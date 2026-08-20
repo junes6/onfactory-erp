@@ -1,0 +1,572 @@
+.sea-product-card[role='button'] {
+  cursor: pointer;
+  outline: none;
+}
+
+.sea-product-card[role='button']:focus-visible {
+  border-color: #5f8f7b;
+  box-shadow: 0 0 0 4px rgba(23, 77, 63, .13), 0 13px 32px rgba(25, 62, 48, .1);
+}
+
+.product-crop.custom-image img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  object-fit: cover;
+}
+
+.product-image-control {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  align-items: center;
+  gap: 15px;
+}
+
+.product-image-preview {
+  width: 160px;
+  aspect-ratio: 4 / 3;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px dashed #b9cbc2;
+  border-radius: 13px;
+  color: var(--muted);
+  background: #f6f9f7;
+}
+
+.product-image-preview span {
+  margin-top: 7px;
+  font-size: 12px;
+}
+
+.product-image-preview:not(.has-image) {
+  align-content: center;
+}
+
+.product-image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.product-image-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.product-image-actions small {
+  width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-picker-button {
+  cursor: pointer;
+}
+
+.file-picker-button.disabled {
+  cursor: wait;
+  opacity: .58;
+}
+
+.file-picker-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.product-image-error {
+  grid-column: 1 / -1;
+}
+
+.channel-card-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.channel-card-actions > :is(a, button) {
+  min-width: 0;
+  justify-content: center;
+}
+
+.channel-health-card-button,
+.channel-health-check {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid #c8d9d1;
+  border-radius: 9px;
+  color: var(--forest);
+  background: #f5f9f7;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.channel-health-card-button:disabled,
+.channel-health-check:disabled {
+  cursor: wait;
+  opacity: .55;
+}
+
+.channel-health-panel {
+  margin: 16px 0 18px;
+  overflow: hidden;
+  border: 1px solid #c8dbd2;
+  border-radius: 15px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.channel-health-panel > header {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #f6faf8;
+}
+
+.channel-health-panel > header > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.channel-health-icon {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: #176149;
+  background: #e8f3ee;
+}
+
+.channel-health-panel h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.channel-health-panel p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.channel-health-table {
+  min-width: 0;
+}
+
+.channel-health-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(150px, 1.05fr) minmax(125px, .85fr) minmax(185px, 1.3fr) minmax(150px, 1fr) minmax(115px, .75fr) 58px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.channel-health-row:first-child {
+  border-top: 0;
+}
+
+.channel-health-row.header {
+  min-height: 34px;
+  padding-block: 7px;
+  color: var(--muted);
+  background: var(--canvas);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.channel-health-row > span:not(.channel-health-name) {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.35;
+}
+
+.channel-health-name {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.channel-health-name .channel-mark {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.channel-health-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.health-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #a8b3ae;
+}
+
+.health-dot.ok { background: #2f9367; }
+.health-dot.warning { background: #d89430; }
+.health-dot.danger { background: #c4574e; }
+
+.channel-health-check {
+  min-height: 32px;
+  padding-inline: 8px;
+}
+
+.channel-health-empty {
+  padding: 22px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 13px;
+}
+
+.channel-remove-button {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid #ead0cd;
+  border-radius: 9px;
+  color: #ad433b;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.channel-catalog > button.configured {
+  border-color: #a9c9b9;
+  background: #f3f8f5;
+}
+
+.channel-catalog > button.configured > svg {
+  color: #27805a;
+}
+
+.shipment-panel {
+  margin: 18px 0;
+}
+
+.shipment-panel-head {
+  min-height: 76px;
+}
+
+.shipment-heading-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.shipment-integration-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 13px 16px 0;
+  padding: 11px 13px;
+  border: 1px solid #cbded5;
+  border-radius: 11px;
+  color: #315e4c;
+  background: #f2f8f5;
+}
+
+.shipment-integration-note > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.shipment-integration-note strong,
+.shipment-integration-note span {
+  display: block;
+}
+
+.shipment-integration-note strong {
+  font-size: 13px;
+}
+
+.shipment-integration-note span {
+  margin-top: 3px;
+  color: #577066;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.shipment-filter-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 12px 16px;
+}
+
+.shipment-filter-row button {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.shipment-filter-row button span {
+  min-width: 22px;
+  padding: 2px 6px;
+  border-radius: 99px;
+  color: #4b6459;
+  background: #edf3f0;
+  font-size: 11px;
+  text-align: center;
+}
+
+.shipment-filter-row button.active {
+  color: var(--forest);
+  border-color: #a9c5b8;
+  background: var(--forest-soft);
+}
+
+.shipment-table-wrap {
+  overflow-x: auto;
+  border-top: 1px solid var(--line);
+}
+
+.shipment-table {
+  width: 100%;
+  min-width: 1060px;
+  border-collapse: collapse;
+}
+
+.shipment-table th {
+  padding: 10px 13px;
+  color: var(--muted);
+  background: #f6f9f7;
+  font-size: 12px;
+  font-weight: 750;
+  text-align: left;
+}
+
+.shipment-table td {
+  max-width: 270px;
+  padding: 12px 13px;
+  border-top: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.shipment-table td strong,
+.shipment-table td span {
+  display: block;
+}
+
+.shipment-table td strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shipment-table td > span,
+.shipment-table td strong + span {
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shipment-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.shipment-row-actions .secondary-button {
+  min-height: 36px;
+  padding-inline: 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.shipment-row-actions .icon-button {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+}
+
+.shipment-delete-button {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #ead0cd;
+  border-radius: 9px;
+  color: #ad433b;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.shipment-delete-button.confirming {
+  width: 66px;
+  color: #fff;
+  border-color: #b8463e;
+  background: #b8463e;
+}
+
+.icon-button.danger {
+  color: #ad433b;
+}
+
+.icon-button:disabled,
+.secondary-button:disabled,
+.primary-button:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+}
+
+.shipment-editor-modal {
+  width: min(760px, 100%);
+}
+
+.shipment-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 13px;
+}
+
+.shipment-editor-grid .full {
+  grid-column: 1 / -1;
+}
+
+.shipment-editor-help {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  color: #4a665a;
+  background: #f1f6f3;
+  font-size: 12px;
+}
+
+html[data-theme='dark'] .product-image-preview,
+html[data-theme='dark'] .shipment-filter-row button,
+html[data-theme='dark'] .channel-remove-button,
+html[data-theme='dark'] .channel-health-card-button,
+html[data-theme='dark'] .channel-health-check,
+html[data-theme='dark'] .shipment-delete-button:not(.confirming),
+html[data-theme='dark'] .shipment-editor-help,
+html[data-theme='dark'] .shipment-table th {
+  color: var(--ink);
+  border-color: var(--line);
+  background: #1b2823;
+}
+
+html[data-theme='dark'] .shipment-integration-note,
+html[data-theme='dark'] .channel-catalog > button.configured,
+html[data-theme='dark'] .channel-health-panel > header,
+html[data-theme='dark'] .channel-health-row.header {
+  color: var(--ink);
+  border-color: var(--line);
+  background: #20312a;
+}
+
+@media (max-width: 1120px) {
+  .shipment-panel-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .shipment-heading-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .channel-health-table {
+    overflow-x: auto;
+  }
+
+  .channel-health-row {
+    min-width: 920px;
+  }
+}
+
+@media (max-width: 680px) {
+  .product-image-control,
+  .shipment-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .product-image-preview {
+    width: 100%;
+    max-height: 220px;
+  }
+
+  .product-image-error,
+  .shipment-editor-grid .full {
+    grid-column: auto;
+  }
+
+  .channel-card-actions { grid-template-columns: 1fr 1fr; }
+
+  .channel-health-panel > header { align-items: flex-start; }
+
+  .shipment-heading-actions > button {
+    flex: 1 1 150px;
+  }
+
+  .shipment-integration-note {
+    margin-inline: 12px;
+  }
+}

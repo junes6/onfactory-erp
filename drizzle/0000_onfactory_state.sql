@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS app_state (
+  id TEXT PRIMARY KEY NOT NULL,
+  payload TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL
+);

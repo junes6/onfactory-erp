@@ -1,0 +1,1989 @@
+{
+  "version": 2,
+  "tenants": {
+    "TENANT-SUNSEA": {
+      "work-items": {
+        "data": [
+          {
+            "id": "WK-22354608",
+            "title": "짐옴겨",
+            "description": "담당자가 업무 내용을 확인하고 완료 결과를 남깁니다.",
+            "owner": "김서원",
+            "ownerId": "USR-SUNSEA-ADMIN",
+            "requestedBy": "김서원",
+            "requesterId": "USR-SUNSEA-ADMIN",
+            "due": "오늘 18:00",
+            "priority": "높음",
+            "status": "수행중",
+            "category": "제품",
+            "review": {
+              "decision": "changes-requested",
+              "comment": "짐을 제대로 옴기라고",
+              "requestedChanges": "짐을 제대로 옴기라고",
+              "reviewedAt": "2026-08-20T07:10:09.054Z",
+              "reviewerId": "USR-SUNSEA-ADMIN",
+              "reviewerName": "김서원"
+            }
+          },
+          {
+            "id": "WK-260819-01",
+            "title": "G마켓 SKU 매핑 오류 2건 확인",
+            "description": "붉은대게라면 묶음상품 SKU와 ERP 품목코드를 다시 연결합니다.",
+            "owner": "김서원",
+            "requestedBy": "김서원",
+            "due": "오늘 15:30",
+            "priority": "긴급",
+            "status": "결재완료",
+            "category": "판매채널",
+            "ownerId": "USR-SUNSEA-ADMIN",
+            "requesterId": "USR-SUNSEA-ADMIN"
+          },
+          {
+            "id": "WK-260819-02",
+            "title": "멍게젓 제품정보 수정본 검토",
+            "description": "새우 알레르기와 멍게 원산지 문구를 최종 확인합니다.",
+            "owner": "박지현",
+            "requestedBy": "김서원",
+            "due": "오늘 16:00",
+            "priority": "높음",
+            "status": "결재대기",
+            "category": "제품",
+            "ownerId": "USR-SUNSEA-PARK",
+            "requesterId": "USR-SUNSEA-ADMIN"
+          },
+          {
+            "id": "WK-260819-03",
+            "title": "붉은대게라면 내일 생산량 확정",
+            "description": "쿠팡 판매 증가분을 반영하여 1,200개 추가 생산 여부를 결정합니다.",
+            "owner": "오태식",
+            "requestedBy": "김서원",
+            "due": "오늘 17:00",
+            "priority": "높음",
+            "status": "업무요청",
+            "category": "생산",
+            "ownerId": "USR-SUNSEA-OH",
+            "requesterId": "USR-SUNSEA-ADMIN"
+          },
+          {
+            "id": "WK-260819-04",
+            "title": "냉장 2창고 FEFO 피킹",
+            "description": "멍게젓 임박 LOT 18개를 오늘 주문에 우선 할당합니다.",
+            "owner": "서동현",
+            "requestedBy": "김서원",
+            "due": "오늘 17:30",
+            "priority": "보통",
+            "status": "업무요청",
+            "category": "재고",
+            "ownerId": "USR-SUNSEA-SEO",
+            "requesterId": "USR-SUNSEA-ADMIN"
+          },
+          {
+            "id": "WK-260818-08",
+            "title": "육수다시 선물세트 상세페이지 승인",
+            "description": "3개 판매채널의 상품정보 일치 여부를 확인했습니다.",
+            "owner": "윤서진",
+            "requestedBy": "박지현",
+            "due": "어제",
+            "priority": "보통",
+            "status": "결재완료",
+            "category": "제품",
+            "ownerId": "USR-SUNSEA-YOON",
+            "requesterId": "USR-SUNSEA-PARK"
+          }
+        ],
+        "updatedAt": "2026-08-20T07:10:09.054Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "messenger-conversations": {
+        "data": [
+          {
+            "id": "direct-1787209697756-7a668c",
+            "type": "direct",
+            "name": "서동현",
+            "subtitle": "물류팀 · 재고 담당",
+            "memberId": "USR-SUNSEA-SEO",
+            "participantIds": [
+              "USR-SUNSEA-ADMIN",
+              "USR-SUNSEA-SEO"
+            ],
+            "hiddenFor": [],
+            "unread": 0,
+            "lastMessage": "새 대화를 시작해 보세요.",
+            "lastTime": "방금",
+            "messages": []
+          },
+          {
+            "id": "direct-park",
+            "type": "direct",
+            "name": "박지현",
+            "subtitle": "품질관리 · 품질 책임자",
+            "memberId": "park",
+            "participantIds": [
+              "USR-SUNSEA-ADMIN",
+              "USR-SUNSEA-PARK"
+            ],
+            "unread": 0,
+            "lastMessage": "하이",
+            "lastTime": "15:54",
+            "messages": [
+              {
+                "id": "m-1787122455230",
+                "senderId": "USR-SUNSEA-ADMIN",
+                "senderName": "김서원",
+                "text": "하이",
+                "time": "15:54",
+                "readBy": [
+                  "USR-SUNSEA-ADMIN"
+                ]
+              }
+            ],
+            "hiddenFor": []
+          },
+          {
+            "id": "team-ops",
+            "type": "team",
+            "name": "전사 운영 공지",
+            "subtitle": "햇살바다 · 46명",
+            "unread": 0,
+            "lastMessage": "오늘 16시 냉장창고 점검 일정을 공유합니다.",
+            "lastTime": "14:18",
+            "messages": [
+              {
+                "id": "m-ops-1",
+                "senderId": "yoon",
+                "senderName": "윤서진",
+                "text": "쿠팡 기획전 주문이 평소보다 18% 늘었습니다. 생산계획에 반영 부탁드립니다.",
+                "time": "13:42"
+              },
+              {
+                "id": "m-ops-2",
+                "senderId": "park",
+                "senderName": "박지현",
+                "text": "확인했습니다. 붉은대게라면 추가 생산분 표시사항도 승인본으로 확인할게요.",
+                "time": "13:51"
+              },
+              {
+                "id": "m-ops-3",
+                "senderId": "seo",
+                "senderName": "서동현",
+                "text": "오늘 16시 냉장창고 점검 일정을 공유합니다.",
+                "time": "14:18"
+              }
+            ]
+          },
+          {
+            "id": "team-quality",
+            "type": "team",
+            "name": "품질관리팀",
+            "subtitle": "팀 대화 · 5명",
+            "unread": 0,
+            "lastMessage": "멍게젓 수정 시안을 올렸습니다. 확인 부탁드려요.",
+            "lastTime": "13:56",
+            "messages": [
+              {
+                "id": "m-q-1",
+                "senderId": "park",
+                "senderName": "박지현",
+                "text": "멍게젓 새우 알레르기 문구를 반영했습니다.",
+                "time": "13:40"
+              },
+              {
+                "id": "m-q-2",
+                "senderId": "lee",
+                "senderName": "이정민",
+                "text": "원산지 표기 위치도 전면 하단으로 맞췄습니다.",
+                "time": "13:48"
+              },
+              {
+                "id": "m-q-3",
+                "senderId": "park",
+                "senderName": "박지현",
+                "text": "멍게젓 수정 시안을 올렸습니다. 확인 부탁드려요.",
+                "time": "13:56"
+              }
+            ]
+          },
+          {
+            "id": "direct-yoon",
+            "type": "direct",
+            "name": "윤서진",
+            "subtitle": "판매운영팀 · 온라인 MD",
+            "memberId": "yoon",
+            "unread": 0,
+            "lastMessage": "하이",
+            "lastTime": "13:48",
+            "messages": [
+              {
+                "id": "m-y-1",
+                "senderId": "me",
+                "senderName": "김서원",
+                "text": "오늘 채널 동기화 경고 확인 가능할까요?",
+                "time": "12:24"
+              },
+              {
+                "id": "m-y-2",
+                "senderId": "yoon",
+                "senderName": "윤서진",
+                "text": "G마켓 SKU 두 건은 제가 먼저 확인할게요.",
+                "time": "12:31"
+              },
+              {
+                "id": "m-1787201311433",
+                "senderId": "USR-SUNSEA-ADMIN",
+                "senderName": "김서원",
+                "text": "하이",
+                "time": "13:48"
+              }
+            ]
+          },
+          {
+            "id": "direct-oh",
+            "type": "direct",
+            "name": "오태식",
+            "subtitle": "생산 1팀 · 생산 반장",
+            "memberId": "oh",
+            "unread": 0,
+            "lastMessage": "내일 1,200봉 추가 생산 가능합니다.",
+            "lastTime": "11:47",
+            "messages": [
+              {
+                "id": "m-o-1",
+                "senderId": "oh",
+                "senderName": "오태식",
+                "text": "내일 1,200봉 추가 생산 가능합니다.",
+                "time": "11:47",
+                "readBy": [
+                  "USR-SUNSEA-OH"
+                ]
+              }
+            ]
+          }
+        ],
+        "updatedAt": "2026-08-20T07:08:21.295Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "calendar-events": {
+        "data": [
+          {
+            "id": "EV-001",
+            "title": "전사 주간 운영회의",
+            "date": "2026-08-19",
+            "start": "09:00",
+            "end": "10:00",
+            "scope": "company",
+            "department": "전사",
+            "location": "2층 대회의실",
+            "owner": "김서원",
+            "note": "채널 매출과 생산계획 공유"
+          },
+          {
+            "id": "EV-002",
+            "title": "멍게젓 표시 수정본 검토",
+            "date": "2026-08-19",
+            "start": "11:00",
+            "end": "11:40",
+            "scope": "department",
+            "department": "품질관리팀",
+            "location": "품질회의실",
+            "owner": "박지현",
+            "note": "알레르기·원산지 최종 확인"
+          },
+          {
+            "id": "EV-003",
+            "title": "쿠팡 기획전 재고 협의",
+            "date": "2026-08-19",
+            "start": "15:00",
+            "end": "15:30",
+            "scope": "personal",
+            "department": "판매운영팀",
+            "location": "온라인",
+            "owner": "김서원",
+            "note": "라면 추가 물량 확정"
+          },
+          {
+            "id": "EV-004",
+            "title": "붉은대게라면 OEM 생산",
+            "date": "2026-08-20",
+            "start": "08:30",
+            "end": "16:30",
+            "scope": "department",
+            "department": "생산 1팀",
+            "location": "동해제면",
+            "owner": "오태식",
+            "note": "1,200봉 추가 생산"
+          },
+          {
+            "id": "EV-005",
+            "title": "HACCP 내부 점검",
+            "date": "2026-08-21",
+            "start": "10:00",
+            "end": "12:00",
+            "scope": "company",
+            "department": "전사",
+            "location": "제1공장",
+            "owner": "박지현",
+            "note": "현장 기록과 개선조치 확인"
+          },
+          {
+            "id": "EV-006",
+            "title": "온라인 추석 선물전 시작",
+            "date": "2026-08-24",
+            "start": "09:00",
+            "end": "09:30",
+            "scope": "company",
+            "department": "판매운영팀",
+            "location": "온라인몰",
+            "owner": "윤서진",
+            "note": "3개 판매채널 동시 오픈"
+          },
+          {
+            "id": "EV-007",
+            "title": "냉동창고 안전교육",
+            "date": "2026-08-26",
+            "start": "14:00",
+            "end": "15:00",
+            "scope": "department",
+            "department": "물류팀",
+            "location": "냉동 1창고",
+            "owner": "서동현",
+            "note": "전동 지게차·비상탈출 교육"
+          },
+          {
+            "id": "EV-008",
+            "title": "월말 비용 마감",
+            "date": "2026-08-28",
+            "start": "16:00",
+            "end": "17:00",
+            "scope": "personal",
+            "department": "경영지원팀",
+            "location": "사무실",
+            "owner": "김서원",
+            "note": "구매·물류 비용 확인"
+          }
+        ],
+        "updatedAt": "2026-08-19T05:17:46.149Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "sales-channels": {
+        "data": [
+          {
+            "id": "coupang",
+            "name": "쿠팡",
+            "short": "C",
+            "color": "#e94b35",
+            "orders": 142,
+            "units": 328,
+            "revenue": 4876000,
+            "delta": 12.4,
+            "sync": "1분 전",
+            "status": "정상"
+          },
+          {
+            "id": "naver",
+            "name": "네이버 스마트스토어",
+            "short": "N",
+            "color": "#03c75a",
+            "orders": 86,
+            "units": 174,
+            "revenue": 2984000,
+            "delta": 8.1,
+            "sync": "2분 전",
+            "status": "정상"
+          },
+          {
+            "id": "gmarket",
+            "name": "G마켓",
+            "short": "G",
+            "color": "#0b57d0",
+            "orders": 38,
+            "units": 79,
+            "revenue": 1248000,
+            "delta": -3.2,
+            "sync": "5분 전",
+            "status": "주의"
+          },
+          {
+            "id": "own",
+            "name": "자사몰",
+            "short": "H",
+            "color": "#164c3f",
+            "orders": 27,
+            "units": 48,
+            "revenue": 918000,
+            "delta": 16.8,
+            "sync": "방금",
+            "status": "정상"
+          },
+          {
+            "id": "11st",
+            "name": "11번가",
+            "short": "11",
+            "color": "#ff2f16",
+            "orders": 0,
+            "units": 0,
+            "revenue": 0,
+            "delta": 0,
+            "sync": "방금",
+            "status": "정상"
+          },
+          {
+            "id": "ssg",
+            "name": "SSG.COM",
+            "short": "S",
+            "color": "#ff4c3b",
+            "orders": 0,
+            "units": 0,
+            "revenue": 0,
+            "delta": 0,
+            "sync": "방금",
+            "status": "정상"
+          }
+        ],
+        "updatedAt": "2026-08-19T07:03:29.802Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "inventory-locations": {
+        "data": [
+          {
+            "id": "WH-C01",
+            "name": "냉장 1창고",
+            "type": "냉장",
+            "temperature": "3.1℃",
+            "condition": "3.1℃ · 정상",
+            "items": "젓갈류 202개",
+            "utilization": 74,
+            "alert": "멍게젓 안전재고 이하"
+          },
+          {
+            "id": "WH-R01",
+            "name": "실온 원료창고",
+            "type": "실온",
+            "temperature": "22.4℃",
+            "condition": "22.4℃ · 정상",
+            "items": "원재료 1,840kg",
+            "utilization": 61,
+            "alert": "이상 없음"
+          },
+          {
+            "id": "WH-F01",
+            "name": "완제품 창고",
+            "type": "실온",
+            "temperature": "19.8℃",
+            "condition": "19.8℃ · 정상",
+            "items": "완제품 5,068개",
+            "utilization": 82,
+            "alert": "선물세트 피킹 예정"
+          },
+          {
+            "id": "WH-FZ2",
+            "name": "냉동 2창고",
+            "type": "냉동",
+            "temperature": "-19.2℃",
+            "condition": "-19.2℃ · 정상",
+            "items": "냉동제품 180개",
+            "utilization": 48,
+            "alert": "볶음밥 출고가능 0개"
+          }
+        ],
+        "updatedAt": "2026-08-19T07:01:17.540Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "factory-locations": {
+        "data": [
+          {
+            "id": "LOC-RM-A01",
+            "factoryId": "FAC-POH-01",
+            "zoneId": "raw",
+            "kind": "재고",
+            "name": "원료 A동 1열",
+            "code": "RM-A01",
+            "item": "붉은대게 분말",
+            "current": 4380,
+            "capacity": 6000,
+            "unit": "kg",
+            "status": "정상",
+            "note": "FEFO 순서로 출고"
+          },
+          {
+            "id": "LOC-RM-B02",
+            "factoryId": "FAC-POH-01",
+            "zoneId": "raw",
+            "kind": "재고",
+            "name": "원료 B동 2열",
+            "code": "RM-B02",
+            "item": "건조 다시마·멸치",
+            "current": 2680,
+            "capacity": 4000,
+            "unit": "kg",
+            "status": "정상",
+            "note": "상온·건조 보관"
+          },
+          {
+            "id": "LOC-FZ-A03",
+            "factoryId": "FAC-POH-01",
+            "zoneId": "frozen",
+            "kind": "재고",
+            "name": "냉동 A-03 랙",
+            "code": "FZ-A03",
+            "item": "붉은대게살",
+            "current": 1840,
+            "capacity": 2000,
+            "unit": "kg",
+            "status": "주의",
+            "note": "금일 3팔레트 우선 출고"
+          },
+          {
+            "id": "LOC-PR-L01",
+            "factoryId": "FAC-POH-01",
+            "zoneId": "production",
+            "kind": "생산",
+            "name": "생산 1라인",
+            "code": "PR-L01",
+            "item": "붉은대게라면 스프",
+            "current": 2460,
+            "capacity": 3200,
+            "unit": "ea",
+            "status": "정상",
+            "note": "배합·건조 공정"
+          },
+          {
+            "id": "LOC-PR-L02",
+            "factoryId": "FAC-POH-01",
+            "zoneId": "production",
+            "kind": "생산",
+            "name": "생산 2라인",
+            "code": "PR-L02",
+            "item": "육수다시",
+            "current": 2360,
+            "capacity": 3000,
+            "unit": "ea",
+            "status": "정상",
+            "note": "충진 공정"
+          },
+          {
+            "id": "LOC-PK-L01",
+            "factoryId": "FAC-POH-01",
+            "zoneId": "packing",
+            "kind": "생산",
+            "name": "포장 1라인",
+            "code": "PK-L01",
+            "item": "육수다시 선물세트",
+            "current": 760,
+            "capacity": 1400,
+            "unit": "ea",
+            "status": "정상",
+            "note": "중량·라벨 검사 포함"
+          },
+          {
+            "id": "LOC-SH-D02",
+            "factoryId": "FAC-POH-01",
+            "zoneId": "shipping",
+            "kind": "재고",
+            "name": "출하 도크 2",
+            "code": "SH-D02",
+            "item": "온라인 주문 출하품",
+            "current": 14,
+            "capacity": 24,
+            "unit": "PLT",
+            "status": "정상",
+            "note": "16:30 1차 상차"
+          },
+          {
+            "id": "LOC-GR-F01",
+            "factoryId": "FAC-GRP-02",
+            "zoneId": "frozen",
+            "kind": "재고",
+            "name": "냉동 1창고",
+            "code": "GR-F01",
+            "item": "냉동 수산 원물",
+            "current": 6710,
+            "capacity": 9200,
+            "unit": "kg",
+            "status": "정상",
+            "note": "자동 온도기록 중"
+          },
+          {
+            "id": "LOC-GR-P01",
+            "factoryId": "FAC-GRP-02",
+            "zoneId": "production",
+            "kind": "생산",
+            "name": "냉동식품 1라인",
+            "code": "GR-P01",
+            "item": "붉은대게살 볶음밥",
+            "current": 1780,
+            "capacity": 2200,
+            "unit": "ea",
+            "status": "정상",
+            "note": "급속동결 포함"
+          },
+          {
+            "id": "LOC-GR-P02",
+            "factoryId": "FAC-GRP-02",
+            "zoneId": "production",
+            "kind": "생산",
+            "name": "소스 2라인",
+            "code": "GR-P02",
+            "item": "붉은대게 어간장",
+            "current": 1380,
+            "capacity": 1800,
+            "unit": "ea",
+            "status": "점검",
+            "note": "충진 노즐 점검 예정"
+          }
+        ],
+        "updatedAt": "2026-08-19T05:19:34.168Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "leave-requests": {
+        "data": [
+          {
+            "id": "LV-260819-03",
+            "name": "오태식",
+            "team": "생산 1팀",
+            "type": "연차",
+            "period": "8월 22일",
+            "days": 1,
+            "reason": "개인 일정",
+            "status": "승인"
+          },
+          {
+            "id": "LV-260819-02",
+            "name": "윤서진",
+            "team": "판매운영",
+            "type": "반차",
+            "period": "8월 19일 오후",
+            "days": 0.5,
+            "reason": "병원 진료",
+            "status": "승인"
+          },
+          {
+            "id": "LV-260818-08",
+            "name": "박지현",
+            "team": "품질관리",
+            "type": "연차",
+            "period": "8월 28일 ~ 29일",
+            "days": 2,
+            "reason": "가족 일정",
+            "status": "결재대기"
+          }
+        ],
+        "updatedAt": "2026-08-19T07:04:34.953Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "account-requests": {
+        "data": [
+          {
+            "id": "AC-260819-04",
+            "name": "이하늘",
+            "email": "haneul@sunsea.co.kr",
+            "team": "생산 1팀",
+            "role": "생산 작업자",
+            "requested": "오늘 09:24",
+            "status": "승인대기"
+          },
+          {
+            "id": "AC-260819-03",
+            "name": "최민준",
+            "email": "minjun@sunsea.co.kr",
+            "team": "물류팀",
+            "role": "재고 담당",
+            "requested": "어제 16:42",
+            "status": "승인대기"
+          },
+          {
+            "id": "AC-260818-11",
+            "name": "정수아",
+            "email": "sua@sunsea.co.kr",
+            "team": "품질관리",
+            "role": "품질 담당",
+            "requested": "8월 18일",
+            "status": "활성"
+          }
+        ],
+        "updatedAt": "2026-08-19T05:26:44.126Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "daily-journals": {
+        "data": [
+          {
+            "id": "JR-1787200589485",
+            "date": "2026-08-19",
+            "title": "새 일일업무일지",
+            "authorId": "USR-SUNSEA-ADMIN",
+            "author": "김서원",
+            "department": "경영지원",
+            "completed": "",
+            "issue": "",
+            "nextPlan": "",
+            "approver": "소속 관리자",
+            "status": "임시저장",
+            "updatedAt": "방금",
+            "feedback": "",
+            "attachments": [],
+            "reviews": []
+          },
+          {
+            "id": "JR-260819-01",
+            "date": "2026-08-19",
+            "title": "8월 19일 운영관리 업무일지",
+            "authorId": "USR-SUNSEA-ADMIN",
+            "author": "김서원",
+            "department": "경영지원팀",
+            "completed": "· 쿠팡·네이버·G마켓 오전 주문 수집 상태 확인\n· G마켓 SKU 매핑 오류 2건 담당자 배정\n· 멍게젓 안전재고 부족 관련 구매팀 협의",
+            "issue": "붉은대게라면 쿠팡 주문 증가분을 내일 생산계획에 반영해야 합니다.",
+            "nextPlan": "생산 1팀 추가 생산량 확정 및 온라인 기획전 재고 배분 확인",
+            "approver": "이민호 공장장",
+            "status": "결재요청",
+            "updatedAt": "방금",
+            "feedback": "",
+            "attachments": [
+              {
+                "id": "a-1",
+                "name": "판매채널_오전집계.xlsx",
+                "size": "184 KB"
+              }
+            ],
+            "reviews": []
+          },
+          {
+            "id": "JR-260818-01",
+            "date": "2026-08-18",
+            "title": "8월 18일 운영관리 업무일지",
+            "authorId": "USR-SUNSEA-ADMIN",
+            "author": "김서원",
+            "department": "경영지원팀",
+            "completed": "판매채널 연동 상태 점검, 주간 운영회의 준비, 제품 사진 등록 요청 처리",
+            "issue": "G마켓 API 응답 지연이 2회 발생했습니다.",
+            "nextPlan": "G마켓 주문 누락 여부 확인",
+            "approver": "이민호 공장장",
+            "status": "결재요청",
+            "updatedAt": "어제 17:42",
+            "feedback": "",
+            "attachments": [
+              {
+                "id": "a-2",
+                "name": "채널연동_점검결과.pdf",
+                "size": "620 KB"
+              }
+            ],
+            "reviews": []
+          },
+          {
+            "id": "JR-260817-01",
+            "date": "2026-08-17",
+            "title": "8월 17일 운영관리 업무일지",
+            "authorId": "USR-SUNSEA-ADMIN",
+            "author": "김서원",
+            "department": "경영지원팀",
+            "completed": "추석 선물세트 판매계획 검토와 재고 기준 확정",
+            "issue": "특이사항 없음",
+            "nextPlan": "채널별 상품 등록 최종 확인",
+            "approver": "이민호 공장장",
+            "status": "승인",
+            "updatedAt": "8월 18일 09:12",
+            "feedback": "판매계획과 재고 기준을 확인했습니다.",
+            "attachments": [],
+            "reviews": []
+          },
+          {
+            "id": "JR-260816-01",
+            "date": "2026-08-16",
+            "title": "8월 16일 운영관리 업무일지",
+            "authorId": "USR-SUNSEA-ADMIN",
+            "author": "김서원",
+            "department": "경영지원팀",
+            "completed": "냉장창고 재고 실사 지원",
+            "issue": "멍게젓 LOT 수량 차이 확인",
+            "nextPlan": "LOT별 실사 결과 반영",
+            "approver": "이민호 공장장",
+            "status": "반려",
+            "updatedAt": "8월 17일 08:46",
+            "feedback": "재고 차이가 발생한 LOT 번호와 조치 결과를 보완해 주세요.",
+            "attachments": [],
+            "reviews": []
+          }
+        ],
+        "updatedAt": "2026-08-20T04:36:29.487Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "work-rules": {
+        "data": [
+          {
+            "id": "WR-WEEKLY-QUALITY",
+            "title": "주간 표시사항 변경 점검",
+            "description": "변경된 원료·알레르기·원산지 문구를 매주 확인합니다.",
+            "owner": "박지현",
+            "ownerId": "USR-SUNSEA-PARK",
+            "requester": "김서원",
+            "requesterId": "USR-SUNSEA-ADMIN",
+            "frequency": "weekly",
+            "interval": 1,
+            "weekday": 5,
+            "nextRun": "2026-08-21",
+            "dueTime": "16:00",
+            "priority": "높음",
+            "category": "제품",
+            "active": true,
+            "createdAt": "2026-08-19T09:00:00+09:00"
+          },
+          {
+            "id": "WR-MONTHLY-STOCK",
+            "title": "월말 냉장창고 실사",
+            "description": "냉장창고 LOT 수량과 FEFO 배치를 월 1회 대조합니다.",
+            "owner": "서동현",
+            "ownerId": "USR-SUNSEA-SEO",
+            "requester": "김서원",
+            "requesterId": "USR-SUNSEA-ADMIN",
+            "frequency": "monthly",
+            "interval": 1,
+            "monthDay": 28,
+            "nextRun": "2026-08-28",
+            "dueTime": "17:00",
+            "priority": "보통",
+            "category": "재고",
+            "active": true,
+            "createdAt": "2026-08-19T09:05:00+09:00"
+          }
+        ],
+        "updatedAt": "2026-08-19T07:27:28.834Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "inventory-movements": {
+        "data": [
+          {
+            "id": "MOV-260819-004",
+            "direction": "출고",
+            "product": "멍게젓 400g",
+            "lot": "LOT-MG-0812",
+            "quantity": 24,
+            "unit": "EA",
+            "warehouseId": "WH-C01",
+            "occurredAt": "2026-08-19 10:20",
+            "reason": "네이버 오늘 출고"
+          },
+          {
+            "id": "MOV-260819-003",
+            "direction": "입고",
+            "product": "국내산 냉동 멍게",
+            "lot": "LOT-RAW-0819",
+            "quantity": 180,
+            "unit": "KG",
+            "warehouseId": "WH-R01",
+            "occurredAt": "2026-08-19 09:10",
+            "reason": "원료 검수 완료",
+            "evidence": "입고검수서_0819.pdf"
+          }
+        ],
+        "updatedAt": "2026-08-20T08:15:06.913Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "product-catalog": {
+        "data": [
+          {
+            "id": "SP-001",
+            "code": "FG-MJG-30011",
+            "name": "햇살바다 멍게젓 300g",
+            "shortName": "멍게젓",
+            "category": "젓갈",
+            "specification": "300g × 12병 / BOX",
+            "price": 15000,
+            "stock": 148,
+            "available": 132,
+            "safetyStock": 180,
+            "storage": "냉장 0~10℃",
+            "labelStatus": "검토중",
+            "status": "주의",
+            "channels": 3,
+            "visual": 1,
+            "fact": {
+              "manufacturer": "햇살바다 제1공장",
+              "manufacturingType": "자체생산",
+              "foodType": "양념젓갈",
+              "barcode": "8809876543101",
+              "shelfLife": "제조일로부터 90일",
+              "origin": "멍게 국산, 고춧가루 국산",
+              "ingredients": "멍게 72%, 고춧가루, 천일염, 액젓, 마늘, 물엿",
+              "labelScore": 80,
+              "labelOwner": "박지현 · 품질관리팀",
+              "labelSummary": "제품 정보가 변경되어 표시 필수항목 재검증이 필요합니다.",
+              "labelIssue": "액젓 하위 원재료의 새우 표시와 멍게 원산지 문구를 보완하세요.",
+              "lotNo": "MJG-260805-A1",
+              "warehouse": "냉장 2창고",
+              "location": "C-01-02",
+              "manufacturedAt": "2026-08-05",
+              "expiresAt": "2026-11-03",
+              "daysToExpire": 77,
+              "inspection": "적합",
+              "reserved": 16
+            }
+          },
+          {
+            "id": "SP-002",
+            "code": "FG-RCR-RMN-120",
+            "name": "햇살바다 붉은대게라면 120g",
+            "shortName": "붉은대게라면",
+            "category": "면류",
+            "specification": "120g × 40봉 / BOX",
+            "price": 1800,
+            "stock": 3240,
+            "available": 3150,
+            "safetyStock": 1500,
+            "storage": "실온 보관",
+            "labelStatus": "검토중",
+            "status": "정상",
+            "channels": 4,
+            "visual": 2,
+            "fact": {
+              "manufacturer": "동해제면 주식회사",
+              "manufacturingType": "OEM",
+              "foodType": "유탕면",
+              "barcode": "8809876543118",
+              "shelfLife": "제조일로부터 180일",
+              "origin": "붉은대게분말 국산, 밀 미국·호주산",
+              "ingredients": "소맥분, 팜유, 감자전분, 붉은대게분말, 해물맛분말, 정제염",
+              "labelScore": 89,
+              "labelOwner": "이정민 · 품질관리팀",
+              "labelSummary": "표시 필수항목 1건을 담당자가 확인해야 합니다.",
+              "labelIssue": "나트륨 기준치 비율과 “게 함유” 강조 표기를 최종 확인하세요.",
+              "lotNo": "RRM-260725-B3",
+              "warehouse": "상온 완제품 창고",
+              "location": "D-02-04",
+              "manufacturedAt": "2026-07-25",
+              "expiresAt": "2027-01-21",
+              "daysToExpire": 156,
+              "inspection": "적합",
+              "reserved": 90
+            },
+            "validation": {
+              "checkedAt": "방금",
+              "issues": [
+                "나트륨 기준치 비율과 “게 함유” 강조 표기를 최종 확인하세요."
+              ]
+            }
+          },
+          {
+            "id": "SP-003",
+            "code": "FG-RCR-BTH-GFT",
+            "name": "붉은대게 육수다시 선물세트",
+            "shortName": "육수다시 선물세트",
+            "category": "조미식품",
+            "specification": "5g × 20포 × 2박스",
+            "price": 25000,
+            "stock": 412,
+            "available": 380,
+            "safetyStock": 200,
+            "storage": "실온·건조",
+            "labelStatus": "승인",
+            "status": "정상",
+            "channels": 4,
+            "visual": 3,
+            "fact": {
+              "manufacturer": "햇살바다 제1공장",
+              "manufacturingType": "자체생산",
+              "foodType": "복합조미식품",
+              "barcode": "8809876543125",
+              "shelfLife": "제조일로부터 12개월",
+              "origin": "붉은대게 국산, 멸치 국산, 다시마 국산",
+              "ingredients": "붉은대게분말, 멸치분말, 다시마분말, 표고버섯분말, 천일염",
+              "labelScore": 100,
+              "labelOwner": "박지현 · 품질관리팀",
+              "labelSummary": "법정 의무표시 필수 입력값이 모두 확인되었습니다.",
+              "labelIssue": "현재 확인된 수정 항목이 없습니다.",
+              "lotNo": "RBG-260730-A2",
+              "warehouse": "선물세트 창고",
+              "location": "G-01-03",
+              "manufacturedAt": "2026-07-30",
+              "expiresAt": "2027-07-29",
+              "daysToExpire": 345,
+              "inspection": "적합",
+              "reserved": 32
+            },
+            "validation": {
+              "checkedAt": "방금",
+              "issues": []
+            }
+          },
+          {
+            "id": "SP-004",
+            "code": "FG-NAT-MST-GFT",
+            "name": "자연다시 바이오 미스틱 선물세트",
+            "shortName": "바이오 미스틱",
+            "category": "조미식품",
+            "specification": "10g × 20스틱",
+            "price": 25000,
+            "stock": 96,
+            "available": 88,
+            "safetyStock": 120,
+            "storage": "실온·건조",
+            "labelStatus": "검토중",
+            "status": "주의",
+            "channels": 3,
+            "visual": 4,
+            "fact": {
+              "manufacturer": "햇살바다 제1공장",
+              "manufacturingType": "자체생산",
+              "foodType": "복합조미식품",
+              "barcode": "8809876543132",
+              "shelfLife": "제조일로부터 12개월",
+              "origin": "멸치·다시마·표고버섯 국산",
+              "ingredients": "멸치분말, 다시마분말, 표고버섯분말, 새우분말, 천일염",
+              "labelScore": 89,
+              "labelOwner": "박지현 · 품질관리팀",
+              "labelSummary": "표시 필수항목 1건을 담당자가 확인해야 합니다.",
+              "labelIssue": "“자연다시 미스틱”과 “바이오 미스틱” 중 승인 명칭으로 통일하세요.",
+              "lotNo": "BMG-260801-A1",
+              "warehouse": "선물세트 창고",
+              "location": "G-01-05",
+              "manufacturedAt": "2026-08-01",
+              "expiresAt": "2027-07-31",
+              "daysToExpire": 347,
+              "inspection": "적합",
+              "reserved": 8
+            },
+            "validation": {
+              "checkedAt": "방금",
+              "issues": [
+                "“자연다시 미스틱”과 “바이오 미스틱” 중 승인 명칭으로 통일하세요."
+              ]
+            }
+          },
+          {
+            "id": "SP-005",
+            "code": "FG-RCR-FSH-500",
+            "name": "붉은대게 어간장 500mL",
+            "shortName": "붉은대게 어간장",
+            "category": "소스류",
+            "specification": "500mL × 12병",
+            "price": 11900,
+            "stock": 680,
+            "available": 654,
+            "safetyStock": 300,
+            "storage": "실온 보관",
+            "labelStatus": "승인",
+            "status": "정상",
+            "channels": 3,
+            "visual": 3,
+            "fact": {
+              "manufacturer": "햇살바다 제1공장",
+              "manufacturingType": "자체생산",
+              "foodType": "소스",
+              "barcode": "8809876543149",
+              "shelfLife": "제조일로부터 12개월",
+              "origin": "붉은대게 국산, 천일염 국산",
+              "ingredients": "붉은대게추출액, 양조간장, 다시마농축액, 천일염",
+              "labelScore": 100,
+              "labelOwner": "이정민 · 품질관리팀",
+              "labelSummary": "법정 의무표시 필수 입력값이 모두 확인되었습니다.",
+              "labelIssue": "현재 확인된 수정 항목이 없습니다.",
+              "lotNo": "RFS-260618-C1",
+              "warehouse": "상온 완제품 창고",
+              "location": "D-04-02",
+              "manufacturedAt": "2026-06-18",
+              "expiresAt": "2027-06-17",
+              "daysToExpire": 303,
+              "inspection": "적합",
+              "reserved": 26
+            },
+            "validation": {
+              "checkedAt": "방금",
+              "issues": []
+            }
+          },
+          {
+            "id": "SP-006",
+            "code": "FG-RCR-BTH-100",
+            "name": "붉은대게 육수다시 100g",
+            "shortName": "붉은대게 육수다시",
+            "category": "조미식품",
+            "specification": "5g × 20포",
+            "price": 13900,
+            "stock": 1120,
+            "available": 1040,
+            "safetyStock": 500,
+            "storage": "실온·건조",
+            "labelStatus": "검토중",
+            "status": "정상",
+            "channels": 4,
+            "visual": 3,
+            "fact": {
+              "manufacturer": "햇살바다 제1공장",
+              "manufacturingType": "자체생산",
+              "foodType": "복합조미식품",
+              "barcode": "8809876543156",
+              "shelfLife": "제조일로부터 12개월",
+              "origin": "붉은대게·멸치·다시마 국산",
+              "ingredients": "붉은대게분말, 멸치분말, 다시마분말, 표고버섯분말",
+              "labelScore": 89,
+              "labelOwner": "박지현 · 품질관리팀",
+              "labelSummary": "표시 필수항목 1건을 담당자가 확인해야 합니다.",
+              "labelIssue": "제품명 하단 식품유형 글자 크기를 10pt 이상으로 유지하세요.",
+              "lotNo": "RBS-260802-B1",
+              "warehouse": "상온 완제품 창고",
+              "location": "D-03-06",
+              "manufacturedAt": "2026-08-02",
+              "expiresAt": "2027-08-01",
+              "daysToExpire": 348,
+              "inspection": "적합",
+              "reserved": 80
+            },
+            "validation": {
+              "checkedAt": "방금",
+              "issues": [
+                "제품명 하단 식품유형 글자 크기를 10pt 이상으로 유지하세요."
+              ]
+            }
+          },
+          {
+            "id": "SP-007",
+            "code": "FG-OJG-300",
+            "name": "햇살바다 오징어젓 300g",
+            "shortName": "오징어젓",
+            "category": "젓갈",
+            "specification": "300g × 12병 / BOX",
+            "price": 13000,
+            "stock": 54,
+            "available": 54,
+            "safetyStock": 150,
+            "storage": "냉장 0~10℃",
+            "labelStatus": "검토중",
+            "status": "주의",
+            "channels": 3,
+            "visual": 1,
+            "fact": {
+              "manufacturer": "햇살바다 제1공장",
+              "manufacturingType": "자체생산",
+              "foodType": "양념젓갈",
+              "barcode": "8809876543163",
+              "shelfLife": "제조일로부터 90일",
+              "origin": "오징어 국산, 고춧가루 국산",
+              "ingredients": "오징어 75%, 고춧가루, 천일염, 액젓, 마늘, 물엿",
+              "labelScore": 89,
+              "labelOwner": "박지현 · 품질관리팀",
+              "labelSummary": "표시 필수항목 1건을 담당자가 확인해야 합니다.",
+              "labelIssue": "오징어 원산지와 조미액에 포함된 새우·밀을 표시하세요.",
+              "lotNo": "OJG-260810-A2",
+              "warehouse": "냉장 2창고",
+              "location": "C-02-01",
+              "manufacturedAt": "2026-08-10",
+              "expiresAt": "2026-11-08",
+              "daysToExpire": 82,
+              "inspection": "적합",
+              "reserved": 0
+            },
+            "validation": {
+              "checkedAt": "방금",
+              "issues": [
+                "오징어 원산지와 조미액에 포함된 새우·밀을 표시하세요."
+              ]
+            }
+          },
+          {
+            "id": "SP-008",
+            "code": "FG-RCR-RICE-250",
+            "name": "붉은대게살 볶음밥 250g",
+            "shortName": "붉은대게살 볶음밥",
+            "category": "냉동식품",
+            "specification": "250g × 20팩",
+            "price": 6900,
+            "stock": 180,
+            "available": 0,
+            "safetyStock": 400,
+            "storage": "냉동 -18℃ 이하",
+            "labelStatus": "검토중",
+            "status": "품절",
+            "channels": 2,
+            "visual": 2,
+            "fact": {
+              "manufacturer": "동해냉동식품 주식회사",
+              "manufacturingType": "OEM",
+              "foodType": "즉석조리식품",
+              "barcode": "8809876543170",
+              "shelfLife": "제조일로부터 12개월",
+              "origin": "붉은대게살 국산, 쌀 국산",
+              "ingredients": "쌀, 붉은대게살, 알류, 대파, 양파, 대두유, 간장",
+              "labelScore": 89,
+              "labelOwner": "이정민 · 품질관리팀",
+              "labelSummary": "표시 필수항목 1건을 담당자가 확인해야 합니다.",
+              "labelIssue": "붉은대게살 함량, 알류·게 표시와 영양성분을 재대조하세요.",
+              "lotNo": "RFR-260817-A1",
+              "warehouse": "냉동 1창고",
+              "location": "F-03-02",
+              "manufacturedAt": "2026-08-17",
+              "expiresAt": "2027-08-16",
+              "daysToExpire": 363,
+              "inspection": "재검사",
+              "reserved": 0
+            },
+            "validation": {
+              "checkedAt": "방금",
+              "issues": [
+                "붉은대게살 함량, 알류·게 표시와 영양성분을 재대조하세요."
+              ]
+            }
+          }
+        ],
+        "updatedAt": "2026-08-20T08:12:33.326Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "leave-management": {
+        "data": {
+          "policy": {
+            "mode": "yearly",
+            "annualDays": 15,
+            "monthlyDays": 1,
+            "carryOverLimit": 5,
+            "renewalDate": "01-01"
+          },
+          "balances": [
+            {
+              "accountId": "USR-SUNSEA-ADMIN",
+              "name": "김서원",
+              "team": "경영지원",
+              "total": 20,
+              "used": 7.5,
+              "updatedAt": "2026-08-01"
+            },
+            {
+              "accountId": "USR-SUNSEA-PARK",
+              "name": "박지현",
+              "team": "품질관리",
+              "total": 18,
+              "used": 3,
+              "updatedAt": "2026-08-01"
+            },
+            {
+              "accountId": "USR-SUNSEA-OH",
+              "name": "오태식",
+              "team": "생산 1팀",
+              "total": 15,
+              "used": 8,
+              "updatedAt": "2026-08-01"
+            },
+            {
+              "accountId": "USR-SUNSEA-SEO",
+              "name": "서동현",
+              "team": "물류팀",
+              "total": 15,
+              "used": 4,
+              "updatedAt": "2026-08-01"
+            },
+            {
+              "accountId": "USR-SUNSEA-YOON",
+              "name": "윤서진",
+              "team": "판매운영",
+              "total": 15,
+              "used": 9.5,
+              "updatedAt": "2026-08-01"
+            }
+          ],
+          "ledger": [
+            {
+              "id": "LED-260801-01",
+              "accountId": "USR-SUNSEA-ADMIN",
+              "name": "김서원",
+              "team": "경영지원",
+              "type": "부여",
+              "days": 5,
+              "balanceAfter": 12.5,
+              "memo": "장기근속 특별 연차",
+              "actor": "시스템 관리자",
+              "createdAt": "2026-08-01 09:10"
+            },
+            {
+              "id": "LED-260701-02",
+              "accountId": "USR-SUNSEA-YOON",
+              "name": "윤서진",
+              "team": "판매운영",
+              "type": "사용",
+              "days": -0.5,
+              "balanceAfter": 5.5,
+              "memo": "7월 반차 승인",
+              "actor": "김서원",
+              "createdAt": "2026-07-18 14:22"
+            },
+            {
+              "id": "LED-260101-01",
+              "name": "전 구성원",
+              "team": "전사",
+              "type": "리뉴얼",
+              "days": 15,
+              "balanceAfter": 15,
+              "memo": "2026년 연차 일괄 발생",
+              "actor": "시스템",
+              "createdAt": "2026-01-01 00:00"
+            }
+          ]
+        },
+        "updatedAt": "2026-08-19T07:36:30.343Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "factory-layouts": {
+        "data": {
+          "FAC-POH-01": [
+            {
+              "id": "BLOCK-POH-RAW",
+              "factoryId": "FAC-POH-01",
+              "zoneId": "raw",
+              "name": "원료·자재 창고",
+              "purpose": "원료·자재",
+              "kind": "재고",
+              "x": 2.2,
+              "y": 3,
+              "width": 28,
+              "height": 33,
+              "color": "#d9efe1",
+              "item": "붉은대게 분말 외 원료",
+              "current": 7060,
+              "capacity": 10000,
+              "unit": "kg",
+              "note": "입고 검수 후 FEFO 배치"
+            },
+            {
+              "id": "BLOCK-POH-FROZEN",
+              "factoryId": "FAC-POH-01",
+              "zoneId": "frozen",
+              "name": "냉동 A동",
+              "purpose": "냉장·냉동",
+              "kind": "재고",
+              "x": 3,
+              "y": 51,
+              "width": 28,
+              "height": 41,
+              "color": "#d5eaf5",
+              "item": "붉은대게살",
+              "current": 1840,
+              "capacity": 2000,
+              "unit": "kg",
+              "note": "-19℃ 유지 · A-03 우선 출고"
+            },
+            {
+              "id": "BLOCK-POH-PROD",
+              "factoryId": "FAC-POH-01",
+              "zoneId": "production",
+              "name": "생산 1·2라인",
+              "purpose": "생산",
+              "kind": "생산",
+              "x": 31.9,
+              "y": 4.3,
+              "width": 36,
+              "height": 40,
+              "color": "#fae4c7",
+              "item": "라면 스프 · 육수다시",
+              "current": 4820,
+              "capacity": 6200,
+              "unit": "ea",
+              "note": "1라인 배합 · 2라인 충진"
+            },
+            {
+              "id": "BLOCK-POH-PACK",
+              "factoryId": "FAC-POH-01",
+              "zoneId": "packing",
+              "name": "포장구역",
+              "purpose": "포장",
+              "kind": "생산",
+              "x": 32.1,
+              "y": 50.6,
+              "width": 29.9,
+              "height": 27.4,
+              "color": "#e8dcf2",
+              "item": "선물세트",
+              "current": 760,
+              "capacity": 1400,
+              "unit": "ea",
+              "note": "중량·라벨 검사 포함"
+            },
+            {
+              "id": "BLOCK-POH-SHIP",
+              "factoryId": "FAC-POH-01",
+              "zoneId": "shipping",
+              "name": "출하 도크",
+              "purpose": "출하",
+              "kind": "재고",
+              "x": 76.6,
+              "y": 6.5,
+              "width": 20,
+              "height": 87,
+              "color": "#d8eee9",
+              "item": "온라인 주문 출하품",
+              "current": 14,
+              "capacity": 24,
+              "unit": "PLT",
+              "note": "16:30 1차 상차"
+            }
+          ],
+          "FAC-GRP-02": [
+            {
+              "id": "BLOCK-GRP-RAW",
+              "factoryId": "FAC-GRP-02",
+              "zoneId": "raw",
+              "name": "원료창고",
+              "purpose": "원료·자재",
+              "kind": "재고",
+              "x": 4,
+              "y": 6,
+              "width": 29,
+              "height": 35,
+              "color": "#d9efe1",
+              "item": "수산 원물",
+              "current": 12870,
+              "capacity": 20000,
+              "unit": "kg",
+              "note": "입고 검수 대기 없음"
+            },
+            {
+              "id": "BLOCK-GRP-FROZEN",
+              "factoryId": "FAC-GRP-02",
+              "zoneId": "frozen",
+              "name": "냉동 1창고",
+              "purpose": "냉장·냉동",
+              "kind": "재고",
+              "x": 4,
+              "y": 51,
+              "width": 29,
+              "height": 42,
+              "color": "#d5eaf5",
+              "item": "냉동 수산 원물",
+              "current": 6710,
+              "capacity": 9200,
+              "unit": "kg",
+              "note": "자동 온도기록 중"
+            },
+            {
+              "id": "BLOCK-GRP-PROD",
+              "factoryId": "FAC-GRP-02",
+              "zoneId": "production",
+              "name": "냉동식품 생산라인",
+              "purpose": "생산",
+              "kind": "생산",
+              "x": 38,
+              "y": 6,
+              "width": 36,
+              "height": 49,
+              "color": "#fae4c7",
+              "item": "볶음밥 · 어간장",
+              "current": 3160,
+              "capacity": 4000,
+              "unit": "ea",
+              "note": "2개 라인 가동 중"
+            },
+            {
+              "id": "BLOCK-GRP-PACK",
+              "factoryId": "FAC-GRP-02",
+              "zoneId": "packing",
+              "name": "포장·검사",
+              "purpose": "포장",
+              "kind": "생산",
+              "x": 38,
+              "y": 65,
+              "width": 36,
+              "height": 28,
+              "color": "#e8dcf2",
+              "item": "냉동볶음밥",
+              "current": 420,
+              "capacity": 1200,
+              "unit": "ea",
+              "note": "금속검출기 감도 확인"
+            },
+            {
+              "id": "BLOCK-GRP-SHIP",
+              "factoryId": "FAC-GRP-02",
+              "zoneId": "shipping",
+              "name": "냉동 출하장",
+              "purpose": "출하",
+              "kind": "재고",
+              "x": 79,
+              "y": 6,
+              "width": 17,
+              "height": 87,
+              "color": "#d8eee9",
+              "item": "냉동 택배",
+              "current": 6,
+              "capacity": 18,
+              "unit": "PLT",
+              "note": "17:10 냉동 탑차 상차"
+            }
+          ]
+        },
+        "updatedAt": "2026-08-20T07:18:43.513Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "calendar-departments": {
+        "data": [
+          "전사",
+          "경영지원팀",
+          "품질관리팀",
+          "생산 1팀",
+          "판매운영팀",
+          "물류팀",
+          "구매팀"
+        ],
+        "updatedAt": "2026-08-20T06:01:04.204Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "document-storage-settings": {
+        "data": {
+          "provider": "webdav",
+          "endpoint": "",
+          "share": "",
+          "basePath": "/온팩토리",
+          "account": "",
+          "status": "설정 필요"
+        },
+        "updatedAt": "2026-08-20T06:10:50.880Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "compliance-records": {
+        "data": [
+          {
+            "id": "CERT-HACCP-01",
+            "category": "HACCP",
+            "name": "수산가공식품 HACCP 인증",
+            "authority": "한국식품안전관리인증원",
+            "certificateNo": "2024-5-0187",
+            "issuedAt": "2024-10-12",
+            "expiresAt": "2027-10-11",
+            "owner": "박지현",
+            "status": "유효",
+            "checklist": [
+              "선행요건 기록",
+              "CCP 모니터링",
+              "검증 기록"
+            ],
+            "attachments": [
+              {
+                "id": "ATT-1",
+                "name": "HACCP_인증서.pdf",
+                "size": "1.2 MB"
+              }
+            ],
+            "note": "연 1회 정기 조사 대응",
+            "updatedAt": "2026-08-20"
+          },
+          {
+            "id": "CERT-SELF-02",
+            "category": "자가품질검사",
+            "name": "멍게젓 정기 자가품질검사",
+            "authority": "공인 시험검사기관",
+            "certificateNo": "SELF-2026-081",
+            "issuedAt": "2026-07-21",
+            "expiresAt": "2026-09-21",
+            "owner": "이정민",
+            "status": "갱신예정",
+            "checklist": [
+              "검체 채취",
+              "검사 의뢰",
+              "성적서 확인"
+            ],
+            "attachments": [
+              {
+                "id": "ATT-2",
+                "name": "자가품질검사_성적서.pdf",
+                "size": "840 KB"
+              }
+            ],
+            "note": "차기 검사 의뢰일 9월 7일",
+            "updatedAt": "2026-08-19"
+          },
+          {
+            "id": "CERT-EDU-03",
+            "category": "위생교육",
+            "name": "영업자 위생교육",
+            "authority": "한국식품산업협회",
+            "certificateNo": "EDU-2026-403",
+            "issuedAt": "2026-01-18",
+            "expiresAt": "2026-12-31",
+            "owner": "김서원",
+            "status": "보완필요",
+            "checklist": [
+              "수료증 등록",
+              "대상자 명단 확인"
+            ],
+            "attachments": [],
+            "note": "수료증 파일 등록 필요",
+            "updatedAt": "2026-08-19"
+          }
+        ],
+        "updatedAt": "2026-08-20T06:16:00.725Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      },
+      "sales-shipments": {
+        "data": [
+          {
+            "id": "SHIP-DEMO-001",
+            "orderNo": "NAV-260820-1042",
+            "channelId": "naver",
+            "channelName": "네이버 스마트스토어",
+            "recipient": "이소연",
+            "phone": "010-4821-****",
+            "address": "서울시 송파구 올림픽로 00",
+            "productName": "붉은대게라면 10봉",
+            "quantity": 1,
+            "courier": "",
+            "trackingNo": "",
+            "status": "출고대기",
+            "orderedAt": "2026-08-20 09:42"
+          },
+          {
+            "id": "SHIP-DEMO-002",
+            "orderNo": "CP-260820-0981",
+            "channelId": "coupang",
+            "channelName": "쿠팡",
+            "recipient": "박준호",
+            "phone": "010-3198-****",
+            "address": "경기도 성남시 분당구 판교로 00",
+            "productName": "붉은대게 육수다시 선물세트",
+            "quantity": 2,
+            "courier": "CJ대한통운",
+            "trackingNo": "689123456789",
+            "status": "송장등록",
+            "orderedAt": "2026-08-20 08:55"
+          }
+        ],
+        "updatedAt": "2026-08-20T07:19:03.915Z",
+        "updatedBy": "USR-SUNSEA-ADMIN"
+      }
+    },
+    "TENANT-POHANG": {
+      "work-items": {
+        "data": [],
+        "updatedAt": "2026-08-19T06:22:51.328Z",
+        "updatedBy": "USR-POHANG-ADMIN"
+      },
+      "messenger-conversations": {
+        "data": [],
+        "updatedAt": "2026-08-19T06:22:51.348Z",
+        "updatedBy": "USR-POHANG-ADMIN"
+      },
+      "work-rules": {
+        "data": [],
+        "updatedAt": "2026-08-20T06:17:00.828Z",
+        "updatedBy": "USR-POHANG-ADMIN"
+      },
+      "calendar-events": {
+        "data": [],
+        "updatedAt": "2026-08-20T06:18:10.026Z",
+        "updatedBy": "USR-POHANG-ADMIN"
+      },
+      "calendar-departments": {
+        "data": [
+          "전사",
+          "경영지원팀",
+          "품질관리팀",
+          "생산 1팀",
+          "판매운영팀",
+          "물류팀",
+          "구매팀"
+        ],
+        "updatedAt": "2026-08-20T06:18:10.028Z",
+        "updatedBy": "USR-POHANG-ADMIN"
+      }
+    }
+  },
+  "accountApprovals": {},
+  "passwordResetRequests": [],
+  "invitedAccounts": [],
+  "accountCredentials": {},
+  "platform": {
+    "tenants": [
+      {
+        "id": "TENANT-SUNSEA",
+        "name": "햇살바다",
+        "industry": "수산가공 · HMR · 온라인 유통",
+        "contract": "운영중",
+        "service": "정상",
+        "health": 98,
+        "plan": "Enterprise",
+        "sites": 2,
+        "users": 46,
+        "activeUsers": 28,
+        "integrations": "5 / 5",
+        "sync": "14:42",
+        "tickets": 1,
+        "aiUsage": "1,284 / 5,000",
+        "storage": "41.8 / 100GB",
+        "csm": "이민지",
+        "adminEmail": "admin@sunsea.co.kr",
+        "adminAccount": {
+          "id": "USR-SUNSEA-ADMIN",
+          "name": "김서원",
+          "email": "admin@sunsea.co.kr",
+          "team": "경영지원",
+          "jobRole": "운영 관리자"
+        },
+        "createdAt": "2026-08-01T00:00:00.000Z"
+      },
+      {
+        "id": "TENANT-POHANG",
+        "name": "포항시수산가공협동조합",
+        "industry": "수산가공 · 조합 공동판매",
+        "contract": "온보딩",
+        "service": "주의",
+        "health": 82,
+        "plan": "Growth",
+        "sites": 1,
+        "users": 24,
+        "activeUsers": 11,
+        "integrations": "3 / 5",
+        "sync": "14:36",
+        "tickets": 3,
+        "aiUsage": "412 / 2,000",
+        "storage": "13.2 / 50GB",
+        "csm": "박하늘",
+        "adminEmail": "admin@pohangcoop.co.kr",
+        "adminAccount": {
+          "id": "USR-POHANG-ADMIN",
+          "name": "박해진",
+          "email": "admin@pohangcoop.co.kr",
+          "team": "조합 운영",
+          "jobRole": "운영 관리자"
+        },
+        "createdAt": "2026-08-01T00:00:00.000Z"
+      }
+    ],
+    "supportTickets": [
+      {
+        "id": "CS-260818-021",
+        "tenantId": "TENANT-POHANG",
+        "tenant": "포항시수산가공협동조합",
+        "title": "G마켓 SKU 27개 매핑 실패",
+        "priority": "P1",
+        "status": "기술팀 처리중",
+        "sla": "37분 남음",
+        "owner": "김도윤",
+        "description": "G마켓 SKU 27개 매핑 실패 관련 고객 지원 요청입니다.",
+        "createdAt": "2026-08-18T05:00:00.000Z",
+        "updatedAt": "2026-08-18T05:00:00.000Z",
+        "history": [
+          {
+            "id": "CS-260818-021-H1",
+            "at": "2026-08-18 14:00",
+            "title": "CS 접수",
+            "detail": "G마켓 SKU 27개 매핑 실패",
+            "actor": "플랫폼 운영"
+          }
+        ]
+      },
+      {
+        "id": "CS-260818-019",
+        "tenantId": "TENANT-POHANG",
+        "tenant": "포항시수산가공협동조합",
+        "title": "네이버 API 권한 인증",
+        "priority": "P2",
+        "status": "고객 회신 대기",
+        "sla": "일시정지",
+        "owner": "박하늘",
+        "description": "네이버 API 권한 인증 관련 고객 지원 요청입니다.",
+        "createdAt": "2026-08-18T05:00:00.000Z",
+        "updatedAt": "2026-08-18T05:00:00.000Z",
+        "history": [
+          {
+            "id": "CS-260818-019-H1",
+            "at": "2026-08-18 14:00",
+            "title": "CS 접수",
+            "detail": "네이버 API 권한 인증",
+            "actor": "플랫폼 운영"
+          }
+        ]
+      },
+      {
+        "id": "CS-260817-031",
+        "tenantId": "TENANT-POHANG",
+        "tenant": "포항시수산가공협동조합",
+        "title": "초기 품목 12개 중복코드 검증",
+        "priority": "P2",
+        "status": "수정본 검증중",
+        "sla": "2시간 12분",
+        "owner": "이민지",
+        "description": "초기 품목 12개 중복코드 검증 관련 고객 지원 요청입니다.",
+        "createdAt": "2026-08-18T05:00:00.000Z",
+        "updatedAt": "2026-08-18T05:00:00.000Z",
+        "history": [
+          {
+            "id": "CS-260817-031-H1",
+            "at": "2026-08-18 14:00",
+            "title": "CS 접수",
+            "detail": "초기 품목 12개 중복코드 검증",
+            "actor": "플랫폼 운영"
+          }
+        ]
+      },
+      {
+        "id": "CS-260817-028",
+        "tenantId": "TENANT-SUNSEA",
+        "tenant": "햇살바다",
+        "title": "제품 이미지 일괄등록 문의",
+        "priority": "P3",
+        "status": "고객 회신 대기",
+        "sla": "18시간",
+        "owner": "이민지",
+        "description": "제품 이미지 일괄등록 문의 관련 고객 지원 요청입니다.",
+        "createdAt": "2026-08-18T05:00:00.000Z",
+        "updatedAt": "2026-08-18T05:00:00.000Z",
+        "history": [
+          {
+            "id": "CS-260817-028-H1",
+            "at": "2026-08-18 14:00",
+            "title": "CS 접수",
+            "detail": "제품 이미지 일괄등록 문의",
+            "actor": "플랫폼 운영"
+          }
+        ]
+      }
+    ],
+    "integrations": [
+      {
+        "id": "SUNSEA-COUPANG",
+        "tenantId": "TENANT-SUNSEA",
+        "name": "쿠팡",
+        "short": "C",
+        "kind": "판매채널",
+        "status": "정상",
+        "lastSync": "14:42",
+        "result": "수집 지연 없음",
+        "successRate": "99.9%"
+      },
+      {
+        "id": "SUNSEA-NAVER",
+        "tenantId": "TENANT-SUNSEA",
+        "name": "네이버 스마트스토어",
+        "short": "N",
+        "kind": "판매채널",
+        "status": "정상",
+        "lastSync": "14:41",
+        "result": "인증 유효",
+        "successRate": "100%"
+      },
+      {
+        "id": "SUNSEA-GMARKET",
+        "tenantId": "TENANT-SUNSEA",
+        "name": "G마켓",
+        "short": "G",
+        "kind": "판매채널",
+        "status": "주의",
+        "lastSync": "14:38",
+        "result": "SKU 매핑 2건",
+        "successRate": "99.7%"
+      },
+      {
+        "id": "SUNSEA-DELIVERY",
+        "tenantId": "TENANT-SUNSEA",
+        "name": "택배 연동",
+        "short": "T",
+        "kind": "물류",
+        "status": "정상",
+        "lastSync": "14:40",
+        "result": "송장 상태 정상",
+        "successRate": "99.9%"
+      },
+      {
+        "id": "SUNSEA-CLAUDE",
+        "tenantId": "TENANT-SUNSEA",
+        "name": "Claude AI",
+        "short": "AI",
+        "kind": "AI",
+        "status": "정상",
+        "lastSync": "14:42",
+        "result": "응답 지연 정상",
+        "successRate": "99.8%"
+      },
+      {
+        "id": "POHANG-COUPANG",
+        "tenantId": "TENANT-POHANG",
+        "name": "쿠팡",
+        "short": "C",
+        "kind": "판매채널",
+        "status": "정상",
+        "lastSync": "14:36",
+        "result": "수집 지연 없음",
+        "successRate": "99.8%"
+      },
+      {
+        "id": "POHANG-NAVER",
+        "tenantId": "TENANT-POHANG",
+        "name": "네이버 스마트스토어",
+        "short": "N",
+        "kind": "판매채널",
+        "status": "설정중",
+        "lastSync": "—",
+        "result": "고객 인증 대기",
+        "successRate": "—"
+      },
+      {
+        "id": "POHANG-GMARKET",
+        "tenantId": "TENANT-POHANG",
+        "name": "G마켓",
+        "short": "G",
+        "kind": "판매채널",
+        "status": "주의",
+        "lastSync": "14:31",
+        "result": "SKU 매핑 점검 필요",
+        "successRate": "91.4%"
+      },
+      {
+        "id": "POHANG-DELIVERY",
+        "tenantId": "TENANT-POHANG",
+        "name": "택배 연동",
+        "short": "T",
+        "kind": "물류",
+        "status": "정상",
+        "lastSync": "14:34",
+        "result": "송장 상태 정상",
+        "successRate": "99.6%"
+      },
+      {
+        "id": "POHANG-CLAUDE",
+        "tenantId": "TENANT-POHANG",
+        "name": "Claude AI",
+        "short": "AI",
+        "kind": "AI",
+        "status": "정상",
+        "lastSync": "14:35",
+        "result": "응답 지연 정상",
+        "successRate": "99.5%"
+      }
+    ],
+    "actions": [],
+    "auditEvents": [
+      {
+        "id": "AUD-260818-104",
+        "tenantId": "TENANT-SUNSEA",
+        "at": "2026-08-18 14:24",
+        "event": "지원 세션 정상 종료",
+        "scope": "설정 조회 · 읽기 전용 · 9분",
+        "actor": "지원팀 김도윤",
+        "result": "완료",
+        "reference": "CS-260817-028"
+      },
+      {
+        "id": "AUD-260818-098",
+        "tenantId": "TENANT-POHANG",
+        "at": "2026-08-18 13:58",
+        "event": "연동 상태 진단 실행",
+        "scope": "G마켓 설정 메타데이터",
+        "actor": "시스템 자동화",
+        "result": "검토필요",
+        "reference": "CS-260818-021"
+      },
+      {
+        "id": "AUD-260818-083",
+        "tenantId": "TENANT-POHANG",
+        "at": "2026-08-18 11:32",
+        "event": "CS 담당 조직 변경",
+        "scope": "기술지원팀으로 이관",
+        "actor": "CSM 박하늘",
+        "result": "완료",
+        "reference": "CS-260818-021"
+      },
+      {
+        "id": "AUD-260817-241",
+        "tenantId": "TENANT-SUNSEA",
+        "at": "2026-08-17 17:10",
+        "event": "지원 세션 요청 승인",
+        "scope": "설정 조회 · 15분 제한",
+        "actor": "고객사 관리자",
+        "result": "완료",
+        "reference": "CS-260817-028"
+      }
+    ]
+  }
+}

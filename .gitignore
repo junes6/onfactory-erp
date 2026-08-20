@@ -1,0 +1,15 @@
+node_modules
+dist
+.DS_Store
+*.local
+*.log
+*.tsbuildinfo
+server/data/*.json
+server/data/*.json.bak
+server/data/documents/
+server/backups/
+vite.config.js
+vite.config.d.ts
+.wrangler/
+.dev.vars*
+.sites-build/

@@ -1,0 +1,39 @@
+{
+  "name": "onfactory-erp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently --kill-others --names web,api --prefix-colors cyan,magenta \"vite\" \"node --watch server/index.mjs\"",
+    "dev:web": "vite",
+    "dev:api": "node --watch server/index.mjs",
+    "build": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json && vite build",
+    "build:sites": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json && vite build --config vite.sites.config.ts && node scripts/stage-sites-build.mjs",
+    "preview": "vite preview",
+    "preview:sites": "vite preview --config vite.sites.config.ts",
+    "start": "node server/index.mjs",
+    "test:server": "node --test server/*.test.mjs",
+    "backup:data": "node server/backup-data.mjs",
+    "restore:data": "node server/restore-data.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.37.1",
+    "@cloudflare/workers-types": "^5.20260819.1",
+    "@openai/sites-vite-plugin": "0.1.0",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
+    "concurrently": "^10.0.5",
+    "typescript": "latest",
+    "vite": "latest",
+    "wrangler": "4.92.0"
+  }
+}
