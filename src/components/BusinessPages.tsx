@@ -30,9 +30,10 @@ import {
   X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { channelMetrics, seaProducts } from '../domainData'
 import type { ChannelMetric, SeaProduct } from '../domainData'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
+import { formatDateTime } from '../utils/dateTime'
+import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './BusinessPagesEnhancements.css'
 
 type BusinessPageProps = {
@@ -41,7 +42,6 @@ type BusinessPageProps = {
 
 type TenantBusinessPageProps = BusinessPageProps & {
   workspaceScope?: string
-  seedDemoData?: boolean
   companyName?: string
 }
 
@@ -52,14 +52,13 @@ type ChannelHealthResult = {
   credential: 'missing' | 'ready'
   response: 'not-tested' | 'ok' | 'unavailable'
   responseLabel: string
-  mapping: 'none' | 'demo' | 'ready' | 'attention'
+  mapping: 'none' | 'ready' | 'attention'
   mappingLabel: string
   checkedAt: string
 }
 
 type ManagedChannel = ChannelMetric & {
   connectionStatus?: ChannelSetupStatus
-  demoData?: boolean
   sellerAccount?: string
   credentialHint?: string
   credentialFields?: Record<string, string>
@@ -107,11 +106,6 @@ type SalesShipment = {
 }
 
 const couriers = ['CJ대한통운', '한진택배', '롯데택배', '로젠택배', '우체국택배']
-
-const demoShipments: SalesShipment[] = [
-  { id: 'SHIP-DEMO-001', orderNo: 'NAV-260820-1042', channelId: 'naver', channelName: '네이버 스마트스토어', recipient: '이소연', phone: '010-4821-****', address: '서울시 송파구 올림픽로 00', productName: '붉은대게라면 10봉', quantity: 1, courier: '', trackingNo: '', status: '출고대기', orderedAt: '2026-08-20 09:42' },
-  { id: 'SHIP-DEMO-002', orderNo: 'CP-260820-0981', channelId: 'coupang', channelName: '쿠팡', recipient: '박준호', phone: '010-3198-****', address: '경기도 성남시 분당구 판교로 00', productName: '붉은대게 육수다시 선물세트', quantity: 2, courier: 'CJ대한통운', trackingNo: '689123456789', status: '송장등록', orderedAt: '2026-08-20 08:55' },
-]
 
 function isSalesShipmentList(value: unknown): value is SalesShipment[] {
   return Array.isArray(value) && value.every((item) => {
@@ -187,7 +181,7 @@ function useModalFocus(active: boolean) {
 
 const channelDefinitions: ChannelDefinition[] = [
   {
-    id: 'coupang', name: '쿠팡', short: 'C', color: '#e94b35', authMode: 'HMAC Access Key',
+    id: 'coupang', name: '쿠팡', short: 'C', color: 'var(--color-danger)', authMode: 'HMAC Access Key',
     sellerUrl: 'https://wing.coupang.com/', docsUrl: 'https://developers.coupangcorp.com/',
     fields: [
       { id: 'vendorId', label: 'Vendor ID', placeholder: 'A00012345' },
@@ -198,7 +192,7 @@ const channelDefinitions: ChannelDefinition[] = [
     accessNote: '쿠팡은 WING에서 발급한 Vendor ID·Access Key·Secret Key와 HMAC 서명이 필요합니다.',
   },
   {
-    id: 'naver', name: '네이버 스마트스토어', short: 'N', color: '#03c75a', authMode: 'Commerce API 애플리케이션',
+    id: 'naver', name: '네이버 스마트스토어', short: 'N', color: 'var(--color-success)', authMode: 'Commerce API 애플리케이션',
     sellerUrl: 'https://sell.smartstore.naver.com/', docsUrl: 'https://apicenter.commerce.naver.com/docs/commerce-api/current',
     fields: [
       { id: 'sellerId', label: '커머스 판매자 ID', placeholder: '통합 매니저 계정' },
@@ -209,7 +203,7 @@ const channelDefinitions: ChannelDefinition[] = [
     accessNote: '스마트스토어 통합 매니저가 커머스API센터에서 애플리케이션을 등록해야 합니다.',
   },
   {
-    id: 'gmarket', name: 'G마켓 · 옥션', short: 'G', color: '#0b57d0', authMode: 'ESM Trading API',
+    id: 'gmarket', name: 'G마켓 · 옥션', short: 'G', color: 'var(--color-blue)', authMode: 'ESM Trading API',
     sellerUrl: 'https://www.esmplus.com/', docsUrl: 'https://etapi.gmarket.com/',
     fields: [
       { id: 'esmId', label: 'ESM 마스터 ID', placeholder: 'ESM PLUS 마스터 ID' },
@@ -219,7 +213,7 @@ const channelDefinitions: ChannelDefinition[] = [
     accessNote: 'ESM PLUS 판매자 계정과 ESM Trading API 사용 권한이 모두 필요합니다.',
   },
   {
-    id: '11st', name: '11번가', short: '11', color: '#ff2f16', authMode: 'Open API Key',
+    id: '11st', name: '11번가', short: '11', color: 'var(--color-danger)', authMode: 'Open API Key',
     sellerUrl: 'https://soffice.11st.co.kr/', docsUrl: 'https://openapi.11st.co.kr/',
     fields: [
       { id: 'sellerId', label: '셀러 ID', placeholder: '11번가 셀러오피스 ID' },
@@ -229,7 +223,7 @@ const channelDefinitions: ChannelDefinition[] = [
     accessNote: '11번가 Open API Center에서 서비스 등록 후 API Key를 발급해야 합니다.',
   },
   {
-    id: 'ssg', name: 'SSG.COM', short: 'S', color: '#ff4c3b', authMode: 'SSG eAPI 인증키',
+    id: 'ssg', name: 'SSG.COM', short: 'S', color: 'var(--color-danger)', authMode: 'SSG eAPI 인증키',
     sellerUrl: 'https://partners.ssgadm.com/', docsUrl: 'https://eapi.ssgadm.com/info/main.ssg',
     fields: [
       { id: 'sellerId', label: '파트너사 ID', placeholder: 'SSG 파트너오피스 ID' },
@@ -239,7 +233,7 @@ const channelDefinitions: ChannelDefinition[] = [
     accessNote: 'SSG.COM 파트너오피스 입점 승인 후 eAPI 신규(New) API 기준으로 인증키와 사용할 권한을 확인해야 합니다.',
   },
   {
-    id: 'kakao', name: '카카오 톡스토어 · 선물하기', short: 'K', color: '#d7ae00', authMode: 'REST API KEY + ADMIN KEY',
+    id: 'kakao', name: '카카오 톡스토어 · 선물하기', short: 'K', color: 'var(--color-warning)', authMode: 'REST API KEY + ADMIN KEY',
     sellerUrl: 'https://shopping-sell.kakao.com/hub', docsUrl: 'https://shopping-developers.kakao.com/hc/ko/articles/4681097907087',
     fields: [
       { id: 'sellerId', label: '판매자 ID', placeholder: '카카오쇼핑 판매자 ID' },
@@ -250,7 +244,7 @@ const channelDefinitions: ChannelDefinition[] = [
     accessNote: '카카오쇼핑 Open API는 별도 이용 신청과 판매자 연동 설정이 필요하며, 제공되는 운영 환경의 REST API KEY·ADMIN KEY로 인증합니다.',
   },
   {
-    id: 'own', name: '카페24 자사몰', short: '24', color: '#164c3f', authMode: 'OAuth 2.0',
+    id: 'own', name: '카페24 자사몰', short: '24', color: 'var(--color-blue-deep)', authMode: 'OAuth 2.0',
     sellerUrl: 'https://eclogin.cafe24.com/Shop/', docsUrl: 'https://developers.cafe24.com/',
     fields: [
       { id: 'mallId', label: 'Mall ID', placeholder: '카페24 쇼핑몰 ID' },
@@ -262,23 +256,19 @@ const channelDefinitions: ChannelDefinition[] = [
   },
 ]
 
-function isSunseaFixtureChannel(channel: ChannelMetric) {
-  return Boolean(channelMetrics.find((fixture) => fixture.id === channel.id
-    && fixture.orders === channel.orders
-    && fixture.units === channel.units
-    && fixture.revenue === channel.revenue))
-}
-
 function channelDefinition(channelId: string) {
   return channelDefinitions.find((definition) => definition.id === channelId)
+}
+
+function channelTokenColor(channelId: string) {
+  return channelDefinition(channelId)?.color ?? 'var(--color-blue)'
 }
 
 function normalizeManagedChannel(channel: ManagedChannel): ManagedChannel {
   return {
     ...channel,
-    status: '설정중',
+    status: channel.status ?? '설정중',
     connectionStatus: channel.connectionStatus ?? 'setup-required',
-    demoData: channel.demoData ?? isSunseaFixtureChannel(channel),
   }
 }
 
@@ -295,7 +285,6 @@ function emptyManagedChannel(definition: ChannelDefinition): ManagedChannel {
     sync: '실 API 미연결',
     status: '설정중',
     connectionStatus: 'setup-required',
-    demoData: false,
   }
 }
 
@@ -349,177 +338,6 @@ type ProductEditorState = {
   productId?: string
 }
 
-const productFacts: Record<string, ProductFact> = {
-  'SP-001': {
-    manufacturer: '햇살바다 제1공장',
-    manufacturingType: '자체생산',
-    foodType: '양념젓갈',
-    barcode: '8809876543101',
-    shelfLife: '제조일로부터 90일',
-    origin: '멍게 국산, 고춧가루 국산',
-    ingredients: '멍게 72%, 고춧가루, 천일염, 액젓, 마늘, 물엿',
-    labelScore: 72,
-    labelOwner: '박지현 · 품질관리팀',
-    labelSummary: '복합원재료와 알레르기 표시 2건의 수정이 필요합니다.',
-    labelIssue: '액젓 하위 원재료의 새우 표시와 멍게 원산지 문구를 보완하세요.',
-    lotNo: 'MJG-260805-A1',
-    warehouse: '냉장 2창고',
-    location: 'C-01-02',
-    manufacturedAt: '2026-08-05',
-    expiresAt: '2026-11-03',
-    daysToExpire: 77,
-    inspection: '적합',
-    reserved: 16,
-  },
-  'SP-002': {
-    manufacturer: '동해제면 주식회사',
-    manufacturingType: 'OEM',
-    foodType: '유탕면',
-    barcode: '8809876543118',
-    shelfLife: '제조일로부터 180일',
-    origin: '붉은대게분말 국산, 밀 미국·호주산',
-    ingredients: '소맥분, 팜유, 감자전분, 붉은대게분말, 해물맛분말, 정제염',
-    labelScore: 86,
-    labelOwner: '이정민 · 품질관리팀',
-    labelSummary: '영양정보와 알레르기 강조 문구를 AI가 대조하고 있습니다.',
-    labelIssue: '나트륨 기준치 비율과 “게 함유” 강조 표기를 최종 확인하세요.',
-    lotNo: 'RRM-260725-B3',
-    warehouse: '상온 완제품 창고',
-    location: 'D-02-04',
-    manufacturedAt: '2026-07-25',
-    expiresAt: '2027-01-21',
-    daysToExpire: 156,
-    inspection: '적합',
-    reserved: 90,
-  },
-  'SP-003': {
-    manufacturer: '햇살바다 제1공장',
-    manufacturingType: '자체생산',
-    foodType: '복합조미식품',
-    barcode: '8809876543125',
-    shelfLife: '제조일로부터 12개월',
-    origin: '붉은대게 국산, 멸치 국산, 다시마 국산',
-    ingredients: '붉은대게분말, 멸치분말, 다시마분말, 표고버섯분말, 천일염',
-    labelScore: 98,
-    labelOwner: '박지현 · 품질관리팀',
-    labelSummary: '법정 의무표시와 세트 외포장 표시 검토를 통과했습니다.',
-    labelIssue: '현재 확인된 수정 항목이 없습니다.',
-    lotNo: 'RBG-260730-A2',
-    warehouse: '선물세트 창고',
-    location: 'G-01-03',
-    manufacturedAt: '2026-07-30',
-    expiresAt: '2027-07-29',
-    daysToExpire: 345,
-    inspection: '적합',
-    reserved: 32,
-  },
-  'SP-004': {
-    manufacturer: '햇살바다 제1공장',
-    manufacturingType: '자체생산',
-    foodType: '복합조미식품',
-    barcode: '8809876543132',
-    shelfLife: '제조일로부터 12개월',
-    origin: '멸치·다시마·표고버섯 국산',
-    ingredients: '멸치분말, 다시마분말, 표고버섯분말, 새우분말, 천일염',
-    labelScore: 79,
-    labelOwner: '박지현 · 품질관리팀',
-    labelSummary: '품목제조보고서와 전면 제품명의 일치 여부를 확인 중입니다.',
-    labelIssue: '“자연다시 미스틱”과 “바이오 미스틱” 중 승인 명칭으로 통일하세요.',
-    lotNo: 'BMG-260801-A1',
-    warehouse: '선물세트 창고',
-    location: 'G-01-05',
-    manufacturedAt: '2026-08-01',
-    expiresAt: '2027-07-31',
-    daysToExpire: 347,
-    inspection: '적합',
-    reserved: 8,
-  },
-  'SP-005': {
-    manufacturer: '햇살바다 제1공장',
-    manufacturingType: '자체생산',
-    foodType: '소스',
-    barcode: '8809876543149',
-    shelfLife: '제조일로부터 12개월',
-    origin: '붉은대게 국산, 천일염 국산',
-    ingredients: '붉은대게추출액, 양조간장, 다시마농축액, 천일염',
-    labelScore: 97,
-    labelOwner: '이정민 · 품질관리팀',
-    labelSummary: '원재료, 원산지와 보관방법 표시 검토를 통과했습니다.',
-    labelIssue: '현재 확인된 수정 항목이 없습니다.',
-    lotNo: 'RFS-260618-C1',
-    warehouse: '상온 완제품 창고',
-    location: 'D-04-02',
-    manufacturedAt: '2026-06-18',
-    expiresAt: '2027-06-17',
-    daysToExpire: 303,
-    inspection: '적합',
-    reserved: 26,
-  },
-  'SP-006': {
-    manufacturer: '햇살바다 제1공장',
-    manufacturingType: '자체생산',
-    foodType: '복합조미식품',
-    barcode: '8809876543156',
-    shelfLife: '제조일로부터 12개월',
-    origin: '붉은대게·멸치·다시마 국산',
-    ingredients: '붉은대게분말, 멸치분말, 다시마분말, 표고버섯분말',
-    labelScore: 94,
-    labelOwner: '박지현 · 품질관리팀',
-    labelSummary: '리뉴얼 시안의 의무표시 글자 크기를 최종 검토합니다.',
-    labelIssue: '제품명 하단 식품유형 글자 크기를 10pt 이상으로 유지하세요.',
-    lotNo: 'RBS-260802-B1',
-    warehouse: '상온 완제품 창고',
-    location: 'D-03-06',
-    manufacturedAt: '2026-08-02',
-    expiresAt: '2027-08-01',
-    daysToExpire: 348,
-    inspection: '적합',
-    reserved: 80,
-  },
-  'SP-007': {
-    manufacturer: '햇살바다 제1공장',
-    manufacturingType: '자체생산',
-    foodType: '양념젓갈',
-    barcode: '8809876543163',
-    shelfLife: '제조일로부터 90일',
-    origin: '오징어 국산, 고춧가루 국산',
-    ingredients: '오징어 75%, 고춧가루, 천일염, 액젓, 마늘, 물엿',
-    labelScore: 64,
-    labelOwner: '박지현 · 품질관리팀',
-    labelSummary: '원산지와 복합원재료 알레르기 표시의 수정이 필요합니다.',
-    labelIssue: '오징어 원산지와 조미액에 포함된 새우·밀을 표시하세요.',
-    lotNo: 'OJG-260810-A2',
-    warehouse: '냉장 2창고',
-    location: 'C-02-01',
-    manufacturedAt: '2026-08-10',
-    expiresAt: '2026-11-08',
-    daysToExpire: 82,
-    inspection: '적합',
-    reserved: 0,
-  },
-  'SP-008': {
-    manufacturer: '동해냉동식품 주식회사',
-    manufacturingType: 'OEM',
-    foodType: '즉석조리식품',
-    barcode: '8809876543170',
-    shelfLife: '제조일로부터 12개월',
-    origin: '붉은대게살 국산, 쌀 국산',
-    ingredients: '쌀, 붉은대게살, 알류, 대파, 양파, 대두유, 간장',
-    labelScore: 71,
-    labelOwner: '이정민 · 품질관리팀',
-    labelSummary: '표시 시안 검토와 완제품 LOT 재검사가 함께 진행 중입니다.',
-    labelIssue: '붉은대게살 함량, 알류·게 표시와 영양성분을 재대조하세요.',
-    lotNo: 'RFR-260817-A1',
-    warehouse: '냉동 1창고',
-    location: 'F-03-02',
-    manufacturedAt: '2026-08-17',
-    expiresAt: '2027-08-16',
-    daysToExpire: 363,
-    inspection: '재검사',
-    reserved: 0,
-  },
-}
-
 const defaultProductFact: ProductFact = {
   manufacturer: '',
   manufacturingType: '자체생산',
@@ -541,11 +359,6 @@ const defaultProductFact: ProductFact = {
   inspection: '대기',
   reserved: 0,
 }
-
-const demoProductCatalog: ManagedProduct[] = seaProducts.map((product) => ({
-  ...product,
-  fact: productFacts[product.id] ?? defaultProductFact,
-}))
 
 const PRODUCT_IMAGE_MAX_SOURCE_BYTES = 5 * 1024 * 1024
 const PRODUCT_IMAGE_MAX_DATA_URL_LENGTH = 180_000
@@ -602,7 +415,7 @@ async function prepareProductImage(file: File) {
   canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
   const context = canvas.getContext('2d')
   if (!context) throw new Error('브라우저에서 이미지 변환을 시작하지 못했습니다.')
-  context.fillStyle = '#ffffff'
+  context.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--color-surface').trim()
   context.fillRect(0, 0, canvas.width, canvas.height)
   context.drawImage(image, 0, 0, canvas.width, canvas.height)
 
@@ -614,10 +427,6 @@ async function prepareProductImage(file: File) {
   }
   if (!isStoredProductImage(dataUrl)) throw new Error('이미지 용량을 줄이지 못했습니다. 더 작은 이미지를 선택해 주세요.')
   return dataUrl
-}
-
-function isSunseaFixtureProduct(product: ManagedProduct) {
-  return seaProducts.some((fixture) => fixture.id === product.id && fixture.code === product.code)
 }
 
 function collectLabelIssues(product: ManagedProduct) {
@@ -649,42 +458,9 @@ function validateLabelRecord(product: ManagedProduct): ManagedProduct {
         : `표시 필수항목 ${issues.length}건을 담당자가 확인해야 합니다.`,
       labelIssue: issues[0] ?? '현재 확인된 수정 항목이 없습니다.',
     },
-    validation: { checkedAt: '방금', issues },
+    validation: { checkedAt: new Date().toISOString(), issues },
   }
 }
-
-const channelIdsByProduct: Record<string, string[]> = {
-  'SP-001': ['naver', 'coupang', 'gmarket'],
-  'SP-002': ['coupang', 'naver', 'gmarket', 'own'],
-  'SP-003': ['naver', 'coupang', 'gmarket', 'own'],
-  'SP-004': ['naver', 'coupang', 'gmarket'],
-  'SP-005': ['naver', 'coupang', 'own'],
-  'SP-006': ['coupang', 'naver', 'gmarket', 'own'],
-  'SP-007': ['naver', 'coupang', 'gmarket'],
-  'SP-008': ['coupang', 'naver'],
-}
-
-const channelUnitSales: Record<string, Record<string, number>> = {
-  'SP-001': { naver: 42, coupang: 31, gmarket: 12 },
-  'SP-002': { coupang: 128, naver: 72, gmarket: 38, own: 22 },
-  'SP-003': { naver: 21, coupang: 18, gmarket: 7, own: 5 },
-  'SP-004': { naver: 17, coupang: 12, gmarket: 4 },
-  'SP-005': { naver: 28, coupang: 22, own: 9 },
-  'SP-006': { coupang: 23, naver: 22, gmarket: 9, own: 6 },
-  'SP-007': { naver: 19, coupang: 17, gmarket: 5 },
-  'SP-008': { coupang: 24, naver: 16 },
-}
-
-const productPerformance = [
-  { productId: 'SP-002', units: 260, revenue: 4305900, delta: 18.5 },
-  { productId: 'SP-003', units: 51, revenue: 1275000, delta: 7.8 },
-  { productId: 'SP-001', units: 85, revenue: 1275000, delta: 10.2 },
-  { productId: 'SP-006', units: 60, revenue: 834000, delta: 5.1 },
-  { productId: 'SP-004', units: 33, revenue: 825000, delta: -2.6 },
-  { productId: 'SP-005', units: 59, revenue: 702100, delta: 12.1 },
-  { productId: 'SP-007', units: 41, revenue: 533000, delta: 4.2 },
-  { productId: 'SP-008', units: 40, revenue: 276000, delta: -8.4 },
-]
 
 const salesPeriods: Array<{ id: SalesPeriod; label: string; factor: number }> = [
   { id: 'today', label: '오늘', factor: 0.16 },
@@ -704,15 +480,15 @@ function formatMoney(value: number) {
   }).format(Math.round(value))
 }
 
-function toneForStatus(status: string) {
+function toneForStatus(status: string): StatusBadgeTone {
   if (['정상', '승인', '적합', '판매중', '출고완료'].includes(status)) return 'success'
   if (['주의', '검토중', '재검사', '매핑 확인', '출고대기', '송장등록'].includes(status)) return 'warning'
   if (['수정필요', '품절', '판매중지'].includes(status)) return 'danger'
   return 'neutral'
 }
 
-function StatusPill({ status }: { status: string }) {
-  return <span className={`status-badge ${toneForStatus(status)}`}>{status}</span>
+function BusinessStatusBadge({ status }: { status: string }) {
+  return <StatusBadge tone={toneForStatus(status)}>{status}</StatusBadge>
 }
 
 function ProductVisual({ product, compact = false }: { product: SeaProduct & { imageDataUrl?: string }; compact?: boolean }) {
@@ -723,7 +499,7 @@ function ProductVisual({ product, compact = false }: { product: SeaProduct & { i
       role="img"
       aria-label={`${product.shortName} 제품 사진`}
     >
-      <img src={customImage ?? '/assets/haetsal-products.png'} alt="" />
+      {customImage ? <img src={customImage} alt="" /> : <Package size={compact ? 28 : 42} aria-hidden="true" />}
     </div>
   )
 }
@@ -748,35 +524,7 @@ function BusinessSummaryStrip({ items, label }: {
   )
 }
 
-function getProductChannels(product: SeaProduct): ChannelMetric[] {
-  const ids = channelIdsByProduct[product.id] ?? []
-  return ids
-    .map((id) => channelMetrics.find((channel) => channel.id === id))
-    .filter((channel): channel is ChannelMetric => Boolean(channel))
-}
-
-function getListingPrice(product: SeaProduct, channelId: string) {
-  if (product.id === 'SP-002') {
-    return { coupang: 34900, naver: 18000, gmarket: 17500, own: 1800 }[channelId] ?? product.price
-  }
-  if (product.id === 'SP-008') {
-    return { coupang: 25900, naver: 27600 }[channelId] ?? product.price
-  }
-  if (channelId === 'coupang') return Math.round(product.price * 1.04 / 100) * 100
-  if (channelId === 'own') return Math.round(product.price * 0.96 / 100) * 100
-  return product.price
-}
-
-function getListingUnit(product: SeaProduct, channelId: string) {
-  if (product.id === 'SP-002') {
-    if (channelId === 'coupang') return '20봉 묶음'
-    if (channelId === 'naver' || channelId === 'gmarket') return '10봉 묶음'
-  }
-  if (product.id === 'SP-008') return '4팩 묶음'
-  return product.specification.split('×')[0].trim()
-}
-
-export function ProductManagement({ onToast, canManage = true, workspaceScope, seedDemoData = false, companyName = '고객사' }: TenantBusinessPageProps & { canManage?: boolean }) {
+export function ProductManagement({ onToast, canManage = true, workspaceScope, companyName = '고객사' }: TenantBusinessPageProps & { canManage?: boolean }) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('전체')
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null)
@@ -785,11 +533,17 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, s
   const [productSaveError, setProductSaveError] = useState('')
   const [storedProducts, setProducts] = useWorkspaceState<ManagedProduct[]>(
     'product-catalog',
-    seedDemoData ? demoProductCatalog : [],
-    { scope: workspaceScope, seedWhenEmpty: canManage, validate: isManagedProductList },
+    [],
+    { scope: workspaceScope, seedWhenEmpty: false, validate: isManagedProductList },
+  )
+  const [storedSalesChannels] = useWorkspaceState<ManagedChannel[]>(
+    'sales-channels',
+    [],
+    { scope: workspaceScope, enabled: canManage, seedWhenEmpty: false, validate: isManagedChannelList },
   )
 
-  const products = seedDemoData ? storedProducts : storedProducts.filter((product) => !isSunseaFixtureProduct(product))
+  const products = storedProducts
+  const productSalesChannels = useMemo(() => storedSalesChannels.map(normalizeManagedChannel), [storedSalesChannels])
   const selectedProduct = products.find((product) => product.id === selectedProductId) ?? null
   const editingProduct = editor?.productId ? products.find((product) => product.id === editor.productId) ?? null : null
   const categories = useMemo(
@@ -820,7 +574,7 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, s
 
   const commitProductChange = async (action: (current: ManagedProduct[]) => ManagedProduct[]) => {
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      const result = await setProducts((current) => action(seedDemoData ? current : current.filter((product) => !isSunseaFixtureProduct(product))))
+      const result = await setProducts(action)
       if (result.ok || !result.message?.includes('불러오는 중')) return result
       await new Promise((resolve) => window.setTimeout(resolve, 150))
     }
@@ -943,7 +697,7 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, s
                   <div className="sea-product-card-body">
                     <div className="product-card-flags">
                       <span className="product-category-tag">{product.category}</span>
-                      <StatusPill status={product.status} />
+                      <BusinessStatusBadge status={product.status} />
                     </div>
                     <div className="product-card-title">
                       <h3>{product.shortName}</h3>
@@ -992,6 +746,7 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, s
       {selectedProduct && (
         <ProductDetailDialog
           product={selectedProduct}
+          channels={productSalesChannels}
           detail={selectedProduct.fact}
           validation={selectedProduct.validation}
           activeTab={detailTab}
@@ -1223,6 +978,7 @@ function ProductEditorDialog({
 
 function ProductDetailDialog({
   product,
+  channels,
   detail,
   validation,
   activeTab,
@@ -1233,6 +989,7 @@ function ProductDetailDialog({
   canViewCommercial,
 }: {
   product: ManagedProduct
+  channels: ManagedChannel[]
   detail: ProductFact
   validation?: ProductValidation
   activeTab: ProductDetailTab
@@ -1247,7 +1004,7 @@ function ProductDetailDialog({
   const onCloseRef = useRef(onClose)
   const [showValidationHistory, setShowValidationHistory] = useState(false)
   const [showLotHistory, setShowLotHistory] = useState(false)
-  const productChannels = getProductChannels(product)
+  const productChannels = channels
   const heldStock = Math.max(0, product.stock - product.available - detail.reserved)
 
   onCloseRef.current = onClose
@@ -1317,8 +1074,8 @@ function ProductDetailDialog({
           <div className="product-detail-heading-copy">
             <div className="product-detail-badges">
               <span className="product-category-tag">{product.category}</span>
-              <StatusPill status={product.status} />
-              <StatusPill status={`표시 ${product.labelStatus}`} />
+              <BusinessStatusBadge status={product.status} />
+              <BusinessStatusBadge status={`표시 ${product.labelStatus}`} />
             </div>
             <h2 id="product-detail-title">{product.name}</h2>
             <p>{product.code} · {product.specification}</p>
@@ -1385,7 +1142,7 @@ function ProductDetailDialog({
                   <span>AI 점수</span>
                 </div>
                 <div>
-                  <div className="label-score-title"><StatusPill status={product.labelStatus} /><span>담당 {detail.labelOwner}</span></div>
+                  <div className="label-score-title"><BusinessStatusBadge status={product.labelStatus} /><span>담당 {detail.labelOwner}</span></div>
                   <h3>{detail.labelSummary}</h3>
                   <p>{detail.labelIssue}</p>
                 </div>
@@ -1402,7 +1159,7 @@ function ProductDetailDialog({
                 })}
               </div>
               {showValidationHistory && <div className="label-validation-history" role="status">
-                <div><strong>최근 규칙 검증</strong><span>{validation?.checkedAt ?? '아직 실행하지 않음'}</span></div>
+                <div><strong>최근 규칙 검증</strong><span>{validation?.checkedAt ? formatDateTime(validation.checkedAt) : '아직 실행하지 않음'}</span></div>
                 {validation?.issues.length
                   ? <ul>{validation.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
                   : <p>{validation ? '현재 필수 입력값 기준 확인 항목이 없습니다.' : '표시사항 다시 검증을 실행하면 결과가 이곳에 기록됩니다.'}</p>}
@@ -1415,25 +1172,22 @@ function ProductDetailDialog({
 
           {canViewCommercial && activeTab === 'channels' && (
             <div id="product-panel-channels" role="tabpanel" aria-labelledby="product-tab-channels" className="product-channel-detail-list">
-              <p className="channel-demo-note">실 API 연결 전 예시 매핑입니다. 실제 판매자센터 상태와 다를 수 있습니다.</p>
+              <p className="channel-demo-note">회사에 등록된 판매채널 설정입니다. 상품별 매핑 상태는 판매자센터 API가 연결되면 확인할 수 있습니다.</p>
               {productChannels.length === 0 && <div className="business-empty-state"><Store size={28} /><h3>등록된 상품 채널이 없습니다</h3><p>판매채널 페이지에서 API 설정을 완료한 뒤 상품 매핑을 진행하세요.</p></div>}
-              {productChannels.map((channel) => {
-                const listingStatus = channel.id === 'gmarket' && product.id === 'SP-002' ? '데모 · 매핑 확인' : '데모 데이터'
-                return (
+              {productChannels.map((channel) => (
                   <article className="product-channel-detail" key={channel.id}>
-                    <span className="channel-mark" style={{ backgroundColor: channel.color }}>{channel.short}</span>
+                    <span className="channel-mark" style={{ backgroundColor: channelTokenColor(channel.id) }}>{channel.short}</span>
                     <div className="product-channel-name">
                       <strong>{channel.name}</strong>
-                      <span>{channel.short}-{product.code} · {getListingUnit(product, channel.id)}</span>
+                      <span>{channel.short}-{product.code} · {product.specification}</span>
                     </div>
-                    <div><span>판매가</span><strong>{formatMoney(getListingPrice(product, channel.id))}</strong></div>
-                    <div><span>7일 판매</span><strong>{formatNumber(channelUnitSales[product.id]?.[channel.id] ?? 0)}개</strong></div>
+                    <div><span>기준 판매가</span><strong>{formatMoney(product.price)}</strong></div>
+                    <div><span>채널 주문</span><strong>{formatNumber(channel.orders)}건</strong></div>
                     <div><span>동기화</span><strong>{channel.sync}</strong></div>
-                    <StatusPill status={listingStatus} />
+                    <BusinessStatusBadge status={connectionLabel(channel)} />
                     {channelDefinition(channel.id) && <a className="product-channel-external" href={channelDefinition(channel.id)!.sellerUrl} target="_blank" rel="noreferrer" aria-label={`${channel.name} 판매자센터 열기`}><ExternalLink size={18} aria-hidden="true" /></a>}
                   </article>
-                )
-              })}
+              ))}
             </div>
           )}
 
@@ -1456,7 +1210,7 @@ function ProductDetailDialog({
               <div className="lot-detail-card">
                 <div className="lot-detail-head">
                   <div><span>대표 LOT</span><h3>{detail.lotNo}</h3></div>
-                  <StatusPill status={detail.inspection} />
+                  <BusinessStatusBadge status={detail.inspection} />
                 </div>
                 <dl className="product-fact-grid">
                   <div><dt>창고</dt><dd>{detail.warehouse}</dd></div>
@@ -1467,7 +1221,7 @@ function ProductDetailDialog({
                   <div><dt>검사상태</dt><dd>{detail.inspection}</dd></div>
                 </dl>
               </div>
-              {showLotHistory && <div className="lot-history-list"><div><strong>{detail.lotNo}</strong><span>{detail.manufacturedAt} 제조 · {detail.warehouse} {detail.location}</span><StatusPill status={detail.inspection} /></div><p>현재 제품에 연결된 추가 LOT는 없습니다.</p></div>}
+              {showLotHistory && <div className="lot-history-list"><div><strong>{detail.lotNo}</strong><span>{detail.manufacturedAt} 제조 · {detail.warehouse} {detail.location}</span><BusinessStatusBadge status={detail.inspection} /></div><p>현재 제품에 연결된 추가 LOT는 없습니다.</p></div>}
               <button className="secondary-button" type="button" aria-expanded={showLotHistory} onClick={() => setShowLotHistory((current) => !current)}>
                 <Warehouse size={16} aria-hidden="true" /> {showLotHistory ? 'LOT 이력 닫기' : '전체 LOT 이력'}
               </button>
@@ -1476,7 +1230,7 @@ function ProductDetailDialog({
         </div>
 
         <footer className="product-detail-actions">
-          <span>표시 검증 · {validation?.checkedAt ?? '실행 전'}</span>
+          <span>표시 검증 · {validation?.checkedAt ? formatDateTime(validation.checkedAt) : '실행 전'}</span>
           {canViewCommercial ? <div>
             <button className="secondary-button" type="button" onClick={onValidate}>
               <RefreshCw size={16} aria-hidden="true" /> 표시 다시 검증
@@ -1538,7 +1292,7 @@ function ShipmentEditorDialog({ shipment, channels, busy, onClose, onSave }: {
       setError('송장번호는 공백 없이 영문·숫자·하이픈 8~30자로 입력해 주세요.')
       return
     }
-    const now = new Date().toLocaleString('sv-SE', { hour12: false }).slice(0, 16)
+    const now = new Date().toISOString()
     await onSave({
       id: shipment?.id ?? `SHIP-${Date.now()}`,
       orderNo: text('orderNo'),
@@ -1582,21 +1336,20 @@ function ShipmentEditorDialog({ shipment, channels, busy, onClose, onSave }: {
   </div>
 }
 
-export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, companyName = '고객사', canManage = true }: TenantBusinessPageProps & { canManage?: boolean }) {
+export function SalesChannels({ onToast, workspaceScope, companyName = '고객사', canManage = true }: TenantBusinessPageProps & { canManage?: boolean }) {
   const [period, setPeriod] = useState<SalesPeriod>('week')
   const [storedChannels, setChannels] = useWorkspaceState<ManagedChannel[]>(
     'sales-channels',
-    canManage && seedDemoData ? channelMetrics.map((channel) => normalizeManagedChannel({ ...channel, demoData: true })) : [],
-    { scope: workspaceScope, enabled: canManage, seedWhenEmpty: canManage, validate: isManagedChannelList },
+    [],
+    { scope: workspaceScope, enabled: canManage, seedWhenEmpty: false, validate: isManagedChannelList },
   )
   const [shipments, setShipments] = useWorkspaceState<SalesShipment[]>(
     'sales-shipments',
-    canManage && seedDemoData ? demoShipments : [],
-    { scope: workspaceScope, enabled: canManage, seedWhenEmpty: canManage, validate: isSalesShipmentList },
+    [],
+    { scope: workspaceScope, enabled: canManage, seedWhenEmpty: false, validate: isSalesShipmentList },
   )
   const normalizedChannels = useMemo(() => storedChannels.map(normalizeManagedChannel), [storedChannels])
-  const channels = seedDemoData ? normalizedChannels : normalizedChannels.filter((channel) => !isSunseaFixtureChannel(channel))
-  const [showAllProducts, setShowAllProducts] = useState(false)
+  const channels = normalizedChannels
   const [channelDialog, setChannelDialog] = useState<'catalog' | string | null>(null)
   const [credentialDraft, setCredentialDraft] = useState<Record<string, string>>({})
   const [credentialError, setCredentialError] = useState('')
@@ -1635,7 +1388,6 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
   const totalRevenue = channels.reduce((sum, channel) => sum + channel.revenue, 0) * factor
   const averageOrder = totalOrders > 0 ? totalRevenue / totalOrders : 0
   const maxChannelRevenue = Math.max(1, ...channels.map((channel) => channel.revenue))
-  const maxProductRevenue = Math.max(...productPerformance.map((item) => item.revenue))
 
   const openChannelSetup = (channelId: string) => {
     const definition = channelDefinition(channelId)
@@ -1650,7 +1402,7 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
 
   const commitChannelChange = async (action: (current: ManagedChannel[]) => ManagedChannel[]) => {
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      const result = await setChannels((current) => action(seedDemoData ? current : current.filter((channel) => !isSunseaFixtureChannel(channel))))
+      const result = await setChannels(action)
       if (result.ok || !result.message?.includes('불러오는 중')) return result
       await new Promise((resolve) => window.setTimeout(resolve, 150))
     }
@@ -1658,11 +1410,9 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
   }
 
   const inspectChannelHealth = async (channel: ManagedChannel): Promise<ChannelHealthResult> => {
-    const checkedAt = new Date().toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+    const checkedAt = new Date().toISOString()
     const hasCredentials = channel.connectionStatus !== 'setup-required' && Boolean(channel.credentialHint)
-    const localMapping = channel.demoData
-      ? { mapping: 'demo' as const, mappingLabel: '데모 상품 매핑만 있음' }
-      : channel.orders > 0 || channel.units > 0
+    const localMapping = channel.orders > 0 || channel.units > 0
         ? { mapping: 'ready' as const, mappingLabel: '수집 데이터 매핑 있음' }
         : { mapping: 'none' as const, mappingLabel: '상품 매핑 없음' }
     if (!hasCredentials) {
@@ -1757,7 +1507,7 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
       credentialFields,
       sellerAccount: Object.values(credentialFields)[0] ?? '',
       credentialHint: secretValue ? `•••• ${secretValue.slice(-4)}` : existing?.credentialHint,
-      checkedAt: '방금',
+      checkedAt: new Date().toISOString(),
       sync: testRequested ? '서버 API 테스트 대기' : '자격정보 입력됨',
       health: undefined,
     }
@@ -1782,28 +1532,6 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
     setCredentialDraft({})
     setConfirmDisconnect(false)
     onToast(`${channel.name} 설정을 해제했습니다. 언제든 다시 설정할 수 있습니다.`)
-  }
-
-  const downloadSalesReport = () => {
-    const rows = [
-      ['채널', '데이터 구분', 'API 상태', '주문', '판매수량', '매출'],
-      ...channels.map((channel) => [
-        channel.name,
-        channel.demoData ? '데모 데이터' : '수집 전',
-        connectionLabel(channel),
-        Math.round(channel.orders * factor),
-        Math.round(channel.units * factor),
-        Math.round(channel.revenue * factor),
-      ]),
-    ]
-    const csv = rows.map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\r\n')
-    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `판매채널-${periodConfig.label}-보고서.csv`
-    link.click()
-    URL.revokeObjectURL(url)
-    onToast('판매채널 보고서를 내려받았습니다. 데모 데이터 여부를 함께 표기했습니다.')
   }
 
   const commitShipmentChange = async (action: (current: SalesShipment[]) => SalesShipment[]) => {
@@ -1861,7 +1589,17 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
     }
     printWindow.document.title = `${shipment.orderNo} 송장`
     const style = printWindow.document.createElement('style')
-    style.textContent = 'body{font-family:Arial,sans-serif;margin:0;padding:28px;color:#10251e}.label{width:560px;border:2px solid #10251e;padding:22px}.head{display:flex;justify-content:space-between;border-bottom:2px solid #10251e;padding-bottom:14px}.head strong{font-size:24px}.tracking{font-size:25px;font-weight:800;letter-spacing:2px;margin:22px 0}.row{display:grid;grid-template-columns:100px 1fr;gap:12px;padding:10px 0;border-top:1px solid #bbb}.row b{font-size:14px}.row span{font-size:16px;line-height:1.45}.foot{margin-top:22px;font-size:12px;color:#555}@media print{body{padding:0}.label{width:auto;border:2px solid #000}}'
+    const appStyles = getComputedStyle(document.documentElement)
+    const printInk = appStyles.getPropertyValue('--color-ink').trim() || 'currentColor'
+    const printMuted = appStyles.getPropertyValue('--color-gray-600').trim() || 'currentColor'
+    const printLine = appStyles.getPropertyValue('--color-gray-200').trim() || 'currentColor'
+    const printFont22 = appStyles.getPropertyValue('--font-22').trim()
+    const printFont15 = appStyles.getPropertyValue('--font-15').trim()
+    const printFont13 = appStyles.getPropertyValue('--font-13').trim()
+    const printFont11 = appStyles.getPropertyValue('--font-11').trim()
+    const printWeight = appStyles.getPropertyValue('--weight-medium').trim()
+    const printHairline = appStyles.getPropertyValue('--hairline').trim()
+    style.textContent = `:root{--print-ink:${printInk};--print-muted:${printMuted};--print-line:${printLine};--print-font-22:${printFont22};--print-font-15:${printFont15};--print-font-13:${printFont13};--print-font-11:${printFont11};--print-weight:${printWeight};--print-hairline:${printHairline}}body{font-family:Arial,sans-serif;margin:0;padding:32px;color:var(--print-ink)}.label{width:560px;border:var(--print-hairline) solid var(--print-ink);padding:24px}.head{display:flex;justify-content:space-between;border-bottom:var(--print-hairline) solid var(--print-ink);padding-bottom:16px}.head strong{font-size:var(--print-font-22)}.tracking{font-size:var(--print-font-22);font-weight:var(--print-weight);letter-spacing:0;margin:24px 0}.row{display:grid;grid-template-columns:100px 1fr;gap:12px;padding:12px 0;border-top:var(--print-hairline) solid var(--print-line)}.row b{font-size:var(--print-font-13)}.row span{font-size:var(--print-font-15);line-height:1.45}.foot{margin-top:24px;font-size:var(--print-font-11);color:var(--print-muted)}@media print{body{padding:0}.label{width:auto;border:var(--print-hairline) solid var(--print-ink)}}`
     const label = printWindow.document.createElement('main')
     label.className = 'label'
     const rows: Array<[string, string]> = [
@@ -1903,7 +1641,7 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
   }
 
   const downloadShipmentTemplate = () => {
-    const content = '\uFEFF주문번호,채널ID,채널명,수취인,연락처,주소,상품명,수량\r\nORDER-001,naver,네이버 스마트스토어,홍길동,010-0000-0000,경북 포항시 주소,상품명,1'
+    const content = '\uFEFF주문번호,채널ID,채널명,수취인,연락처,주소,상품명,수량\r\nORDER-001,naver,네이버 스마트스토어,홍길동,010-0000-0000,배송지 주소,상품명,1'
     const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
     link.href = url
@@ -1927,7 +1665,7 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
       const [orderNo, channelId, channelName, recipient, phone, address, productName, rawQuantity] = row
       const quantity = Number(rawQuantity)
       if (!orderNo || !channelId || !channelName || !recipient || !address || !productName || !Number.isInteger(quantity) || quantity < 1) return []
-      return [{ id: `SHIP-${Date.now()}-${index}`, orderNo, channelId, channelName, recipient, phone, address, productName, quantity, courier: '', trackingNo: '', status: '출고대기', orderedAt: new Date().toLocaleString('sv-SE', { hour12: false }).slice(0, 16) }]
+      return [{ id: `SHIP-${Date.now()}-${index}`, orderNo, channelId, channelName, recipient, phone, address, productName, quantity, courier: '', trackingNo: '', status: '출고대기', orderedAt: new Date().toISOString() }]
     })
     if (imported.length === 0) {
       onToast('가져올 수 있는 배송 주문이 없습니다. CSV 양식과 필수값을 확인해 주세요.')
@@ -1948,7 +1686,6 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
   const checkedChannelCount = channels.filter((channel) => Boolean(channel.health)).length
   const respondingChannelCount = channels.filter((channel) => channel.health?.response === 'ok').length
 
-  const visibleProductPerformance = showAllProducts ? productPerformance : productPerformance.slice(0, 5)
   const visibleShipments = shipments.filter((shipment) => shipmentFilter === 'all' || shipment.status === shipmentFilter)
 
   return (
@@ -1957,7 +1694,7 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
         <div>
           <div className="page-kicker">Commerce hub</div>
           <h1>판매채널 통합</h1>
-          <p>{companyName}의 판매자센터·API 자격정보와 연결 준비 상태를 관리합니다. 실 API 연결 전 수치는 데모로 구분합니다.</p>
+          <p>{companyName}의 판매자센터·API 자격정보와 연결 준비 상태를 관리합니다. 표시 수치는 연결된 API 또는 업로드 데이터 기준입니다.</p>
         </div>
         <div className="heading-actions">
           <div className="sales-period-switch" role="group" aria-label="판매 조회 기간">
@@ -1981,9 +1718,9 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
       </header>
 
       <BusinessSummaryStrip label={`${periodConfig.label} 판매 요약`} items={[
-        { icon: ShoppingBag, label: '주문', value: `${formatNumber(totalOrders)}건`, helper: seedDemoData ? `데모 · ${formatNumber(totalUnits)}개` : '실 API 연결 전' },
-        { icon: CircleDollarSign, label: '총매출', value: formatMoney(totalRevenue), helper: seedDemoData ? '데모 합계' : '수집 전', tone: 'green' },
-        { icon: BarChart3, label: '객단가', value: formatMoney(averageOrder), helper: seedDemoData ? '데모 계산값' : '수집 전', tone: 'blue' },
+        { icon: ShoppingBag, label: '주문', value: `${formatNumber(totalOrders)}건`, helper: `${formatNumber(totalUnits)}개 판매` },
+        { icon: CircleDollarSign, label: '총매출', value: formatMoney(totalRevenue), helper: channels.length ? '수집 합계' : '수집 대기', tone: 'green' },
+        { icon: BarChart3, label: '객단가', value: formatMoney(averageOrder), helper: totalOrders > 0 ? '수집 주문 기준' : '주문 없음', tone: 'blue' },
         { icon: Clock3, label: '상태 점검', value: `${checkedChannelCount} / ${channels.length}`, helper: `API 응답 ${respondingChannelCount}개`, tone: checkedChannelCount === channels.length && channels.length > 0 ? 'green' : 'warning' },
       ]} />
 
@@ -1994,13 +1731,13 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
           {channels.map((channel) => {
             const health = channel.health
             const credentialLabel = health ? (health.credential === 'ready' ? '입력됨' : '자격정보 없음') : channel.credentialHint ? '입력됨 · 미점검' : '자격정보 없음'
-            const mappingLabel = health?.mappingLabel ?? (channel.demoData ? '데모 상품 매핑만 있음' : channel.orders || channel.units ? '수집 데이터 매핑 있음' : '상품 매핑 없음')
+            const mappingLabel = health?.mappingLabel ?? (channel.orders || channel.units ? '수집 데이터 매핑 있음' : '상품 매핑 없음')
             return <div className="channel-health-row" role="row" key={channel.id}>
-              <span className="channel-health-name"><i className="channel-mark" style={{ backgroundColor: channel.color }}>{channel.short}</i><strong>{channel.name}</strong></span>
+              <span className="channel-health-name"><i className="channel-mark" style={{ backgroundColor: channelTokenColor(channel.id) }}>{channel.short}</i><strong>{channel.name}</strong></span>
               <span><i className={`health-dot ${health?.credential === 'ready' ? 'ok' : 'muted'}`} />{credentialLabel}</span>
               <span><i className={`health-dot ${health?.response === 'ok' ? 'ok' : health?.response === 'unavailable' ? 'danger' : 'muted'}`} />{health?.responseLabel ?? '아직 점검하지 않음'}</span>
               <span><i className={`health-dot ${health?.mapping === 'ready' ? 'ok' : health?.mapping === 'attention' ? 'warning' : 'muted'}`} />{mappingLabel}</span>
-              <span>{health?.checkedAt ?? '—'}</span>
+              <span>{health?.checkedAt ? formatDateTime(health.checkedAt) : '—'}</span>
               {canManage ? <button className="channel-health-check" type="button" disabled={Boolean(checkingChannelId)} onClick={() => void runChannelHealthCheck(channel)}>{checkingChannelId === channel.id ? '점검 중' : '점검'}</button> : <span />}
             </div>
           })}
@@ -2010,8 +1747,8 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
 
       <section className="sales-channel-section" aria-labelledby="channel-status-title">
         <div className="business-section-heading">
-          <div><h2 id="channel-status-title">채널 설정과 판매 현황</h2><p>{periodConfig.label} 기준 · 실 API 연결 전 수치는 데모로만 표시합니다.</p></div>
-          <span className="section-live-status setup"><span /> 실 API 미연결</span>
+          <div><h2 id="channel-status-title">채널 설정과 판매 현황</h2><p>{periodConfig.label} 기준 · 등록된 채널의 수집 데이터를 표시합니다.</p></div>
+          <span className="section-live-status setup"><span /> 채널별 연결 상태</span>
         </div>
         <div className="sales-channel-grid">
           {channels.length === 0 && <div className="business-empty-state"><Store size={32} /><h3>{canManage ? '설정한 판매채널이 없습니다' : '판매채널 운영 권한이 필요합니다'}</h3><p>{canManage ? '공식 판매자센터에서 API 권한을 준비한 뒤 자격정보를 등록하세요.' : '자격정보와 주문·배송 데이터는 회사 관리자만 관리할 수 있습니다.'}</p>{canManage && <button className="primary-button" type="button" onClick={() => setChannelDialog('catalog')}><Plus size={17} /> 첫 채널 설정</button>}</div>}
@@ -2022,8 +1759,8 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
             return (
               <article className={`sales-channel-card ${channel.status === '주의' ? 'warning' : ''}`} key={channel.id}>
                 <div className="sales-channel-card-head">
-                  <span className="channel-mark large" style={{ backgroundColor: channel.color }}>{channel.short}</span>
-                  <div><h3>{channel.name}</h3><p>{channel.demoData ? '데모 판매 데이터' : '판매 데이터 수집 전'}</p></div>
+                  <span className="channel-mark large" style={{ backgroundColor: channelTokenColor(channel.id) }}>{channel.short}</span>
+                  <div><h3>{channel.name}</h3><p>{channel.orders || channel.units ? '판매 데이터 수집됨' : '판매 데이터 수집 전'}</p></div>
                   <span className={`connection-status ${channel.connectionStatus ?? 'setup-required'}`}>{connectionLabel(channel)}</span>
                 </div>
                 <div className="channel-revenue">
@@ -2035,7 +1772,7 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
                   </em>
                 </div>
                 <div className="channel-performance-bar" aria-label={`최고 채널 대비 매출 ${performanceWidth}%`}>
-                  <span style={{ width: `${performanceWidth}%`, backgroundColor: channel.color }} />
+                  <span style={{ width: `${performanceWidth}%`, backgroundColor: channelTokenColor(channel.id) }} />
                 </div>
                 <div className="channel-card-metrics">
                   <div><span>주문</span><strong>{formatNumber(channel.orders * factor)}건</strong></div>
@@ -2054,17 +1791,6 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
           })}
         </div>
       </section>
-
-      {canManage && seedDemoData && <section className="channel-alert-banner" aria-labelledby="channel-alert-title">
-        <span className="channel-alert-icon"><AlertTriangle size={22} aria-hidden="true" /></span>
-        <div>
-          <h2 id="channel-alert-title">데모 알림 · G마켓 SKU 매핑 2건</h2>
-          <p>실 API 연결 후 실제 오류로 교체됩니다. 현재는 붉은대게라면과 볶음밥 예시입니다.</p>
-        </div>
-        <button className="secondary-button" type="button" onClick={() => openChannelSetup('gmarket')}>
-          G마켓 설정 확인 <ArrowRight size={16} aria-hidden="true" />
-        </button>
-      </section>}
 
       <section className="business-panel shipment-panel" aria-labelledby="shipment-title">
         <div className="business-panel-head shipment-panel-head">
@@ -2094,11 +1820,11 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
           <table className="shipment-table">
             <thead><tr><th>주문·채널</th><th>수취인·배송지</th><th>상품</th><th>택배·송장</th><th>상태</th><th><span className="sr-only">작업</span></th></tr></thead>
             <tbody>{visibleShipments.map((shipment) => <tr key={shipment.id}>
-              <td><strong>{shipment.orderNo}</strong><span>{shipment.channelName} · {shipment.orderedAt}</span></td>
+              <td><strong>{shipment.orderNo}</strong><span>{shipment.channelName} · {formatDateTime(shipment.orderedAt)}</span></td>
               <td><strong>{shipment.recipient} · {shipment.phone}</strong><span>{shipment.address}</span></td>
               <td><strong>{shipment.productName}</strong><span>{shipment.quantity}개</span></td>
               <td>{shipment.trackingNo ? <><strong>{shipment.courier}</strong><span>{shipment.trackingNo}</span></> : <span>송장 미등록</span>}</td>
-              <td><StatusPill status={shipment.status} /></td>
+              <td><BusinessStatusBadge status={shipment.status} /></td>
               <td><div className="shipment-row-actions">
                 <button className="secondary-button" type="button" onClick={() => setShipmentDialog(shipment.id)}>{shipment.trackingNo ? '송장 수정' : '송장 등록'}</button>
                 <button className="icon-button" type="button" aria-label={`${shipment.orderNo} 송장 인쇄`} disabled={!shipment.trackingNo} onClick={() => printShippingLabel(shipment)}><Printer size={17} /></button>
@@ -2110,57 +1836,6 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
         </div> : <div className="business-empty-state compact"><Truck size={30} /><h3>해당 상태의 배송 주문이 없습니다</h3><p>채널 주문 CSV를 가져오거나 배송 주문을 직접 등록하세요.</p></div>}
       </section>
 
-      {canManage && seedDemoData && <section className="business-panel product-sales-panel" aria-labelledby="product-sales-title">
-        <div className="business-panel-head">
-          <div>
-            <h2 id="product-sales-title">상품별 판매 · 데모</h2>
-            <p>{periodConfig.label} 화면 예시입니다. 실제 API 연결 전에는 운영 판단에 사용하지 마세요.</p>
-          </div>
-          <button className="text-action-button" type="button" onClick={downloadSalesReport}>
-            정산 보고서 <ArrowRight size={16} aria-hidden="true" />
-          </button>
-        </div>
-
-        <div className="product-sales-list">
-          {visibleProductPerformance.map((item, index) => {
-            const product = seaProducts.find((candidate) => candidate.id === item.productId)
-            if (!product) return null
-            const width = Math.max(5, Math.round((item.revenue / maxProductRevenue) * 100))
-            const adjustedUnits = item.units * factor
-            const adjustedRevenue = item.revenue * factor
-            return (
-              <article className="product-sales-row" key={item.productId}>
-                <span className="product-sales-rank">{index + 1}</span>
-                <ProductVisual product={product} compact />
-                <div className="product-sales-name">
-                  <strong>{product.shortName}</strong>
-                  <span>{product.code} · {product.channels}개 채널</span>
-                </div>
-                <div className="product-sales-performance">
-                  <div><span>판매수량</span><strong>{formatNumber(adjustedUnits)}개</strong></div>
-                  <div><span>매출</span><strong>{formatMoney(adjustedRevenue)}</strong></div>
-                  <div className={`product-sales-delta ${item.delta >= 0 ? 'up' : 'down'}`}>
-                    {item.delta >= 0 ? <TrendingUp size={16} aria-hidden="true" /> : <TrendingDown size={16} aria-hidden="true" />}
-                    <strong>{item.delta >= 0 ? '+' : ''}{item.delta}%</strong>
-                  </div>
-                </div>
-                <div className="product-sales-bar" aria-label={`상품 최고 매출 대비 ${width}%`}><span style={{ width: `${width}%` }} /></div>
-                <div className="product-sales-stock">
-                  <span>가용재고</span>
-                  <strong>{formatNumber(product.available)}개</strong>
-                  <StatusPill status={product.status} />
-                </div>
-              </article>
-            )
-          })}
-        </div>
-        <div className="product-sales-footer">
-          <span>총 {productPerformance.length}개 대표상품</span>
-          <button className="secondary-button" type="button" onClick={() => setShowAllProducts((current) => !current)}>
-            {showAllProducts ? '상위 상품만 보기' : '전체 상품 보기'}
-          </button>
-        </div>
-      </section>}
       {canManage && shipmentDialog && <ShipmentEditorDialog
         shipment={shipmentDialog === 'new' ? null : shipments.find((item) => item.id === shipmentDialog) ?? null}
         channels={channels}
@@ -2172,7 +1847,7 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
         <section ref={channelDialogRef} className="modal-card channel-connect-modal" role="dialog" aria-modal="true" aria-labelledby="channel-connect-title">
           <header><div><span className="page-kicker">CHANNEL CONNECT</span><h2 id="channel-connect-title">{selectedDefinition ? `${selectedDefinition.name} 연결 설정` : '판매채널 선택'}</h2><p>{selectedDefinition ? selectedDefinition.accessNote : '공식 판매자센터와 API 문서를 확인한 뒤 자격정보를 준비하세요.'}</p></div><button className="icon-button" type="button" aria-label="닫기" disabled={savingChannel} onClick={() => setChannelDialog(null)}><X size={21} /></button></header>
           {channelDialog === 'catalog' && <>
-            <div className="integration-truth-banner"><ShieldCheck size={20} /><div><strong>실 API 자격정보가 없으면 연결 완료로 표시하지 않습니다.</strong><p>현재 보이는 판매 수치는 화면 체험용 데모 데이터이며 실제 주문·매출 수집값이 아닙니다.</p></div></div>
+            <div className="integration-truth-banner"><ShieldCheck size={20} /><div><strong>실 API 자격정보가 없으면 연결 완료로 표시하지 않습니다.</strong><p>연결되지 않은 채널은 주문·매출 수치를 0으로 표시하며 운영 데이터로 추정하지 않습니다.</p></div></div>
             <div className="channel-catalog">{channelDefinitions.map((definition) => {
               const existing = channels.find((channel) => channel.id === definition.id)
               return <button className={existing ? 'configured' : ''} type="button" key={definition.id} onClick={() => openChannelSetup(definition.id)}>
@@ -2201,7 +1876,7 @@ export function SalesChannels({ onToast, workspaceScope, seedDemoData = false, c
                 </div>
                 {credentialError && <div className="channel-credential-error" role="alert"><AlertTriangle size={17} /> {credentialError}</div>}
                 <div className="credential-security-note"><KeyRound size={18} /><p><strong>이 로컬 버전은 Secret 원문을 저장하지 않습니다.</strong><span>실제 연결에는 서버 커넥터, 암호화 Secret Vault와 OAuth Redirect 설정이 필요합니다.</span></p></div>
-                {selectedChannel?.checkedAt && <div className="connection-test-status"><Clock3 size={17} /><span>최근 입력 점검 {selectedChannel.checkedAt}</span><strong>{connectionLabel(selectedChannel)}</strong></div>}
+                {selectedChannel?.checkedAt && <div className="connection-test-status"><Clock3 size={17} /><span>최근 입력 점검 {formatDateTime(selectedChannel.checkedAt)}</span><strong>{connectionLabel(selectedChannel)}</strong></div>}
               </section>
             </div>
             <footer className="channel-setup-footer">

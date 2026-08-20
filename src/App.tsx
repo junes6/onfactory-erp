@@ -21,11 +21,12 @@ import { FactoryManagement } from './components/FactoryManagement'
 import './components/InventoryEnhancements.css'
 import { PeopleOperationsPage } from './components/PeopleOperations'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
+import { StatusBadge } from './components/StatusBadge'
 import { WorkspaceNavigationEditButton, WorkspaceNavigationEditor, usePersonalNavigation } from './components/WorkspaceNavigation'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
 import { deleteDocumentAttachment, deleteDocumentAttachments } from './utils/documentAttachments'
+import { formatDateLabel, formatDateTime, formatMonthLabel, formatWorkDue, formatWorkRuleRun, seoulDateInputValue, seoulDateTimeInputValue, seoulLocalToUtcIso } from './utils/dateTime'
 import {
-  channelMetrics, initialWorkItems, initialWorkRules, seaProducts,
   type Tenant, type WorkEvidence, type WorkItem, type WorkRule,
 } from './domainData'
 
@@ -40,7 +41,6 @@ type PlatformDirectoryState = { tenants: Tenant[]; supportTickets: PlatformTicke
 type SupportSessionRequest = { tenantId: string; ticketId: string; scope: string; duration: string; reason: string }
 
 const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'products', 'inventory', 'factory', 'people', 'documents', 'compliance'])
-const SUNSEA_TENANT_ID = 'TENANT-SUNSEA'
 const AUTH_SYNC_KEY = 'onfactory-auth-sync'
 const emptyWorkItems: WorkItem[] = []
 const emptyWorkRules: WorkRule[] = []
@@ -55,20 +55,6 @@ function publishSessionChange(identity: string | null) {
     window.localStorage.setItem(AUTH_SYNC_KEY, JSON.stringify({ identity, changedAt: Date.now() }))
   } catch { /* cross-tab sync is an additional safety layer */ }
 }
-
-function isSunseaFixtureWorkItem(item: WorkItem) {
-  return Boolean(initialWorkItems.find((fixture) => fixture.id === item.id && fixture.title === item.title))
-    || item.ownerId?.startsWith('USR-SUNSEA-')
-    || item.requesterId?.startsWith('USR-SUNSEA-')
-}
-
-const people = [
-  { name: '김서원', role: '운영 관리자', team: '경영지원', shift: '주간', work: 'G마켓 SKU 확인', state: '업무중' },
-  { name: '박지현', role: '품질 책임자', team: '품질관리', shift: '주간', work: '멍게젓 표시사항 검토', state: '확인중' },
-  { name: '오태식', role: '생산 반장', team: '생산 1팀', shift: '주간', work: '내일 생산계획 확정', state: '업무중' },
-  { name: '서동현', role: '재고 담당', team: '물류팀', shift: '주간', work: '냉장 2창고 FEFO 피킹', state: '업무중' },
-  { name: '윤서진', role: '온라인 MD', team: '판매운영', shift: '주간', work: '채널별 상품정보 확인', state: '완료' },
-]
 
 type WarehouseLocation = { id: string; name: string; type: string; temperature: string; condition: string; items: string; utilization: number; alert: string }
 type InventoryMovement = {
@@ -97,20 +83,37 @@ type WarehouseLotSummary = {
   movementCount: number
 }
 
-const initialInventoryLocations: WarehouseLocation[] = [
-  { id: 'WH-C01', name: '냉장 1창고', type: '냉장', temperature: '3.1℃', condition: '3.1℃ · 정상', items: '젓갈류 202개', utilization: 74, alert: '멍게젓 안전재고 이하' },
-  { id: 'WH-R01', name: '실온 원료창고', type: '실온', temperature: '22.4℃', condition: '22.4℃ · 정상', items: '원재료 1,840kg', utilization: 61, alert: '이상 없음' },
-  { id: 'WH-F01', name: '완제품 창고', type: '실온', temperature: '19.8℃', condition: '19.8℃ · 정상', items: '완제품 5,068개', utilization: 82, alert: '선물세트 피킹 예정' },
-  { id: 'WH-FZ2', name: '냉동 2창고', type: '냉동', temperature: '-19.2℃', condition: '-19.2℃ · 정상', items: '냉동제품 180개', utilization: 48, alert: '볶음밥 출고가능 0개' },
-]
+type DashboardProduct = {
+  id: string
+  name: string
+  code: string
+  category: string
+  stock: number
+  available: number
+  safetyStock: number
+  labelStatus: string
+  status: string
+}
 
-const initialInventoryMovements: InventoryMovement[] = [
-  { id: 'MOV-260819-004', direction: '출고', product: '멍게젓 400g', lot: 'LOT-MG-0812', quantity: 24, unit: 'EA', warehouseId: 'WH-C01', occurredAt: '2026-08-19 10:20', reason: '네이버 오늘 출고' },
-  { id: 'MOV-260819-003', direction: '입고', product: '국내산 냉동 멍게', lot: 'LOT-RAW-0819', quantity: 180, unit: 'KG', warehouseId: 'WH-R01', occurredAt: '2026-08-19 09:10', reason: '원료 검수 완료', evidence: '입고검수서_0819.pdf' },
-]
+type DashboardSalesChannel = {
+  id: string
+  name: string
+  orders: number
+  units: number
+  revenue: number
+  status: string
+  connectionStatus?: string
+}
 
-function isSunseaFixtureWarehouse(location: WarehouseLocation) {
-  return Boolean(initialInventoryLocations.find((fixture) => fixture.id === location.id && fixture.name === location.name && fixture.items === location.items))
+type DashboardCalendarEvent = {
+  id: string
+  title: string
+  date: string
+  start: string
+  end: string
+  scope: 'company' | 'department' | 'personal'
+  department: string
+  location: string
 }
 
 const pageTitles: Record<PageId, string> = {
@@ -119,10 +122,6 @@ const pageTitles: Record<PageId, string> = {
   sales: '판매채널', people: '인사 · 조직', documents: '기업 자료실', compliance: '식품안전 · 인증',
   platform: '플랫폼 운영 개요', tenants: '고객사 관리', support: 'CS 지원센터',
   integrations: '연동 상태', audit: '지원 세션 · 감사로그',
-}
-
-function StatusPill({ children, tone = 'neutral' }: { children: ReactNode; tone?: string }) {
-  return <span className={'status-pill ' + tone}><i />{children}</span>
 }
 
 function PageHeader({ eyebrow, title, description, action }: {
@@ -178,19 +177,28 @@ function useDialogFocus(active = true) {
   return dialogRef
 }
 
-function SharedCalendarPreview({ onOpen, hasDemoData }: { onOpen: () => void; hasDemoData: boolean }) {
-  const days: Array<{ day: number; event?: string; today?: boolean }> = hasDemoData ? [
-    { day: 17 }, { day: 18, event: 'quality' }, { day: 19, today: true, event: 'production' },
-    { day: 20, event: 'company' }, { day: 21 }, { day: 22, event: 'personal' }, { day: 23 },
-  ] : [{ day: 17 }, { day: 18 }, { day: 19, today: true }, { day: 20 }, { day: 21 }, { day: 22 }, { day: 23 }]
+function SharedCalendarPreview({ onOpen, events }: { onOpen: () => void; events: DashboardCalendarEvent[] }) {
+  const todayKey = seoulDateInputValue()
+  const todayDate = new Date(`${todayKey}T00:00:00Z`)
+  const mondayOffset = (todayDate.getUTCDay() + 6) % 7
+  const weekStart = new Date(todayDate)
+  weekStart.setUTCDate(weekStart.getUTCDate() - mondayOffset)
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(weekStart)
+    date.setUTCDate(date.getUTCDate() + index)
+    const key = date.toISOString().slice(0, 10)
+    const dayEvents = events.filter((event) => event.date.slice(0, 10) === key)
+    return { key, day: date.getUTCDate(), today: key === todayKey, event: dayEvents[0]?.scope }
+  })
+  const todayEvents = events
+    .filter((event) => event.date.slice(0, 10) === todayKey)
+    .sort((a, b) => a.start.localeCompare(b.start))
+  const monthLabel = formatMonthLabel(todayDate)
   return <section className="home-calendar-card" aria-labelledby="home-calendar-title">
-    <header><div><span className="eyebrow">SHARED SCHEDULE</span><h2 id="home-calendar-title">8월 일정</h2></div><button className="text-button" type="button" onClick={onOpen}>전체 보기 <ArrowRight size={16} /></button></header>
+    <header><div><span className="eyebrow">SHARED SCHEDULE</span><h2 id="home-calendar-title">{monthLabel} 일정</h2></div><button className="text-button" type="button" onClick={onOpen}>전체 보기 <ArrowRight size={16} /></button></header>
     <div className="mini-weekdays" aria-hidden="true">{['월', '화', '수', '목', '금', '토', '일'].map((day) => <span key={day}>{day}</span>)}</div>
-    <div className="mini-calendar-days">{days.map((item) => <button type="button" className={item.today ? 'today' : ''} key={item.day} onClick={onOpen}><span>{item.day}</span>{item.event && <i className={item.event} />}</button>)}</div>
-    {hasDemoData ? <div className="today-agenda">
-      <article><time>14:30</time><span className="agenda-color production" /><div><strong>생산계획 확정 회의</strong><p>생산팀 · 회의실 A</p></div></article>
-      <article><time>16:00</time><span className="agenda-color quality" /><div><strong>멍게젓 제품정보 최종 검토</strong><p>품질관리 · 온라인</p></div></article>
-    </div> : <div className="empty-state"><CalendarDays size={25} /><h3>등록된 일정이 없습니다</h3><p>첫 전사 일정을 등록하면 직원들과 바로 공유됩니다.</p></div>}
+    <div className="mini-calendar-days">{days.map((item) => <button type="button" className={item.today ? 'today' : ''} key={item.key} onClick={onOpen}><span>{item.day}</span>{item.event && <i className={item.event} />}</button>)}</div>
+    {todayEvents.length > 0 ? <div className="today-agenda">{todayEvents.slice(0, 2).map((event) => <article key={event.id}><time>{event.start}</time><span className={`agenda-color ${event.scope === 'department' ? 'quality' : event.scope}`} /><div><strong>{event.title}</strong><p>{event.department} · {event.location || '장소 미정'}</p></div></article>)}</div> : <div className="empty-state"><CalendarDays size={25} /><h3>오늘 공유 일정이 없습니다</h3><p>일정을 등록하면 권한이 있는 직원에게 바로 공유됩니다.</p></div>}
     <button className="button secondary full" type="button" onClick={onOpen}><CalendarDays size={17} /> 일정 등록</button>
   </section>
 }
@@ -209,13 +217,16 @@ type DashboardDropTarget = {
   edge: 'before' | 'after'
 }
 
-function AIHome({ workItems, currentUserName, currentUserId, companyName, canAssignTasks, hasDemoData, onAdvanceTask, onCreateTask, onNavigate, onToast }: {
+function AIHome({ workItems, products, salesChannels, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, onAdvanceTask, onCreateTask, onNavigate, onToast }: {
   workItems: WorkItem[]
+  products: DashboardProduct[]
+  salesChannels: DashboardSalesChannel[]
+  calendarEvents: DashboardCalendarEvent[]
   currentUserName: string
   currentUserId: string
   companyName: string
   canAssignTasks: boolean
-  hasDemoData: boolean
+  workspaceScope?: string
   onAdvanceTask: (item: WorkItem) => void
   onCreateTask: (text?: string) => void
   onNavigate: (page: PageId) => void
@@ -224,10 +235,25 @@ function AIHome({ workItems, currentUserName, currentUserId, companyName, canAss
   const openWork = workItems.filter((item) => item.status !== '결재완료')
   const myWork = openWork.filter((item) => item.ownerId === currentUserId || (item.requesterId === currentUserId && item.status === '결재대기'))
   const today = new Date()
-  const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(today)
-  const todayLabel = new Intl.DateTimeFormat('ko-KR', {
-    timeZone: 'Asia/Seoul', year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
-  }).format(today)
+  const todayIso = seoulDateInputValue(today)
+  const todayLabel = formatDateLabel(today)
+  const todayEvents = calendarEvents.filter((event) => event.date.slice(0, 10) === todayIso)
+  const totalOrders = salesChannels.reduce((sum, channel) => sum + (Number.isFinite(channel.orders) ? channel.orders : 0), 0)
+  const connectedChannels = salesChannels.filter((channel) => channel.connectionStatus && channel.connectionStatus !== 'setup-required').length
+  const productAlerts = products.filter((product) => product.status !== '정상' || !['승인', '정상'].includes(product.labelStatus))
+  const channelAlerts = salesChannels.filter((channel) => ['주의', '오류'].includes(channel.status))
+  const urgentWork = openWork.filter((item) => item.priority === '긴급')
+  const attentionCount = productAlerts.length + channelAlerts.length + urgentWork.length
+  const operatingDataAvailable = products.length > 0 || salesChannels.length > 0 || calendarEvents.length > 0 || workItems.length > 0
+  const dashboardAlert = productAlerts[0]
+    ? { title: `${productAlerts[0].name} 점검이 필요해요`, detail: `제품 상태 ${productAlerts[0].status} · 표시정보 ${productAlerts[0].labelStatus}`, page: 'products' as PageId }
+    : channelAlerts[0]
+      ? { title: `${channelAlerts[0].name} 연결 상태를 확인해 주세요`, detail: `현재 채널 상태가 ${channelAlerts[0].status}로 보고됐습니다.`, page: 'sales' as PageId }
+      : urgentWork[0]
+        ? { title: urgentWork[0].title, detail: `${formatWorkDue(urgentWork[0].due)} 마감 · ${urgentWork[0].status}`, page: 'tasks' as PageId }
+        : operatingDataAvailable
+          ? { title: '현재 긴급 점검 항목이 없습니다', detail: '등록된 제품·채널·업무에서 긴급 상태가 발견되지 않았습니다.', page: 'tasks' as PageId }
+          : { title: '운영 데이터를 먼저 연결해 주세요', detail: '제품·창고·판매채널을 등록하면 AI 선제 알림이 시작됩니다.', page: 'products' as PageId }
   const [layoutOpen, setLayoutOpen] = useState(false)
   const [widgetPreferences, setWidgetPreferences] = useDashboardPreferences(`${companyName}:${currentUserId}`)
   const [draggingWidgetId, setDraggingWidgetId] = useState<DashboardWidgetPreference['id'] | null>(null)
@@ -237,10 +263,13 @@ function AIHome({ workItems, currentUserName, currentUserId, companyName, canAss
   const aiContext = {
     date: todayIso,
     company: companyName,
-    salesChannels: canAssignTasks && hasDemoData ? channelMetrics : undefined,
-    products: (hasDemoData ? seaProducts : []).map(({ name, stock, available, safetyStock, labelStatus, status }) => ({
+    salesChannels: salesChannels.map(({ name, orders, units, revenue, status }) => canAssignTasks
+      ? { name, orders, units, revenue, status }
+      : { name, status }),
+    products: products.map(({ name, stock, available, safetyStock, labelStatus, status }) => ({
       name, stock, available, safetyStock, labelStatus, status,
     })),
+    sharedSchedule: calendarEvents,
     openWork: canAssignTasks ? openWork : myWork,
   }
 
@@ -306,15 +335,15 @@ function AIHome({ workItems, currentUserName, currentUserId, companyName, canAss
     if (preference.id === 'summary') {
       content = <section className="home-action-strip compact" aria-label="오늘 핵심 현황">
         {canAssignTasks
-          ? <button type="button" onClick={() => onNavigate('sales')}><span className="quick-icon green"><ShoppingCart size={19} /></span><div><span>오늘 온라인 주문</span><strong>{hasDemoData ? '293' : '0'}<small>건</small></strong><em>{hasDemoData ? '+10.8%' : '연결 필요'}</em></div></button>
-          : <button type="button" onClick={() => onNavigate('schedule')}><span className="quick-icon green"><CalendarDays size={19} /></span><div><span>오늘 공유 일정</span><strong>2<small>건</small></strong><em>일정 확인</em></div></button>}
+          ? <button type="button" onClick={() => onNavigate('sales')}><span className="quick-icon green"><ShoppingCart size={19} /></span><div><span>수집 온라인 주문</span><strong>{totalOrders.toLocaleString('ko-KR')}<small>건</small></strong><em>{salesChannels.length > 0 ? `${connectedChannels}/${salesChannels.length}개 연결` : '연결 필요'}</em></div></button>
+          : <button type="button" onClick={() => onNavigate('schedule')}><span className="quick-icon green"><CalendarDays size={19} /></span><div><span>오늘 공유 일정</span><strong>{todayEvents.length}<small>건</small></strong><em>{todayEvents.length > 0 ? '일정 확인' : '등록 없음'}</em></div></button>}
         <button type="button" onClick={() => onNavigate('tasks')}><span className="quick-icon blue"><ListChecks size={19} /></span><div><span>내가 확인할 업무</span><strong>{myWork.length}<small>건</small></strong><em>결재 {myWork.filter((item) => item.status === '결재대기').length}</em></div></button>
-        <button type="button" onClick={() => onNavigate(hasDemoData ? 'inventory' : 'products')}><span className="quick-icon amber"><Sparkles size={19} /></span><div><span>AI 선제 알림</span><strong>{hasDemoData ? '3' : '0'}<small>건</small></strong><em>{hasDemoData ? '긴급 1' : '설정 대기'}</em></div></button>
+        <button type="button" onClick={() => onNavigate(dashboardAlert.page)}><span className="quick-icon amber"><Sparkles size={19} /></span><div><span>AI 선제 알림</span><strong>{attentionCount}<small>건</small></strong><em>{operatingDataAvailable ? urgentWork.length > 0 ? `긴급 ${urgentWork.length}` : '점검 결과' : '설정 대기'}</em></div></button>
       </section>
     } else if (preference.id === 'ai') {
-      content = <AIChat companyName={companyName} canCreateTask={canAssignTasks} canViewCommercial={canAssignTasks} hasDemoData={hasDemoData} onCreateTask={(text) => onCreateTask(text)} context={aiContext} />
+      content = <AIChat companyName={companyName} canCreateTask={canAssignTasks} canViewCommercial={canAssignTasks} operatingDataAvailable={operatingDataAvailable} workspaceScope={workspaceScope} onCreateTask={(text) => onCreateTask(text)} context={aiContext} />
     } else if (preference.id === 'schedule') {
-      content = <SharedCalendarPreview hasDemoData={hasDemoData} onOpen={() => onNavigate('schedule')} />
+      content = <SharedCalendarPreview events={calendarEvents} onOpen={() => onNavigate('schedule')} />
     } else if (preference.id === 'links') {
       content = <QuickLinksWidget scope={`${companyName}:${currentUserId}`} onToast={onToast} />
     } else if (preference.id === 'work') {
@@ -323,17 +352,17 @@ function AIHome({ workItems, currentUserName, currentUserId, companyName, canAss
         <div className="work-mini-list">
           {myWork.length === 0 && <div className="empty-state compact"><CheckCircle2 size={26} /><h3>지금 처리할 업무가 없습니다</h3><p>새 업무가 배정되면 여기에 표시됩니다.</p></div>}
           {myWork.slice(0, 2).map((item) => <article className="work-mini" key={item.id}>
-            <div className="work-mini-top"><StatusPill tone={item.priority === '긴급' ? 'danger' : item.priority === '높음' ? 'warning' : 'neutral'}>{item.priority}</StatusPill><StatusPill tone={item.status === '결재대기' ? 'blue' : 'neutral'}>{item.status}</StatusPill></div>
-            <h3>{item.title}</h3><p>{item.owner} · {item.due}</p>
+            <div className="work-mini-top"><StatusBadge className="status-pill" dot tone={item.priority === '긴급' ? 'danger' : item.priority === '높음' ? 'warning' : 'neutral'}>{item.priority}</StatusBadge><StatusBadge className="status-pill" dot tone={item.status === '결재대기' ? 'info' : 'neutral'}>{item.status}</StatusBadge></div>
+            <h3>{item.title}</h3><p>{item.owner} · {formatWorkDue(item.due)}</p>
             <button type="button" disabled={item.status === '결재대기' && item.requesterId !== currentUserId} onClick={() => onAdvanceTask(item)}>{item.status === '업무요청' ? '업무 수락' : item.status === '수행중' ? '결재 요청' : item.requesterId === currentUserId ? '결재 승인' : '승인 대기'} <ArrowRight size={15} /></button>
           </article>)}
         </div>
       </section>
     } else {
-      content = <section className={'priority-alert-bar ' + (!hasDemoData ? 'setup' : !canAssignTasks ? 'neutral' : '')}>
+      content = <section className={'priority-alert-bar ' + (!operatingDataAvailable ? 'setup' : attentionCount === 0 || !canAssignTasks ? 'neutral' : '')}>
         <span className="priority-alert-icon"><AlertTriangle size={20} /></span>
-        <div><strong>{!hasDemoData ? '운영 데이터를 먼저 연결해 주세요' : canAssignTasks ? 'G마켓 SKU 매핑 2건이 끊겼어요' : '내 업무 마감을 확인해 주세요'}</strong><p>{!hasDemoData ? '제품·창고·판매채널을 등록하면 AI 선제 알림이 시작됩니다.' : canAssignTasks ? '오늘 주문 7건이 ERP로 수집되지 않을 수 있습니다.' : '오늘 수행할 업무와 공유 일정을 확인하세요.'}</p></div>
-        <button className="small-button" type="button" onClick={() => !hasDemoData ? onNavigate('products') : canAssignTasks ? onCreateTask('G마켓 SKU 매핑 오류 2건 확인') : onNavigate('tasks')}>{!hasDemoData ? '초기 설정' : canAssignTasks ? '업무 만들기' : '내 업무 보기'} <ArrowRight size={15} /></button>
+        <div><strong>{dashboardAlert.title}</strong><p>{dashboardAlert.detail}</p></div>
+        <button className="small-button" type="button" onClick={() => onNavigate(dashboardAlert.page)}>{!operatingDataAvailable ? '초기 설정' : '상세 확인'} <ArrowRight size={15} /></button>
       </section>
     }
     const visibleIndex = visibleWidgets.findIndex((item) => item.id === preference.id)
@@ -406,7 +435,7 @@ function AIHome({ workItems, currentUserName, currentUserId, companyName, canAss
         eyebrow={`${todayLabel} · ${companyName}`}
         title={`안녕하세요, ${currentUserName}님`}
         description="AI에게 업무 정보를 묻거나, 오늘 처리할 일정과 결재를 확인하세요."
-        action={<>{layoutOpen ? <button className="button primary" type="button" onClick={finishLayoutEdit}><Check size={18} /> 편집 완료</button> : <DashboardLayoutButton onClick={() => setLayoutOpen(true)} />}{canAssignTasks ? <button className="button primary" type="button" onClick={() => onCreateTask()}><Plus size={18} /> 새 업무 지시</button> : <StatusPill tone="neutral">직원용 업무 화면</StatusPill>}</>}
+        action={<>{layoutOpen ? <button className="button primary" type="button" onClick={finishLayoutEdit}><Check size={18} /> 편집 완료</button> : <DashboardLayoutButton onClick={() => setLayoutOpen(true)} />}{canAssignTasks ? <button className="button primary" type="button" onClick={() => onCreateTask()}><Plus size={18} /> 새 업무 지시</button> : <StatusBadge className="status-pill" tone="neutral">직원용 업무 화면</StatusBadge>}</>}
       />
       {layoutOpen && <section className="dashboard-layout-workbench" aria-labelledby="dashboard-layout-workbench-title">
         <div className="dashboard-layout-guide"><span className="dashboard-layout-guide-icon"><GripVertical size={19} /></span><div><h2 id="dashboard-layout-workbench-title">블록을 잡아 원하는 빈 슬롯에 놓으세요</h2><p>블록은 자동으로 격자에 맞춰지고 순서와 너비는 이 계정에 바로 저장됩니다. 핸들을 누른 뒤 방향키·이동 버튼으로도 조정할 수 있습니다.</p></div><span className="dashboard-layout-saved"><Check size={15} /> 개인 저장</span><button type="button" className="small-button" onClick={() => { setWidgetPreferences(defaultDashboardWidgets.map((item) => ({ ...item }))); setKeyboardWidgetId(null); setLayoutAnnouncement('기본 위젯 배치로 되돌렸습니다.') }}><RotateCcw size={15} /> 기본 배치</button></div>
@@ -573,7 +602,7 @@ function WorkRuleModal({ assignees, onClose, onSubmit }: { assignees: WorkAssign
   const [weekday, setWeekday] = useState(3)
   const [monthDay, setMonthDay] = useState(1)
   const [busy, setBusy] = useState(false)
-  const today = new Date().toISOString().slice(0, 10)
+  const today = seoulDateInputValue()
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section ref={dialogRef} className="modal-card workflow-modal" role="dialog" aria-modal="true" aria-labelledby="rule-modal-title">
       <header><div><span className="eyebrow">RECURRING WORK</span><h2 id="rule-modal-title">반복 업무 규칙 만들기</h2><p>매주 또는 매월 자동으로 업무를 생성합니다.</p></div><button type="button" className="icon-button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
@@ -582,6 +611,7 @@ function WorkRuleModal({ assignees, onClose, onSubmit }: { assignees: WorkAssign
         const input: Record<string, unknown> = Object.fromEntries(new FormData(event.currentTarget).entries())
         input.frequency = frequency
         input.interval = Number(input.interval)
+        input.startAt = seoulLocalToUtcIso(String(input.startDate ?? ''), String(input.dueTime ?? '00:00'))
         if (frequency === 'weekly') input.weekday = weekday
         else {
           input.monthlyMode = monthlyMode
@@ -627,7 +657,7 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, work
   const visible = items.filter((item) => tab === 'done' ? item.status === '결재완료' : tab === 'approval' ? item.requesterId === currentUserId && item.status === '결재대기' : tab === 'requested' ? item.requesterId === currentUserId && item.status !== '결재완료' : item.ownerId === currentUserId && item.status !== '결재완료')
   const stages: WorkItem['status'][] = ['업무요청', '수행중', '결재대기', '결재완료']
   return <div className="content-page">
-    <PageHeader eyebrow="WORKFLOW" title="업무지시 · 결재" description="수행 결과와 증빙, 결재 코멘트를 한 흐름에서 확인합니다." action={canAssignTasks ? <div className="page-action-row"><button className="button secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Repeat2 size={18} /> 반복 업무</button><button className="button primary" type="button" onClick={onCreate}><Plus size={18} /> 새 업무 지시</button></div> : <StatusPill tone="neutral">내 업무 수행</StatusPill>} />
+    <PageHeader eyebrow="WORKFLOW" title="업무지시 · 결재" description="수행 결과와 증빙, 결재 코멘트를 한 흐름에서 확인합니다." action={canAssignTasks ? <div className="page-action-row"><button className="button secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Repeat2 size={18} /> 반복 업무</button><button className="button primary" type="button" onClick={onCreate}><Plus size={18} /> 새 업무 지시</button></div> : <StatusBadge className="status-pill" tone="neutral">내 업무 수행</StatusBadge>} />
     <section className="workflow-summary-strip" aria-label="업무 상태 요약">{stages.map((status, index) => <div className={status === '결재대기' ? 'attention' : ''} key={status}><span>{status}</span><strong>{items.filter((item) => item.status === status).length}</strong>{index < stages.length - 1 && <ArrowRight size={17} />}</div>)}</section>
     <section className="panel work-panel workflow-board"><div className="segmented-tabs" role="tablist" aria-label="업무 구분"><button type="button" role="tab" aria-selected={tab === 'mine'} onClick={() => setTab('mine')}>내 업무</button>{canAssignTasks && <button type="button" role="tab" aria-selected={tab === 'requested'} onClick={() => setTab('requested')}>지시한 업무</button>}{canAssignTasks && <button type="button" role="tab" aria-selected={tab === 'approval'} onClick={() => setTab('approval')}>결재 대기 <em>{items.filter((item) => item.requesterId === currentUserId && item.status === '결재대기').length}</em></button>}<button type="button" role="tab" aria-selected={tab === 'done'} onClick={() => setTab('done')}>완료</button></div>
       <div className="workflow-card-list">{visible.length === 0 && <div className="empty-state"><CheckCircle2 size={34} /><h3>이 구간의 업무가 없습니다</h3><p>다른 상태 탭을 확인해 보세요.</p></div>}{visible.map((item) => {
@@ -635,45 +665,64 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, work
         const ownerAction = item.ownerId === currentUserId
         const reviewerAction = item.requesterId === currentUserId
         const reviewAction = reviewerAction && item.status === '결재대기'
-        const actionContext = reviewAction ? '검토 업무 · 다음 행동' : ownerAction ? '내 업무 · 다음 행동' : '현재 상태'
-        const actionHint = reviewAction
-          ? '제출 결과를 검토하고 승인 또는 수정을 요청하세요'
+        const changeRequested = item.review?.decision === 'changes-requested'
+        const actionLabel = reviewAction ? '지금 검토할 일' : ownerAction ? '지금 내가 할 일' : '현재 업무 상태'
+        const actionTitle = reviewAction
+          ? '제출 결과를 검토해 결정하세요'
           : ownerAction
-          ? item.status === '업무요청' ? '수락 후 바로 수행 시작' : item.status === '수행중' ? item.review?.decision === 'changes-requested' ? '요청사항 보완 후 재제출' : '완료 결과와 증빙 제출' : item.status === '결재대기' ? '요청자 검토를 기다리는 중' : '업무 처리 완료'
-          : item.status === '결재완료' ? '승인과 업무 처리 완료' : '진행 상태 확인'
+            ? item.status === '업무요청'
+              ? '업무를 수락하고 바로 시작하세요'
+              : item.status === '수행중'
+                ? changeRequested ? '수정 요청을 반영해 다시 제출하세요' : '완료 결과와 증빙을 제출하세요'
+                : item.status === '결재대기' ? '요청자의 결재를 기다리고 있어요' : '승인까지 모두 완료됐어요'
+            : item.status === '결재완료' ? '승인과 업무 처리가 완료됐어요' : '담당자의 진행 상태를 확인하세요'
+        const actionDetail = reviewAction
+          ? '완료 보고와 증빙을 확인한 뒤 승인하거나, 한 번에 이해되는 보완 내용을 남겨 주세요.'
+          : ownerAction && item.status === '업무요청'
+            ? '수락하면 상태가 수행중으로 바뀌며 담당자에게 수행 책임이 확정됩니다.'
+            : ownerAction && item.status === '수행중'
+              ? changeRequested ? '아래 수정 사유를 먼저 반영하고 새 완료 보고와 증빙을 올려 주세요.' : '아래 완료 기준을 충족한 뒤 결과 요약과 필요한 증빙을 올려 주세요.'
+              : ownerAction && item.status === '결재대기'
+                ? '제출은 완료됐습니다. 요청자가 승인하거나 수정 요청을 보내면 다음 행동이 열립니다.'
+                : '상태와 처리 이력은 모든 참여자에게 공유됩니다.'
         return <article className={`workflow-task-card task-focused status-${step}`} key={item.id}>
           <div className="workflow-task-progress" aria-hidden="true"><span style={{ width: `${Math.max(0, step) / (stages.length - 1) * 100}%` }} /></div>
-          <header className="workflow-card-head"><div className="work-row-meta"><StatusPill tone={item.priority === '긴급' ? 'danger' : item.priority === '높음' ? 'warning' : 'neutral'}>{item.priority}</StatusPill><span>{item.category}</span>{item.ruleId && <span><Repeat2 size={13} /> 반복</span>}<span>{item.id}</span></div><StatusPill tone={item.status === '결재완료' ? 'good' : item.status === '결재대기' ? 'blue' : item.status === '수행중' ? 'warning' : 'neutral'}>{item.status}</StatusPill></header>
-          <div className="workflow-task-core">
-            <div className="workflow-task-title"><span className={`workflow-state-icon ${item.status}`} aria-hidden="true">{step + 1}</span><div><h3>{item.title}</h3><p>{item.description}</p></div></div>
-            <dl className="workflow-task-meta"><div><dt>담당</dt><dd>{item.owner}</dd></div><div><dt>요청</dt><dd>{item.requestedBy}</dd></div><div><dt>마감</dt><dd><Clock3 size={14} /> {item.due}</dd></div></dl>
-            <ol className="workflow-compact-stepper" aria-label={`업무 단계. 현재 ${item.status}`}>{stages.map((status, index) => <li className={index < step ? 'done' : index === step ? 'current' : ''} aria-current={index === step ? 'step' : undefined} key={status}><i>{index < step ? <Check size={11} /> : index + 1}</i><span>{status}</span></li>)}</ol>
-            <aside className="workflow-current-action"><span>{actionContext}</span><strong>{actionHint}</strong><div>{ownerAction && item.status === '업무요청' && <button className="button primary compact-action" type="button" onClick={() => void onTransition(item.id, 'accept')}><PlayCircle size={16} /> 업무 수락</button>}{ownerAction && item.status === '수행중' && <button className="button primary compact-action" type="button" onClick={() => setDialog({ type: 'completion', item })}><Upload size={16} /> {item.review?.decision === 'changes-requested' ? '보완 재제출' : '완료 제출'}</button>}{reviewAction && <><button className="button danger compact-action" type="button" onClick={() => setDialog({ type: 'changes', item })}>수정 요청</button><button className="button primary compact-action" type="button" onClick={() => setDialog({ type: 'approve', item })}><Check size={16} /> 승인</button></>}</div></aside>
+          <header className="workflow-card-head"><div className="work-row-meta"><StatusBadge className="status-pill" dot tone={item.priority === '긴급' ? 'danger' : item.priority === '높음' ? 'warning' : 'neutral'}>{item.priority}</StatusBadge><span>{item.category}</span>{item.ruleId && <span><Repeat2 size={13} /> 반복</span>}<span>{item.id}</span></div><StatusBadge className="status-pill" dot tone={item.status === '결재완료' ? 'success' : item.status === '결재대기' ? 'info' : item.status === '수행중' ? 'warning' : 'neutral'}>{item.status}</StatusBadge></header>
+          <div className="work-now-grid">
+            <section className={`work-now-action ${reviewAction ? 'is-review' : changeRequested ? 'is-revision' : ''}`} aria-label={actionLabel}>
+              <span>{actionLabel}</span><strong>{actionTitle}</strong><p>{actionDetail}</p>
+              <div className="work-now-actions">{ownerAction && item.status === '업무요청' && <button className="button primary compact-action" type="button" onClick={() => void onTransition(item.id, 'accept')}><PlayCircle size={16} /> 업무 수락</button>}{ownerAction && item.status === '수행중' && <button className="button primary compact-action" type="button" onClick={() => setDialog({ type: 'completion', item })}><Upload size={16} /> {changeRequested ? '보완 재제출' : '완료·증빙 제출'}</button>}{reviewAction && <><button className="button danger compact-action" type="button" onClick={() => setDialog({ type: 'changes', item })}>수정 요청</button><button className="button primary compact-action" type="button" onClick={() => setDialog({ type: 'approve', item })}><Check size={16} /> 승인</button></>}</div>
+            </section>
+            <div className="work-now-brief">
+              <div className="work-now-title"><span className={`workflow-state-icon ${item.status}`} aria-hidden="true">{step + 1}</span><h3>{item.title}</h3></div>
+              {changeRequested && <section className="work-now-revision" aria-label="수정 요청 사유"><span>먼저 반영할 수정 요청</span><strong>{item.review?.requestedChanges || item.review?.comment || '요청자가 보완 내용을 남기지 않았습니다.'}</strong>{item.review?.comment && item.review.comment !== item.review.requestedChanges && <p>검토 코멘트 · {item.review.comment}</p>}</section>}
+              <section className="work-now-criteria" aria-label="업무 완료 기준"><span>완료 기준</span><p>{item.description || '요청자가 등록한 상세 기준이 없습니다. 수행 전에 완료 조건을 확인해 주세요.'}</p></section>
+              <dl className="work-now-meta"><div><dt>마감</dt><dd><Clock3 size={15} /> {formatWorkDue(item.due)}</dd></div><div><dt>담당</dt><dd>{item.owner}</dd></div><div><dt>요청</dt><dd>{item.requestedBy}</dd></div></dl>
+            </div>
           </div>
+          <ol className="work-now-stepper" aria-label={`업무 단계. 현재 ${item.status}`}>{stages.map((status, index) => <li className={index < step ? 'done' : index === step ? 'current' : ''} aria-current={index === step ? 'step' : undefined} key={status}><i>{index < step ? <Check size={11} /> : index + 1}</i><span>{status}</span></li>)}</ol>
           {(item.completion || item.review) && <div className="workflow-record-stack">
-            {item.completion && <div className="workflow-record"><ClipboardCheck size={17} /><div><strong>완료 보고</strong><p>{item.completion.summary}</p><div className="workflow-record-files">{item.completion.evidence.map((file) => file.id.startsWith('DOC-') ? <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={12} /> {file.name} · {file.size}</button> : <span key={file.id}><Paperclip size={12} /> {file.name} · {file.size}</span>)}</div></div></div>}
-            {item.review && <div className={`workflow-record ${item.review.decision === 'approved' ? 'approved' : 'changes'}`}><ShieldCheck size={17} /><div><strong>{item.review.decision === 'approved' ? '승인 코멘트' : '수정 요청'}</strong><p>{item.review.requestedChanges || item.review.comment}</p></div></div>}
+            {item.completion && <div className="workflow-record"><ClipboardCheck size={17} /><div><strong>제출한 결과 <time dateTime={item.completion.submittedAt}>{formatDateTime(item.completion.submittedAt)}</time></strong><p>{item.completion.summary}</p><div className="workflow-record-files">{item.completion.evidence.length === 0 && <span>첨부 증빙 없음</span>}{item.completion.evidence.map((file) => file.id.startsWith('DOC-') ? <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={12} /> {file.name} · {file.size}</button> : <span key={file.id}><Paperclip size={12} /> {file.name} · {file.size}</span>)}</div></div></div>}
+            {item.review && <div className={`workflow-record ${item.review.decision === 'approved' ? 'approved' : 'changes'}`}><ShieldCheck size={17} /><div><strong>{item.review.decision === 'approved' ? '승인 기록' : '수정 요청 기록'} <time dateTime={item.review.reviewedAt}>{formatDateTime(item.review.reviewedAt)}</time></strong><p>{item.review.requestedChanges || item.review.comment}</p></div></div>}
           </div>}
         </article>
       })}</div>
     </section>
-    {canAssignTasks && <section className="panel recurring-work-panel"><header><div><span className="eyebrow">RECURRING RULES</span><h2>반복 업무 규칙</h2><p>도래한 규칙은 공유 업무로 자동 생성됩니다.</p></div><button className="button secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Plus size={17} /> 규칙 추가</button></header><div className="recurring-rule-grid">{rules.map((rule) => <article key={rule.id}><div><span className={`rule-state ${rule.active ? 'active' : 'paused'}`}>{rule.active ? '활성' : '중지'}</span><strong>{rule.title}</strong><p>{rule.description}</p></div><dl><div><dt>주기</dt><dd>{workRuleScheduleLabel(rule)}</dd></div><div><dt>담당자</dt><dd>{rule.owner}</dd></div><div><dt>다음 실행</dt><dd>{rule.nextRun} {rule.dueTime}</dd></div></dl><button className="button ghost" type="button" onClick={() => void onToggleRule(rule)}>{rule.active ? <PauseCircle size={17} /> : <PlayCircle size={17} />}{rule.active ? ' 일시 중지' : ' 다시 활성화'}</button></article>)}{rules.length === 0 && <div className="empty-state"><Repeat2 size={30} /><h3>반복 규칙이 없습니다</h3><p>매주·매월 반복되는 점검을 자동화해 보세요.</p></div>}</div></section>}
+    {canAssignTasks && <section className="panel recurring-work-panel"><header><div><span className="eyebrow">RECURRING RULES</span><h2>반복 업무 규칙</h2><p>도래한 규칙은 공유 업무로 자동 생성됩니다.</p></div><button className="button secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Plus size={17} /> 규칙 추가</button></header><div className="recurring-rule-grid">{rules.map((rule) => <article key={rule.id}><div><span className={`rule-state ${rule.active ? 'active' : 'paused'}`}>{rule.active ? '활성' : '중지'}</span><strong>{rule.title}</strong><p>{rule.description}</p></div><dl><div><dt>주기</dt><dd>{workRuleScheduleLabel(rule)}</dd></div><div><dt>담당자</dt><dd>{rule.owner}</dd></div><div><dt>다음 실행</dt><dd>{formatWorkRuleRun(rule.nextRun, rule.dueTime)}</dd></div></dl><button className="button ghost" type="button" onClick={() => void onToggleRule(rule)}>{rule.active ? <PauseCircle size={17} /> : <PlayCircle size={17} />}{rule.active ? ' 일시 중지' : ' 다시 활성화'}</button></article>)}{rules.length === 0 && <div className="empty-state"><Repeat2 size={30} /><h3>반복 규칙이 없습니다</h3><p>매주·매월 반복되는 점검을 자동화해 보세요.</p></div>}</div></section>}
     {dialog?.type === 'completion' && <CompletionModal item={dialog.item} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(summary, evidence) => onTransition(dialog.item.id, 'submit', { completion: { summary, evidence } })} />}
     {(dialog?.type === 'approve' || dialog?.type === 'changes') && <WorkReviewModal item={dialog.item} mode={dialog.type === 'approve' ? 'approve' : 'request-changes'} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(comment, requestedChanges) => onTransition(dialog.item.id, dialog.type === 'approve' ? 'approve' : 'request-changes', { review: { comment, requestedChanges } })} />}
     {dialog?.type === 'rule' && <WorkRuleModal assignees={assignees} onClose={() => setDialog(null)} onSubmit={onCreateRule} />}
   </div>
 }
 
-function InventoryPage({ onToast, canManage, workspaceScope, seedDemoData }: { onToast: (message: string) => void; canManage: boolean; workspaceScope?: string; seedDemoData: boolean }) {
-  const [storedLocations, setLocations] = useWorkspaceState<WarehouseLocation[]>('inventory-locations', seedDemoData ? initialInventoryLocations : emptyInventoryLocations, { scope: workspaceScope, seedWhenEmpty: canManage })
-  const [movements, setMovements] = useWorkspaceState<InventoryMovement[]>('inventory-movements', seedDemoData ? initialInventoryMovements : [], { scope: workspaceScope, seedWhenEmpty: canManage })
-  const locations = seedDemoData ? storedLocations : storedLocations.filter((location) => !isSunseaFixtureWarehouse(location))
+function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (message: string) => void; canManage: boolean; workspaceScope?: string }) {
+  const [locations, setLocations] = useWorkspaceState<WarehouseLocation[]>('inventory-locations', emptyInventoryLocations, { scope: workspaceScope, seedWhenEmpty: false })
+  const [movements, setMovements] = useWorkspaceState<InventoryMovement[]>('inventory-movements', [], { scope: workspaceScope, seedWhenEmpty: false })
   const [editing, setEditing] = useState<WarehouseLocation | 'new' | null>(null)
   const [movementOpen, setMovementOpen] = useState(false)
-  const [showAllLots, setShowAllLots] = useState(false)
   const [showAllMovements, setShowAllMovements] = useState(false)
   const [expandedWarehouseIds, setExpandedWarehouseIds] = useState<Set<string>>(() => new Set())
-  const defaultMovementTime = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16)
+  const defaultMovementTime = seoulDateTimeInputValue()
   const warehouseDialogRef = useDialogFocus(Boolean(editing))
   const movementDialogRef = useDialogFocus(movementOpen)
   const lotsByWarehouse = useMemo(() => {
@@ -712,16 +761,6 @@ function InventoryPage({ onToast, canManage, workspaceScope, seedDemoData }: { o
     Object.values(byWarehouse).forEach((lots) => lots.sort((a, b) => b.lastAt.localeCompare(a.lastAt)))
     return byWarehouse
   }, [movements])
-
-  useEffect(() => {
-    if (seedDemoData || !storedLocations.some(isSunseaFixtureWarehouse)) return
-    setLocations((current) => current.filter((location) => !isSunseaFixtureWarehouse(location)))
-  }, [seedDemoData, setLocations, storedLocations])
-
-  useEffect(() => {
-    if (!movements.some((movement) => movement.product === '햄게젓 400g')) return
-    setMovements((current) => current.map((movement) => movement.product === '햄게젓 400g' ? { ...movement, product: '멍게젓 400g' } : movement))
-  }, [movements, setMovements])
 
   useEffect(() => {
     if (!editing && !movementOpen) return
@@ -767,7 +806,9 @@ function InventoryPage({ onToast, canManage, workspaceScope, seedDemoData }: { o
     const quantity = Number(form.get('quantity') || 0)
     const unit = String(form.get('unit') || 'EA')
     const warehouseId = String(form.get('warehouseId') || '')
-    const occurredAt = String(form.get('occurredAt') || '').replace('T', ' ')
+    const occurredAtInput = String(form.get('occurredAt') || '')
+    const [occurredDate, occurredTime] = occurredAtInput.split('T')
+    const occurredAt = occurredDate && occurredTime ? seoulLocalToUtcIso(occurredDate, occurredTime) : null
     const reason = String(form.get('reason') || '').trim()
     const evidenceFile = form.get('evidence') instanceof File ? form.get('evidence') as File : null
     const validQuantity = direction === '재고조정' ? quantity >= 0 : quantity > 0
@@ -800,7 +841,7 @@ function InventoryPage({ onToast, canManage, workspaceScope, seedDemoData }: { o
     const movement: InventoryMovement = {
       id: `MOV-${Date.now().toString().slice(-10)}`,
       direction, product, lot, quantity, unit, warehouseId,
-      occurredAt: occurredAt || new Date().toISOString().slice(0, 16).replace('T', ' '),
+      occurredAt: occurredAt || new Date().toISOString(),
       reason,
       evidence: evidenceFile && evidenceFile.size > 0 ? evidenceFile.name : undefined,
       evidenceId,
@@ -824,7 +865,7 @@ function InventoryPage({ onToast, canManage, workspaceScope, seedDemoData }: { o
 
   return (
     <div className="content-page">
-      <PageHeader eyebrow="INVENTORY & LOT" title="재고 · LOT" description="창고 환경과 유통기한, 출고 가능 수량을 제품 흐름에 맞춰 관리합니다." action={canManage ? <><button className="button ghost" type="button" onClick={() => setMovementOpen(true)}><Boxes size={18} /> 입출고 등록</button><button className="button primary" type="button" onClick={() => setEditing('new')}><Plus size={18} /> 창고 등록</button></> : <StatusPill tone="neutral">조회 전용</StatusPill>} />
+      <PageHeader eyebrow="INVENTORY & LOT" title="재고 · LOT" description="창고 환경과 유통기한, 출고 가능 수량을 제품 흐름에 맞춰 관리합니다." action={canManage ? <><button className="button ghost" type="button" onClick={() => setMovementOpen(true)}><Boxes size={18} /> 입출고 등록</button><button className="button primary" type="button" onClick={() => setEditing('new')}><Plus size={18} /> 창고 등록</button></> : <StatusBadge className="status-pill" tone="neutral">조회 전용</StatusBadge>} />
       <section className="warehouse-grid">
         {locations.length === 0 && <div className="empty-state"><Warehouse size={30} /><h3>등록된 창고가 없습니다</h3><p>창고를 등록하면 보관 조건과 공간 사용률을 이곳에서 관리할 수 있습니다.</p>{canManage && <button className="button primary" type="button" onClick={() => setEditing('new')}><Plus size={17} /> 첫 창고 등록</button>}</div>}
         {locations.map((location) => {
@@ -839,7 +880,7 @@ function InventoryPage({ onToast, canManage, workspaceScope, seedDemoData }: { o
           const expanded = expandedWarehouseIds.has(location.id)
           const visibleLots = expanded ? lots : lots.slice(0, 4)
           return <article className="warehouse-card warehouse-inventory-block" key={location.id}>
-            <div className="warehouse-card-top"><span className="warehouse-icon"><Warehouse size={21} /></span><div><StatusPill tone={location.alert === '이상 없음' ? 'good' : 'warning'}>{location.condition}</StatusPill>{canManage && <button type="button" className="warehouse-edit" onClick={() => setEditing(location)}>변경</button>}</div></div>
+            <div className="warehouse-card-top"><span className="warehouse-icon"><Warehouse size={21} /></span><div><StatusBadge className="status-pill" dot tone={location.alert === '이상 없음' ? 'success' : 'warning'}>{location.condition}</StatusBadge>{canManage && <button type="button" className="warehouse-edit" onClick={() => setEditing(location)}>변경</button>}</div></div>
             <div className="warehouse-card-heading"><div><h2>{location.name}</h2><span className="warehouse-code">{location.id} · {location.type}</span></div><strong className={unresolvedCount > 0 ? 'needs-reconcile' : ''}>{stockSummary}{unresolvedCount > 0 && stockTotals.length > 0 ? ` · 미확정 ${unresolvedCount}` : ''}</strong></div>
             <div className="warehouse-utilization"><div className="progress-head"><span>공간 사용률</span><strong>{location.utilization}%</strong></div><div className="progress-track"><span style={{ width: location.utilization + '%' }} /></div></div>
             <section className="warehouse-lot-block" aria-label={`${location.name} 품목 및 LOT 수량`}>
@@ -859,26 +900,17 @@ function InventoryPage({ onToast, canManage, workspaceScope, seedDemoData }: { o
       </section>
       <section className="panel table-panel inventory-movement-panel">
         <div className="panel-heading"><div><h2>{showAllMovements ? '전체 입출고 원장' : '최근 입출고'}</h2><p>LOT별 수량, 등록 사유와 증빙자료를 확인합니다.</p></div><div className="inventory-panel-actions">{movements.length > 8 && <button type="button" className="small-button" aria-pressed={showAllMovements} onClick={() => setShowAllMovements((value) => !value)}>{showAllMovements ? '최근 8건만' : `전체 ${movements.length}건`}</button>}{canManage && <button type="button" className="small-button" onClick={() => setMovementOpen(true)}><Plus size={16} /> 내역 등록</button>}</div></div>
-        {movements.length === 0 ? <div className="empty-state compact"><Boxes size={28} /><h3>등록된 입출고가 없습니다</h3><p>첫 입고, 출고 또는 재고조정 내역을 등록해 보세요.</p></div> : <div className="responsive-table"><table><thead><tr><th>구분 · 품목</th><th>LOT</th><th>수량</th><th>창고</th><th>일시 · 사유</th><th>증빙</th>{canManage && <th>관리</th>}</tr></thead><tbody>{(showAllMovements ? movements : movements.slice(0, 8)).map((movement) => <tr key={movement.id}><td><div className={'movement-direction ' + movement.direction}>{movement.direction === '입고' ? <ArrowDownToLine size={17} /> : <ArrowUpFromLine size={17} />}<span><strong>{movement.product}</strong><small>{movement.id}</small></span></div></td><td><strong>{movement.lot}</strong></td><td><strong>{movement.quantity.toLocaleString()}{movement.unit}</strong></td><td>{locations.find((location) => location.id === movement.warehouseId)?.name ?? movement.warehouseId}</td><td><strong>{movement.occurredAt}</strong><span>{movement.reason}</span></td><td>{movement.evidence ? movement.evidenceId ? <button type="button" className="movement-evidence download" onClick={async () => { if (!await downloadStoredDocument(movement.evidenceId!, movement.evidence!, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={15} /> {movement.evidence}</button> : <span className="movement-evidence"><Paperclip size={15} /> {movement.evidence}</span> : '—'}</td>{canManage && <td><button type="button" className="movement-delete" onClick={() => void removeMovement(movement)}>삭제</button></td>}</tr>)}</tbody></table></div>}
+        {movements.length === 0 ? <div className="empty-state compact"><Boxes size={28} /><h3>등록된 입출고가 없습니다</h3><p>첫 입고, 출고 또는 재고조정 내역을 등록해 보세요.</p></div> : <div className="responsive-table"><table><thead><tr><th>구분 · 품목</th><th>LOT</th><th>수량</th><th>창고</th><th>일시 · 사유</th><th>증빙</th>{canManage && <th>관리</th>}</tr></thead><tbody>{(showAllMovements ? movements : movements.slice(0, 8)).map((movement) => <tr key={movement.id}><td><div className={'movement-direction ' + movement.direction}>{movement.direction === '입고' ? <ArrowDownToLine size={17} /> : <ArrowUpFromLine size={17} />}<span><strong>{movement.product}</strong><small>{movement.id}</small></span></div></td><td><strong>{movement.lot}</strong></td><td><strong>{movement.quantity.toLocaleString()}{movement.unit}</strong></td><td>{locations.find((location) => location.id === movement.warehouseId)?.name ?? movement.warehouseId}</td><td><strong>{formatDateTime(movement.occurredAt)}</strong><span>{movement.reason}</span></td><td>{movement.evidence ? movement.evidenceId ? <button type="button" className="movement-evidence download" onClick={async () => { if (!await downloadStoredDocument(movement.evidenceId!, movement.evidence!, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={15} /> {movement.evidence}</button> : <span className="movement-evidence"><Paperclip size={15} /> {movement.evidence}</span> : '—'}</td>{canManage && <td><button type="button" className="movement-delete" onClick={() => void removeMovement(movement)}>삭제</button></td>}</tr>)}</tbody></table></div>}
       </section>
-      {seedDemoData && <section className="panel table-panel">
-        <div className="panel-heading"><div><h2>{showAllLots ? '전체 제품 재고' : '주의 재고'}</h2><p>안전재고와 출고 가능 수량 기준입니다.</p></div><button type="button" className="text-button" aria-pressed={showAllLots} onClick={() => setShowAllLots((value) => !value)}>{showAllLots ? '주의 재고만 보기' : '전체 제품 보기'} <ArrowRight size={16} /></button></div>
-        <div className="responsive-table">
-          <table>
-            <thead><tr><th>제품</th><th>현재고</th><th>출고가능</th><th>안전재고</th><th>보관</th><th>상태</th></tr></thead>
-            <tbody>{seaProducts.filter((product) => showAllLots || product.status !== '정상').map((product) => <tr key={product.id}><td><strong>{product.name}</strong><span>{product.code}</span></td><td>{product.stock.toLocaleString()}개</td><td><strong>{product.available.toLocaleString()}개</strong></td><td>{product.safetyStock.toLocaleString()}개</td><td>{product.storage}</td><td><StatusPill tone={product.status === '정상' ? 'good' : product.status === '품절' ? 'danger' : 'warning'}>{product.status}</StatusPill></td></tr>)}</tbody>
-          </table>
-        </div>
-      </section>}
       {movementOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setMovementOpen(false)}>
         <section ref={movementDialogRef} className="modal-card inventory-movement-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-movement-title">
           <header><div><span className="eyebrow">STOCK MOVEMENT</span><h2 id="inventory-movement-title">입출고 등록</h2><p>LOT와 수량, 이동 사유를 남겨 재고 변동 이력을 관리합니다.</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={() => setMovementOpen(false)}><X size={21} /></button></header>
           <form onSubmit={saveMovement}>
             <div className="form-grid"><label className="form-field"><span>구분</span><select name="direction" defaultValue="입고"><option>입고</option><option>출고</option><option>재고조정</option></select></label><label className="form-field"><span>처리 일시</span><input name="occurredAt" type="datetime-local" defaultValue={defaultMovementTime} /></label></div>
             <p className="inventory-ledger-note"><Database size={16} /><span><strong>현재고 계산 기준</strong> 입고·출고는 확정 현재고에 더하고 빼며, 재고조정은 입력 수량을 해당 LOT의 실사 현재고로 확정합니다. 기존 출고만 있는 LOT은 먼저 재고조정을 등록해 주세요.</span></p>
-            <div className="form-grid"><label className="form-field"><span>품목명</span><input name="product" autoFocus data-autofocus placeholder="예: 멍게젓 400g" required /></label><label className="form-field"><span>LOT 번호</span><input name="lot" placeholder="LOT-260819-01" required /></label></div>
+            <div className="form-grid"><label className="form-field"><span>품목명</span><input name="product" autoFocus data-autofocus placeholder="예: 완제품 A 400g" required /></label><label className="form-field"><span>LOT 번호</span><input name="lot" placeholder="LOT-YYYYMMDD-01" required /></label></div>
             <div className="form-grid three"><label className="form-field"><span>수량</span><input name="quantity" type="number" min="0" step="0.001" required /></label><label className="form-field"><span>단위</span><select name="unit" defaultValue="EA"><option>EA</option><option>BOX</option><option>KG</option><option>G</option><option>ROLL</option></select></label><label className="form-field"><span>창고</span><select name="warehouseId" required defaultValue={locations[0]?.id ?? ''}><option value="" disabled>창고 선택</option>{locations.map((location) => <option value={location.id} key={location.id}>{location.name}</option>)}</select></label></div>
-            <label className="form-field full"><span>처리 사유</span><textarea name="reason" rows={3} placeholder="예: 오늘 자사몰 주문 출고" required /></label>
+            <label className="form-field full"><span>처리 사유</span><textarea name="reason" rows={3} placeholder="예: 온라인 주문 출고" required /></label>
             <label className="form-field full"><span>증빙자료 (선택)</span><input name="evidence" type="file" accept="image/*,.pdf,.xlsx,.xls,.csv" /><small>파일 원본을 고객사 자료 저장소에 보관하고 입출고 이력에서 다시 다운로드할 수 있습니다.</small></label>
             <footer><button type="button" className="button ghost" onClick={() => setMovementOpen(false)}>취소</button><button type="submit" className="button primary"><Check size={18} /> 입출고 저장</button></footer>
           </form>
@@ -900,22 +932,8 @@ function InventoryPage({ onToast, canManage, workspaceScope, seedDemoData }: { o
   )
 }
 
-function TenantModuleOnboarding({ title, description, actionLabel, onAction }: {
-  title: string; description: string; actionLabel: string; onAction: () => void
-}) {
-  return <div className="content-page">
-    <PageHeader eyebrow="WORKSPACE SETUP" title={title} description={description} />
-    <section className="panel empty-state"><Database size={34} /><h2>아직 연결된 운영 데이터가 없습니다</h2><p>이 고객사의 제품·창고·조직 정보를 등록하면 대시보드와 AI 분석이 자동으로 활성화됩니다.</p><button className="button primary" type="button" onClick={onAction}><Plus size={17} /> {actionLabel}</button></section>
-  </div>
-}
-
-const seededWorkAccountIds: Record<string, string> = {
-  김서원: 'USR-SUNSEA-ADMIN', 박지현: 'USR-SUNSEA-PARK', 오태식: 'USR-SUNSEA-OH',
-  서동현: 'USR-SUNSEA-SEO', 윤서진: 'USR-SUNSEA-YOON',
-}
-
-function TaskModal({ initialText, requesterName, requesterId, assigneeNames, onClose, onSave }: {
-  initialText: string; requesterName: string; requesterId: string; assigneeNames: string[]; onClose: () => void; onSave: (item: WorkItem) => void
+function TaskModal({ initialText, requesterName, requesterId, assignees, onClose, onSave }: {
+  initialText: string; requesterName: string; requesterId: string; assignees: WorkAssignee[]; onClose: () => void; onSave: (item: WorkItem) => void
 }) {
   const [title, setTitle] = useState(initialText)
   const [description, setDescription] = useState('')
@@ -924,19 +942,24 @@ function TaskModal({ initialText, requesterName, requesterId, assigneeNames, onC
     event.preventDefault()
     if (!title.trim()) return
     const form = new FormData(event.currentTarget)
-    const owner = String(form.get('owner') || requesterName)
+    const ownerId = String(form.get('ownerId') || '')
+    const owner = assignees.find((assignee) => assignee.id === ownerId)
+    if (!owner) return
+    const dueLocal = String(form.get('due') || '')
+    const due = seoulLocalToUtcIso(dueLocal.slice(0, 10), dueLocal.slice(11, 16)) ?? dueLocal
     onSave({
       id: 'WK-' + new Date().getTime().toString().slice(-8),
       title: title.trim(),
       description: description.trim() || '담당자가 업무 내용을 확인하고 완료 결과를 남깁니다.',
-      owner,
-      ownerId: owner === requesterName ? requesterId : seededWorkAccountIds[owner],
+      owner: owner.name,
+      ownerId: owner.id,
       requestedBy: requesterName,
       requesterId,
-      due: String(form.get('due') || '오늘 18:00'),
+      due,
       priority: String(form.get('priority') || '보통') as WorkItem['priority'],
       status: '업무요청',
       category: String(form.get('category') || '일반'),
+      createdAt: new Date().toISOString(),
     })
   }
   return (
@@ -947,13 +970,14 @@ function TaskModal({ initialText, requesterName, requesterId, assigneeNames, onC
           <label className="form-field full"><span>업무 제목</span><input autoFocus data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 신규 제품 표시사항 최종 검토" required /></label>
           <label className="form-field full"><span>완료 기준 · 상세 내용</span><textarea rows={4} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="완료한 것으로 판단할 수 있는 기준을 구체적으로 입력하세요." /></label>
           <div className="form-grid">
-            <label className="form-field"><span>담당자</span><select name="owner" defaultValue={requesterName}>{Array.from(new Set([requesterName, ...assigneeNames])).map((name) => <option key={name}>{name}</option>)}</select></label>
+            <label className="form-field"><span>담당자</span><select name="ownerId" defaultValue={assignees.find((item) => item.id === requesterId)?.id ?? assignees[0]?.id ?? ''} required><option value="" disabled>직원 선택</option>{assignees.map((assignee) => <option value={assignee.id} key={assignee.id}>{assignee.name}</option>)}</select></label>
             <label className="form-field"><span>업무 구분</span><select name="category" defaultValue="제품"><option>제품</option><option>생산</option><option>재고</option><option>판매채널</option><option>일반</option></select></label>
             <label className="form-field"><span>우선순위</span><select name="priority" defaultValue="높음"><option>긴급</option><option>높음</option><option>보통</option></select></label>
-            <label className="form-field"><span>마감</span><input name="due" defaultValue="오늘 18:00" /></label>
+            <label className="form-field"><span>마감</span><input name="due" type="datetime-local" defaultValue={`${seoulDateInputValue()}T18:00`} required /></label>
           </div>
           <div className="modal-note"><ShieldCheck size={18} /><p><strong>담당자가 ‘업무 수락’ 후 수행을 시작합니다.</strong><span>수행 결과는 결재 요청과 승인 단계를 거쳐 완료됩니다.</span></p></div>
-          <footer><button type="button" className="button ghost" onClick={onClose}>취소</button><button type="submit" className="button primary"><Check size={18} /> 업무 요청 보내기</button></footer>
+          {assignees.length === 0 && <div className="modal-note"><AlertTriangle size={18} /><p><strong>배정 가능한 직원 정보를 불러오지 못했습니다.</strong><span>직원 계정이 승인됐는지 확인한 뒤 다시 열어 주세요.</span></p></div>}
+          <footer><button type="button" className="button ghost" onClick={onClose}>취소</button><button type="submit" className="button primary" disabled={assignees.length === 0}><Check size={18} /> 업무 요청 보내기</button></footer>
         </form>
       </section>
     </div>
@@ -1007,7 +1031,6 @@ function SupportSessionModal({ tenant, tickets, onClose, onCreate }: {
 export default function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>('checking')
   const [account, setAccount] = useState<AuthAccount | null>(null)
-  const isSunseaDemo = account?.tenantId === SUNSEA_TENANT_ID
   // The API scopes workspace data by the authenticated tenant and account role.
   // Match that boundary in the optimistic cache so switching accounts in the
   // same browser can never reuse another employee's filtered response.
@@ -1018,21 +1041,36 @@ export default function App() {
   const [mobileNav, setMobileNav] = useState(false)
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 1024)
   const [messengerOpen, setMessengerOpen] = useState(false)
-  const [messengerUnread, setMessengerUnread] = useState(4)
+  const [messengerUnread, setMessengerUnread] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [navEditorOpen, setNavEditorOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const [unread, setUnread] = useState(3)
+  const [unread, setUnread] = useState(0)
   const [query, setQuery] = useState('')
-  const [workItems, setWorkItems] = useWorkspaceState<WorkItem[]>('work-items', isSunseaDemo ? initialWorkItems : emptyWorkItems, {
+  const [workItems, setWorkItems] = useWorkspaceState<WorkItem[]>('work-items', emptyWorkItems, {
     enabled: authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange,
     scope: workspaceScope,
-    seedWhenEmpty: account?.role === 'tenant-admin',
+    seedWhenEmpty: false,
   })
-  const [workRules, setWorkRules] = useWorkspaceState<WorkRule[]>('work-rules', isSunseaDemo ? initialWorkRules : emptyWorkRules, {
+  const [workRules, setWorkRules] = useWorkspaceState<WorkRule[]>('work-rules', emptyWorkRules, {
     enabled: authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange,
     scope: workspaceScope,
-    seedWhenEmpty: account?.role === 'tenant-admin',
+    seedWhenEmpty: false,
+  })
+  const [dashboardProducts] = useWorkspaceState<DashboardProduct[]>('product-catalog', [], {
+    enabled: authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange,
+    scope: workspaceScope,
+    seedWhenEmpty: false,
+  })
+  const [dashboardSalesChannels] = useWorkspaceState<DashboardSalesChannel[]>('sales-channels', [], {
+    enabled: authStatus === 'signed-in' && mode === 'tenant' && account?.role === 'tenant-admin' && !account?.requiresPasswordChange,
+    scope: workspaceScope,
+    seedWhenEmpty: false,
+  })
+  const [dashboardCalendarEvents] = useWorkspaceState<DashboardCalendarEvent[]>('calendar-events', [], {
+    enabled: authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange,
+    scope: workspaceScope,
+    seedWhenEmpty: false,
   })
   const [directoryAssignees, setDirectoryAssignees] = useState<WorkAssignee[]>([])
   const [taskDraft, setTaskDraft] = useState<string | null>(null)
@@ -1177,10 +1215,10 @@ export default function App() {
           .map((member) => ({ id: member.id, name: member.name })))
       })
       .catch(() => {
-        if (active) setDirectoryAssignees([{ id: account.id, name: account.name }])
+        if (active) setDirectoryAssignees([])
       })
     return () => { active = false }
-  }, [account?.id, account?.name, account?.requiresPasswordChange, account?.tenantId, authStatus, mode, page])
+  }, [account?.requiresPasswordChange, account?.tenantId, authStatus, mode])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1231,11 +1269,6 @@ export default function App() {
     }
   }, [account, authStatus, mode])
 
-  useEffect(() => {
-    if (account?.requiresPasswordChange || isSunseaDemo || !workItems.some(isSunseaFixtureWorkItem)) return
-    setWorkItems((current) => current.filter((item) => !isSunseaFixtureWorkItem(item)))
-  }, [account?.requiresPasswordChange, isSunseaDemo, setWorkItems, workItems])
-
   const tenantName = account?.tenantName ?? '고객사'
   const collaborationIdentity = {
     currentUserId: account?.id ?? '',
@@ -1243,27 +1276,30 @@ export default function App() {
     currentUserTeam: account?.team ?? '미지정',
     canManage: account?.role === 'tenant-admin',
   }
-  const isTenantMember = account?.role === 'tenant-member'
-  const primaryTenantNotice = !isSunseaDemo
-    ? { title: '워크스페이스 초기 설정을 시작해 주세요', detail: '제품·창고·판매채널을 연결하면 AI 알림이 활성화됩니다.', page: 'products' as PageId }
-    : isTenantMember
-    ? { title: '담당 업무 마감 시간을 확인해 주세요', detail: '내 업무 1건이 오늘 17:00에 마감됩니다.', page: 'tasks' as PageId }
-    : { title: 'G마켓 SKU 오류를 확인해 주세요', detail: '주문 7건 수집에 영향을 줄 수 있습니다.', page: 'tasks' as PageId }
-  const secondaryTenantNotice = !isSunseaDemo
-    ? { title: '첫 공유 일정을 등록해 보세요', detail: `${tenantName} 구성원에게 일정을 공유할 수 있습니다.`, page: 'schedule' as PageId }
-    : isTenantMember
-    ? { title: '생산 일정이 새로 공유됐습니다', detail: '내 소속 부서의 일정을 확인해 주세요.', page: 'schedule' as PageId }
-    : { title: '멍게젓 제품정보 결재 요청', detail: '박지현님이 결재 승인을 요청했습니다.', page: 'products' as PageId }
-
-  const tenantWorkItems = isSunseaDemo ? workItems : workItems.filter((item) => !isSunseaFixtureWorkItem(item))
+  const tenantWorkItems = workItems
   const scopedWorkItems = account?.role === 'tenant-member'
     ? tenantWorkItems.filter((item) => item.ownerId === account.id || item.requesterId === account.id)
     : tenantWorkItems
-  const workAssignees: WorkAssignee[] = directoryAssignees.length > 0
-    ? directoryAssignees
-    : isSunseaDemo
-      ? Object.entries(seededWorkAccountIds).map(([name, id]) => ({ name, id }))
-      : account?.tenantId ? [{ id: account.id, name: account.name }] : []
+  const nextWorkNotice = scopedWorkItems
+    .filter((item) => item.status !== '결재완료')
+    .sort((a, b) => (a.priority === b.priority ? formatWorkDue(a.due).localeCompare(formatWorkDue(b.due)) : ['긴급', '높음', '보통'].indexOf(a.priority) - ['긴급', '높음', '보통'].indexOf(b.priority)))[0]
+  const todayKey = seoulDateInputValue()
+  const nextSharedEvent = [...dashboardCalendarEvents]
+    .filter((event) => event.date.slice(0, 10) >= todayKey)
+    .sort((a, b) => `${a.date}T${a.start}`.localeCompare(`${b.date}T${b.start}`))[0]
+  const channelAttention = dashboardSalesChannels.find((channel) => ['주의', '오류'].includes(channel.status) || channel.connectionStatus === 'setup-required')
+  const workspaceHasOperatingData = workItems.length > 0 || dashboardProducts.length > 0 || dashboardSalesChannels.length > 0 || dashboardCalendarEvents.length > 0
+  const primaryTenantNotice = nextWorkNotice
+    ? { title: nextWorkNotice.title, detail: `${formatWorkDue(nextWorkNotice.due)} · ${nextWorkNotice.status}`, page: 'tasks' as PageId }
+    : workspaceHasOperatingData
+      ? { title: '현재 확인할 미완료 업무가 없습니다', detail: '새 업무가 배정되면 알림과 업무 화면에 표시됩니다.', page: 'tasks' as PageId }
+      : { title: '워크스페이스 초기 설정을 시작해 주세요', detail: '제품·창고·판매채널을 연결하면 AI 알림이 활성화됩니다.', page: 'products' as PageId }
+  const secondaryTenantNotice = channelAttention
+    ? { title: `${channelAttention.name} 연결 상태를 확인해 주세요`, detail: `현재 상태 · ${channelAttention.status}`, page: 'sales' as PageId }
+    : nextSharedEvent
+      ? { title: nextSharedEvent.title, detail: `${formatWorkDue(`${nextSharedEvent.date}T${nextSharedEvent.start}:00`)} · ${nextSharedEvent.location || '장소 미정'}`, page: 'schedule' as PageId }
+      : { title: '첫 공유 일정을 등록해 보세요', detail: `${tenantName} 구성원에게 일정을 공유할 수 있습니다.`, page: 'schedule' as PageId }
+  const workAssignees: WorkAssignee[] = directoryAssignees
   const tenantNavAll: NavItem[] = [
     { id: 'ai', label: 'AI 업무허브', icon: Sparkles },
     { id: 'schedule', label: '일정관리', icon: CalendarDays },
@@ -1288,6 +1324,13 @@ export default function App() {
   const platformTenants = platformDirectory.tenants
   const platformTickets = platformDirectory.supportTickets
   const openPlatformTickets = platformTickets.filter((ticket) => !['해결', '종료'].includes(ticket.status))
+  const platformServiceAttention = platformTenants.find((tenant) => tenant.service === '주의')
+  const primaryPlatformNotice = openPlatformTickets[0]
+    ? { title: openPlatformTickets[0].title, detail: `${openPlatformTickets[0].tenant} · ${openPlatformTickets[0].priority} · SLA ${openPlatformTickets[0].sla}` }
+    : { title: '열린 CS 티켓이 없습니다', detail: '새 고객사 요청이 접수되면 여기에 표시됩니다.' }
+  const secondaryPlatformNotice = platformServiceAttention
+    ? { title: `${platformServiceAttention.name} 서비스 상태를 확인해 주세요`, detail: `현재 상태 ${platformServiceAttention.service} · 최근 동기화 ${platformServiceAttention.sync}` }
+    : { title: '고객사 서비스가 정상 상태입니다', detail: `현재 관리 중인 고객사 ${platformTenants.length}곳 기준입니다.` }
   const platformNav: NavItem[] = [
     { id: 'platform', label: '운영 개요', icon: Home },
     { id: 'tenants', label: '고객사 관리', icon: Building2, badge: platformTenants.length },
@@ -1310,13 +1353,13 @@ export default function App() {
         .map((ticket) => ({ id: ticket.id, title: ticket.title, meta: ticket.id + ' · ' + ticket.tenant, page: 'support' as PageId, icon: Headphones }))
       return [...tenantResults, ...ticketResults]
     }
-    const products = (isSunseaDemo ? seaProducts : []).filter((product) => (product.name + ' ' + product.code + ' ' + product.category).toLowerCase().includes(value)).slice(0, 4).map((product) => ({ id: product.id, title: product.name, meta: product.code + ' · ' + product.category, page: 'products' as PageId, icon: Package }))
+    const products = dashboardProducts.filter((product) => (product.name + ' ' + product.code + ' ' + product.category).toLowerCase().includes(value)).slice(0, 4).map((product) => ({ id: product.id, title: product.name, meta: product.code + ' · ' + product.category, page: 'products' as PageId, icon: Package }))
     const taskScope = account?.role === 'tenant-member'
       ? scopedWorkItems
       : tenantWorkItems
     const tasks = taskScope.filter((work) => (work.title + ' ' + work.owner + ' ' + work.id).toLowerCase().includes(value)).slice(0, 3).map((work) => ({ id: work.id, title: work.title, meta: work.owner + ' · ' + work.status, page: 'tasks' as PageId, icon: ListChecks }))
     return [...products, ...tasks]
-  }, [account, isSunseaDemo, mode, platformTenants, platformTickets, query, scopedWorkItems, tenantWorkItems])
+  }, [account, dashboardProducts, mode, platformTenants, platformTickets, query, scopedWorkItems, tenantWorkItems])
 
   const navigate = (nextPage: PageId) => {
     if (mode === 'tenant' && account?.role === 'tenant-member' && !tenantMemberPages.has(nextPage)) {
@@ -1334,7 +1377,7 @@ export default function App() {
     setMode('platform'); navigate('platform')
   }
   const requestTenantSupportAccess = () => {
-    const targetTenant = platformTenants.find((tenant) => tenant.id === SUNSEA_TENANT_ID) ?? platformTenants[0]
+    const targetTenant = platformTenants[0]
     if (!targetTenant) { setToast('지원 세션을 요청할 고객사를 찾을 수 없습니다.'); return }
     setSupportTenant(targetTenant)
   }
@@ -1469,20 +1512,20 @@ export default function App() {
       return <PlatformConsole section={page as PlatformSection} focusId={platformFocusId} refreshToken={platformRefreshToken} onSectionChange={(section) => navigate(section)} onReturnTenant={requestTenantSupportAccess} onRequestSupport={setSupportTenant} onDataChanged={() => setPlatformRefreshToken((current) => current + 1)} onToast={setToast} />
     }
     if (account?.role === 'tenant-member' && !tenantMemberPages.has(page)) {
-      return <AIHome workItems={scopedWorkItems} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} hasDemoData={isSunseaDemo} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onToast={setToast} />
+      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onToast={setToast} />
     }
     switch (page) {
-      case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} seedDemoData={isSunseaDemo} onToast={setToast} />
+      case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} workspaceScope={workspaceScope} onToast={setToast} onCreate={() => setTaskDraft('')} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} />
-      case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} seedDemoData={isSunseaDemo} onToast={setToast} />
-      case 'products': return <ProductManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} seedDemoData={isSunseaDemo} companyName={tenantName} workspaceScope={workspaceScope} />
-      case 'inventory': return <InventoryPage onToast={setToast} canManage={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} seedDemoData={isSunseaDemo} />
-      case 'factory': return <FactoryManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} seedDemoData={isSunseaDemo} />
-      case 'sales': return <SalesChannels onToast={setToast} workspaceScope={workspaceScope} seedDemoData={isSunseaDemo} companyName={tenantName} canManage={account?.role === 'tenant-admin'} />
-      case 'people': return <PeopleOperationsPage onToast={setToast} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} seedDemoData={isSunseaDemo} />
+      case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
+      case 'products': return <ProductManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
+      case 'inventory': return <InventoryPage onToast={setToast} canManage={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} />
+      case 'factory': return <FactoryManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
+      case 'sales': return <SalesChannels onToast={setToast} workspaceScope={workspaceScope} companyName={tenantName} canManage={account?.role === 'tenant-admin'} />
+      case 'people': return <PeopleOperationsPage onToast={setToast} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} onToast={setToast} />
-      case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} seedDemoData={isSunseaDemo} canManage={account?.role === 'tenant-admin'} companyName={tenantName} onToast={setToast} />
-      default: return <AIHome workItems={scopedWorkItems} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} hasDemoData={isSunseaDemo} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onToast={setToast} />
+      case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} companyName={tenantName} onToast={setToast} />
+      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onToast={setToast} />
     }
   }
 
@@ -1537,9 +1580,9 @@ export default function App() {
               {notificationsOpen && <section className="notification-panel" id="notification-panel">
                 <header><div><h2>알림</h2><p>업무와 시스템 변화를 알려드려요.</p></div><button type="button" onClick={() => setUnread(0)}>모두 읽음</button></header>
                 <div className="notification-list">
-                  <button type="button" onClick={() => { navigate(mode === 'tenant' ? primaryTenantNotice.page : 'support'); setNotificationsOpen(false) }}><span className="notice-icon red"><AlertTriangle size={17} /></span><div><strong>{mode === 'tenant' ? primaryTenantNotice.title : 'P1 CS 티켓의 SLA가 37분 남았습니다'}</strong><p>{mode === 'tenant' ? primaryTenantNotice.detail : '포항시수산가공협동조합 · 연동 오류'}</p><small>5분 전</small></div></button>
-                  <button type="button" onClick={() => { navigate(mode === 'tenant' ? secondaryTenantNotice.page : 'integrations'); setNotificationsOpen(false) }}><span className="notice-icon amber"><Package size={17} /></span><div><strong>{mode === 'tenant' ? secondaryTenantNotice.title : 'G마켓 연동 1개가 주의 상태입니다'}</strong><p>{mode === 'tenant' ? secondaryTenantNotice.detail : 'SKU 27개를 다시 매핑해야 합니다.'}</p><small>18분 전</small></div></button>
-                  <button type="button" onClick={() => setNotificationsOpen(false)}><span className="notice-icon green"><CheckCircle2 size={17} /></span><div><strong>{mode === 'tenant' && !isSunseaDemo ? '초기 데이터 연결을 기다리고 있습니다' : '오늘 자동 동기화가 완료됐습니다'}</strong><p>{mode === 'tenant' && !isSunseaDemo ? '제품·창고·판매채널을 등록하면 자동 동기화가 시작됩니다.' : '판매·재고 데이터가 최신 상태입니다.'}</p><small>42분 전</small></div></button>
+                  <button type="button" onClick={() => { navigate(mode === 'tenant' ? primaryTenantNotice.page : 'support'); setNotificationsOpen(false) }}><span className="notice-icon red"><AlertTriangle size={17} /></span><div><strong>{mode === 'tenant' ? primaryTenantNotice.title : primaryPlatformNotice.title}</strong><p>{mode === 'tenant' ? primaryTenantNotice.detail : primaryPlatformNotice.detail}</p><small>현재 상태</small></div></button>
+                  <button type="button" onClick={() => { navigate(mode === 'tenant' ? secondaryTenantNotice.page : 'integrations'); setNotificationsOpen(false) }}><span className="notice-icon amber"><Package size={17} /></span><div><strong>{mode === 'tenant' ? secondaryTenantNotice.title : secondaryPlatformNotice.title}</strong><p>{mode === 'tenant' ? secondaryTenantNotice.detail : secondaryPlatformNotice.detail}</p><small>현재 상태</small></div></button>
+                  <button type="button" onClick={() => setNotificationsOpen(false)}><span className="notice-icon green"><CheckCircle2 size={17} /></span><div><strong>{mode === 'tenant' && dashboardSalesChannels.length === 0 ? '판매채널 연결을 기다리고 있습니다' : mode === 'tenant' ? `판매채널 ${dashboardSalesChannels.length}개의 상태를 불러왔습니다` : '플랫폼 운영 데이터를 불러왔습니다'}</strong><p>{mode === 'tenant' && dashboardSalesChannels.length === 0 ? '판매채널을 연결하면 주문과 재고 동기화 상태가 표시됩니다.' : '표시된 값은 현재 워크스페이스에서 받은 데이터 기준입니다.'}</p><small>현재 상태</small></div></button>
                 </div>
               </section>}
             </div>
@@ -1548,10 +1591,10 @@ export default function App() {
         <main id="main-content" className="main-content" tabIndex={-1}>{renderPage()}</main>
       </div>
 
-      <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} seedDemoData={isSunseaDemo} open={messengerOpen} onClose={() => setMessengerOpen(false)} onToast={setToast} onUnreadChange={setMessengerUnread} />
+      <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => setMessengerOpen(false)} onToast={setToast} onUnreadChange={setMessengerUnread} />
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? '온팩토리'} theme={theme} fontSize={fontSize} density={density} onThemeChange={setTheme} onFontSizeChange={setFontSize} onDensityChange={setDensity} onLogout={logout} />
       <WorkspaceNavigationEditor open={navEditorOpen} source={tenantNavSource} preferences={tenantNavPreferences} onChange={setTenantNavPreferences} onClose={() => setNavEditorOpen(false)} />
-      {taskDraft !== null && <TaskModal initialText={taskDraft} requesterName={account?.name ?? '사용자'} requesterId={account?.id ?? ''} assigneeNames={isSunseaDemo ? ['김서원', '박지현', '오태식', '서동현', '윤서진'] : []} onClose={() => setTaskDraft(null)} onSave={saveTask} />}
+      {taskDraft !== null && <TaskModal initialText={taskDraft} requesterName={account?.name ?? '사용자'} requesterId={account?.id ?? ''} assignees={workAssignees} onClose={() => setTaskDraft(null)} onSave={saveTask} />}
       {supportTenant && <SupportSessionModal tenant={supportTenant} tickets={platformTickets} onClose={() => setSupportTenant(null)} onCreate={createPlatformSupportSession} />}
       {toast && <div className="toast" role="status"><CheckCircle2 size={19} /><span>{toast}</span><button type="button" aria-label="알림 닫기" onClick={() => setToast('')}><X size={16} /></button></div>}
     </div>

@@ -15,14 +15,13 @@ type LoginPageProps = {
 }
 
 export function LoginPage({ onLogin, initialError = '' }: LoginPageProps) {
-  const hostedDeployment = import.meta.env.VITE_HOSTED_DEPLOYMENT === 'true'
   const queryResetToken = new URLSearchParams(window.location.search).get('reset') ?? ''
   const [view, setView] = useState<'login' | 'forgot' | 'reset' | 'pending'>(queryResetToken ? 'reset' : 'login')
   const [showPassword, setShowPassword] = useState(false)
   const [notice, setNotice] = useState('')
   const [workspace, setWorkspace] = useState<'tenant' | 'platform'>('tenant')
-  const [email, setEmail] = useState('admin@sunsea.co.kr')
-  const [password, setPassword] = useState(hostedDeployment ? '' : 'demo1234')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [loginError, setLoginError] = useState(initialError)
   const [remember, setRemember] = useState(true)
@@ -43,7 +42,8 @@ export function LoginPage({ onLogin, initialError = '' }: LoginPageProps) {
 
   const changeWorkspace = (value: 'tenant' | 'platform') => {
     setWorkspace(value)
-    setEmail(value === 'platform' ? 'operator@onfactory.co.kr' : 'admin@sunsea.co.kr')
+    setEmail('')
+    setPassword('')
     setLoginError('')
   }
 
@@ -125,7 +125,7 @@ export function LoginPage({ onLogin, initialError = '' }: LoginPageProps) {
               <button className="auth-submit" type="submit" disabled={submitting}><LogIn size={19} /> {submitting ? '인증 중…' : '로그인'}</button>
             </form>
             <button className="auth-status-link" type="button" onClick={() => setView('pending')}>신규 직원이신가요? 가입 및 승인 상태 확인 <ChevronRight size={17} /></button>
-            <div className="auth-demo-note"><ShieldCheck size={18} /><div><strong>{hostedDeployment ? '관리자가 발급한 임시 비밀번호로 로그인하세요.' : '역할별 체험 계정이 입력되어 있습니다.'}</strong><span>{workspace === 'platform' ? '운영자만 두 고객사 통합 콘솔에 접근합니다.' : '로그인한 회사의 데이터만 분리해 확인합니다.'}</span></div></div>
+            <div className="auth-demo-note"><ShieldCheck size={18} /><div><strong>관리자가 발급한 회사 계정으로 로그인하세요.</strong><span>{workspace === 'platform' ? '승인된 플랫폼 운영자만 통합 콘솔에 접근합니다.' : '로그인한 회사의 데이터만 분리해 확인합니다.'}</span></div></div>
           </>}
 
           {view === 'forgot' && <>
@@ -158,7 +158,7 @@ export function LoginPage({ onLogin, initialError = '' }: LoginPageProps) {
               <li className="active"><span>2</span><div><strong>관리자 승인</strong><p>소속·직무·접근 권한 확인</p></div></li>
               <li><span>3</span><div><strong>계정 활성화</strong><p>72시간 초기 비밀번호 로그인 후 즉시 변경</p></div></li>
             </ol>
-            <div className="pending-account-card"><span className="status-dot" /><div><strong>관리자 승인 대기</strong><p>햇살바다 · 생산 1팀 · 2026.08.19 신청</p></div></div>
+            <div className="pending-account-card"><span className="status-dot" /><div><strong>승인 상태는 회사 관리자에게 확인하세요</strong><p>관리자가 계정을 승인하면 72시간 유효한 초기 비밀번호를 전달합니다.</p></div></div>
             <p className="auth-help">계정이 없다면 회사 관리자에게 구성원 등록과 임시 비밀번호 발급을 요청하세요.</p>
           </>}
         </div>
@@ -272,7 +272,7 @@ export function SettingsDrawer({ open, onClose, profileName, profileRole, compan
       </section>
       <section className="setting-section">
         <div className="setting-section-title"><Type size={19} /><div><h3>글자 크기</h3><p>설정 즉시 전체 화면에 반영됩니다.</p></div></div>
-        <div className="font-preview"><span style={{ fontSize: 14 }}>가</span><span style={{ fontSize: 17 }}>가</span><span style={{ fontSize: 20 }}>가</span></div>
+        <div className="font-preview"><span>가</span><span>가</span><span>가</span></div>
         <div className="setting-segmented" role="group" aria-label="글자 크기">
           {([['standard', '기본'], ['large', '크게'], ['extra', '아주 크게']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={fontSize === value} onClick={() => onFontSizeChange(value)}>{label}</button>)}
         </div>

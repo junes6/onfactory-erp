@@ -1,0 +1,53 @@
+export const WORKSPACE_TABLES = Object.freeze({
+  'work-items': 'work_items',
+  'inventory-locations': 'inventory_locations',
+  'sales-channels': 'sales_channels',
+  'messenger-conversations': 'messenger_conversations',
+  'calendar-events': 'calendar_events',
+  'daily-journals': 'daily_journals',
+  'leave-requests': 'leave_requests',
+  'account-requests': 'account_requests',
+  'factory-locations': 'factory_locations',
+  'factory-layouts': 'factory_layouts',
+  'leave-management': 'leave_management',
+  'work-rules': 'work_rules',
+  'product-catalog': 'product_catalog',
+  'inventory-movements': 'inventory_movements',
+  'calendar-departments': 'calendar_departments',
+  'sales-shipments': 'sales_shipments',
+  'compliance-records': 'compliance_records',
+  'document-storage-settings': 'document_storage_settings',
+})
+
+export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))
+export const WORKSPACE_KEY_SET = new Set(WORKSPACE_KEYS)
+export const COMPANY_DOCUMENTS_KEY = 'company-documents'
+
+export const WORKSPACE_SHAPES = Object.freeze({
+  'factory-layouts': 'object-map',
+  'leave-management': 'singleton',
+  'document-storage-settings': 'singleton',
+})
+
+export const ARRAY_WORKSPACE_KEYS = new Set(
+  WORKSPACE_KEYS.filter((key) => !Object.prototype.hasOwnProperty.call(WORKSPACE_SHAPES, key)),
+)
+
+export const STORE_BACKENDS = new Set(['postgres', 'json'])
+
+export const emptyWorkspaceStore = () => ({
+  version: 2,
+  tenants: {},
+  platform: {
+    tenants: [],
+    supportTickets: [],
+    integrations: [],
+    actions: [],
+    auditEvents: [],
+  },
+  accountApprovals: {},
+  accountCredentials: {},
+  invitedAccounts: [],
+  passwordResetRequests: [],
+})
+

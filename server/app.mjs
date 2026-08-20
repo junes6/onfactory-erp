@@ -17,6 +17,31 @@ import { isDeepStrictEqual } from 'node:util'
 import Anthropic from '@anthropic-ai/sdk'
 import express from 'express'
 
+import { attachBlocksToLatestUserMessage, ChatAttachmentError, normalizeChatAttachmentRequest, resolveChatAttachments } from './chat-attachments.mjs'
+import {
+  deletePlatformEvidence,
+  deleteTenantDocument,
+  documentStorageKey,
+  DocumentStorageError,
+  getPlatformEvidence,
+  getTenantDocument,
+  platformEvidenceSignedUrl,
+  putPlatformEvidence,
+  putTenantDocument,
+  tenantDocumentSignedUrl,
+} from './document-storage-service.mjs'
+import { createStorage } from './storage/index.mjs'
+import {
+  DEFAULT_LOCAL_DEMO_PASSWORD,
+  DEMO_ACCOUNT_DEFINITIONS,
+  LEGACY_ID_BY_NAME,
+  legacyConversationParticipantIds,
+  PLATFORM_AUDIT_FIXTURES,
+  PLATFORM_INTEGRATION_FIXTURES,
+  PLATFORM_TENANT_FIXTURES,
+  PLATFORM_TICKET_FIXTURES,
+} from './store/demo-seed.mjs'
+
 const DEFAULT_MODEL = 'claude-sonnet-5'
 const MAX_MESSAGES = 30
 const MAX_MESSAGE_LENGTH = 12_000
@@ -58,10 +83,6 @@ const JOURNAL_OPTIONAL_FIELDS = ['reviews', 'submittedAt']
 const JOURNAL_STATUSES = new Set(['임시저장', '결재요청', '승인', '반려'])
 const MEMBER_EDITABLE_JOURNAL_STATUSES = new Set(['임시저장', '반려'])
 const MEMBER_WRITABLE_JOURNAL_STATUSES = new Set(['임시저장', '결재요청'])
-const LEGACY_ID_BY_NAME = new Map([
-  ['박지현', 'park'], ['오태식', 'oh'], ['서동현', 'seo'], ['윤서진', 'yoon'], ['이정민', 'lee'], ['한예린', 'han'],
-])
-
 function accountIdentityIds(account) {
   const legacyId = LEGACY_ID_BY_NAME.get(account?.name)
   return legacyId ? [account.id, legacyId] : [account.id]
@@ -70,7 +91,7 @@ const CALENDAR_FIELDS = ['id', 'title', 'date', 'start', 'end', 'scope', 'depart
 const CALENDAR_SCOPES = new Set(['company', 'department', 'personal'])
 const CONVERSATION_FIELDS = ['id', 'type', 'name', 'subtitle', 'unread', 'lastMessage', 'lastTime', 'messages']
 const MESSAGE_FIELDS = ['id', 'senderId', 'senderName', 'text', 'time']
-const MESSAGE_OPTIONAL_FIELDS = ['readBy']
+const MESSAGE_OPTIONAL_FIELDS = ['readBy', 'createdAt']
 const CONVERSATION_OPTIONAL_FIELDS = ['memberId', 'participantIds', 'hiddenFor', 'lineageId', 'generation', 'lifecycle', 'closedAt', 'deletedAt']
 const CONVERSATION_LIFECYCLES = new Set(['active', 'closed', 'deleted'])
 const PLATFORM_TICKET_PRIORITIES = new Set(['P1', 'P2', 'P3'])
@@ -81,27 +102,6 @@ const PLATFORM_PLAN_LIMITS = {
   Growth: { aiUsage: '0 / 2,000', storage: '0 / 50GB' },
   Enterprise: { aiUsage: '0 / 5,000', storage: '0 / 100GB' },
 }
-const PLATFORM_TENANT_FIXTURES = [
-  { id: 'TENANT-SUNSEA', name: '햇살바다', industry: '수산가공 · HMR · 온라인 유통', contract: '운영중', service: '정상', health: 98, plan: 'Enterprise', sites: 2, users: 46, activeUsers: 28, integrations: '5 / 5', sync: '14:42', tickets: 1, aiUsage: '1,284 / 5,000', storage: '41.8 / 100GB', csm: '이민지', adminEmail: 'admin@sunsea.co.kr', adminAccount: { id: 'USR-SUNSEA-ADMIN', name: '김서원', email: 'admin@sunsea.co.kr', team: '경영지원', jobRole: '운영 관리자' }, createdAt: '2026-08-01T00:00:00.000Z' },
-  { id: 'TENANT-POHANG', name: '포항시수산가공협동조합', industry: '수산가공 · 조합 공동판매', contract: '온보딩', service: '주의', health: 82, plan: 'Growth', sites: 1, users: 24, activeUsers: 11, integrations: '3 / 5', sync: '14:36', tickets: 3, aiUsage: '412 / 2,000', storage: '13.2 / 50GB', csm: '박하늘', adminEmail: 'admin@pohangcoop.co.kr', adminAccount: { id: 'USR-POHANG-ADMIN', name: '박해진', email: 'admin@pohangcoop.co.kr', team: '조합 운영', jobRole: '운영 관리자' }, createdAt: '2026-08-01T00:00:00.000Z' },
-]
-const PLATFORM_INTEGRATION_FIXTURES = [
-  ...[['COUPANG', '쿠팡', 'C', '판매채널', '정상', '14:42', '수집 지연 없음', '99.9%'], ['NAVER', '네이버 스마트스토어', 'N', '판매채널', '정상', '14:41', '인증 유효', '100%'], ['GMARKET', 'G마켓', 'G', '판매채널', '주의', '14:38', 'SKU 매핑 2건', '99.7%'], ['DELIVERY', '택배 연동', 'T', '물류', '정상', '14:40', '송장 상태 정상', '99.9%'], ['CLAUDE', 'Claude AI', 'AI', 'AI', '정상', '14:42', '응답 지연 정상', '99.8%']].map(([suffix, name, short, kind, status, lastSync, result, successRate]) => ({ id: `SUNSEA-${suffix}`, tenantId: 'TENANT-SUNSEA', name, short, kind, status, lastSync, result, successRate })),
-  ...[['COUPANG', '쿠팡', 'C', '판매채널', '정상', '14:36', '수집 지연 없음', '99.8%'], ['NAVER', '네이버 스마트스토어', 'N', '판매채널', '설정중', '—', '고객 인증 대기', '—'], ['GMARKET', 'G마켓', 'G', '판매채널', '주의', '14:31', 'SKU 매핑 점검 필요', '91.4%'], ['DELIVERY', '택배 연동', 'T', '물류', '정상', '14:34', '송장 상태 정상', '99.6%'], ['CLAUDE', 'Claude AI', 'AI', 'AI', '정상', '14:35', '응답 지연 정상', '99.5%']].map(([suffix, name, short, kind, status, lastSync, result, successRate]) => ({ id: `POHANG-${suffix}`, tenantId: 'TENANT-POHANG', name, short, kind, status, lastSync, result, successRate })),
-]
-const PLATFORM_TICKET_FIXTURES = [
-  { id: 'CS-260818-021', tenantId: 'TENANT-POHANG', tenant: '포항시수산가공협동조합', title: 'G마켓 SKU 27개 매핑 실패', priority: 'P1', status: '기술팀 처리중', sla: '37분 남음', owner: '김도윤' },
-  { id: 'CS-260818-019', tenantId: 'TENANT-POHANG', tenant: '포항시수산가공협동조합', title: '네이버 API 권한 인증', priority: 'P2', status: '고객 회신 대기', sla: '일시정지', owner: '박하늘' },
-  { id: 'CS-260817-031', tenantId: 'TENANT-POHANG', tenant: '포항시수산가공협동조합', title: '초기 품목 12개 중복코드 검증', priority: 'P2', status: '수정본 검증중', sla: '2시간 12분', owner: '이민지' },
-  { id: 'CS-260817-028', tenantId: 'TENANT-SUNSEA', tenant: '햇살바다', title: '제품 이미지 일괄등록 문의', priority: 'P3', status: '고객 회신 대기', sla: '18시간', owner: '이민지' },
-].map((ticket) => ({ ...ticket, description: `${ticket.title} 관련 고객 지원 요청입니다.`, createdAt: '2026-08-18T05:00:00.000Z', updatedAt: '2026-08-18T05:00:00.000Z', history: [{ id: `${ticket.id}-H1`, at: '2026-08-18 14:00', title: 'CS 접수', detail: ticket.title, actor: '플랫폼 운영' }] }))
-const PLATFORM_AUDIT_FIXTURES = [
-  { id: 'AUD-260818-104', tenantId: 'TENANT-SUNSEA', at: '2026-08-18 14:24', event: '지원 세션 정상 종료', scope: '설정 조회 · 읽기 전용 · 9분', actor: '지원팀 김도윤', result: '완료', reference: 'CS-260817-028' },
-  { id: 'AUD-260818-098', tenantId: 'TENANT-POHANG', at: '2026-08-18 13:58', event: '연동 상태 진단 실행', scope: 'G마켓 설정 메타데이터', actor: '시스템 자동화', result: '검토필요', reference: 'CS-260818-021' },
-  { id: 'AUD-260818-083', tenantId: 'TENANT-POHANG', at: '2026-08-18 11:32', event: 'CS 담당 조직 변경', scope: '기술지원팀으로 이관', actor: 'CSM 박하늘', result: '완료', reference: 'CS-260818-021' },
-  { id: 'AUD-260817-241', tenantId: 'TENANT-SUNSEA', at: '2026-08-17 17:10', event: '지원 세션 요청 승인', scope: '설정 조회 · 15분 제한', actor: '고객사 관리자', result: '완료', reference: 'CS-260817-028' },
-]
-
 function hasExactFields(value, fields) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const actual = Object.keys(value).sort()
@@ -764,6 +764,7 @@ function hasMessageShape(value) {
     && Boolean(value.id && value.text.trim())
     && value.text.length <= 4_000
     && (value.readBy === undefined || (Array.isArray(value.readBy) && value.readBy.length <= 500 && value.readBy.every((id) => typeof id === 'string' && id)))
+    && (value.createdAt === undefined || (typeof value.createdAt === 'string' && !Number.isNaN(Date.parse(value.createdAt))))
 }
 
 function hasConversationShape(value) {
@@ -790,14 +791,6 @@ function conversationLifecycle(conversation) {
 
 function directLineageId(leftId, rightId) {
   return `direct:${[String(leftId), String(rightId)].sort().join(':')}`
-}
-
-function legacyParticipantIdsServer(conversation) {
-  if (Array.isArray(conversation?.participantIds) && conversation.participantIds.length > 0) return conversation.participantIds
-  if (conversation?.id === 'team-ops') return []
-  if (conversation?.id === 'team-quality') return ['park', 'lee']
-  if (conversation?.type === 'direct' && typeof conversation.memberId === 'string') return ['USR-SUNSEA-ADMIN', conversation.memberId]
-  return []
 }
 
 function isConversationVisibleToMember(conversation, account) {
@@ -1031,7 +1024,7 @@ function validNewPassword(password, _account) {
   const value = String(password ?? '')
   return value.length >= 10 && value.length <= 72
     && /[a-z]/.test(value) && /[A-Z]/.test(value) && /\d/.test(value) && /[^a-z0-9]/i.test(value)
-    && value !== 'demo1234'
+    && value !== DEFAULT_LOCAL_DEMO_PASSWORD
 }
 
 function parseCookies(header = '') {
@@ -1056,6 +1049,7 @@ function safeAccount(account) {
     approved: account.approved,
     team: account.team,
     jobRole: account.jobRole,
+    isDemo: Boolean(account.isDemo),
     requiresPasswordChange: Boolean(account.mustChangePassword),
   }
 }
@@ -1087,7 +1081,7 @@ function normalizeSalesShipments(value) {
   return value
 }
 
-function ensurePlatformStore(store) {
+function ensurePlatformStore(store, { seedFixtures = true } = {}) {
   let changed = false
   if (!store.platform || typeof store.platform !== 'object' || Array.isArray(store.platform)) {
     store.platform = {}
@@ -1114,7 +1108,7 @@ function ensurePlatformStore(store) {
     changed = true
     return { ...tenant, id }
   })
-  for (const [key, fixtures] of [['tenants', PLATFORM_TENANT_FIXTURES], ['supportTickets', PLATFORM_TICKET_FIXTURES], ['integrations', PLATFORM_INTEGRATION_FIXTURES], ['auditEvents', PLATFORM_AUDIT_FIXTURES]]) {
+  for (const [key, fixtures] of seedFixtures ? [['tenants', PLATFORM_TENANT_FIXTURES], ['supportTickets', PLATFORM_TICKET_FIXTURES], ['integrations', PLATFORM_INTEGRATION_FIXTURES], ['auditEvents', PLATFORM_AUDIT_FIXTURES]] : []) {
     const ids = new Set(store.platform[key].map((item) => item?.id))
     for (const fixture of fixtures) {
       if (ids.has(fixture.id)) continue
@@ -1126,7 +1120,7 @@ function ensurePlatformStore(store) {
 }
 
 function platformTimestamp() {
-  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'short', hour12: false }).format(new Date())
+  return new Date().toISOString()
 }
 
 function appendPlatformAudit(platform, { tenantId, event, scope, actor, result = '완료', reference }) {
@@ -1271,7 +1265,7 @@ export function createApp(options = {}) {
     : 10_000
   const seedPassword = typeof options.seedPassword === 'string' && options.seedPassword.length >= 12
     ? options.seedPassword
-    : 'demo1234'
+    : DEFAULT_LOCAL_DEMO_PASSWORD
   const requireSeedPasswordChange = options.requireSeedPasswordChange === true
   const seedCredential = (accountId) => ({
     password: passwordDigest(seedPassword, accountId),
@@ -1283,33 +1277,46 @@ export function createApp(options = {}) {
   const workspaceStoreFile = options.workspaceStoreFile || null
   const documentUploadDirectory = options.documentUploadDirectory
     || (workspaceStoreFile ? path.join(path.dirname(workspaceStoreFile), 'documents') : null)
+  const documentStorage = options.documentStorage ?? createStorage({
+    env: options.env ?? process.env,
+    documentUploadDirectory,
+  })
   const workspaceStore = options.initialWorkspaceStore && typeof options.initialWorkspaceStore === 'object'
     ? options.initialWorkspaceStore
     : readWorkspaceStore(workspaceStoreFile)
   const onWorkspaceStoreChange = typeof options.onWorkspaceStoreChange === 'function' ? options.onWorkspaceStoreChange : null
   const commitWorkspaceStore = () => {
-    if (onWorkspaceStoreChange) onWorkspaceStoreChange(workspaceStore)
-    else persistWorkspaceStore(workspaceStoreFile, workspaceStore)
+    if (onWorkspaceStoreChange) return onWorkspaceStoreChange(workspaceStore)
+    return persistWorkspaceStore(workspaceStoreFile, workspaceStore)
   }
   workspaceStore.accountApprovals ??= {}
   workspaceStore.accountCredentials ??= {}
   workspaceStore.invitedAccounts ??= []
   workspaceStore.passwordResetRequests ??= []
-  const platformSeedChanged = ensurePlatformStore(workspaceStore)
-  if (platformSeedChanged) commitWorkspaceStore()
+  const platformSeedChanged = ensurePlatformStore(workspaceStore, { seedFixtures: options.seedPlatformFixtures !== false })
+  if (platformSeedChanged) {
+    const startupCommit = commitWorkspaceStore()
+    if (startupCommit && typeof startupCommit.then === 'function') {
+      throw new Error('비동기 저장소는 createApp 호출 전에 platform seed를 적재해야 합니다.')
+    }
+  }
   const sessions = options.sessions instanceof Map ? options.sessions : new Map()
-  const accounts = [
-    { id: 'USR-SUNSEA-ADMIN', name: '김서원', email: 'admin@sunsea.co.kr', role: 'tenant-admin', tenantId: 'TENANT-SUNSEA', tenantName: '햇살바다', team: '경영지원', jobRole: '운영 관리자', requested: '초기 관리자', approved: true, approvalStatus: 'approved', ...seedCredential('USR-SUNSEA-ADMIN') },
-    { id: 'USR-POHANG-ADMIN', name: '박해진', email: 'admin@pohangcoop.co.kr', role: 'tenant-admin', tenantId: 'TENANT-POHANG', tenantName: '포항시수산가공협동조합', team: '조합 운영', jobRole: '운영 관리자', requested: '초기 관리자', approved: true, approvalStatus: 'approved', ...seedCredential('USR-POHANG-ADMIN') },
-    { id: 'USR-ONFACTORY-OPS', name: '김서원', email: 'operator@onfactory.co.kr', role: 'platform-operator', tenantId: null, tenantName: null, team: '플랫폼 운영', jobRole: 'Platform Operator', requested: '초기 운영자', approved: true, approvalStatus: 'approved', ...seedCredential('USR-ONFACTORY-OPS') },
-    { id: 'USR-SUNSEA-PARK', name: '박지현', email: 'jihyun.park@sunsea.co.kr', role: 'tenant-member', tenantId: 'TENANT-SUNSEA', tenantName: '햇살바다', team: '품질관리', jobRole: '품질 책임자', requested: '기존 구성원', approved: true, approvalStatus: 'approved', ...seedCredential('USR-SUNSEA-PARK') },
-    { id: 'USR-SUNSEA-OH', name: '오태식', email: 'taesik.oh@sunsea.co.kr', role: 'tenant-member', tenantId: 'TENANT-SUNSEA', tenantName: '햇살바다', team: '생산 1팀', jobRole: '생산 반장', requested: '기존 구성원', approved: true, approvalStatus: 'approved', ...seedCredential('USR-SUNSEA-OH') },
-    { id: 'USR-SUNSEA-SEO', name: '서동현', email: 'donghyun.seo@sunsea.co.kr', role: 'tenant-member', tenantId: 'TENANT-SUNSEA', tenantName: '햇살바다', team: '물류팀', jobRole: '재고 담당', requested: '기존 구성원', approved: true, approvalStatus: 'approved', ...seedCredential('USR-SUNSEA-SEO') },
-    { id: 'USR-SUNSEA-YOON', name: '윤서진', email: 'seojin.yoon@sunsea.co.kr', role: 'tenant-member', tenantId: 'TENANT-SUNSEA', tenantName: '햇살바다', team: '판매운영', jobRole: '온라인 MD', requested: '기존 구성원', approved: true, approvalStatus: 'approved', ...seedCredential('USR-SUNSEA-YOON') },
-    { id: 'USR-SUNSEA-LEE', name: '이정민', email: 'jungmin.lee@sunsea.co.kr', role: 'tenant-member', tenantId: 'TENANT-SUNSEA', tenantName: '햇살바다', team: '품질관리', jobRole: '품질 담당', requested: '기존 구성원', approved: true, approvalStatus: 'approved', ...seedCredential('USR-SUNSEA-LEE') },
-    { id: 'USR-SUNSEA-HAN', name: '한예린', email: 'yerin.han@sunsea.co.kr', role: 'tenant-member', tenantId: 'TENANT-SUNSEA', tenantName: '햇살바다', team: '구매팀', jobRole: '원부자재 구매', requested: '기존 구성원', approved: true, approvalStatus: 'approved', ...seedCredential('USR-SUNSEA-HAN') },
-    { id: 'USR-SUNSEA-PENDING', name: '신규 직원', email: 'newstaff@sunsea.co.kr', role: 'tenant-member', tenantId: 'TENANT-SUNSEA', tenantName: '햇살바다', team: '생산 1팀', jobRole: '생산 작업자', requested: '오늘 09:24', approved: false, approvalStatus: 'pending', ...seedCredential('USR-SUNSEA-PENDING') },
-  ]
+  const accounts = (options.seedDemoAccounts === false ? [] : DEMO_ACCOUNT_DEFINITIONS)
+    .map((definition) => ({ ...structuredClone(definition), ...seedCredential(definition.id) }))
+  for (const persisted of Array.isArray(workspaceStore.accounts) ? workspaceStore.accounts : []) {
+    if (!persisted?.id || !persisted?.email) continue
+    const existing = accounts.find((account) => account.id === persisted.id)
+    if (existing) {
+      Object.assign(existing, persisted, { password: existing.password })
+      continue
+    }
+    accounts.push({
+      ...persisted,
+      approved: persisted.approved ?? persisted.approvalStatus === 'approved',
+      approvalStatus: persisted.approvalStatus || (persisted.approved ? 'approved' : 'pending'),
+      password: passwordDigest(randomBytes(32).toString('base64url'), persisted.id),
+    })
+  }
   for (const tenant of workspaceStore.platform.tenants) {
     const admin = tenant?.adminAccount
     if (!admin?.id || !admin?.email || accounts.some((account) => account.id === admin.id || account.email.toLowerCase() === String(admin.email).toLowerCase())) continue
@@ -1349,6 +1356,10 @@ export function createApp(options = {}) {
     })
   }
   for (const account of accounts) {
+    account.isDemo = Boolean(account.tenantId && (
+      workspaceStore.tenantMetadata?.[account.tenantId]?.isDemo
+      ?? workspaceStore.platform.tenants.find((tenant) => tenant?.id === account.tenantId)?.isDemo
+    ))
     const persistedDecision = workspaceStore.accountApprovals[account.id]
     if (persistedDecision === 'approved' || persistedDecision === 'rejected') {
       account.approvalStatus = persistedDecision
@@ -1364,9 +1375,10 @@ export function createApp(options = {}) {
       account.temporaryPasswordExpiresAt = null
     }
   }
-  if (migrateLegacyWorkItemIds(workspaceStore, accounts)) {
+  if (options.skipStartupMigrations !== true && migrateLegacyWorkItemIds(workspaceStore, accounts)) {
     try {
-      commitWorkspaceStore()
+      const startupCommit = commitWorkspaceStore()
+      if (startupCommit && typeof startupCommit.then === 'function') throw new Error('비동기 저장소는 사전 migration이 필요합니다.')
     } catch (error) {
       console.error('[work-item-migration] Failed to persist account IDs', { message: error?.message })
     }
@@ -1470,14 +1482,14 @@ export function createApp(options = {}) {
     return document.visibility === 'restricted' && Array.isArray(document.allowedUserIds) && document.allowedUserIds.includes(account.id)
   }
   const listParameter = (value, limit = 20) => String(value ?? '').split(',').map((item) => item.trim()).filter(Boolean).slice(0, limit)
-  const persistDocumentList = (tenantId, documents, accountId) => {
+  const persistDocumentList = async (tenantId, documents, accountId) => {
     const previousTenantStore = workspaceStore.tenants[tenantId]
     workspaceStore.tenants[tenantId] = {
       ...(previousTenantStore ?? {}),
       'company-documents': { data: documents, updatedAt: new Date().toISOString(), updatedBy: accountId },
     }
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch (error) {
       if (previousTenantStore) workspaceStore.tenants[tenantId] = previousTenantStore
       else delete workspaceStore.tenants[tenantId]
@@ -1493,17 +1505,23 @@ export function createApp(options = {}) {
       item?.backgroundDocumentId,
     ]).map((id) => String(id ?? '')).filter((id) => id.startsWith('DOC-')))]
     : []
-  const canReferenceDocuments = (data, account) => {
+  const canReferenceDocuments = async (data, account) => {
     const ids = linkedDocumentIds(data)
     if (!ids.length) return true
-    if (!account?.tenantId || !documentUploadDirectory) return false
+    if (!account?.tenantId || !documentStorage) return false
     const documents = Array.isArray(documentRecord(account.tenantId)?.data) ? documentRecord(account.tenantId).data : []
     const byId = new Map(documents.map((document) => [document.id, document]))
-    return ids.every((id) => {
+    const results = await Promise.all(ids.map(async (id) => {
       const document = byId.get(id)
-      return canReadDocument(document, account)
-        && existsSync(path.join(documentUploadDirectory, account.tenantId, `${id}.bin`))
-    })
+      if (!canReadDocument(document, account)) return false
+      try {
+        await getTenantDocument(documentStorage, document, account.tenantId)
+        return true
+      } catch {
+        return false
+      }
+    }))
+    return results.every(Boolean)
   }
   const documentIsReferenced = (tenantId, id) => {
     const tenantStore = workspaceStore.tenants[tenantId] ?? {}
@@ -1521,9 +1539,9 @@ export function createApp(options = {}) {
     response.json({ documents: documents.filter((document) => canReadDocument(document, request.auth)).map(({ tenantId: _tenantId, ...document }) => document) })
   })
 
-  app.post('/api/documents', requireAuth, requireMatchingWorkspaceIdentity, express.raw({ type: '*/*', limit: '10mb' }), (request, response) => {
+  app.post('/api/documents', requireAuth, requireMatchingWorkspaceIdentity, express.raw({ type: '*/*', limit: '10mb' }), async (request, response) => {
     if (!request.auth.tenantId) { response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } }); return }
-    if (!documentUploadDirectory) { response.status(503).json({ error: { code: 'DOCUMENT_STORAGE_UNAVAILABLE', message: '파일 저장 경로가 설정되지 않았습니다.' } }); return }
+    if (!documentStorage) { response.status(503).json({ error: { code: 'DOCUMENT_STORAGE_UNAVAILABLE', message: '파일 저장소가 설정되지 않았습니다.' } }); return }
     if (!Buffer.isBuffer(request.body) || request.body.length === 0) { response.status(400).json({ error: { code: 'DOCUMENT_FILE_REQUIRED', message: '업로드할 파일을 선택해 주세요.' } }); return }
     let originalName = 'document'
     try { originalName = decodeURIComponent(String(request.get('x-file-name') || 'document')) } catch { originalName = 'document' }
@@ -1553,6 +1571,7 @@ export function createApp(options = {}) {
       if (visibility === 'restricted') allowedUserIds = [request.auth.id]
     }
     const id = `DOC-${Date.now()}-${randomBytes(4).toString('hex')}`
+    let storedFile = null
     const document = {
       id,
       tenantId: request.auth.tenantId,
@@ -1569,25 +1588,30 @@ export function createApp(options = {}) {
       uploadedAt: new Date().toISOString(),
       uploadedById: request.auth.id,
       uploadedByName: request.auth.name,
-      storage: 'local',
+      storage: documentStorage.backend,
     }
-    const tenantDirectory = path.join(documentUploadDirectory, request.auth.tenantId)
-    const filePath = path.join(tenantDirectory, `${id}.bin`)
     try {
-      mkdirSync(tenantDirectory, { recursive: true })
-      writeFileSync(filePath, request.body, { mode: 0o600 })
+      storedFile = await putTenantDocument(documentStorage, {
+        tenantId: request.auth.tenantId,
+        id,
+        body: request.body,
+        contentType: document.mime,
+      })
+      Object.assign(document, storedFile)
       const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? [...documentRecord(request.auth.tenantId).data] : []
       documents.unshift(document)
-      persistDocumentList(request.auth.tenantId, documents, request.auth.id)
+      await persistDocumentList(request.auth.tenantId, documents, request.auth.id)
       const { tenantId: _tenantId, ...safeDocument } = document
       response.status(201).json({ document: safeDocument })
     } catch (error) {
-      try { if (existsSync(filePath)) unlinkSync(filePath) } catch { /* best-effort cleanup */ }
+      if (storedFile) {
+        try { await deleteTenantDocument(documentStorage, document, request.auth.tenantId) } catch { /* best-effort cleanup */ }
+      }
       response.status(500).json({ error: { code: 'DOCUMENT_UPLOAD_FAILED', message: '기업 자료를 저장하지 못했습니다.' } })
     }
   })
 
-  app.patch('/api/documents/:id', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.patch('/api/documents/:id', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
     const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? [...documentRecord(request.auth.tenantId).data] : []
     const index = documents.findIndex((document) => document.id === request.params.id)
     if (index < 0) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } }); return }
@@ -1612,55 +1636,55 @@ export function createApp(options = {}) {
       }
     }
     documents[index] = updatedDocument
-    try { persistDocumentList(request.auth.tenantId, documents, request.auth.id); const { tenantId: _tenantId, ...safeDocument } = documents[index]; response.json({ document: safeDocument }) }
+    try { await persistDocumentList(request.auth.tenantId, documents, request.auth.id); const { tenantId: _tenantId, ...safeDocument } = documents[index]; response.json({ document: safeDocument }) }
     catch { response.status(500).json({ error: { code: 'DOCUMENT_UPDATE_FAILED', message: '자료 정보를 저장하지 못했습니다.' } }) }
   })
 
-  app.get('/api/documents/:id/download', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
-    if (!request.auth.tenantId || !documentUploadDirectory) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } }); return }
+  app.get('/api/documents/:id/download', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    if (!request.auth.tenantId || !documentStorage) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } }); return }
     const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : []
     const document = documents.find((item) => item.id === request.params.id)
     if (!document || !canReadDocument(document, request.auth)) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없거나 열람 권한이 없습니다.' } }); return }
-    const filePath = path.join(documentUploadDirectory, request.auth.tenantId, `${document.id}.bin`)
-    if (!existsSync(filePath)) { response.status(410).json({ error: { code: 'DOCUMENT_FILE_MISSING', message: '파일 원본을 찾을 수 없습니다. 관리자에게 복구를 요청해 주세요.' } }); return }
-    response.setHeader('content-type', document.mime || 'application/octet-stream')
-    response.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeDownloadName(document.originalName || document.name))}`)
-    response.send(readFileSync(filePath))
+    try {
+      const signedUrl = await tenantDocumentSignedUrl(documentStorage, document, request.auth.tenantId)
+      if (signedUrl) { response.redirect(302, signedUrl); return }
+      const body = await getTenantDocument(documentStorage, document, request.auth.tenantId)
+      response.setHeader('content-type', document.mime || 'application/octet-stream')
+      response.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeDownloadName(document.originalName || document.name))}`)
+      response.send(body)
+    } catch (error) {
+      const status = error instanceof DocumentStorageError ? error.status : 500
+      const code = error instanceof DocumentStorageError ? error.code : 'DOCUMENT_DOWNLOAD_FAILED'
+      response.status(status).json({ error: { code, message: status === 410 ? '파일 원본을 찾을 수 없습니다. 관리자에게 복구를 요청해 주세요.' : '자료를 다운로드하지 못했습니다.' } })
+    }
   })
 
-  app.delete('/api/documents/:id', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
-    if (!request.auth.tenantId || !documentUploadDirectory) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } }); return }
+  app.delete('/api/documents/:id', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    if (!request.auth.tenantId || !documentStorage) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } }); return }
     const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? [...documentRecord(request.auth.tenantId).data] : []
     const document = documents.find((item) => item.id === request.params.id)
     if (!document) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } }); return }
     if (isFactoryDrawingDocument(document) && request.auth.role !== 'tenant-admin') { response.status(403).json({ error: { code: 'FACTORY_DRAWING_WRITE_FORBIDDEN', message: '공장 배경 도면은 회사 관리자만 삭제할 수 있습니다.' } }); return }
     if (request.auth.role !== 'tenant-admin' && document.uploadedById !== request.auth.id) { response.status(403).json({ error: { code: 'DOCUMENT_DELETE_FORBIDDEN', message: '본인이 업로드한 자료만 삭제할 수 있습니다.' } }); return }
     if (documentIsReferenced(request.auth.tenantId, document.id)) { response.status(409).json({ error: { code: 'DOCUMENT_IN_USE', message: '업무·일지·인증·재고 또는 공장 화면에서 사용 중인 자료입니다. 해당 화면에서 먼저 연결을 해제해 주세요.' } }); return }
-    const filePath = path.join(documentUploadDirectory, request.auth.tenantId, `${document.id}.bin`)
-    const tombstonePath = `${filePath}.deleting-${randomBytes(4).toString('hex')}`
-    let moved = false
-    let metadataRemoved = false
+    let originalBytes = null
+    let removedFile = false
     try {
-      if (existsSync(filePath)) {
-        renameSync(filePath, tombstonePath)
-        moved = true
-      }
-      persistDocumentList(request.auth.tenantId, documents.filter((item) => item.id !== document.id), request.auth.id)
-      metadataRemoved = true
-      if (moved) unlinkSync(tombstonePath)
+      try { originalBytes = await getTenantDocument(documentStorage, document, request.auth.tenantId) }
+      catch (error) { if (!(error instanceof DocumentStorageError && error.code === 'DOCUMENT_FILE_MISSING')) throw error }
+      removedFile = await deleteTenantDocument(documentStorage, document, request.auth.tenantId)
+      await persistDocumentList(request.auth.tenantId, documents.filter((item) => item.id !== document.id), request.auth.id)
       response.json({ deleted: true })
     } catch {
-      if (metadataRemoved) {
-        try { persistDocumentList(request.auth.tenantId, documents, request.auth.id) } catch { /* best-effort metadata rollback */ }
-      }
-      if (moved && existsSync(tombstonePath) && !existsSync(filePath)) {
-        try { renameSync(tombstonePath, filePath) } catch { /* best-effort file rollback */ }
+      if (removedFile && originalBytes) {
+        try {
+          await documentStorage.put(documentStorageKey(document, request.auth.tenantId), originalBytes, { contentType: document.mime })
+        } catch { /* best-effort file rollback */ }
       }
       response.status(500).json({ error: { code: 'DOCUMENT_DELETE_FAILED', message: '자료를 삭제하지 못했습니다. 기존 파일은 보존했습니다.' } })
     }
   })
 
-  const platformEvidenceDirectory = documentUploadDirectory ? path.join(documentUploadDirectory, '_platform') : null
   const platformTenant = (tenantId) => workspaceStore.platform.tenants.find((tenant) => tenant?.id === tenantId)
   const publicPlatformTenant = (tenant) => {
     const { adminAccount: _adminAccount, ...safeTenant } = tenant
@@ -1686,7 +1710,7 @@ export function createApp(options = {}) {
     response.json(publicPlatformState())
   })
 
-  app.post('/api/platform/tenants', requireAuth, requirePlatformOperator, (request, response) => {
+  app.post('/api/platform/tenants', requireAuth, requirePlatformOperator, async (request, response) => {
     const companyName = String(request.body?.companyName ?? '').trim()
     const industry = String(request.body?.industry ?? '').trim()
     const plan = String(request.body?.plan ?? '')
@@ -1727,7 +1751,7 @@ export function createApp(options = {}) {
     accounts.push(account)
     appendPlatformAudit(workspaceStore.platform, { tenantId, event: '고객사 온보딩 완료', scope: `${plan} · 최초 관리자 ${adminEmail}`, actor: request.auth.name, reference: tenantId })
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch (error) {
       workspaceStore.platform.tenants = previousTenants
       workspaceStore.platform.integrations = previousIntegrations
@@ -1743,7 +1767,7 @@ export function createApp(options = {}) {
     response.status(201).json({ tenant: publicPlatformTenant(tenant), onboarding })
   })
 
-  app.post('/api/platform/tickets', requireAuth, requirePlatformOperator, express.raw({ type: 'application/octet-stream', limit: '10mb' }), (request, response) => {
+  app.post('/api/platform/tickets', requireAuth, requirePlatformOperator, express.raw({ type: 'application/octet-stream', limit: '10mb' }), async (request, response) => {
     const source = Buffer.isBuffer(request.body) ? request.query : request.body ?? {}
     const tenantId = String(source.tenantId ?? request.query.tenantId ?? '')
     const tenant = platformTenant(tenantId)
@@ -1756,15 +1780,17 @@ export function createApp(options = {}) {
       return
     }
     let evidence
-    let evidencePath
+    let storedEvidence = null
     if (Buffer.isBuffer(request.body) && request.body.length > 0) {
-      if (!platformEvidenceDirectory) { response.status(503).json({ error: { code: 'PLATFORM_EVIDENCE_UNAVAILABLE', message: '플랫폼 증빙 저장 경로가 설정되지 않았습니다.' } }); return }
+      if (!documentStorage) { response.status(503).json({ error: { code: 'PLATFORM_EVIDENCE_UNAVAILABLE', message: '플랫폼 증빙 저장소가 설정되지 않았습니다.' } }); return }
       let evidenceName = String(request.query.evidenceName ?? request.get('x-file-name') ?? 'evidence')
       try { evidenceName = decodeURIComponent(evidenceName) } catch { evidenceName = 'evidence' }
       evidenceName = safeDownloadName(evidenceName)
       evidence = { id: `PFD-${Date.now()}-${randomBytes(4).toString('hex')}`, name: evidenceName, mime: String(request.get('x-file-type') || 'application/octet-stream').slice(0, 120), size: request.body.length }
-      evidencePath = path.join(platformEvidenceDirectory, `${evidence.id}.bin`)
-      try { mkdirSync(platformEvidenceDirectory, { recursive: true }); writeFileSync(evidencePath, request.body, { mode: 0o600 }) }
+      try {
+        storedEvidence = await putPlatformEvidence(documentStorage, { id: evidence.id, body: request.body, contentType: evidence.mime })
+        Object.assign(evidence, storedEvidence, { storage: storedEvidence.storageBackend })
+      }
       catch { response.status(500).json({ error: { code: 'PLATFORM_EVIDENCE_WRITE_FAILED', message: 'CS 증빙 파일을 저장하지 못했습니다.' } }); return }
     }
     const now = new Date().toISOString()
@@ -1773,18 +1799,18 @@ export function createApp(options = {}) {
     const previousAudits = workspaceStore.platform.auditEvents
     workspaceStore.platform.supportTickets = [ticket, ...previousTickets]
     appendPlatformAudit(workspaceStore.platform, { tenantId, event: 'CS 티켓 등록', scope: `${priority} · ${owner}`, actor: request.auth.name, reference: ticket.id })
-    try { commitWorkspaceStore() }
+    try { await commitWorkspaceStore() }
     catch {
       workspaceStore.platform.supportTickets = previousTickets
       workspaceStore.platform.auditEvents = previousAudits
-      try { if (evidencePath && existsSync(evidencePath)) unlinkSync(evidencePath) } catch { /* preserve write failure */ }
+      try { if (storedEvidence) await deletePlatformEvidence(documentStorage, evidence) } catch { /* preserve write failure */ }
       response.status(500).json({ error: { code: 'PLATFORM_TICKET_WRITE_FAILED', message: 'CS 티켓을 저장하지 못했습니다.' } })
       return
     }
     response.status(201).json({ ticket })
   })
 
-  app.patch('/api/platform/tickets/:id', requireAuth, requirePlatformOperator, (request, response) => {
+  app.patch('/api/platform/tickets/:id', requireAuth, requirePlatformOperator, async (request, response) => {
     const index = workspaceStore.platform.supportTickets.findIndex((ticket) => ticket?.id === request.params.id)
     if (index < 0) { response.status(404).json({ error: { code: 'PLATFORM_TICKET_NOT_FOUND', message: 'CS 티켓을 찾을 수 없습니다.' } }); return }
     const previous = workspaceStore.platform.supportTickets[index]
@@ -1802,7 +1828,7 @@ export function createApp(options = {}) {
     const previousAudits = workspaceStore.platform.auditEvents
     workspaceStore.platform.supportTickets = previousTickets.map((item, itemIndex) => itemIndex === index ? ticket : item)
     if (changed.length) appendPlatformAudit(workspaceStore.platform, { tenantId: ticket.tenantId, event: 'CS 티켓 변경', scope: changed.join(' · '), actor: request.auth.name, reference: ticket.id })
-    try { commitWorkspaceStore() }
+    try { await commitWorkspaceStore() }
     catch {
       workspaceStore.platform.supportTickets = previousTickets
       workspaceStore.platform.auditEvents = previousAudits
@@ -1812,17 +1838,24 @@ export function createApp(options = {}) {
     response.json({ ticket })
   })
 
-  app.get('/api/platform/tickets/:id/evidence', requireAuth, requirePlatformOperator, (request, response) => {
+  app.get('/api/platform/tickets/:id/evidence', requireAuth, requirePlatformOperator, async (request, response) => {
     const ticket = workspaceStore.platform.supportTickets.find((item) => item?.id === request.params.id)
-    if (!ticket?.evidence || !platformEvidenceDirectory) { response.status(404).json({ error: { code: 'PLATFORM_EVIDENCE_NOT_FOUND', message: 'CS 증빙을 찾을 수 없습니다.' } }); return }
-    const filePath = path.join(platformEvidenceDirectory, `${ticket.evidence.id}.bin`)
-    if (!existsSync(filePath)) { response.status(410).json({ error: { code: 'PLATFORM_EVIDENCE_MISSING', message: 'CS 증빙 원본을 찾을 수 없습니다.' } }); return }
-    response.setHeader('content-type', ticket.evidence.mime || 'application/octet-stream')
-    response.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeDownloadName(ticket.evidence.name))}`)
-    response.send(readFileSync(filePath))
+    if (!ticket?.evidence || !documentStorage) { response.status(404).json({ error: { code: 'PLATFORM_EVIDENCE_NOT_FOUND', message: 'CS 증빙을 찾을 수 없습니다.' } }); return }
+    try {
+      const signedUrl = await platformEvidenceSignedUrl(documentStorage, ticket.evidence)
+      if (signedUrl) { response.redirect(302, signedUrl); return }
+      const body = await getPlatformEvidence(documentStorage, ticket.evidence)
+      response.setHeader('content-type', ticket.evidence.mime || 'application/octet-stream')
+      response.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeDownloadName(ticket.evidence.name))}`)
+      response.send(body)
+    } catch (error) {
+      const status = error instanceof DocumentStorageError ? error.status : 500
+      const code = error instanceof DocumentStorageError ? error.code : 'PLATFORM_EVIDENCE_DOWNLOAD_FAILED'
+      response.status(status).json({ error: { code, message: status === 410 ? 'CS 증빙 원본을 찾을 수 없습니다.' : 'CS 증빙을 다운로드하지 못했습니다.' } })
+    }
   })
 
-  app.post('/api/platform/actions', requireAuth, requirePlatformOperator, (request, response) => {
+  app.post('/api/platform/actions', requireAuth, requirePlatformOperator, async (request, response) => {
     const tenantId = String(request.body?.tenantId ?? '')
     const kind = String(request.body?.kind ?? '')
     const target = String(request.body?.target ?? '').trim()
@@ -1837,7 +1870,7 @@ export function createApp(options = {}) {
     const previousAudits = workspaceStore.platform.auditEvents
     workspaceStore.platform.actions = [action, ...previousActions].slice(0, 5_000)
     appendPlatformAudit(workspaceStore.platform, { tenantId, event: kind, scope: `${target} · ${message.slice(0, 160)}`, actor: request.auth.name, reference: reference || action.id })
-    try { commitWorkspaceStore() }
+    try { await commitWorkspaceStore() }
     catch {
       workspaceStore.platform.actions = previousActions
       workspaceStore.platform.auditEvents = previousAudits
@@ -1847,7 +1880,7 @@ export function createApp(options = {}) {
     response.status(201).json({ action })
   })
 
-  const materializeDueWorkRules = (tenantId, actorId) => {
+  const materializeDueWorkRules = async (tenantId, actorId) => {
     const tenantStore = workspaceStore.tenants[tenantId] ?? {}
     const rulesRecord = tenantStore['work-rules']
     const tasksRecord = tenantStore['work-items']
@@ -1905,7 +1938,7 @@ export function createApp(options = {}) {
     tenantStore['work-items'] = { data: tasks, updatedAt, updatedBy: actorId }
     workspaceStore.tenants[tenantId] = tenantStore
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch (error) {
       tenantStore['work-rules'] = previousRulesRecord
       if (previousTasksRecord) tenantStore['work-items'] = previousTasksRecord
@@ -1915,14 +1948,14 @@ export function createApp(options = {}) {
     return { created, rules }
   }
 
-  const commitConversationData = (tenantId, data, actorId) => {
+  const commitConversationData = async (tenantId, data, actorId) => {
     const tenantStore = workspaceStore.tenants[tenantId] ?? {}
     const previousRecord = tenantStore['messenger-conversations']
     const record = { data, updatedAt: new Date().toISOString(), updatedBy: actorId }
     tenantStore['messenger-conversations'] = record
     workspaceStore.tenants[tenantId] = tenantStore
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch (error) {
       if (previousRecord) tenantStore['messenger-conversations'] = previousRecord
       else delete tenantStore['messenger-conversations']
@@ -1931,7 +1964,7 @@ export function createApp(options = {}) {
     return record
   }
 
-  app.post('/api/auth/login', (request, response) => {
+  app.post('/api/auth/login', async (request, response) => {
     const email = String(request.body?.email ?? '').trim().toLowerCase()
     const password = String(request.body?.password ?? '')
     const requestedWorkspace = request.body?.workspace === 'platform' ? 'platform' : 'tenant'
@@ -1960,6 +1993,13 @@ export function createApp(options = {}) {
 
     const token = randomBytes(32).toString('base64url')
     sessions.set(token, { accountId: account.id, expiresAt: Date.now() + SESSION_MAX_AGE_SECONDS * 1000 })
+    try {
+      await sessions.flush?.()
+    } catch {
+      sessions.delete(token)
+      response.status(503).json({ error: { code: 'SESSION_WRITE_FAILED', message: '로그인 세션을 안전하게 저장하지 못했습니다. 다시 시도해 주세요.' } })
+      return
+    }
     const secure = request.secure || request.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''
     const persistence = request.body?.remember === false ? '' : `; Max-Age=${SESSION_MAX_AGE_SECONDS}`
     response.setHeader('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/${persistence}${secure}`)
@@ -1970,7 +2010,7 @@ export function createApp(options = {}) {
     response.json({ account: request.auth })
   })
 
-  app.post('/api/auth/password/change', requireSession, (request, response) => {
+  app.post('/api/auth/password/change', requireSession, async (request, response) => {
     const account = request.sessionAccount
     if (!account.mustChangePassword) {
       response.status(409).json({ error: { code: 'PASSWORD_CHANGE_NOT_REQUIRED', message: '이 계정은 초기 비밀번호 변경 대상이 아닙니다.' } })
@@ -1996,7 +2036,7 @@ export function createApp(options = {}) {
       changedAt,
     }
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch {
       account.password = previousPassword
       account.mustChangePassword = previousMustChange
@@ -2007,15 +2047,18 @@ export function createApp(options = {}) {
       return
     }
     const currentToken = parseCookies(request.headers.cookie)[SESSION_COOKIE]
+    const currentSessionKey = typeof sessions.canonicalKey === 'function' ? sessions.canonicalKey(currentToken) : currentToken
     for (const [token, session] of sessions.entries()) {
-      if (session.accountId === account.id && token !== currentToken) sessions.delete(token)
+      if (session.accountId === account.id && token !== currentSessionKey) sessions.delete(token)
     }
+    try { await sessions.flush?.() } catch { response.status(500).json({ error: { code: 'SESSION_REVOKE_FAILED', message: '기존 로그인 세션을 해제하지 못했습니다.' } }); return }
     response.json({ account: safeAccount(account), changedAt })
   })
 
-  app.post('/api/auth/logout', (request, response) => {
+  app.post('/api/auth/logout', async (request, response) => {
     const token = parseCookies(request.headers.cookie)[SESSION_COOKIE]
     if (token) sessions.delete(token)
+    try { await sessions.flush?.() } catch { response.status(503).json({ error: { code: 'SESSION_REVOKE_FAILED', message: '로그아웃 세션을 저장하지 못했습니다.' } }); return }
     response.setHeader('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`)
     response.status(204).end()
   })
@@ -2141,7 +2184,7 @@ export function createApp(options = {}) {
     }
   })
 
-  app.post('/api/messenger/conversations/direct', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.post('/api/messenger/conversations/direct', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     if (!request.auth.tenantId) {
       response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 대화를 시작할 수 있습니다.' } })
       return
@@ -2159,8 +2202,8 @@ export function createApp(options = {}) {
     const participantIds = accountIdentityIds(participant)
     const lineageId = directLineageId(request.auth.id, participant.id)
     const related = conversations.filter((conversation) => conversation?.type === 'direct'
-      && legacyParticipantIdsServer(conversation).some((id) => requesterIds.includes(id))
-      && legacyParticipantIdsServer(conversation).some((id) => participantIds.includes(id)))
+      && legacyConversationParticipantIds(conversation).some((id) => requesterIds.includes(id))
+      && legacyConversationParticipantIds(conversation).some((id) => participantIds.includes(id)))
     const generationOf = (conversation) => Number.isInteger(conversation?.generation) ? conversation.generation : 1
     const maxGeneration = related.reduce((maximum, conversation) => Math.max(maximum, generationOf(conversation)), 0)
     const maxHistoricalGeneration = related
@@ -2192,7 +2235,7 @@ export function createApp(options = {}) {
         return conversation
       })
       try {
-        commitConversationData(request.auth.tenantId, nextData, request.auth.id)
+        await commitConversationData(request.auth.tenantId, nextData, request.auth.id)
       } catch {
         response.status(500).json({ error: { code: 'MESSENGER_WRITE_FAILED', message: '기존 대화를 다시 열지 못했습니다.' } })
         return
@@ -2233,7 +2276,7 @@ export function createApp(options = {}) {
       messages: [],
     }
     try {
-      commitConversationData(request.auth.tenantId, [conversation, ...nextConversations], request.auth.id)
+      await commitConversationData(request.auth.tenantId, [conversation, ...nextConversations], request.auth.id)
     } catch {
       response.status(500).json({ error: { code: 'MESSENGER_WRITE_FAILED', message: '새 대화를 저장하지 못했습니다.' } })
       return
@@ -2241,7 +2284,7 @@ export function createApp(options = {}) {
     response.status(201).json({ conversation, created: true, closedConversationIds })
   })
 
-  app.post('/api/messenger/conversations/:id/read', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.post('/api/messenger/conversations/:id/read', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const conversations = Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []
     const previous = conversations.find((conversation) => conversation?.id === request.params.id)
@@ -2259,7 +2302,7 @@ export function createApp(options = {}) {
       return
     }
     try {
-      commitConversationData(request.auth.tenantId, conversations.map((item) => item.id === conversation.id ? conversation : item), request.auth.id)
+      await commitConversationData(request.auth.tenantId, conversations.map((item) => item.id === conversation.id ? conversation : item), request.auth.id)
     } catch {
       response.status(500).json({ error: { code: 'MESSENGER_READ_WRITE_FAILED', message: '읽음 상태를 저장하지 못했습니다.' } })
       return
@@ -2267,7 +2310,7 @@ export function createApp(options = {}) {
     response.json({ conversation })
   })
 
-  app.post('/api/messenger/conversations/:id/messages', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.post('/api/messenger/conversations/:id/messages', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     const text = String(request.body?.text ?? '').trim()
     if (!text || text.length > 4_000) {
       response.status(400).json({ error: { code: 'INVALID_MESSAGE', message: '메시지는 1자 이상 4,000자 이하로 입력해 주세요.' } })
@@ -2280,13 +2323,15 @@ export function createApp(options = {}) {
       response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '참여 중인 대화를 찾을 수 없습니다.' } })
       return
     }
-    const sentAt = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date())
+    const createdAt = new Date().toISOString()
+    const sentAt = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(createdAt))
     const message = {
       id: `m-${Date.now()}-${randomBytes(3).toString('hex')}`,
       senderId: request.auth.id,
       senderName: request.auth.name,
       text,
       time: sentAt,
+      createdAt,
       readBy: [request.auth.id],
     }
     const conversation = {
@@ -2296,7 +2341,7 @@ export function createApp(options = {}) {
       lastTime: sentAt,
     }
     try {
-      commitConversationData(request.auth.tenantId, conversations.map((item) => item.id === conversation.id ? conversation : item), request.auth.id)
+      await commitConversationData(request.auth.tenantId, conversations.map((item) => item.id === conversation.id ? conversation : item), request.auth.id)
     } catch {
       response.status(500).json({ error: { code: 'MESSENGER_WRITE_FAILED', message: '메시지를 저장하지 못했습니다.' } })
       return
@@ -2304,7 +2349,7 @@ export function createApp(options = {}) {
     response.status(201).json({ conversation, message })
   })
 
-  app.post('/api/messenger/conversations/:id/leave', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.post('/api/messenger/conversations/:id/leave', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const conversations = Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []
     const previous = conversations.find((conversation) => conversation?.id === request.params.id)
@@ -2314,7 +2359,7 @@ export function createApp(options = {}) {
     }
     const conversation = { ...previous, hiddenFor: Array.from(new Set([...(previous.hiddenFor ?? []), request.auth.id])) }
     try {
-      commitConversationData(request.auth.tenantId, conversations.map((item) => item.id === conversation.id ? conversation : item), request.auth.id)
+      await commitConversationData(request.auth.tenantId, conversations.map((item) => item.id === conversation.id ? conversation : item), request.auth.id)
     } catch {
       response.status(500).json({ error: { code: 'MESSENGER_LEAVE_FAILED', message: '대화방 나가기를 저장하지 못했습니다.' } })
       return
@@ -2322,7 +2367,7 @@ export function createApp(options = {}) {
     response.json({ left: true, conversationId: conversation.id })
   })
 
-  app.delete('/api/messenger/conversations/:id', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.delete('/api/messenger/conversations/:id', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const conversations = Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []
     const target = conversations.find((conversation) => conversation?.id === request.params.id)
@@ -2333,7 +2378,7 @@ export function createApp(options = {}) {
     const deletedAt = new Date().toISOString()
     const participantAccounts = target.type === 'direct'
       ? accounts.filter((account) => account.tenantId === request.auth.tenantId
-        && legacyParticipantIdsServer(target).some((id) => accountIdentityIds(account).includes(id)))
+        && legacyConversationParticipantIds(target).some((id) => accountIdentityIds(account).includes(id)))
       : []
     const canonicalParticipantIds = participantAccounts.map((account) => account.id)
     const tombstone = {
@@ -2353,7 +2398,7 @@ export function createApp(options = {}) {
       messages: [],
     }
     try {
-      commitConversationData(request.auth.tenantId, conversations.map((conversation) => conversation.id === target.id ? tombstone : conversation), request.auth.id)
+      await commitConversationData(request.auth.tenantId, conversations.map((conversation) => conversation.id === target.id ? tombstone : conversation), request.auth.id)
     } catch {
       response.status(500).json({ error: { code: 'MESSENGER_DELETE_FAILED', message: '대화방을 삭제하지 못했습니다.' } })
       return
@@ -2380,7 +2425,7 @@ export function createApp(options = {}) {
         ...previousRequests.map((item) => item.accountId === account.id && !item.usedAt && !item.revokedAt ? { ...item, status: 'revoked', revokedAt: createdAt } : item),
       ].slice(0, 100)
       try {
-        commitWorkspaceStore()
+        await commitWorkspaceStore()
         if (exposePasswordResetTokens) developmentReset = { token, expiresAt }
         if (passwordResetDelivery) {
           const resetUrl = `${request.protocol}://${request.get('host')}/?reset=${encodeURIComponent(token)}`
@@ -2388,11 +2433,11 @@ export function createApp(options = {}) {
             await passwordResetDelivery({ account: safeAccount(account), email, resetUrl, expiresAt })
             const record = workspaceStore.passwordResetRequests.find((item) => item.id === id)
             if (record) { record.status = 'delivered'; record.deliveredAt = new Date().toISOString() }
-            commitWorkspaceStore()
+            await commitWorkspaceStore()
           } catch {
             const record = workspaceStore.passwordResetRequests.find((item) => item.id === id)
             if (record) { record.status = 'delivery-failed'; record.deliveryFailedAt = new Date().toISOString() }
-            try { commitWorkspaceStore() } catch { /* generic response remains safe */ }
+            try { await commitWorkspaceStore() } catch { /* generic response remains safe */ }
           }
         }
       } catch {
@@ -2405,7 +2450,7 @@ export function createApp(options = {}) {
     })
   })
 
-  app.post('/api/auth/password-reset/confirm', (request, response) => {
+  app.post('/api/auth/password-reset/confirm', async (request, response) => {
     const token = String(request.body?.token ?? '')
     const newPassword = String(request.body?.newPassword ?? '')
     if (!/^[A-Za-z0-9_-]{40,100}$/.test(token)) {
@@ -2447,7 +2492,7 @@ export function createApp(options = {}) {
       ? { ...item, status: 'used', usedAt: changedAt }
       : item.accountId === account.id && !item.usedAt && !item.revokedAt ? { ...item, status: 'revoked', revokedAt: changedAt } : item)
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch {
       account.password = previousPassword
       account.mustChangePassword = previousMustChange
@@ -2459,6 +2504,7 @@ export function createApp(options = {}) {
       return
     }
     for (const [sessionToken, session] of sessions.entries()) if (session.accountId === account.id) sessions.delete(sessionToken)
+    try { await sessions.flush?.() } catch { response.status(500).json({ error: { code: 'SESSION_REVOKE_FAILED', message: '기존 로그인 세션을 해제하지 못했습니다.' } }); return }
     response.json({ email: account.email, message: '새 비밀번호를 저장했습니다. 다시 로그인해 주세요.' })
   })
 
@@ -2486,7 +2532,7 @@ export function createApp(options = {}) {
     response.json({ accounts: scopedAccounts })
   })
 
-  app.post('/api/admin/accounts/:id/decision', requireAuth, requireTenantAdmin, (request, response) => {
+  app.post('/api/admin/accounts/:id/decision', requireAuth, requireTenantAdmin, async (request, response) => {
     const decision = request.body?.decision === 'approve' ? 'approved' : request.body?.decision === 'reject' ? 'rejected' : null
     if (!decision) {
       response.status(400).json({ error: { code: 'INVALID_DECISION', message: '승인 또는 반려 결정을 선택해 주세요.' } })
@@ -2512,7 +2558,7 @@ export function createApp(options = {}) {
     workspaceStore.accountApprovals[account.id] = decision
     const onboarding = decision === 'approved' && !wasApproved ? issueOnboardingCredential(account) : undefined
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch (error) {
       account.approvalStatus = previous.approvalStatus
       account.approved = previous.approved
@@ -2530,7 +2576,7 @@ export function createApp(options = {}) {
     response.json({ account: { id: account.id, status: account.approved ? '활성' : '반려', onboardingStatus: account.mustChangePassword ? '초기설정대기' : account.approved ? '설정완료' : '승인대기', temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt || null }, onboarding })
   })
 
-  app.post('/api/admin/accounts/:id/onboarding-credential', requireAuth, requireTenantAdmin, (request, response) => {
+  app.post('/api/admin/accounts/:id/onboarding-credential', requireAuth, requireTenantAdmin, async (request, response) => {
     const account = accounts.find((candidate) => candidate.id === request.params.id && candidate.tenantId === request.auth.tenantId && candidate.role === 'tenant-member')
     if (!account || !account.approved) {
       response.status(404).json({ error: { code: 'ACCOUNT_NOT_ACTIVE', message: '활성화된 회사 계정을 찾을 수 없습니다.' } })
@@ -2542,7 +2588,7 @@ export function createApp(options = {}) {
     const previousCredential = workspaceStore.accountCredentials[account.id]
     const onboarding = issueOnboardingCredential(account)
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch {
       account.password = previousPassword
       account.mustChangePassword = previousMustChange
@@ -2553,10 +2599,11 @@ export function createApp(options = {}) {
       return
     }
     for (const [token, session] of sessions.entries()) if (session.accountId === account.id) sessions.delete(token)
+    try { await sessions.flush?.() } catch { response.status(500).json({ error: { code: 'SESSION_REVOKE_FAILED', message: '기존 로그인 세션을 해제하지 못했습니다.' } }); return }
     response.json({ account: { id: account.id, status: '활성', onboardingStatus: '초기설정대기', temporaryPasswordExpiresAt: onboarding.expiresAt }, onboarding })
   })
 
-  app.post('/api/admin/accounts/invite', requireAuth, requireTenantAdmin, (request, response) => {
+  app.post('/api/admin/accounts/invite', requireAuth, requireTenantAdmin, async (request, response) => {
     const email = String(request.body?.email ?? '').trim().toLowerCase()
     const requestedName = String(request.body?.name ?? '').trim()
     const team = String(request.body?.team ?? '').trim()
@@ -2590,7 +2637,7 @@ export function createApp(options = {}) {
       team, jobRole, requested: account.requested,
     })
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch (error) {
       accounts.splice(accounts.indexOf(account), 1)
       workspaceStore.invitedAccounts = workspaceStore.invitedAccounts.filter((item) => item.id !== id)
@@ -2615,7 +2662,7 @@ export function createApp(options = {}) {
     response.json({ approvers })
   })
 
-  app.post('/api/leave-requests', requireAuth, (request, response) => {
+  app.post('/api/leave-requests', requireAuth, async (request, response) => {
     if (!request.auth.tenantId) {
       response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } })
       return
@@ -2656,7 +2703,7 @@ export function createApp(options = {}) {
     tenantStore['leave-requests'] = record
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch (error) {
       if (previousRecord) tenantStore['leave-requests'] = previousRecord
       else delete tenantStore['leave-requests']
@@ -2667,7 +2714,7 @@ export function createApp(options = {}) {
     response.status(201).json({ leave, updatedAt: record.updatedAt })
   })
 
-  app.patch('/api/leave-requests/:id/decision', requireAuth, requireTenantAdmin, (request, response) => {
+  app.patch('/api/leave-requests/:id/decision', requireAuth, requireTenantAdmin, async (request, response) => {
     const status = request.body?.decision === 'approve' ? '승인' : request.body?.decision === 'reject' ? '반려' : null
     if (!status) {
       response.status(400).json({ error: { code: 'INVALID_DECISION', message: '승인 또는 반려 결정을 선택해 주세요.' } })
@@ -2720,7 +2767,7 @@ export function createApp(options = {}) {
         balanceAfter: nextBalance.total - nextBalance.used,
         memo: `${target.period} ${target.type} 승인`,
         actor: request.auth.name,
-        createdAt: now.toLocaleString('ko-KR', { hour12: false, timeZone: 'Asia/Seoul' }),
+        createdAt: now.toISOString(),
       }
       nextLeaveManagement = {
         ...currentManagement,
@@ -2748,7 +2795,7 @@ export function createApp(options = {}) {
     }
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch (error) {
       tenantStore['leave-requests'] = previousRecord
       if (previousManagementRecord) tenantStore['leave-management'] = previousManagementRecord
@@ -2785,7 +2832,7 @@ export function createApp(options = {}) {
     response.json({ events, updatedAt: record?.updatedAt ?? null })
   })
 
-  app.post('/api/daily-journals/:id/review', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.post('/api/daily-journals/:id/review', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
     const status = request.body?.decision === 'approve' ? '승인' : request.body?.decision === 'reject' ? '반려' : null
     const comment = String(request.body?.comment ?? '').trim()
     if (!status) {
@@ -2839,7 +2886,7 @@ export function createApp(options = {}) {
     tenantStore['daily-journals'] = record
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch (error) {
       tenantStore['daily-journals'] = previousRecord
       console.error('[journal-review] Failed to persist review', { message: error?.message })
@@ -2849,7 +2896,7 @@ export function createApp(options = {}) {
     response.json({ journal: next, review, updatedAt: now })
   })
 
-  app.post('/api/work-items/:id/transition', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.post('/api/work-items/:id/transition', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     if (!request.auth.tenantId) {
       response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } })
       return
@@ -2878,7 +2925,7 @@ export function createApp(options = {}) {
         response.status(400).json({ error: { code: 'INVALID_COMPLETION', message: '완료 내용(3자 이상)과 증빙자료 정보를 확인해 주세요.' } })
         return
       }
-      if (!canReferenceDocuments([{ completion: { evidence } }], request.auth)) {
+      if (!await canReferenceDocuments([{ completion: { evidence } }], request.auth)) {
         response.status(400).json({ error: { code: 'INVALID_DOCUMENT_REFERENCE', message: '증빙파일을 찾을 수 없거나 현재 계정에 열람 권한이 없습니다. 파일을 다시 첨부해 주세요.' } })
         return
       }
@@ -2925,7 +2972,7 @@ export function createApp(options = {}) {
     tenantStore['work-items'] = record
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch (error) {
       tenantStore['work-items'] = previousRecord
       console.error('[work-transition] Failed to persist transition', { message: error?.message })
@@ -2935,7 +2982,7 @@ export function createApp(options = {}) {
     response.json({ item: next, updatedAt: now })
   })
 
-  app.post('/api/work-rules', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.post('/api/work-rules', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
     const ownerId = String(request.body?.ownerId ?? '')
     const owner = accounts.find((account) => account.id === ownerId && account.tenantId === request.auth.tenantId && account.approved)
     const frequency = String(request.body?.frequency ?? '')
@@ -2986,8 +3033,8 @@ export function createApp(options = {}) {
     tenantStore['work-rules'] = { data: [rule, ...previousData], updatedAt: now, updatedBy: request.auth.id }
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
     try {
-      commitWorkspaceStore()
-      const materialized = materializeDueWorkRules(request.auth.tenantId, request.auth.id)
+      await commitWorkspaceStore()
+      const materialized = await materializeDueWorkRules(request.auth.tenantId, request.auth.id)
       response.status(201).json({ rule: materialized.rules.find((item) => item.id === rule.id) ?? rule, created: materialized.created })
     } catch (error) {
       if (previousRecord) tenantStore['work-rules'] = previousRecord
@@ -2997,7 +3044,7 @@ export function createApp(options = {}) {
     }
   })
 
-  app.patch('/api/work-rules/:id', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.patch('/api/work-rules/:id', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
     if (typeof request.body?.active !== 'boolean') {
       response.status(400).json({ error: { code: 'INVALID_WORK_RULE_STATE', message: '활성 또는 중지 상태를 선택해 주세요.' } })
       return
@@ -3016,8 +3063,8 @@ export function createApp(options = {}) {
     tenantStore['work-rules'] = { data: nextData, updatedAt: now, updatedBy: request.auth.id }
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
     try {
-      commitWorkspaceStore()
-      const materialized = request.body.active ? materializeDueWorkRules(request.auth.tenantId, request.auth.id) : { created: [], rules: nextData }
+      await commitWorkspaceStore()
+      const materialized = request.body.active ? await materializeDueWorkRules(request.auth.tenantId, request.auth.id) : { created: [], rules: nextData }
       response.json({ rule: materialized.rules.find((rule) => rule.id === request.params.id), created: materialized.created })
     } catch (error) {
       tenantStore['work-rules'] = previousRecord
@@ -3025,19 +3072,19 @@ export function createApp(options = {}) {
     }
   })
 
-  app.post('/api/work-rules/materialize', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.post('/api/work-rules/materialize', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     if (!request.auth.tenantId) {
       response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } })
       return
     }
     try {
-      response.json(materializeDueWorkRules(request.auth.tenantId, request.auth.id))
+      response.json(await materializeDueWorkRules(request.auth.tenantId, request.auth.id))
     } catch (error) {
       response.status(500).json({ error: { code: 'WORK_RULE_MATERIALIZE_FAILED', message: '도래한 반복 업무를 생성하지 못했습니다.' } })
     }
   })
 
-  app.get('/api/workspace/:key', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.get('/api/workspace/:key', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     const key = String(request.params.key || '')
     if (!WORKSPACE_STORE_KEYS.has(key)) {
       response.status(404).json({ error: { code: 'STORE_KEY_NOT_FOUND', message: '지원하지 않는 저장 영역입니다.' } })
@@ -3053,7 +3100,7 @@ export function createApp(options = {}) {
     }
     if (key === 'work-items' || key === 'work-rules') {
       try {
-        materializeDueWorkRules(request.auth.tenantId, request.auth.id)
+        await materializeDueWorkRules(request.auth.tenantId, request.auth.id)
       } catch (error) {
         response.status(500).json({ error: { code: 'WORK_RULE_MATERIALIZE_FAILED', message: '도래한 반복 업무를 생성하지 못했습니다.' } })
         return
@@ -3081,7 +3128,7 @@ export function createApp(options = {}) {
     response.json({ data, updatedAt: record?.updatedAt ?? null, version })
   })
 
-  app.put('/api/workspace/:key', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.put('/api/workspace/:key', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     const key = String(request.params.key || '')
     if (!WORKSPACE_STORE_KEYS.has(key)) {
       response.status(404).json({ error: { code: 'STORE_KEY_NOT_FOUND', message: '지원하지 않는 저장 영역입니다.' } })
@@ -3115,7 +3162,7 @@ export function createApp(options = {}) {
       return
     }
     let nextData = request.body.data
-    if (['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts'].includes(key) && !canReferenceDocuments(nextData, request.auth)) {
+    if (['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts'].includes(key) && !await canReferenceDocuments(nextData, request.auth)) {
       response.status(400).json({ error: { code: 'INVALID_DOCUMENT_REFERENCE', message: '첨부파일을 찾을 수 없거나 현재 계정에 열람 권한이 없습니다. 파일을 다시 첨부해 주세요.' } })
       return
     }
@@ -3230,7 +3277,7 @@ export function createApp(options = {}) {
     tenantStore[key] = record
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
     try {
-      commitWorkspaceStore()
+      await commitWorkspaceStore()
     } catch (error) {
       console.error('[workspace-store] Failed to persist data', { message: error?.message })
       response.status(500).json({ error: { code: 'STORE_WRITE_FAILED', message: '공유 데이터를 저장하지 못했습니다.' } })
@@ -3241,8 +3288,15 @@ export function createApp(options = {}) {
     response.json({ updatedAt: record.updatedAt, version })
   })
 
-  app.post('/api/chat', requireAuth, async (request, response) => {
+  app.post('/api/chat', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     const messages = normalizeMessages(request.body?.messages)
+    let requestedAttachments
+    try { requestedAttachments = normalizeChatAttachmentRequest(request.body?.attachments) }
+    catch (error) {
+      const status = error instanceof ChatAttachmentError ? error.status : 400
+      response.status(status).json({ error: { code: error?.code || 'INVALID_CHAT_ATTACHMENTS', message: error?.message || '첨부파일을 확인해 주세요.' } })
+      return
+    }
 
     if (messages.length === 0 || !messages.some((message) => message.role === 'user')) {
       response.status(400).json({
@@ -3260,12 +3314,19 @@ export function createApp(options = {}) {
       return
     }
 
+    const tenantDocuments = request.auth.tenantId && Array.isArray(documentRecord(request.auth.tenantId)?.data)
+      ? documentRecord(request.auth.tenantId).data
+      : []
+    const readableDocuments = tenantDocuments.filter((document) => canReadDocument(document, request.auth))
     const accessibleDocuments = request.auth.tenantId
-      ? (Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : [])
-        .filter((document) => canReadDocument(document, request.auth))
+      ? readableDocuments
         .slice(0, 100)
         .map(({ id, name, category, tags, summary, uploadedAt, uploadedByName }) => ({ id, name, category, tags, summary, uploadedAt, uploadedByName }))
       : []
+    if (requestedAttachments.some(({ documentId }) => !readableDocuments.some((document) => document.id === documentId))) {
+      response.status(403).json({ error: { code: 'CHAT_ATTACHMENT_FORBIDDEN', message: '첨부파일을 찾을 수 없거나 열람 권한이 없습니다.' } })
+      return
+    }
     const chatContext = {
       tenant: request.auth.tenantName,
       data: request.body?.context,
@@ -3273,16 +3334,30 @@ export function createApp(options = {}) {
     }
 
     if (!client) {
-      response.json({ text: demoText(messages, accessibleDocuments), model, mode: 'demo' })
+      response.json({
+        text: demoText(messages, accessibleDocuments),
+        model,
+        mode: 'demo',
+        attachmentMode: 'metadata',
+        attachmentsProcessed: 0,
+      })
       return
     }
 
     try {
+      const attachmentResult = await resolveChatAttachments({
+        requested: requestedAttachments,
+        documents: tenantDocuments,
+        account: request.auth,
+        canReadDocument,
+        storage: documentStorage,
+      })
+      const claudeMessages = attachBlocksToLatestUserMessage(messages, attachmentResult.blocks)
       const result = await client.messages.create({
         model,
         max_tokens: 2_048,
-        system: buildSystemPrompt(chatContext),
-        messages,
+        system: buildSystemPrompt({ ...chatContext, selectedDocuments: attachmentResult.documents }),
+        messages: claudeMessages,
       })
       const text = extractText(result)
 
@@ -3293,8 +3368,14 @@ export function createApp(options = {}) {
         model: result.model || model,
         mode: 'claude',
         usage: result.usage,
+        attachmentMode: attachmentResult.documents.length > 0 && attachmentResult.contentDocuments === attachmentResult.documents.length ? 'content' : 'metadata',
+        attachmentsProcessed: attachmentResult.contentDocuments,
       })
     } catch (error) {
+      if (error instanceof ChatAttachmentError) {
+        response.status(error.status).json({ error: { code: error.code, message: error.message }, model, mode: 'claude' })
+        return
+      }
       const mapped = mapAnthropicError(error)
       console.error(`[claude] ${mapped.code}`, {
         status: Number(error?.status) || undefined,

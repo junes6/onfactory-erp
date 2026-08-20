@@ -28,16 +28,22 @@
 
 ## 로컬 실행
 
-Node.js 20 이상과 pnpm을 준비한 뒤 실행합니다.
+Node.js 20 이상과 pnpm을 준비합니다. 운영과 동일한 권장 경로는 Postgres이며, 로컬 Supabase를 사용하려면 Docker Desktop도 필요합니다.
 
 ~~~bash
 pnpm install
+cp .env.example .env.local
+pnpm db:start
+pnpm db:reset
+DEMO_SEED_PASSWORD='12자 이상의 임시 암호' pnpm db:seed -- --base-date=2026-08-20
 pnpm dev
 ~~~
 
+PowerShell에서는 seed 실행 전에 `$env:DEMO_SEED_PASSWORD='12자 이상의 임시 암호'`를 설정합니다. Docker가 없는 이관 전 로컬 환경은 `.env.local`에 `STORE_BACKEND=json`, `STORE_JSON_READONLY=false`를 **명시한 경우에만** 기존 JSON 파일에 쓸 수 있습니다. Postgres 연결 실패로 자동 전환되는 JSON fallback은 데이터 보호를 위해 읽기 전용입니다.
+
 브라우저에서 [http://localhost:5173](http://localhost:5173)을 엽니다. pnpm dev 한 명령으로 Vite 웹앱과 로컬 API 서버가 함께 실행됩니다.
 
-체험 계정:
+체험 계정 이메일은 아래와 같으며, Postgres seed에서는 `DEMO_SEED_PASSWORD`로 지정한 임시 암호를 사용하고 첫 로그인 후 변경합니다. 레거시 JSON 데모의 암호는 기존 `demo1234`입니다.
 
 - 햇살바다 관리자: `admin@sunsea.co.kr` / `demo1234`
 - 햇살바다 일반 직원(생산 반장): `taesik.oh@sunsea.co.kr` / `demo1234`
@@ -45,7 +51,7 @@ pnpm dev
 - 온팩토리 플랫폼 운영자: `operator@onfactory.co.kr` / `demo1234`
 - 승인 대기 계정 확인용: `newstaff@sunsea.co.kr` / `demo1234`
 
-제품·업무·반복규칙·일정·메신저·일지·휴가원장·창고·입출고·판매채널·공장 배치·인증대장은 로그인한 고객사 범위로 로컬 API에 저장됩니다. 기본 저장 파일은 `server/data/workspace-state.json`, 기업 자료 원본은 `server/data/documents/`이며 둘 다 Git과 프론트엔드 빌드 산출물에 포함되지 않습니다. 같은 고객사 계정으로 접속하면 브라우저가 달라도 권한 범위에 맞는 동일한 공유 상태를 불러옵니다.
+제품·업무·반복규칙·일정·메신저·일지·휴가원장·창고·입출고·판매채널·공장 배치·인증대장은 로그인한 고객사 범위로 Postgres의 도메인별 정규 테이블에 저장됩니다. 기업 자료 메타데이터는 `items`, 원본 파일은 로컬 또는 S3 어댑터에 저장됩니다. 같은 고객사 계정으로 접속하면 브라우저가 달라도 권한 범위에 맞는 동일한 공유 상태를 불러옵니다.
 
 Claude API 키가 없어도 전체 UI와 데모 응답을 확인할 수 있습니다. 실제 Claude를 연결하려면:
 
@@ -55,13 +61,21 @@ Copy-Item .env.example .env.local
 
 그다음 .env.local의 ANTHROPIC_API_KEY에 서버용 키를 입력하고 pnpm dev를 다시 실행합니다. 키는 브라우저 번들에 포함되지 않고 로컬 API 서버에서만 사용합니다.
 
+자료 원본은 `FILE_STORAGE_BACKEND=local|s3`로 전환합니다. 로컬은 `FILE_STORAGE_LOCAL_DIRECTORY`, MinIO·S3 호환 저장소는 `S3_BUCKET`, `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`를 설정합니다. 업로드·다운로드·삭제·서명 URL은 동일한 저장소 인터페이스를 사용하므로 라우트 코드를 바꾸지 않습니다.
+
 ## 검증과 운영 실행
 
 ~~~bash
 pnpm test:server
+pnpm test:pg
+pnpm verify
 pnpm build
 pnpm start
 ~~~
+
+`pnpm verify`는 런타임 데모 분리, 18개 정규 테이블과 코어 테이블 계약, 날짜 표시 유틸 사용, CSS 하드코딩 색·타입·간격·모서리·그림자 위반 0건을 검사합니다.
+
+실제 Postgres 통합 검증은 업무용 DB가 아닌 전용 테스트 DB를 `DATABASE_URL`로 지정한 뒤 `pnpm test:pg:e2e`를 실행합니다. 현재 장비처럼 Docker가 없으면 `pg-mem` 통합 테스트만 실행되며 Supabase 기동 검증은 생략됩니다.
 
 - 개발 웹: http://localhost:5173
 - 개발 API: http://127.0.0.1:8787
@@ -75,7 +89,15 @@ pnpm start
 pnpm backup:data
 ~~~
 
-생성된 백업은 `server/backups/onfactory_날짜_시간/`에 저장됩니다. 이후 코드를 업데이트하고 `pnpm install`, `pnpm build`를 실행해도 `server/data/`는 삭제하거나 초기화하지 않습니다. 서버는 이전 버전 JSON을 비파괴 마이그레이션하고 새 필드만 보강합니다.
+생성된 백업은 `server/backups/onfactory_날짜_시간/`에 저장됩니다. 이후 코드를 업데이트하고 `pnpm install`, `pnpm build`를 실행해도 `server/data/`는 삭제하거나 초기화하지 않습니다.
+
+기존 JSON을 Postgres로 처음 이관할 때는 서버를 중지하고 기준일을 명시합니다. 스크립트는 원본을 수정하지 않고 타임스탬프 백업을 만든 뒤, 같은 트랜잭션 안에서 tenant/key별 원본·적재 건수를 검증합니다.
+
+~~~bash
+pnpm db:migrate:json -- --source=server/data/workspace-state.json --base-date=2026-08-20
+~~~
+
+불일치가 있으면 트랜잭션을 롤백하고 비정상 종료합니다. 업데이트 후에는 정규 테이블과 S3/로컬 파일 저장소를 함께 백업하며, JSON fallback을 운영 쓰기 저장소로 되돌리지 않습니다.
 
 장애 복구가 필요할 때는 서버를 중지하고, 현재 데이터도 먼저 백업한 뒤 명시적으로 복원합니다.
 
@@ -91,7 +113,8 @@ Sites 배포에서는 코드와 운영 데이터를 분리합니다. 업무·일
 ## 기술 구성
 
 - React 19 + TypeScript + Vite
-- Express API 서버
+- Express API 서버 + Postgres 정규화 DAL (`STORE_BACKEND=postgres|json`)
+- Supabase CLI 로컬 워크플로, transaction outbox `events`
 - Sites Worker + D1 + R2
 - Anthropic 공식 TypeScript SDK
 - Lucide 및 자체 제작 채팅·알림 SVG 아이콘

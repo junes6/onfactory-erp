@@ -25,6 +25,9 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { Tenant } from '../domainData'
+import { formatDateTime } from '../utils/dateTime'
+import { StatusBadge } from './StatusBadge'
+import './PlatformConsole.css'
 
 export type PlatformSection = 'platform' | 'tenants' | 'support' | 'integrations' | 'audit'
 
@@ -162,231 +165,8 @@ const sectionMeta: Record<PlatformSection, { label: string; title: string; descr
   audit: { label: '지원 세션', title: '지원 세션 · 감사', description: '승인형 접근과 운영자 활동을 추적합니다.', icon: ShieldCheck },
 }
 
-const platformCss = `
-.pc-root {
-  --pc-bg: var(--canvas, #f4f7f5);
-  --pc-panel: var(--surface, #fff);
-  --pc-panel-soft: #f6f9f7;
-  --pc-text: var(--ink, #17251f);
-  --pc-muted: var(--muted, #5b6b64);
-  --pc-line: var(--line, #dbe4df);
-  --pc-accent: #1d5363;
-  --pc-accent-soft: #eaf3f7;
-  --pc-green: #287258;
-  --pc-green-soft: #eaf6ef;
-  --pc-amber: #9a611e;
-  --pc-amber-soft: #fff3df;
-  --pc-red: #b0443e;
-  --pc-red-soft: #fff0ee;
-  --pc-blue: #356c9c;
-  --pc-blue-soft: #edf4fa;
-  color: var(--pc-text);
-  font-size: 14px;
-}
-.pc-root * { box-sizing: border-box; }
-.pc-root button, .pc-root input, .pc-root select, .pc-root textarea { font: inherit; }
-.pc-shell { display: flex; flex-direction: column; gap: 14px; }
-.pc-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
-.pc-head-copy { min-width: 0; }
-.pc-eyebrow { display: flex; align-items: center; gap: 7px; margin: 0 0 4px; color: var(--pc-accent); font-size: 14px; font-weight: 800; }
-.pc-head h1 { margin: 0; font-size: clamp(24px, 2.4vw, 32px); line-height: 1.2; letter-spacing: -.035em; }
-.pc-head p { margin: 5px 0 0; color: var(--pc-muted); font-size: 14px; line-height: 1.5; }
-.pc-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.pc-button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 13px; border: 1px solid var(--pc-line); border-radius: 9px; color: var(--pc-text); background: var(--pc-panel); font-size: 14px; font-weight: 750; cursor: pointer; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
-.pc-button:hover { border-color: #aebeb6; background: var(--pc-panel-soft); }
-.pc-button:active { transform: translateY(1px); }
-.pc-button.primary { border-color: var(--pc-accent); color: #fff; background: var(--pc-accent); }
-.pc-button.primary:hover { background: #173f4b; }
-.pc-button.ghost { min-height: 34px; padding: 0 8px; border-color: transparent; color: var(--pc-accent); background: transparent; }
-.pc-button.small { min-height: 34px; padding: 0 10px; }
-.pc-button:disabled { cursor: not-allowed; opacity: .5; }
-.pc-section-nav { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding: 4px; border: 1px solid var(--pc-line); border-radius: 11px; background: var(--pc-panel); scrollbar-width: thin; }
-.pc-section-tab { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; flex: 1 0 auto; gap: 7px; padding: 0 13px; border: 0; border-radius: 8px; color: var(--pc-muted); background: transparent; font-size: 14px; font-weight: 750; cursor: pointer; white-space: nowrap; }
-.pc-section-tab:hover { color: var(--pc-text); background: var(--pc-panel-soft); }
-.pc-section-tab.active { color: #173b47; background: #dcecf2; }
-.pc-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--pc-line); border-radius: 12px; background: var(--pc-panel); box-shadow: 0 4px 16px rgba(18, 55, 42, .04); }
-.pc-metric { min-width: 0; display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 10px; padding: 12px 14px; }
-.pc-metric + .pc-metric { border-left: 1px solid var(--pc-line); }
-.pc-metric-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; color: var(--pc-accent); background: var(--pc-accent-soft); }
-.pc-metric.warning .pc-metric-icon { color: var(--pc-amber); background: var(--pc-amber-soft); }
-.pc-metric-label { display: block; color: var(--pc-muted); font-size: 14px; font-weight: 650; }
-.pc-metric-value { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; font-size: 22px; line-height: 1.2; letter-spacing: -.03em; }
-.pc-metric-note { color: var(--pc-muted); font-size: 14px; font-weight: 500; letter-spacing: 0; }
-.pc-context { min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 12px; border: 1px solid var(--pc-line); border-radius: 10px; background: var(--pc-panel); }
-.pc-scope { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
-.pc-scope strong { font-size: 14px; }
-.pc-select { min-height: 34px; max-width: 290px; padding: 0 31px 0 10px; border: 1px solid var(--pc-line); border-radius: 8px; color: var(--pc-text); background: var(--pc-panel); font-size: 14px; font-weight: 700; }
-.pc-privacy { display: flex; align-items: center; gap: 7px; color: var(--pc-muted); font-size: 14px; }
-.pc-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 330px; align-items: start; gap: 14px; }
-.pc-panel { min-width: 0; overflow: hidden; border: 1px solid var(--pc-line); border-radius: 12px; background: var(--pc-panel); box-shadow: 0 4px 16px rgba(18, 55, 42, .035); }
-.pc-panel-head { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--pc-line); }
-.pc-panel-head h2, .pc-detail h2 { margin: 0; font-size: 17px; line-height: 1.35; letter-spacing: -.02em; }
-.pc-panel-head p { margin: 2px 0 0; color: var(--pc-muted); font-size: 14px; }
-.pc-panel-tools { display: flex; align-items: center; gap: 7px; }
-.pc-search { position: relative; min-width: min(280px, 36vw); }
-.pc-search svg { position: absolute; left: 10px; top: 50%; color: var(--pc-muted); transform: translateY(-50%); pointer-events: none; }
-.pc-search input { width: 100%; min-height: 36px; padding: 0 10px 0 34px; border: 1px solid var(--pc-line); border-radius: 8px; color: var(--pc-text); background: var(--pc-panel); font-size: 14px; }
-.pc-table-wrap { overflow-x: auto; }
-.pc-table { width: 100%; min-width: 760px; border-collapse: collapse; table-layout: auto; }
-.pc-table th { padding: 10px 12px; border-bottom: 1px solid var(--pc-line); color: var(--pc-muted); background: var(--pc-panel-soft); font-size: 14px; font-weight: 750; text-align: left; white-space: nowrap; }
-.pc-table td { padding: 11px 12px; border-bottom: 1px solid var(--pc-line); color: var(--pc-text); font-size: 14px; vertical-align: middle; }
-.pc-table tbody tr:last-child td { border-bottom: 0; }
-.pc-table tbody tr { transition: background .14s ease; }
-.pc-table tbody tr:hover, .pc-table tbody tr.selected { background: var(--pc-accent-soft); }
-.pc-cell-main { display: flex; align-items: center; gap: 9px; min-width: 170px; }
-.pc-logo { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 9px; color: #fff; background: var(--pc-accent); font-size: 14px; font-weight: 850; }
-.pc-logo.channel { color: var(--pc-accent); background: var(--pc-accent-soft); }
-.pc-cell-copy { min-width: 0; }
-.pc-cell-copy strong { display: block; overflow: hidden; font-size: 14px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.pc-cell-copy span { display: block; overflow: hidden; margin-top: 2px; color: var(--pc-muted); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.pc-badge { min-height: 25px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 999px; color: #56645e; background: #edf1ef; font-size: 14px; font-weight: 800; white-space: nowrap; }
-.pc-badge.success { color: var(--pc-green); background: var(--pc-green-soft); }
-.pc-badge.warning { color: var(--pc-amber); background: var(--pc-amber-soft); }
-.pc-badge.danger { color: var(--pc-red); background: var(--pc-red-soft); }
-.pc-badge.info { color: var(--pc-blue); background: var(--pc-blue-soft); }
-.pc-health { display: flex; align-items: center; gap: 8px; min-width: 108px; }
-.pc-health-track { width: 62px; height: 6px; overflow: hidden; border-radius: 99px; background: #e2e9e5; }
-.pc-health-fill { height: 100%; border-radius: inherit; background: var(--pc-green); }
-.pc-health-fill.warning { background: #d18b33; }
-.pc-row-button { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--pc-line); border-radius: 8px; color: var(--pc-muted); background: var(--pc-panel); cursor: pointer; }
-.pc-row-button:hover { color: var(--pc-accent); border-color: #afc2c9; background: var(--pc-accent-soft); }
-.pc-detail { position: sticky; top: 78px; min-width: 0; overflow: hidden; border: 1px solid var(--pc-line); border-radius: 12px; background: var(--pc-panel); box-shadow: 0 4px 16px rgba(18, 55, 42, .035); }
-.pc-detail-head { padding: 14px; border-bottom: 1px solid var(--pc-line); background: linear-gradient(135deg, var(--pc-accent-soft), var(--pc-panel)); }
-.pc-detail-eyebrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; color: var(--pc-muted); font-size: 14px; }
-.pc-detail-body { display: flex; flex-direction: column; gap: 13px; padding: 14px; }
-.pc-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
-.pc-detail-stat { min-width: 0; padding: 10px; border-radius: 8px; background: var(--pc-panel-soft); }
-.pc-detail-stat span { display: block; color: var(--pc-muted); font-size: 14px; }
-.pc-detail-stat strong { display: block; overflow-wrap: anywhere; margin-top: 3px; font-size: 14px; }
-.pc-detail-section { padding-top: 12px; border-top: 1px solid var(--pc-line); }
-.pc-detail-section > strong { display: block; margin-bottom: 7px; font-size: 14px; }
-.pc-detail-section p { margin: 0; color: var(--pc-muted); font-size: 14px; line-height: 1.55; }
-.pc-detail-actions { display: flex; flex-direction: column; gap: 7px; }
-.pc-detail-actions .pc-button { width: 100%; }
-.pc-alert-list { display: flex; flex-direction: column; }
-.pc-alert { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 11px 12px; border-bottom: 1px solid var(--pc-line); }
-.pc-alert:last-child { border-bottom: 0; }
-.pc-alert-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; color: var(--pc-amber); background: var(--pc-amber-soft); }
-.pc-alert strong { display: block; font-size: 14px; }
-.pc-alert span { display: block; margin-top: 2px; color: var(--pc-muted); font-size: 14px; }
-.pc-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.pc-filter-button { min-height: 34px; padding: 0 10px; border: 1px solid var(--pc-line); border-radius: 8px; color: var(--pc-muted); background: var(--pc-panel); font-size: 14px; font-weight: 700; cursor: pointer; }
-.pc-filter-button.active { color: var(--pc-accent); border-color: #a9bec6; background: var(--pc-accent-soft); }
-.pc-empty { padding: 36px 18px; color: var(--pc-muted); font-size: 14px; text-align: center; }
-.pc-empty svg { display: block; margin: 0 auto 9px; }
-.pc-safe-note { display: flex; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid #cfe0d7; border-radius: 8px; color: #365d4d; background: #eef7f2; font-size: 14px; line-height: 1.5; }
-.pc-safe-note svg { flex: 0 0 auto; margin-top: 1px; }
-.pc-progress { height: 7px; overflow: hidden; border-radius: 99px; background: #e2e9e5; }
-.pc-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--pc-accent); }
-.pc-footnote { padding: 9px 12px; border-top: 1px solid var(--pc-line); color: var(--pc-muted); background: var(--pc-panel-soft); font-size: 14px; }
-.pc-draft-status { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 11px; border: 1px dashed #b6c8c0; border-radius: 10px; color: var(--pc-muted); background: var(--pc-panel-soft); }
-.pc-draft-status > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.pc-draft-status strong { color: var(--pc-text); font-size: 14px; }
-.pc-draft-status span { font-size: 13px; }
-.pc-onboarding-drafts { display: flex; flex-direction: column; border-bottom: 1px solid var(--pc-line); }
-.pc-onboarding-draft { display: grid; grid-template-columns: minmax(170px, 1.2fr) minmax(130px, .8fr) minmax(170px, 1fr) auto; align-items: center; gap: 12px; padding: 11px 13px; border-top: 1px solid var(--pc-line); background: #fffaf0; }
-.pc-onboarding-draft:first-child { border-top: 0; }
-.pc-onboarding-draft strong, .pc-onboarding-draft span { display: block; }
-.pc-onboarding-draft span { margin-top: 2px; color: var(--pc-muted); font-size: 13px; }
-.pc-modal-backdrop { position: fixed; inset: 0; z-index: 180; display: grid; place-items: center; padding: 18px; background: rgba(13, 29, 23, .48); backdrop-filter: blur(3px); }
-.pc-modal { width: min(620px, 100%); max-height: min(840px, calc(100vh - 36px)); overflow: auto; border: 1px solid var(--pc-line); border-radius: 16px; color: var(--pc-text); background: var(--pc-panel); box-shadow: 0 24px 70px rgba(8, 26, 19, .24); outline: 0; }
-.pc-modal.wide { width: min(760px, 100%); }
-.pc-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px 15px; border-bottom: 1px solid var(--pc-line); }
-.pc-modal-head h2 { margin: 3px 0 0; font-size: 21px; letter-spacing: -.025em; }
-.pc-modal-head p { margin: 5px 0 0; color: var(--pc-muted); font-size: 13px; line-height: 1.5; }
-.pc-modal-kicker { color: var(--pc-accent); font-size: 12px; font-weight: 850; letter-spacing: .08em; }
-.pc-modal-close { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid var(--pc-line); border-radius: 9px; color: var(--pc-muted); background: var(--pc-panel); cursor: pointer; }
-.pc-modal-body { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px 20px; }
-.pc-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.pc-field { min-width: 0; display: flex; flex-direction: column; gap: 6px; color: var(--pc-text); font-size: 13px; font-weight: 750; }
-.pc-field.full { grid-column: 1 / -1; }
-.pc-field input, .pc-field select, .pc-field textarea { width: 100%; border: 1px solid var(--pc-line); border-radius: 9px; color: var(--pc-text); background: var(--pc-panel); outline: 0; }
-.pc-field input, .pc-field select { min-height: 42px; padding: 0 11px; }
-.pc-field textarea { min-height: 92px; padding: 10px 11px; resize: vertical; line-height: 1.5; }
-.pc-field input:focus, .pc-field select:focus, .pc-field textarea:focus { border-color: var(--pc-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pc-accent-soft), transparent 15%); }
-.pc-form-note { display: flex; align-items: flex-start; gap: 9px; padding: 11px; border: 1px solid #d9c997; border-radius: 9px; color: #695221; background: #fff9e9; font-size: 13px; line-height: 1.5; }
-.pc-form-note svg { flex: 0 0 auto; margin-top: 1px; }
-.pc-modal-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
-.pc-timeline { display: flex; flex-direction: column; }
-.pc-timeline article { position: relative; display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 11px; padding-bottom: 16px; }
-.pc-timeline article:not(:last-child)::before { content: ''; position: absolute; left: 6px; top: 13px; bottom: 0; width: 1px; background: var(--pc-line); }
-.pc-timeline i { position: relative; z-index: 1; width: 13px; height: 13px; margin-top: 3px; border: 3px solid var(--pc-panel); border-radius: 50%; background: var(--pc-accent); box-shadow: 0 0 0 1px var(--pc-accent); }
-.pc-timeline strong, .pc-timeline span { display: block; }
-.pc-timeline strong { font-size: 14px; }
-.pc-timeline span { margin-top: 3px; color: var(--pc-muted); font-size: 13px; line-height: 1.45; }
-.pc-audit-records { overflow: hidden; border: 1px solid var(--pc-line); border-radius: 10px; }
-.pc-audit-records article { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 11px; padding: 11px; border-bottom: 1px solid var(--pc-line); }
-.pc-audit-records article:last-child { border-bottom: 0; }
-.pc-audit-records strong, .pc-audit-records span { display: block; }
-.pc-audit-records span { margin-top: 3px; color: var(--pc-muted); font-size: 13px; }
-.pc-code { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pc-only-mobile { display: none; }
-@media (max-width: 1180px) {
-  .pc-workspace { grid-template-columns: minmax(0, 1fr); }
-  .pc-detail { position: static; }
-  .pc-detail-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, .7fr); }
-  .pc-detail-actions { align-self: start; }
-}
-@media (max-width: 820px) {
-  .pc-head { align-items: flex-start; flex-direction: column; }
-  .pc-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pc-metric:nth-child(3) { border-left: 0; border-top: 1px solid var(--pc-line); }
-  .pc-metric:nth-child(4) { border-top: 1px solid var(--pc-line); }
-  .pc-context { align-items: flex-start; flex-direction: column; padding: 9px 10px; }
-  .pc-privacy { width: 100%; padding-top: 7px; border-top: 1px solid var(--pc-line); }
-  .pc-panel-head { align-items: flex-start; flex-direction: column; padding: 11px 12px; }
-  .pc-panel-tools, .pc-search { width: 100%; min-width: 0; }
-  .pc-detail-body { display: flex; }
-}
-@media (max-width: 520px) {
-  .pc-shell { gap: 11px; }
-  .pc-head h1 { font-size: 24px; }
-  .pc-head .pc-actions, .pc-head .pc-button { width: 100%; }
-  .pc-summary { grid-template-columns: 1fr; }
-  .pc-metric + .pc-metric { border-left: 0; border-top: 1px solid var(--pc-line); }
-  .pc-section-tab { flex: 0 0 auto; }
-  .pc-scope { align-items: flex-start; flex-direction: column; width: 100%; }
-  .pc-select { width: 100%; max-width: none; }
-  .pc-detail-grid { grid-template-columns: 1fr; }
-  .pc-form-grid { grid-template-columns: 1fr; }
-  .pc-field.full { grid-column: auto; }
-  .pc-onboarding-draft { grid-template-columns: 1fr auto; }
-  .pc-onboarding-draft > div:nth-child(2), .pc-onboarding-draft > div:nth-child(3) { grid-column: 1 / -1; }
-  .pc-audit-records article { grid-template-columns: 1fr auto; }
-  .pc-audit-records article > div { grid-column: 1 / -1; }
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .pc-root {
-    --pc-bg: #0e1715;
-    --pc-panel: #16211e;
-    --pc-panel-soft: #1b2925;
-    --pc-text: #edf5f1;
-    --pc-muted: #a8b8b1;
-    --pc-line: #30413b;
-    --pc-accent: #77afbd;
-    --pc-accent-soft: #21383e;
-    --pc-green: #79c29f;
-    --pc-green-soft: #183a2d;
-    --pc-amber: #e2ac65;
-    --pc-amber-soft: #3c2c18;
-    --pc-red: #ef8d86;
-    --pc-red-soft: #442220;
-    --pc-blue: #8eb8dc;
-    --pc-blue-soft: #213443;
-  }
-  :root:not([data-theme='light']) .pc-section-tab.active { color: #e9f7fb; background: #284753; }
-  :root:not([data-theme='light']) .pc-button.primary { color: #102129; background: #84b9c6; }
-  :root:not([data-theme='light']) .pc-logo { color: #102129; background: #84b9c6; }
-  :root:not([data-theme='light']) .pc-health-track, :root:not([data-theme='light']) .pc-progress { background: #2b3b35; }
-  :root:not([data-theme='light']) .pc-onboarding-draft, :root:not([data-theme='light']) .pc-form-note { color: var(--pc-text); background: #332d20; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .pc-root * { transition: none !important; scroll-behavior: auto !important; }
-}
-`
-
 function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: Tone }) {
-  return <span className={`pc-badge ${tone}`}>{children}</span>
+  return <StatusBadge className="pc-badge" tone={tone}>{children}</StatusBadge>
 }
 
 function Button({ children, onClick, primary = false, small = false, disabled = false, title }: { children: ReactNode; onClick: () => void; primary?: boolean; small?: boolean; disabled?: boolean; title?: string }) {
@@ -572,7 +352,7 @@ function PlatformDialog({
   return <div className="pc-modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section ref={dialogRef} className={`pc-modal${dialog.kind === 'audit-record' ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby="pc-modal-title" tabIndex={-1}>
       <header className="pc-modal-head"><div><span className="pc-modal-kicker">{header[0]}</span><h2 id="pc-modal-title">{header[1]}</h2><p>{header[2]}</p></div><button type="button" className="pc-modal-close" aria-label="닫기" onClick={onClose}><X size={19} /></button></header>
-      {dialog.kind === 'onboarding' && (provisioned ? <div className="pc-modal-body"><div className="pc-safe-note"><ShieldCheck size={18} /><span><strong>{provisioned.tenant.name}</strong> 테넌트와 관리자 계정이 생성되었습니다.</span></div><div className="pc-detail-grid"><DetailStat label="테넌트 ID" value={provisioned.tenant.id} /><DetailStat label="관리자 이메일" value={provisioned.tenant.adminEmail ?? '—'} /><DetailStat label="초기 비밀번호" value={<span className="pc-code">{provisioned.onboarding.temporaryPassword}</span>} /><DetailStat label="만료 시각" value={new Date(provisioned.onboarding.expiresAt).toLocaleString('ko-KR', { hour12: false })} /></div><div className="pc-form-note"><AlertTriangle size={17} /><span>초기 비밀번호는 다시 표시되지 않습니다. 관리자에게 안전하게 전달하고 첫 로그인에서 새 비밀번호로 변경하게 하세요.</span></div><div className="pc-modal-actions"><Button primary onClick={onClose}>확인</Button></div></div> : <form className="pc-modal-body" onSubmit={submitOnboarding}>
+      {dialog.kind === 'onboarding' && (provisioned ? <div className="pc-modal-body"><div className="pc-safe-note"><ShieldCheck size={18} /><span><strong>{provisioned.tenant.name}</strong> 테넌트와 관리자 계정이 생성되었습니다.</span></div><div className="pc-detail-grid"><DetailStat label="테넌트 ID" value={provisioned.tenant.id} /><DetailStat label="관리자 이메일" value={provisioned.tenant.adminEmail ?? '—'} /><DetailStat label="초기 비밀번호" value={<span className="pc-code">{provisioned.onboarding.temporaryPassword}</span>} /><DetailStat label="만료 시각" value={formatDateTime(provisioned.onboarding.expiresAt)} /></div><div className="pc-form-note"><AlertTriangle size={17} /><span>초기 비밀번호는 다시 표시되지 않습니다. 관리자에게 안전하게 전달하고 첫 로그인에서 새 비밀번호로 변경하게 하세요.</span></div><div className="pc-modal-actions"><Button primary onClick={onClose}>확인</Button></div></div> : <form className="pc-modal-body" onSubmit={submitOnboarding}>
         <div className="pc-form-grid"><label className="pc-field"><span>고객사명</span><input name="companyName" data-autofocus required minLength={2} maxLength={80} placeholder="예: 동해식품" /></label><label className="pc-field"><span>업종</span><input name="industry" required maxLength={120} placeholder="예: 수산가공 · 온라인 유통" /></label><label className="pc-field"><span>요금제</span><select name="plan"><option>Growth</option><option>Enterprise</option><option>Starter</option></select></label><label className="pc-field"><span>목표 오픈일</span><input name="targetDate" type="date" required /></label><label className="pc-field"><span>최초 관리자 이름</span><input name="adminName" required minLength={2} maxLength={40} placeholder="예: 홍길동" /></label><label className="pc-field"><span>최초 관리자 이메일</span><input name="adminEmail" type="email" required placeholder="admin@company.co.kr" /></label></div>
         <div className="pc-form-note"><ShieldCheck size={17} /><span>고객사별 격리 저장소와 승인된 최초 관리자 계정을 생성합니다. 초기 비밀번호는 72시간 후 만료됩니다.</span></div>
         {error && <div className="pc-form-note"><AlertTriangle size={17} /><span>{error}</span></div>}
@@ -587,7 +367,7 @@ function PlatformDialog({
       {dialog.kind === 'timeline' && <div className="pc-modal-body"><div className="pc-detail-grid"><DetailStat label="고객사" value={dialog.ticket.tenant} /><DetailStat label="현재 상태" value={dialog.ticket.status} /><DetailStat label="담당" value={dialog.ticket.owner} /><DetailStat label="SLA" value={dialog.ticket.sla} /></div>{dialog.ticket.evidence && <button type="button" className="pc-button" onClick={() => void downloadEvidence(dialog.ticket).catch((reason) => onToast(reason instanceof Error ? reason.message : 'CS 증빙을 다운로드하지 못했습니다.'))}><FileClock size={16} /> 증빙 다운로드 · {dialog.ticket.evidence.name}</button>}<div className="pc-timeline">{timeline.map((item) => <article key={item.id}><i /><div><strong>{item.at} · {item.title}</strong><span>{item.detail} · {item.actor}</span></div></article>)}</div><div className="pc-modal-actions"><Button primary onClick={onClose}>확인</Button></div></div>}
       {dialog.kind === 'audit-record' && <div className="pc-modal-body"><div className="pc-safe-note"><ShieldCheck size={16} /> 고객사 원문이나 인증 토큰 없이 운영 메타데이터만 표시합니다.</div><div className="pc-audit-records">{auditRecords.map((event) => <article key={event.id}><span className="pc-code">{event.at}</span><div><strong>{event.event}</strong><span>{event.actor} · {event.scope} · 참조 {event.reference}</span></div><Badge tone={toneForService(event.result)}>{event.result}</Badge></article>)}</div><div className="pc-modal-actions"><Button primary onClick={onClose}>닫기</Button></div></div>}
       {(dialog.kind === 'owner-notice' || dialog.kind === 'reconnect') && <form className="pc-modal-body" onSubmit={submitAction}><label className="pc-field"><span>전달 대상</span><input readOnly value={dialog.kind === 'owner-notice' ? `${dialog.ticket.owner} · ${dialog.ticket.id}` : `${tenants.find((tenant) => tenant.id === dialog.item.tenantId)?.name ?? ''} 관리자 · ${dialog.item.name}`} /></label><label className="pc-field"><span>전달 내용</span><textarea name="message" data-autofocus required defaultValue={dialog.kind === 'owner-notice' ? `${dialog.ticket.title} 건의 현재 상태(${dialog.ticket.status})를 확인하고 다음 조치를 기록해 주세요.` : `${dialog.item.name} 인증 상태(${dialog.item.status})를 확인하고 판매자센터에서 권한을 다시 승인해 주세요.`} /></label><div className="pc-form-note"><ShieldCheck size={17} /><span>운영자 신원·대상·내용·참조 건을 공유 저장소와 감사로그에 함께 기록합니다.</span></div>{error && <div className="pc-form-note"><AlertTriangle size={17} /><span>{error}</span></div>}<div className="pc-modal-actions"><Button onClick={onClose} disabled={busy}>취소</Button><button type="submit" className="pc-button primary" disabled={busy}>{busy ? '저장 중…' : '운영 액션 저장'}</button></div></form>}
-      {dialog.kind === 'diagnostic' && <div className="pc-modal-body">{dialog.item ? <><div className="pc-detail-grid"><DetailStat label="상태" value={dialog.item.status} /><DetailStat label="최근 동기화" value={dialog.item.lastSync} /><DetailStat label="성공률" value={dialog.item.successRate} /><DetailStat label="화면 진단" value={dialog.item.result} /></div><div className="pc-form-note"><AlertTriangle size={17} /><span>현재 저장된 운영 메타데이터입니다. 외부 API의 최신 토큰 유효성 검사는 채널 커넥터에서 수행해야 합니다.</span></div></> : <><div className="pc-detail-grid"><DetailStat label="표시 연동" value={`${integrations.length}개`} /><DetailStat label="정상" value={`${integrations.filter((item) => item.status === '정상').length}개`} /><DetailStat label="점검 필요" value={`${integrations.filter((item) => item.status !== '정상').length}개`} /><DetailStat label="점검 시각" value={new Date().toLocaleString('ko-KR', { hour12: false })} /></div></>}<div className="pc-modal-actions"><Button primary onClick={onClose}>확인</Button></div></div>}
+      {dialog.kind === 'diagnostic' && <div className="pc-modal-body">{dialog.item ? <><div className="pc-detail-grid"><DetailStat label="상태" value={dialog.item.status} /><DetailStat label="최근 동기화" value={dialog.item.lastSync} /><DetailStat label="성공률" value={dialog.item.successRate} /><DetailStat label="화면 진단" value={dialog.item.result} /></div><div className="pc-form-note"><AlertTriangle size={17} /><span>현재 저장된 운영 메타데이터입니다. 외부 API의 최신 토큰 유효성 검사는 채널 커넥터에서 수행해야 합니다.</span></div></> : <><div className="pc-detail-grid"><DetailStat label="표시 연동" value={`${integrations.length}개`} /><DetailStat label="정상" value={`${integrations.filter((item) => item.status === '정상').length}개`} /><DetailStat label="점검 필요" value={`${integrations.filter((item) => item.status !== '정상').length}개`} /><DetailStat label="점검 시각" value={formatDateTime(new Date())} /></div></>}<div className="pc-modal-actions"><Button primary onClick={onClose}>확인</Button></div></div>}
     </section>
   </div>
 }
@@ -659,7 +439,7 @@ function Overview({ scope, scopedTenants, scopedTickets, scopedIntegrations, sel
   const exceptionIntegrations = scopedIntegrations.filter((item) => item.status !== '정상')
   return (
     <div className="pc-workspace">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div className="pc-overview-stack">
         <Panel title="고객사 상태" subtitle="행을 선택하면 지원에 필요한 요약만 확인합니다." footer={`${scopedTenants.length}개 고객사 · 범위: ${scope === 'all' ? '전체' : selectedTenant?.name ?? ''}`}>
           <div className="pc-table-wrap">
             <table className="pc-table">
@@ -988,7 +768,6 @@ export function PlatformConsole(props: PlatformConsoleProps) {
 
   return (
     <PlatformDataContext.Provider value={contextValue}><div className="pc-root">
-      <style>{platformCss}</style>
       <div className="pc-shell">
         <header className="pc-head">
           <div className="pc-head-copy">

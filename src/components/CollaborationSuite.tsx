@@ -33,6 +33,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, ReactNode } from 'react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
+import { formatDateLabel, formatDateTime, formatShortDateTime, formatYearMonthLabel, seoulDateInputValue } from '../utils/dateTime'
 import {
   deleteDocumentAttachment,
   deleteDocumentAttachments,
@@ -57,7 +58,6 @@ type CurrentUserProps = {
   currentUserTeam: string
   canManage: boolean
   workspaceScope?: string
-  seedDemoData?: boolean
 }
 
 type MessengerDrawerProps = OverlayProps & CurrentUserProps
@@ -191,87 +191,11 @@ type Conversation = {
   deletedAt?: string
 }
 
-const people: Person[] = [
-  { id: 'park', accountId: 'USR-SUNSEA-PARK', name: '박지현', team: '품질관리팀', role: '품질 책임자', status: 'online' },
-  { id: 'oh', accountId: 'USR-SUNSEA-OH', name: '오태식', team: '생산 1팀', role: '생산 반장', status: 'online' },
-  { id: 'seo', accountId: 'USR-SUNSEA-SEO', name: '서동현', team: '물류팀', role: '재고 담당', status: 'away' },
-  { id: 'yoon', accountId: 'USR-SUNSEA-YOON', name: '윤서진', team: '판매운영팀', role: '온라인 MD', status: 'online' },
-  { id: 'lee', accountId: 'USR-SUNSEA-LEE', name: '이정민', team: '품질관리팀', role: '품질 담당', status: 'offline' },
-  { id: 'han', accountId: 'USR-SUNSEA-HAN', name: '한예린', team: '구매팀', role: '원부자재 구매', status: 'away' },
-]
-
-const initialConversations: Conversation[] = [
-  {
-    id: 'team-ops',
-    type: 'team',
-    name: '전사 운영 공지',
-    subtitle: '햇살바다 · 46명',
-    unread: 1,
-    lastMessage: '오늘 16시 냉장창고 점검 일정을 공유합니다.',
-    lastTime: '14:18',
-    messages: [
-      { id: 'm-ops-1', senderId: 'yoon', senderName: '윤서진', text: '쿠팡 기획전 주문이 평소보다 18% 늘었습니다. 생산계획에 반영 부탁드립니다.', time: '13:42' },
-      { id: 'm-ops-2', senderId: 'park', senderName: '박지현', text: '확인했습니다. 붉은대게라면 추가 생산분 표시사항도 승인본으로 확인할게요.', time: '13:51' },
-      { id: 'm-ops-3', senderId: 'seo', senderName: '서동현', text: '오늘 16시 냉장창고 점검 일정을 공유합니다.', time: '14:18' },
-    ],
-  },
-  {
-    id: 'team-quality',
-    type: 'team',
-    name: '품질관리팀',
-    subtitle: '팀 대화 · 5명',
-    participantIds: ['park', 'lee'],
-    unread: 2,
-    lastMessage: '멍게젓 수정 시안을 올렸습니다. 확인 부탁드려요.',
-    lastTime: '13:56',
-    messages: [
-      { id: 'm-q-1', senderId: 'park', senderName: '박지현', text: '멍게젓 새우 알레르기 문구를 반영했습니다.', time: '13:40' },
-      { id: 'm-q-2', senderId: 'lee', senderName: '이정민', text: '원산지 표기 위치도 전면 하단으로 맞췄습니다.', time: '13:48' },
-      { id: 'm-q-3', senderId: 'park', senderName: '박지현', text: '멍게젓 수정 시안을 올렸습니다. 확인 부탁드려요.', time: '13:56' },
-    ],
-  },
-  {
-    id: 'direct-yoon',
-    type: 'direct',
-    name: '윤서진',
-    subtitle: '판매운영팀 · 온라인 MD',
-    memberId: 'yoon',
-    participantIds: ['USR-SUNSEA-ADMIN', 'yoon'],
-    unread: 1,
-    lastMessage: 'G마켓 SKU 두 건은 제가 먼저 확인할게요.',
-    lastTime: '12:31',
-    messages: [
-      { id: 'm-y-1', senderId: 'USR-SUNSEA-ADMIN', senderName: '김서원', text: '오늘 채널 동기화 경고 확인 가능할까요?', time: '12:24' },
-      { id: 'm-y-2', senderId: 'yoon', senderName: '윤서진', text: 'G마켓 SKU 두 건은 제가 먼저 확인할게요.', time: '12:31' },
-    ],
-  },
-  {
-    id: 'direct-oh',
-    type: 'direct',
-    name: '오태식',
-    subtitle: '생산 1팀 · 생산 반장',
-    memberId: 'oh',
-    participantIds: ['USR-SUNSEA-ADMIN', 'oh'],
-    unread: 0,
-    lastMessage: '내일 1,200봉 추가 생산 가능합니다.',
-    lastTime: '11:47',
-    messages: [
-      { id: 'm-o-1', senderId: 'oh', senderName: '오태식', text: '내일 1,200봉 추가 생산 가능합니다.', time: '11:47' },
-    ],
-  },
-]
-
-function isSunseaFixtureConversation(conversation: Conversation) {
-  return initialConversations.some((fixture) => fixture.id === conversation.id)
-}
-
 type MessengerListMode = 'recent' | 'teams' | 'people'
 
 function legacyParticipantIds(conversation: Conversation): string[] {
   if (Array.isArray(conversation.participantIds) && conversation.participantIds.length > 0) return conversation.participantIds
-  if (conversation.id === 'team-ops') return []
-  if (conversation.id === 'team-quality') return ['park', 'lee']
-  if (conversation.type === 'direct' && conversation.memberId) return ['USR-SUNSEA-ADMIN', conversation.memberId]
+  if (conversation.type === 'direct' && conversation.memberId) return [conversation.memberId]
   return []
 }
 
@@ -285,12 +209,11 @@ export function MessengerDrawer({
   currentUserTeam,
   canManage,
   workspaceScope,
-  seedDemoData = false,
 }: MessengerDrawerProps) {
   const overlayRef = useOverlayFocus(open, onClose)
-  const [conversations, setConversations] = useWorkspaceState<Conversation[]>('messenger-conversations', seedDemoData ? initialConversations : [], { scope: workspaceScope, seedWhenEmpty: canManage })
-  const [directory, setDirectory] = useState<Person[]>(seedDemoData ? people : [])
-  const [selectedId, setSelectedId] = useState(initialConversations[0].id)
+  const [conversations, setConversations] = useWorkspaceState<Conversation[]>('messenger-conversations', [], { scope: workspaceScope, seedWhenEmpty: false })
+  const [directory, setDirectory] = useState<Person[]>([])
+  const [selectedId, setSelectedId] = useState('')
   const [query, setQuery] = useState('')
   const [message, setMessage] = useState('')
   const [messageSending, setMessageSending] = useState(false)
@@ -316,8 +239,7 @@ export function MessengerDrawer({
     const peer = conversationPeer(conversation)
     return peer ? `${peer.team} · ${peer.role}` : conversation.subtitle
   }
-  const tenantConversations = seedDemoData ? conversations : conversations.filter((item) => !isSunseaFixtureConversation(item))
-  const myConversations = tenantConversations.filter((item) => {
+  const myConversations = conversations.filter((item) => {
     if (item.lifecycle && item.lifecycle !== 'active') return false
     if (item.hiddenFor?.some((participantId) => currentIdentityIds.includes(participantId))) return false
     if (item.type === 'team' && (!item.participantIds || item.participantIds.length === 0)) return true
@@ -339,7 +261,7 @@ export function MessengerDrawer({
     const hasReceipts = conversation.messages.some((item) => Array.isArray(item.readBy))
     if (!hasReceipts) return conversation.unread
     return conversation.messages.filter((item) => {
-      const mine = currentIdentityIds.includes(item.senderId) || (item.senderId === 'me' && currentUserId === 'USR-SUNSEA-ADMIN')
+      const mine = currentIdentityIds.includes(item.senderId) || item.senderId === 'me'
       return !mine && !item.readBy?.some((readerId) => currentIdentityIds.includes(readerId))
     }).length
   }
@@ -360,15 +282,6 @@ export function MessengerDrawer({
   })
 
   useEffect(() => {
-    setDirectory(seedDemoData ? people : [])
-  }, [seedDemoData, workspaceScope])
-
-  useEffect(() => {
-    if (seedDemoData || !conversations.some(isSunseaFixtureConversation)) return
-    setConversations((current) => current.filter((item) => !isSunseaFixtureConversation(item)))
-  }, [conversations, seedDemoData, setConversations])
-
-  useEffect(() => {
     if (!open) return
     messageEndRef.current?.scrollIntoView({ block: 'nearest' })
   }, [open, selectedId, selectedConversation?.messages.length])
@@ -383,10 +296,7 @@ export function MessengerDrawer({
       })
       .then(({ members }) => {
         if (!active || !Array.isArray(members)) return
-        setDirectory(members.map((member) => {
-          const legacy = people.find((person) => person.name === member.name)
-          return { ...member, id: legacy?.id ?? member.id, accountId: member.id, status: legacy?.status ?? member.status }
-        }))
+        setDirectory(members.map((member) => ({ ...member, accountId: member.id })))
       })
       .catch(() => undefined)
     return () => { active = false }
@@ -668,7 +578,7 @@ export function MessengerDrawer({
                 <div className="collab-empty"><MessageCircle size={32} /><strong>첫 메시지를 보내세요</strong><span>업무 내용과 파일을 안전하게 공유할 수 있습니다.</span></div>
               )}
               {selectedConversation.messages.map((item) => {
-                const mine = currentIdentityIds.includes(item.senderId) || (item.senderId === 'me' && currentUserId === 'USR-SUNSEA-ADMIN')
+                const mine = currentIdentityIds.includes(item.senderId) || item.senderId === 'me'
                 return (
                   <article className={'messenger-message' + (mine ? ' mine' : '')} key={item.id}>
                     {!mine && <Avatar name={item.senderName} compact />}
@@ -792,37 +702,13 @@ type CalendarEvent = {
 
 type CalendarEventDraft = Omit<CalendarEvent, 'id'>
 
-const initialCalendarEvents: CalendarEvent[] = [
-  { id: 'EV-001', title: '전사 주간 운영회의', date: '2026-08-19', start: '09:00', end: '10:00', scope: 'company', department: '전사', location: '2층 대회의실', ownerId: 'USR-SUNSEA-ADMIN', owner: '김서원', note: '채널 매출과 생산계획 공유' },
-  { id: 'EV-002', title: '멍게젓 표시 수정본 검토', date: '2026-08-19', start: '11:00', end: '11:40', scope: 'department', department: '품질관리팀', location: '품질회의실', ownerId: 'park', owner: '박지현', note: '알레르기·원산지 최종 확인' },
-  { id: 'EV-003', title: '쿠팡 기획전 재고 협의', date: '2026-08-19', start: '15:00', end: '15:30', scope: 'personal', department: '판매운영팀', location: '온라인', ownerId: 'USR-SUNSEA-ADMIN', owner: '김서원', note: '라면 추가 물량 확정' },
-  { id: 'EV-004', title: '붉은대게라면 OEM 생산', date: '2026-08-20', start: '08:30', end: '16:30', scope: 'department', department: '생산 1팀', location: '동해제면', ownerId: 'oh', owner: '오태식', note: '1,200봉 추가 생산' },
-  { id: 'EV-005', title: 'HACCP 내부 점검', date: '2026-08-21', start: '10:00', end: '12:00', scope: 'company', department: '전사', location: '제1공장', ownerId: 'park', owner: '박지현', note: '현장 기록과 개선조치 확인' },
-  { id: 'EV-006', title: '온라인 추석 선물전 시작', date: '2026-08-24', start: '09:00', end: '09:30', scope: 'company', department: '판매운영팀', location: '온라인몰', ownerId: 'yoon', owner: '윤서진', note: '3개 판매채널 동시 오픈' },
-  { id: 'EV-007', title: '냉동창고 안전교육', date: '2026-08-26', start: '14:00', end: '15:00', scope: 'department', department: '물류팀', location: '냉동 1창고', ownerId: 'seo', owner: '서동현', note: '전동 지게차·비상탈출 교육' },
-  { id: 'EV-008', title: '월말 비용 마감', date: '2026-08-28', start: '16:00', end: '17:00', scope: 'personal', department: '경영지원팀', location: '사무실', ownerId: 'USR-SUNSEA-ADMIN', owner: '김서원', note: '구매·물류 비용 확인' },
-]
-
-function isSunseaFixtureEvent(event: CalendarEvent) {
-  return Boolean(initialCalendarEvents.find((fixture) => fixture.id === event.id && fixture.title === event.title))
-    || event.ownerId?.startsWith('USR-SUNSEA-')
-}
-
 const scopeCopy: Record<CalendarScope, { label: string; description: string }> = {
   company: { label: '전사', description: '모든 직원에게 공개' },
   department: { label: '부서', description: '선택한 부서에 공개' },
   personal: { label: '개인', description: '나에게만 공개' },
 }
 
-const scheduleToday = dateKey(new Date())
-const defaultDepartments = ['전사', '경영지원팀', '품질관리팀', '생산 1팀', '판매운영팀', '물류팀', '구매팀']
-
-function dateKey(date: Date) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return year + '-' + month + '-' + day
-}
+const scheduleToday = seoulDateInputValue()
 
 function monthCells(viewMonth: Date) {
   const year = viewMonth.getFullYear()
@@ -837,13 +723,7 @@ function monthCells(viewMonth: Date) {
 }
 
 function koreanDateLabel(value: string, includeYear = false) {
-  const date = new Date(value + 'T00:00:00')
-  return new Intl.DateTimeFormat('ko-KR', {
-    year: includeYear ? 'numeric' : undefined,
-    month: 'long',
-    day: 'numeric',
-    weekday: 'short',
-  }).format(date)
+  return formatDateLabel(value, includeYear, true)
 }
 
 function emptyEventDraft(date: string, currentUserId: string, currentUserName: string, currentUserTeam: string, canManage: boolean): CalendarEventDraft {
@@ -866,11 +746,10 @@ function sameDepartment(left: string, right: string) {
   return normalize(left) === normalize(right)
 }
 
-export function SchedulePage({ onToast, currentUserId, currentUserName, currentUserTeam, canManage, workspaceScope, seedDemoData = false }: PageProps) {
-  const [storedEvents, setEvents] = useWorkspaceState<CalendarEvent[]>('calendar-events', seedDemoData ? initialCalendarEvents : [], { scope: workspaceScope, seedWhenEmpty: canManage })
-  const [departments, setDepartments] = useWorkspaceState<string[]>('calendar-departments', defaultDepartments, { scope: workspaceScope, seedWhenEmpty: canManage })
+export function SchedulePage({ onToast, currentUserId, currentUserName, currentUserTeam, canManage, workspaceScope }: PageProps) {
+  const [events, setEvents] = useWorkspaceState<CalendarEvent[]>('calendar-events', [], { scope: workspaceScope, seedWhenEmpty: false })
+  const [departments, setDepartments] = useWorkspaceState<string[]>('calendar-departments', [], { scope: workspaceScope, seedWhenEmpty: false })
   const [leaveEvents, setLeaveEvents] = useState<CalendarEvent[]>([])
-  const events = seedDemoData ? storedEvents : storedEvents.filter((event) => !isSunseaFixtureEvent(event))
   const [viewMonth, setViewMonth] = useState(() => {
     const today = new Date(scheduleToday + 'T00:00:00')
     return new Date(today.getFullYear(), today.getMonth(), 1)
@@ -879,11 +758,6 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
   const [scopeFilter, setScopeFilter] = useState<CalendarFilter>('all')
   const [eventDraft, setEventDraft] = useState<CalendarEventDraft | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (seedDemoData || !storedEvents.some(isSunseaFixtureEvent)) return
-    setEvents((current) => current.filter((event) => !isSunseaFixtureEvent(event)))
-  }, [seedDemoData, setEvents, storedEvents])
 
   useEffect(() => {
     let active = true
@@ -902,9 +776,8 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
   }, [workspaceScope])
 
   const cells = useMemo(() => monthCells(viewMonth), [viewMonth])
-  const currentDirectoryPerson = people.find((person) => person.accountId === currentUserId || person.name === currentUserName)
-  const currentOwnerIds = [currentUserId, currentDirectoryPerson?.id, currentDirectoryPerson?.accountId]
-  const isEventOwner = (event: Pick<CalendarEvent, 'ownerId' | 'owner'>) => currentOwnerIds.includes(event.ownerId) || (!event.ownerId && event.owner === currentUserName)
+  const currentOwnerIds = [currentUserId]
+  const isEventOwner = (event: Pick<CalendarEvent, 'ownerId' | 'owner'>) => Boolean(event.ownerId && currentOwnerIds.includes(event.ownerId)) || (!event.ownerId && event.owner === currentUserName)
   const accessibleEvents = [...events, ...leaveEvents].filter((event) => canManage || event.scope === 'company' || isEventOwner(event) || (event.scope === 'department' && sameDepartment(event.department, currentUserTeam)))
   const visibleEvents = accessibleEvents.filter((event) => scopeFilter === 'all' || event.scope === scopeFilter)
   const selectedEvents = visibleEvents
@@ -1014,7 +887,7 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
       <section className="schedule-toolbar" aria-label="일정 보기 설정">
         <div className="schedule-month-nav">
           <button type="button" aria-label="이전 달" onClick={() => moveMonth(-1)}><ChevronLeft size={21} /></button>
-          <h2>{viewMonth.getFullYear()}년 {viewMonth.getMonth() + 1}월</h2>
+          <h2>{formatYearMonthLabel(viewMonth)}</h2>
           <button type="button" aria-label="다음 달" onClick={() => moveMonth(1)}><ChevronRight size={21} /></button>
         </div>
         <div className="schedule-scope-filter" role="group" aria-label="일정 공개 범위 필터">
@@ -1042,9 +915,9 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
           <div className="calendar-weekdays" aria-hidden="true">
             {['일', '월', '화', '수', '목', '금', '토'].map((day) => <span key={day}>{day}</span>)}
           </div>
-          <div className="calendar-grid" role="grid" aria-label={viewMonth.getFullYear() + '년 ' + (viewMonth.getMonth() + 1) + '월 일정'}>
+          <div className="calendar-grid" role="grid" aria-label={formatYearMonthLabel(viewMonth) + ' 일정'}>
             {cells.map((cell) => {
-              const key = dateKey(cell)
+              const key = seoulDateInputValue(cell)
               const cellEvents = visibleEvents.filter((event) => event.date === key)
               const outside = cell.getMonth() !== viewMonth.getMonth()
               const selected = key === selectedDate
@@ -1122,7 +995,7 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
           editing={Boolean(editingId)}
           canEdit={eventDraft.source !== 'leave' && (!editingId || canManage || isEventOwner(eventDraft))}
           canShareCompany={canManage}
-          availableDepartments={canManage ? Array.from(new Set([...departments, ...events.map((event) => event.department)])) : [currentUserTeam]}
+          availableDepartments={canManage ? Array.from(new Set(['전사', currentUserTeam, ...departments, ...events.map((event) => event.department)])) : [currentUserTeam]}
           canManageDepartments={canManage}
           onAddDepartment={addDepartment}
           onChange={setEventDraft}
@@ -1283,81 +1156,6 @@ type Journal = {
   reviews?: JournalReview[]
 }
 
-const initialJournals: Journal[] = [
-  {
-    id: 'JR-260819-01',
-    date: '2026-08-19',
-    title: '8월 19일 운영관리 업무일지',
-    authorId: 'USR-SUNSEA-ADMIN',
-    author: '김서원',
-    department: '경영지원팀',
-    completed: '· 쿠팡·네이버·G마켓 오전 주문 수집 상태 확인\n· G마켓 SKU 매핑 오류 2건 담당자 배정\n· 멍게젓 안전재고 부족 관련 구매팀 협의',
-    issue: '붉은대게라면 쿠팡 주문 증가분을 내일 생산계획에 반영해야 합니다.',
-    nextPlan: '생산 1팀 추가 생산량 확정 및 온라인 기획전 재고 배분 확인',
-    approver: '이민호 공장장',
-    status: '임시저장',
-    updatedAt: '오늘 14:26',
-    feedback: '',
-    attachments: [{ id: 'a-1', name: '판매채널_오전집계.xlsx', size: '184 KB' }],
-    reviews: [],
-  },
-  {
-    id: 'JR-260818-01',
-    date: '2026-08-18',
-    title: '8월 18일 운영관리 업무일지',
-    authorId: 'USR-SUNSEA-ADMIN',
-    author: '김서원',
-    department: '경영지원팀',
-    completed: '판매채널 연동 상태 점검, 주간 운영회의 준비, 제품 사진 등록 요청 처리',
-    issue: 'G마켓 API 응답 지연이 2회 발생했습니다.',
-    nextPlan: 'G마켓 주문 누락 여부 확인',
-    approver: '이민호 공장장',
-    status: '결재요청',
-    updatedAt: '어제 17:42',
-    feedback: '',
-    attachments: [{ id: 'a-2', name: '채널연동_점검결과.pdf', size: '620 KB' }],
-    reviews: [],
-  },
-  {
-    id: 'JR-260817-01',
-    date: '2026-08-17',
-    title: '8월 17일 운영관리 업무일지',
-    authorId: 'USR-SUNSEA-ADMIN',
-    author: '김서원',
-    department: '경영지원팀',
-    completed: '추석 선물세트 판매계획 검토와 재고 기준 확정',
-    issue: '특이사항 없음',
-    nextPlan: '채널별 상품 등록 최종 확인',
-    approver: '이민호 공장장',
-    status: '승인',
-    updatedAt: '8월 18일 09:12',
-    feedback: '판매계획과 재고 기준을 확인했습니다.',
-    attachments: [],
-    reviews: [{ id: 'JRV-DEMO-APPROVED', decision: '승인', comment: '판매계획과 재고 기준을 확인했습니다.', reviewedAt: '2026-08-18T09:12:00+09:00', reviewerId: 'USR-SUNSEA-ADMIN', reviewerName: '이민호 공장장' }],
-  },
-  {
-    id: 'JR-260816-01',
-    date: '2026-08-16',
-    title: '8월 16일 운영관리 업무일지',
-    authorId: 'USR-SUNSEA-ADMIN',
-    author: '김서원',
-    department: '경영지원팀',
-    completed: '냉장창고 재고 실사 지원',
-    issue: '멍게젓 LOT 수량 차이 확인',
-    nextPlan: 'LOT별 실사 결과 반영',
-    approver: '이민호 공장장',
-    status: '반려',
-    updatedAt: '8월 17일 08:46',
-    feedback: '재고 차이가 발생한 LOT 번호와 조치 결과를 보완해 주세요.',
-    attachments: [],
-    reviews: [{ id: 'JRV-DEMO-REJECTED', decision: '반려', comment: '재고 차이가 발생한 LOT 번호와 조치 결과를 보완해 주세요.', reviewedAt: '2026-08-17T08:46:00+09:00', reviewerId: 'USR-SUNSEA-ADMIN', reviewerName: '이민호 공장장' }],
-  },
-]
-
-function isSunseaFixtureJournal(journal: Journal) {
-  return initialJournals.some((fixture) => fixture.id === journal.id)
-}
-
 type JournalFilter = '전체' | JournalStatus
 
 function journalTone(status: JournalStatus): 'neutral' | 'green' | 'blue' | 'amber' | 'red' {
@@ -1396,27 +1194,15 @@ function newJournalDraft(currentUserId: string, currentUserName: string, current
 }
 
 function formatJournalReviewTime(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ko-KR', {
-    month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(date)
+  return formatShortDateTime(value)
 }
 
 function formatJournalTimestamp(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ko-KR', {
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(date)
+  return formatDateTime(value)
 }
 
 function formatJournalGroupDate(value: string) {
-  const date = new Date(value + 'T00:00:00')
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ko-KR', {
-    year: 'numeric', month: 'long', day: 'numeric', weekday: 'short',
-  }).format(date)
+  return formatDateLabel(value)
 }
 
 function JournalReviewDialog({
@@ -1483,9 +1269,8 @@ function JournalReviewDialog({
   )
 }
 
-export function DailyJournalPage({ onToast, currentUserId, currentUserName, currentUserTeam, canManage, workspaceScope, seedDemoData = false }: PageProps) {
-  const [storedJournals, setJournals] = useWorkspaceState<Journal[]>('daily-journals', seedDemoData ? initialJournals : [], { scope: workspaceScope, seedWhenEmpty: canManage })
-  const journals = seedDemoData ? storedJournals : storedJournals.filter((journal) => !isSunseaFixtureJournal(journal))
+export function DailyJournalPage({ onToast, currentUserId, currentUserName, currentUserTeam, canManage, workspaceScope }: PageProps) {
+  const [journals, setJournals] = useWorkspaceState<Journal[]>('daily-journals', [], { scope: workspaceScope, seedWhenEmpty: false })
   const isJournalOwner = (journal: Pick<Journal, 'authorId' | 'author'>) => journal.authorId === currentUserId || (!journal.authorId && journal.author === currentUserName)
   const initialJournal = journals.find(isJournalOwner) ?? (canManage ? journals[0] : undefined) ?? newJournalDraft(currentUserId, currentUserName, currentUserTeam)
   const [selectedId, setSelectedId] = useState(initialJournal.id)
@@ -1521,11 +1306,6 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
     window.addEventListener('beforeunload', preventAccidentalUnload)
     return () => window.removeEventListener('beforeunload', preventAccidentalUnload)
   }, [journalDirty, viewMode])
-
-  useEffect(() => {
-    if (seedDemoData || !storedJournals.some(isSunseaFixtureJournal)) return
-    setJournals((current) => current.filter((journal) => !isSunseaFixtureJournal(journal)))
-  }, [seedDemoData, setJournals, storedJournals])
 
   useEffect(() => {
     if (editorDirtyRef.current) return

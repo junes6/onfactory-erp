@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent 
 import { AlertTriangle, Bot, CalendarClock, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileCheck2, FileText, Gauge, GraduationCap, Microscope, Pencil, Plus, Search, ShieldCheck, Tags, Trash2, Upload, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
+import { formatDateTime } from '../utils/dateTime'
 import {
   deleteDocumentAttachment,
   deleteDocumentAttachments,
@@ -9,6 +10,7 @@ import {
   isStoredDocumentAttachment,
   uploadDocumentAttachments,
 } from '../utils/documentAttachments'
+import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ComplianceCenter.css'
 
 type ComplianceStatus = '유효' | '갱신예정' | '보완필요' | '만료'
@@ -30,6 +32,13 @@ type ComplianceRecord = {
 
 type ComplianceCategoryMeta = { id: string; label: string; icon: LucideIcon; tone: 'forest' | 'blue' | 'violet' | 'amber' | 'slate' }
 
+function complianceStatusTone(status: ComplianceStatus): StatusBadgeTone {
+  if (status === '유효') return 'success'
+  if (status === '갱신예정') return 'warning'
+  if (status === '보완필요' || status === '만료') return 'danger'
+  return 'neutral'
+}
+
 const complianceCategories: ComplianceCategoryMeta[] = [
   { id: 'HACCP', label: 'HACCP', icon: ShieldCheck, tone: 'forest' },
   { id: '자가품질검사', label: '자가품질', icon: Microscope, tone: 'blue' },
@@ -46,12 +55,6 @@ function categoryMeta(category: string): ComplianceCategoryMeta {
   if (category.includes('검교정')) return complianceCategories[4]
   return { id: category, label: category, icon: FileCheck2, tone: 'slate' }
 }
-
-const demoRecords: ComplianceRecord[] = [
-  { id: 'CERT-HACCP-01', category: 'HACCP', name: '수산가공식품 HACCP 인증', authority: '한국식품안전관리인증원', certificateNo: '2024-5-0187', issuedAt: '2024-10-12', expiresAt: '2027-10-11', owner: '박지현', status: '유효', checklist: ['선행요건 기록', 'CCP 모니터링', '검증 기록'], attachments: [{ id: 'ATT-1', name: 'HACCP_인증서.pdf', size: '1.2 MB' }], note: '연 1회 정기 조사 대응', updatedAt: '2026-08-18' },
-  { id: 'CERT-SELF-02', category: '자가품질검사', name: '멍게젓 정기 자가품질검사', authority: '공인 시험검사기관', certificateNo: 'SELF-2026-081', issuedAt: '2026-07-21', expiresAt: '2026-09-21', owner: '이정민', status: '갱신예정', checklist: ['검체 채취', '검사 의뢰', '성적서 확인'], attachments: [{ id: 'ATT-2', name: '자가품질검사_성적서.pdf', size: '840 KB' }], note: '차기 검사 의뢰일 9월 7일', updatedAt: '2026-08-19' },
-  { id: 'CERT-EDU-03', category: '위생교육', name: '영업자 위생교육', authority: '한국식품산업협회', certificateNo: 'EDU-2026-403', issuedAt: '2026-01-18', expiresAt: '2026-12-31', owner: '김서원', status: '보완필요', checklist: ['수료증 등록', '대상자 명단 확인'], attachments: [], note: '수료증 파일 등록 필요', updatedAt: '2026-08-19' },
-]
 
 function isRecordArray(value: unknown): value is ComplianceRecord[] {
   return Array.isArray(value) && value.every((item) => Boolean(item && typeof item === 'object' && typeof item.id === 'string' && typeof item.name === 'string' && Array.isArray(item.attachments)))
@@ -196,7 +199,7 @@ function RecordModal({ record, workspaceScope, onClose, onSave, onToast }: { rec
           checklist: String(form.get('checklist')).split('\n').map((item) => item.trim()).filter(Boolean),
           attachments,
           note: String(form.get('note')).trim(),
-          updatedAt: new Date().toISOString().slice(0, 10),
+          updatedAt: new Date().toISOString(),
         }
         setBusy(true)
         if (!(await onSave(next))) {
@@ -235,8 +238,8 @@ function RecordModal({ record, workspaceScope, onClose, onSave, onToast }: { rec
   </div>
 }
 
-export function ComplianceCenter({ workspaceScope, seedDemoData, canManage, companyName, onToast }: { workspaceScope?: string; seedDemoData: boolean; canManage: boolean; companyName: string; onToast: (message: string) => void }) {
-  const [records, setRecords] = useWorkspaceState<ComplianceRecord[]>('compliance-records', seedDemoData ? demoRecords : [], { scope: workspaceScope, seedWhenEmpty: canManage, validate: isRecordArray })
+export function ComplianceCenter({ workspaceScope, canManage, companyName, onToast }: { workspaceScope?: string; canManage: boolean; companyName: string; onToast: (message: string) => void }) {
+  const [records, setRecords] = useWorkspaceState<ComplianceRecord[]>('compliance-records', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isRecordArray })
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('전체')
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
@@ -319,7 +322,7 @@ export function ComplianceCenter({ workspaceScope, seedDemoData, canManage, comp
               <button className="compliance-record-select" type="button" aria-pressed={selected} onClick={() => setSelectedRecordId(record.id)}>
                 <span className={`compliance-record-icon ${meta.tone}`}><Icon size={19} /></span>
                 <span className="compliance-record-main"><small>{record.category}</small><strong>{record.name}</strong><em>{record.owner} · {record.expiresAt}</em></span>
-                <span className={`compliance-status ${record.status}`}>{record.status === '갱신예정' || record.status === '보완필요' ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}{record.status}</span>
+                <StatusBadge className="compliance-status" tone={complianceStatusTone(record.status)} icon={record.status === '갱신예정' || record.status === '보완필요' ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}>{record.status}</StatusBadge>
                 <ChevronRight className="compliance-row-chevron" size={17} />
               </button>
               {canManage && <div className="compliance-row-actions"><button type="button" aria-label={`${record.name} 수정`} onClick={() => setEditing(record)}><Pencil size={15} /></button><button className="danger" type="button" aria-label={`${record.name} 삭제`} onClick={() => void remove(record)}><Trash2 size={15} /></button></div>}
@@ -333,12 +336,12 @@ export function ComplianceCenter({ workspaceScope, seedDemoData, canManage, comp
           const meta = categoryMeta(selectedRecord.category)
           const Icon = meta.icon
           return <>
-            <header><span className={`compliance-record-icon ${meta.tone}`}><Icon size={21} /></span><div><small>{selectedRecord.category}</small><h2>{selectedRecord.name}</h2></div><span className={`compliance-status ${selectedRecord.status}`}>{selectedRecord.status}</span></header>
+            <header><span className={`compliance-record-icon ${meta.tone}`}><Icon size={21} /></span><div><small>{selectedRecord.category}</small><h2>{selectedRecord.name}</h2></div><StatusBadge className="compliance-status" tone={complianceStatusTone(selectedRecord.status)}>{selectedRecord.status}</StatusBadge></header>
             <dl className="compliance-detail-meta"><div><dt>발급·검토 기관</dt><dd>{selectedRecord.authority}</dd></div><div><dt>관리번호</dt><dd>{selectedRecord.certificateNo}</dd></div><div><dt>담당자</dt><dd>{selectedRecord.owner}</dd></div><div><dt>다음 검토일</dt><dd>{selectedRecord.expiresAt}</dd></div></dl>
             <section><div className="compliance-detail-section-title"><ClipboardCheck size={16} /><strong>필수 확인 항목</strong><span>{selectedRecord.checklist.length}</span></div><ul className="compliance-checklist">{selectedRecord.checklist.map((item) => <li key={item}><CheckCircle2 size={15} />{item}</li>)}{selectedRecord.checklist.length === 0 && <li className="empty">등록된 확인 항목이 없습니다.</li>}</ul></section>
             <section><div className="compliance-detail-section-title"><FileText size={16} /><strong>증빙자료</strong><span>{selectedRecord.attachments.length}</span></div><div className="compliance-detail-files">{selectedRecord.attachments.map((attachment) => <button type="button" disabled={!isStoredDocumentAttachment(attachment) || Boolean(downloadingId)} onClick={() => void downloadAttachment(attachment)} key={attachment.id}><FileText size={15} /><span><strong>{attachment.name}</strong><small>{attachment.size}{!isStoredDocumentAttachment(attachment) ? ' · 원본 없음' : ''}</small></span>{isStoredDocumentAttachment(attachment) && <Download size={15} />}</button>)}{selectedRecord.attachments.length === 0 && <p>등록된 증빙자료가 없습니다.</p>}</div></section>
             {selectedRecord.note && <section className="compliance-detail-note"><strong>관리 메모</strong><p>{selectedRecord.note}</p></section>}
-            <footer><span>최근 수정 {selectedRecord.updatedAt}</span>{canManage && <div><button className="button secondary" type="button" onClick={() => setEditing(selectedRecord)}><Pencil size={16} /> 수정</button><button className="button ghost danger" type="button" onClick={() => void remove(selectedRecord)}><Trash2 size={16} /> 삭제</button></div>}</footer>
+            <footer><span>최근 수정 {formatDateTime(selectedRecord.updatedAt)}</span>{canManage && <div><button className="button secondary" type="button" onClick={() => setEditing(selectedRecord)}><Pencil size={16} /> 수정</button><button className="button ghost danger" type="button" onClick={() => void remove(selectedRecord)}><Trash2 size={16} /> 삭제</button></div>}</footer>
           </>
         })() : <div className="compliance-detail-empty"><FileCheck2 size={30} /><h2>항목을 선택하세요</h2><p>왼쪽 목록에서 인증·검토 항목을 선택하면 상세 정보와 증빙을 확인할 수 있습니다.</p></div>}
       </aside>

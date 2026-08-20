@@ -105,7 +105,7 @@ function DocumentModal({ document, workspaceScope, onClose, onSaved }: { documen
           <label><span>저장 위치</span><select name="storage" defaultValue={document?.storage ?? 'local'}><option value="local">온팩토리 보관함</option><option value="nas" disabled>NAS 동기화 · 자격증명 연결 후 사용</option></select></label>
           <label><span>열람 권한</span><select name="visibility" defaultValue={document?.visibility ?? 'all'}><option value="all">전 직원</option><option value="department">지정 부서</option><option value="restricted">지정 계정</option></select></label>
           <label><span>허용 부서 · 쉼표 구분</span><input name="departments" defaultValue={document?.departments.join(', ')} placeholder="품질관리, 생산 1팀" /></label>
-          <label className="full"><span>허용 계정 ID · 제한자료일 때</span><input name="allowedUserIds" defaultValue={document?.allowedUserIds.join(', ')} placeholder="USR-SUNSEA-PARK" /></label>
+          <label className="full"><span>허용 계정 ID · 제한자료일 때</span><input name="allowedUserIds" defaultValue={document?.allowedUserIds.join(', ')} placeholder="예: 회사 구성원 계정 ID" /></label>
           <label className="full"><span>AI 검색 태그 · 쉼표 구분</span><input name="tags" defaultValue={document?.tags.join(', ')} placeholder="HACCP, 멍게젓, 2026 검사" /></label>
           <label className="full"><span>자료 요약</span><textarea name="summary" rows={4} defaultValue={document?.summary} placeholder="AI가 파일을 찾고 설명할 때 사용할 핵심 내용을 적어 주세요." required /></label>
         </div>

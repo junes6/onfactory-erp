@@ -1,25 +1,11 @@
 import assert from 'node:assert/strict'
-import { once } from 'node:events'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
 import { createApp, DEFAULT_MODEL } from './app.mjs'
-
-async function withServer(app, run) {
-  const server = app.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  const address = server.address()
-
-  try {
-    await run(`http://127.0.0.1:${address.port}`)
-  } finally {
-    await new Promise((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()))
-    })
-  }
-}
+import { withServer } from './test-server.mjs'
 
 async function login(origin, email, workspace = 'tenant', password = 'demo1234') {
   const response = await fetch(`${origin}/api/auth/login`, {

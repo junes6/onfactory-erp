@@ -1,0 +1,96 @@
+:root {
+  /* Core palette: no component may introduce colors outside these tokens. */
+  --color-surface: #FAFAF9;
+  --color-ink: #1C1C1B;
+  --color-blue-deep: #16324F;
+  --color-blue: #2F6B8F;
+  --color-success: #1D9E75;
+  --color-warning: #EF9F27;
+  --color-danger: #E24B4A;
+  --color-gray-50: #F2F2F0;
+  --color-gray-200: #D9D9D5;
+  --color-gray-400: #A7A7A1;
+  --color-gray-600: #6B6B67;
+  --color-gray-800: #3B3B39;
+
+  --color-blue-soft: color-mix(in srgb, var(--color-blue) 12%, var(--color-surface));
+  --color-success-soft: color-mix(in srgb, var(--color-success) 12%, var(--color-surface));
+  --color-warning-soft: color-mix(in srgb, var(--color-warning) 14%, var(--color-surface));
+  --color-danger-soft: color-mix(in srgb, var(--color-danger) 12%, var(--color-surface));
+  --color-overlay: color-mix(in srgb, var(--color-ink) 58%, transparent);
+  --color-overlay-subtle: color-mix(in srgb, var(--color-ink) 8%, transparent);
+
+  --font-22: 22px;
+  --font-15: 15px;
+  --font-13: 13px;
+  --font-11: 11px;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --numeric-features: 'tnum' 1, 'lnum' 1;
+
+  --space-0: 0px;
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+
+  --radius-8: 8px;
+  --hairline: .5px;
+  --shadow-none: none;
+
+  /* Structural dimensions are layout tokens, not spacing values. */
+  --layout-sidebar-width: 248px;
+
+  /* Backward-compatible aliases used by the existing component classes. */
+  --ink: var(--color-ink);
+  --muted: var(--color-gray-600);
+  --subtle: var(--color-gray-400);
+  --forest: var(--color-blue);
+  --forest-dark: var(--color-blue-deep);
+  --forest-soft: var(--color-blue-soft);
+  --lime: var(--color-success);
+  --line: var(--color-gray-200);
+  --surface: var(--color-surface);
+  --canvas: var(--color-gray-50);
+  --blue: var(--color-blue);
+  --blue-soft: var(--color-blue-soft);
+  --amber: var(--color-warning);
+  --amber-soft: var(--color-warning-soft);
+  --red: var(--color-danger);
+  --red-soft: var(--color-danger-soft);
+  --danger: var(--color-danger);
+  --danger-soft: var(--color-danger-soft);
+  --line-strong: var(--color-gray-400);
+  --shadow-sm: var(--shadow-none);
+  --shadow-md: var(--shadow-none);
+  --shadow-lg: var(--shadow-none);
+  --focus-ring: var(--shadow-none);
+  --radius-card: var(--radius-8);
+  --radius-control: var(--radius-8);
+  --radius-lg: var(--radius-8);
+  --space-page: var(--space-32);
+}
+
+html {
+  font-size: var(--font-15);
+  font-weight: var(--weight-regular);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: var(--numeric-features);
+}
+
+html[data-theme='dark'] {
+  --color-blue-soft: color-mix(in srgb, var(--color-blue) 24%, var(--color-blue-deep));
+  --color-success-soft: color-mix(in srgb, var(--color-success) 20%, var(--color-blue-deep));
+  --color-warning-soft: color-mix(in srgb, var(--color-warning) 20%, var(--color-blue-deep));
+  --color-danger-soft: color-mix(in srgb, var(--color-danger) 20%, var(--color-blue-deep));
+  --color-overlay: color-mix(in srgb, var(--color-ink) 72%, transparent);
+  --color-overlay-subtle: color-mix(in srgb, var(--color-surface) 10%, transparent);
+}
+
+strong,
+b,
+th {
+  font-weight: var(--weight-medium);
+}

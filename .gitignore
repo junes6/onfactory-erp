@@ -13,3 +13,4 @@ vite.config.d.ts
 .wrangler/
 .dev.vars*
 .sites-build/
+supabase/.temp/

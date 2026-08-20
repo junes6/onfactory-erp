@@ -1,18 +1,18 @@
-.inventory-movement-panel { margin-top: 16px; }
+.inventory-movement-panel { margin-top: var(--space-16); }
 .inventory-movement-modal { width: min(760px,100%); }
-.movement-direction { display: flex; align-items: center; gap: 9px; color: var(--muted); }
+.movement-direction { display: flex; align-items: center; gap: var(--space-8); color: var(--muted); }
 .movement-direction.입고 { color: var(--forest); }
-.movement-direction.출고 { color: var(--blue); }
+.movement-direction.출고 { color: var(--color-blue); }
 .movement-direction.재고조정 { color: var(--amber); }
 .movement-direction > span { min-width: 0; }
 .movement-direction strong, .movement-direction small { display: block; }
-.movement-direction small { margin-top: 2px; color: var(--muted); font-size: 13px; }
-.movement-evidence { display: inline-flex; align-items: center; gap: 5px; max-width: 190px; overflow: hidden; color: var(--blue); text-overflow: ellipsis; white-space: nowrap; }
-.movement-evidence.download { padding: 5px 7px; border: 1px solid color-mix(in srgb, var(--blue), transparent 70%); border-radius: 8px; background: transparent; font-weight: 750; cursor: pointer; }
-.movement-evidence.download:hover { background: var(--blue-soft); }
-.movement-delete { min-height: 34px; padding: 0 9px; border: 1px solid color-mix(in srgb, var(--red), transparent 65%); border-radius: 8px; color: var(--red); background: var(--surface); font-size: 13px; font-weight: 800; cursor: pointer; }
-.movement-delete:hover { background: var(--red-soft); }
-.inventory-movement-modal .form-field > small { display: block; margin-top: 6px; color: var(--muted); font-size: 13px; }
+.movement-direction small { margin-top: var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.movement-evidence { display: inline-flex; align-items: center; gap: var(--space-4); max-width: 190px; overflow: hidden; color: var(--color-blue); text-overflow: ellipsis; white-space: nowrap; }
+.movement-evidence.download { padding: var(--space-4) var(--space-8); border: var(--hairline) solid color-mix(in srgb, var(--color-blue), transparent 70%); border-radius: var(--radius-8); background: transparent; font-weight: var(--weight-medium); cursor: pointer; }
+.movement-evidence.download:hover { background: var(--color-blue-soft); }
+.movement-delete { min-height: 34px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid color-mix(in srgb, var(--color-blue), transparent 65%); border-radius: var(--radius-8); color: var(--color-blue); background: var(--surface); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
+.movement-delete:hover { background: var(--color-blue-soft); }
+.inventory-movement-modal .form-field > small { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); }
 .form-grid.three { grid-template-columns: .8fr .8fr 1.4fr; }
 
 html[data-theme='dark'] .inventory-movement-modal { color: var(--ink); background: var(--surface); }

@@ -42,13 +42,13 @@ import {
 } from 'react'
 import './FactoryManagement.css'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
+import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 
 type FactoryManagementProps = {
   onToast: (message: string) => void
   canManage: boolean
   companyName?: string
   workspaceScope?: string
-  seedDemoData?: boolean
 }
 
 type ZoneKind = 'raw' | 'frozen' | 'production' | 'packing' | 'shipping'
@@ -140,6 +140,26 @@ type LayoutBlock = {
 
 type FactoryLayouts = Record<string, LayoutBlock[]>
 
+const layoutColorOptions = [
+  { value: 'var(--color-success-soft)', label: '안전 · 원료' },
+  { value: 'var(--color-blue-soft)', label: '정보 · 냉장냉동' },
+  { value: 'var(--color-warning-soft)', label: '주의 · 생산' },
+  { value: 'var(--color-danger-soft)', label: '위험 · 점검' },
+  { value: 'var(--color-gray-200)', label: '중립 · 설비' },
+  { value: 'var(--color-gray-50)', label: '중립 · 통로' },
+] as const
+
+const layoutColorValues = new Set<string>(layoutColorOptions.map((option) => option.value))
+
+function layoutTokenColor(block: Pick<LayoutBlock, 'color' | 'zoneId'>) {
+  if (layoutColorValues.has(block.color)) return block.color
+  if (block.zoneId === 'raw') return 'var(--color-success-soft)'
+  if (block.zoneId === 'frozen') return 'var(--color-blue-soft)'
+  if (block.zoneId === 'production') return 'var(--color-warning-soft)'
+  if (block.zoneId === 'packing') return 'var(--color-gray-200)'
+  return 'var(--color-gray-50)'
+}
+
 type LocationDraft = Omit<FactoryLocation, 'id' | 'factoryId' | 'current' | 'capacity'> & {
   current: string
   capacity: string
@@ -149,178 +169,7 @@ type LocationModalState =
   | { mode: 'create'; location?: undefined }
   | { mode: 'edit'; location: FactoryLocation }
 
-const factories: FactoryDefinition[] = [
-  {
-    id: 'FAC-POH-01',
-    name: '햇살바다 포항 제1공장',
-    code: 'POH-01',
-    address: '경북 포항시 남구 구룡포읍',
-    area: '연면적 4,280㎡',
-    zones: [
-      {
-        id: 'raw',
-        name: '원료창고',
-        shortName: '원료',
-        state: '정상',
-        utilization: 71,
-        primaryLabel: '보관 재고',
-        primaryValue: '18,420 kg',
-        secondaryLabel: '오늘 입고',
-        secondaryValue: '3건 · 1,240kg',
-        condition: '18.4℃ · 습도 46%',
-        manager: '이동현 주임',
-        note: '붉은대게 분말은 8.2일분 재고가 남아 있습니다.',
-        nextAction: '내일 10:30 멍게 원물 180kg 입고 예정',
-      },
-      {
-        id: 'frozen',
-        name: '냉동창고',
-        shortName: '냉동',
-        state: '주의',
-        utilization: 88,
-        primaryLabel: '보관 재고',
-        primaryValue: '6,280 kg',
-        secondaryLabel: '가용 공간',
-        secondaryValue: '12% · 8 PLT',
-        condition: '-19.2℃ · 정상',
-        manager: '서동현 담당',
-        note: 'A-03 랙 사용률이 92%입니다. 금일 출고 후 재배치가 필요합니다.',
-        nextAction: '16:00 이전 A-03 랙 3팔레트 우선 출고',
-      },
-      {
-        id: 'production',
-        name: '생산구역',
-        shortName: '생산',
-        state: '가동중',
-        utilization: 67,
-        primaryLabel: '가동 라인',
-        primaryValue: '2 / 3 라인',
-        secondaryLabel: '오늘 생산',
-        secondaryValue: '4,820 ea',
-        condition: '라인 효율 91.4%',
-        manager: '오태식 반장',
-        note: '1라인은 붉은대게라면 스프 배합, 2라인은 육수다시 충진 중입니다.',
-        nextAction: '17:00 붉은대게라면 생산량 확정',
-      },
-      {
-        id: 'packing',
-        name: '포장구역',
-        shortName: '포장',
-        state: '가동중',
-        utilization: 54,
-        primaryLabel: '가동 라인',
-        primaryValue: '1 / 2 라인',
-        secondaryLabel: '포장 대기',
-        secondaryValue: '1,260 ea',
-        condition: '불량률 0.42%',
-        manager: '김하늘 주임',
-        note: '육수다시 20포 선물세트를 포장하고 있습니다.',
-        nextAction: '15:40 라벨 시안 교체 후 초도검사',
-      },
-      {
-        id: 'shipping',
-        name: '출하구역',
-        shortName: '출하',
-        state: '출하중',
-        utilization: 62,
-        primaryLabel: '출하 대기',
-        primaryValue: '14 PLT',
-        secondaryLabel: '오늘 주문',
-        secondaryValue: '293건',
-        condition: '상차 도크 2 / 3 사용',
-        manager: '윤서진 담당',
-        note: '쿠팡 142건, 네이버 86건을 우선 피킹하고 있습니다.',
-        nextAction: '16:30 CJ대한통운 1차 상차 마감',
-      },
-    ],
-  },
-  {
-    id: 'FAC-GRP-02',
-    name: '구룡포 냉동·가공공장',
-    code: 'GRP-02',
-    address: '경북 포항시 남구 동해안로',
-    area: '연면적 2,940㎡',
-    zones: [
-      {
-        id: 'raw',
-        name: '원료창고',
-        shortName: '원료',
-        state: '정상',
-        utilization: 64,
-        primaryLabel: '보관 재고',
-        primaryValue: '12,870 kg',
-        secondaryLabel: '오늘 입고',
-        secondaryValue: '2건 · 680kg',
-        condition: '17.8℃ · 습도 43%',
-        manager: '정민석 담당',
-        note: '입고 검수 대기 원료는 없습니다.',
-        nextAction: '내일 붉은대게 원물 600kg 입고 예정',
-      },
-      {
-        id: 'frozen',
-        name: '냉동창고',
-        shortName: '냉동',
-        state: '정상',
-        utilization: 73,
-        primaryLabel: '보관 재고',
-        primaryValue: '9,410 kg',
-        secondaryLabel: '가용 공간',
-        secondaryValue: '27% · 21 PLT',
-        condition: '-20.1℃ · 정상',
-        manager: '박정호 담당',
-        note: '모든 온도 센서가 정상 범위입니다.',
-        nextAction: '18:00 일일 온도기록 승인',
-      },
-      {
-        id: 'production',
-        name: '생산구역',
-        shortName: '생산',
-        state: '가동중',
-        utilization: 82,
-        primaryLabel: '가동 라인',
-        primaryValue: '2 / 2 라인',
-        secondaryLabel: '오늘 생산',
-        secondaryValue: '3,160 ea',
-        condition: '라인 효율 88.7%',
-        manager: '최진호 반장',
-        note: '냉동볶음밥과 붉은대게 소스 생산이 진행 중입니다.',
-        nextAction: '19:20 생산 종료 후 CIP 세척',
-      },
-      {
-        id: 'packing',
-        name: '포장구역',
-        shortName: '포장',
-        state: '대기',
-        utilization: 18,
-        primaryLabel: '가동 라인',
-        primaryValue: '0 / 1 라인',
-        secondaryLabel: '포장 대기',
-        secondaryValue: '420 ea',
-        condition: '세척 완료 · 대기',
-        manager: '문소라 주임',
-        note: '17:30 냉동볶음밥 포장을 시작할 예정입니다.',
-        nextAction: '작업 전 금속검출기 감도 확인',
-      },
-      {
-        id: 'shipping',
-        name: '출하구역',
-        shortName: '출하',
-        state: '정상',
-        utilization: 39,
-        primaryLabel: '출하 대기',
-        primaryValue: '6 PLT',
-        secondaryLabel: '오늘 주문',
-        secondaryValue: '84건',
-        condition: '상차 도크 1 / 2 사용',
-        manager: '이수현 담당',
-        note: '냉동 택배 84건의 송장 발행이 완료되었습니다.',
-        nextAction: '17:10 냉동 탑차 상차',
-      },
-    ],
-  },
-]
-
-function createCustomerFactory(companyName?: string): FactoryDefinition {
+function createCustomerFactory(companyName?: string, id = `FAC-${Date.now()}`): FactoryDefinition {
   const company = companyName?.trim() || '우리 회사'
   const zone = (id: ZoneKind, name: string, shortName: string): FactoryZone => ({
     id,
@@ -338,7 +187,7 @@ function createCustomerFactory(companyName?: string): FactoryDefinition {
     nextAction: '편집 모드에서 첫 공간 블록 등록',
   })
   return {
-    id: 'FAC-MAIN-01',
+    id,
     name: `${company} 제1공장`,
     code: 'MAIN-01',
     address: '주소 미등록',
@@ -351,36 +200,6 @@ function createCustomerFactory(companyName?: string): FactoryDefinition {
       zone('shipping', '출하 구역', '출하'),
     ],
   }
-}
-
-const initialLocations: FactoryLocation[] = [
-  { id: 'LOC-RM-A01', factoryId: 'FAC-POH-01', zoneId: 'raw', kind: '재고', name: '원료 A동 1열', code: 'RM-A01', item: '붉은대게 분말', current: 4380, capacity: 6000, unit: 'kg', status: '정상', note: 'FEFO 순서로 출고' },
-  { id: 'LOC-RM-B02', factoryId: 'FAC-POH-01', zoneId: 'raw', kind: '재고', name: '원료 B동 2열', code: 'RM-B02', item: '건조 다시마·멸치', current: 2680, capacity: 4000, unit: 'kg', status: '정상', note: '상온·건조 보관' },
-  { id: 'LOC-FZ-A03', factoryId: 'FAC-POH-01', zoneId: 'frozen', kind: '재고', name: '냉동 A-03 랙', code: 'FZ-A03', item: '붉은대게살', current: 1840, capacity: 2000, unit: 'kg', status: '주의', note: '금일 3팔레트 우선 출고' },
-  { id: 'LOC-PR-L01', factoryId: 'FAC-POH-01', zoneId: 'production', kind: '생산', name: '생산 1라인', code: 'PR-L01', item: '붉은대게라면 스프', current: 2460, capacity: 3200, unit: 'ea', status: '정상', note: '배합·건조 공정' },
-  { id: 'LOC-PR-L02', factoryId: 'FAC-POH-01', zoneId: 'production', kind: '생산', name: '생산 2라인', code: 'PR-L02', item: '육수다시', current: 2360, capacity: 3000, unit: 'ea', status: '정상', note: '충진 공정' },
-  { id: 'LOC-PK-L01', factoryId: 'FAC-POH-01', zoneId: 'packing', kind: '생산', name: '포장 1라인', code: 'PK-L01', item: '육수다시 선물세트', current: 760, capacity: 1400, unit: 'ea', status: '정상', note: '중량·라벨 검사 포함' },
-  { id: 'LOC-SH-D02', factoryId: 'FAC-POH-01', zoneId: 'shipping', kind: '재고', name: '출하 도크 2', code: 'SH-D02', item: '온라인 주문 출하품', current: 14, capacity: 24, unit: 'PLT', status: '정상', note: '16:30 1차 상차' },
-  { id: 'LOC-GR-F01', factoryId: 'FAC-GRP-02', zoneId: 'frozen', kind: '재고', name: '냉동 1창고', code: 'GR-F01', item: '냉동 수산 원물', current: 6710, capacity: 9200, unit: 'kg', status: '정상', note: '자동 온도기록 중' },
-  { id: 'LOC-GR-P01', factoryId: 'FAC-GRP-02', zoneId: 'production', kind: '생산', name: '냉동식품 1라인', code: 'GR-P01', item: '붉은대게살 볶음밥', current: 1780, capacity: 2200, unit: 'ea', status: '정상', note: '급속동결 포함' },
-  { id: 'LOC-GR-P02', factoryId: 'FAC-GRP-02', zoneId: 'production', kind: '생산', name: '소스 2라인', code: 'GR-P02', item: '붉은대게 어간장', current: 1380, capacity: 1800, unit: 'ea', status: '점검', note: '충진 노즐 점검 예정' },
-]
-
-const initialFactoryLayouts: FactoryLayouts = {
-  'FAC-POH-01': [
-    { id: 'BLOCK-POH-RAW', factoryId: 'FAC-POH-01', zoneId: 'raw', name: '원료·자재 창고', purpose: '원료·자재', kind: '재고', x: 3, y: 5, width: 28, height: 33, color: '#d9efe1', item: '붉은대게 분말 외 원료', current: 7060, capacity: 10000, unit: 'kg', note: '입고 검수 후 FEFO 배치' },
-    { id: 'BLOCK-POH-FROZEN', factoryId: 'FAC-POH-01', zoneId: 'frozen', name: '냉동 A동', purpose: '냉장·냉동', kind: '재고', x: 3, y: 51, width: 28, height: 41, color: '#d5eaf5', item: '붉은대게살', current: 1840, capacity: 2000, unit: 'kg', note: '-19℃ 유지 · A-03 우선 출고' },
-    { id: 'BLOCK-POH-PROD', factoryId: 'FAC-POH-01', zoneId: 'production', name: '생산 1·2라인', purpose: '생산', kind: '생산', x: 36, y: 5, width: 36, height: 40, color: '#fae4c7', item: '라면 스프 · 육수다시', current: 4820, capacity: 6200, unit: 'ea', note: '1라인 배합 · 2라인 충진' },
-    { id: 'BLOCK-POH-PACK', factoryId: 'FAC-POH-01', zoneId: 'packing', name: '포장구역', purpose: '포장', kind: '생산', x: 36, y: 59, width: 36, height: 33, color: '#e8dcf2', item: '선물세트', current: 760, capacity: 1400, unit: 'ea', note: '중량·라벨 검사 포함' },
-    { id: 'BLOCK-POH-SHIP', factoryId: 'FAC-POH-01', zoneId: 'shipping', name: '출하 도크', purpose: '출하', kind: '재고', x: 77, y: 5, width: 20, height: 87, color: '#d8eee9', item: '온라인 주문 출하품', current: 14, capacity: 24, unit: 'PLT', note: '16:30 1차 상차' },
-  ],
-  'FAC-GRP-02': [
-    { id: 'BLOCK-GRP-RAW', factoryId: 'FAC-GRP-02', zoneId: 'raw', name: '원료창고', purpose: '원료·자재', kind: '재고', x: 4, y: 6, width: 29, height: 35, color: '#d9efe1', item: '수산 원물', current: 12870, capacity: 20000, unit: 'kg', note: '입고 검수 대기 없음' },
-    { id: 'BLOCK-GRP-FROZEN', factoryId: 'FAC-GRP-02', zoneId: 'frozen', name: '냉동 1창고', purpose: '냉장·냉동', kind: '재고', x: 4, y: 51, width: 29, height: 42, color: '#d5eaf5', item: '냉동 수산 원물', current: 6710, capacity: 9200, unit: 'kg', note: '자동 온도기록 중' },
-    { id: 'BLOCK-GRP-PROD', factoryId: 'FAC-GRP-02', zoneId: 'production', name: '냉동식품 생산라인', purpose: '생산', kind: '생산', x: 38, y: 6, width: 36, height: 49, color: '#fae4c7', item: '볶음밥 · 어간장', current: 3160, capacity: 4000, unit: 'ea', note: '2개 라인 가동 중' },
-    { id: 'BLOCK-GRP-PACK', factoryId: 'FAC-GRP-02', zoneId: 'packing', name: '포장·검사', purpose: '포장', kind: '생산', x: 38, y: 65, width: 36, height: 28, color: '#e8dcf2', item: '냉동볶음밥', current: 420, capacity: 1200, unit: 'ea', note: '금속검출기 감도 확인' },
-    { id: 'BLOCK-GRP-SHIP', factoryId: 'FAC-GRP-02', zoneId: 'shipping', name: '냉동 출하장', purpose: '출하', kind: '재고', x: 79, y: 6, width: 17, height: 87, color: '#d8eee9', item: '냉동 택배', current: 6, capacity: 18, unit: 'PLT', note: '17:10 냉동 탑차 상차' },
-  ],
 }
 
 const emptyFactoryLayouts: FactoryLayouts = {}
@@ -423,10 +242,10 @@ const zonePresentation: Record<ZoneKind, { icon: LucideIcon; className: string }
   shipping: { icon: Truck, className: 'shipping' },
 }
 
-const statusTone = (state: ZoneState | LocationState) => {
+const statusTone = (state: ZoneState | LocationState): StatusBadgeTone => {
   if (state === '주의' || state === '점검') return 'warning'
-  if (state === '대기' || state === '비가동') return 'idle'
-  return 'good'
+  if (state === '대기' || state === '비가동') return 'neutral'
+  return 'success'
 }
 
 const formatFileSize = (bytes: number) => {
@@ -434,8 +253,8 @@ const formatFileSize = (bytes: number) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function StatusBadge({ state }: { state: ZoneState | LocationState }) {
-  return <span className={`factory-status factory-status--${statusTone(state)}`}><i />{state}</span>
+function FactoryStatusBadge({ state }: { state: ZoneState | LocationState }) {
+  return <StatusBadge className="factory-status" dot tone={statusTone(state)}>{state}</StatusBadge>
 }
 
 function ZoneIcon({ kind, size = 20 }: { kind: ZoneKind; size?: number }) {
@@ -698,7 +517,7 @@ function LayoutEditor({ factory, blocks, selectedId, editable, drawing, showBack
       return <button
         type="button"
         className={`factory-layout-block${selectedId === block.id ? ' is-selected' : ''}`}
-        style={{ left: `${block.x}%`, top: `${block.y}%`, width: `${block.width}%`, height: `${block.height}%`, backgroundColor: block.color }}
+        style={{ left: `${block.x}%`, top: `${block.y}%`, width: `${block.width}%`, height: `${block.height}%`, backgroundColor: layoutTokenColor(block) }}
         aria-pressed={selectedId === block.id}
         aria-label={`${block.name}, ${block.purpose}, ${block.item || '품목 미등록'}, 위치 ${Math.round(block.x)} ${Math.round(block.y)}, 크기 ${Math.round(block.width)} ${Math.round(block.height)}`}
         onClick={() => onSelect(block)}
@@ -756,7 +575,7 @@ function LayoutInspector({ block, canManage, onChange, onDelete }: {
       </div>
       <div className="factory-layout-form__row">
         {field('연결 구역', <select value={block.zoneId} disabled={!canManage} onChange={(event) => onChange({ zoneId: event.target.value as ZoneKind })}><option value="raw">원료</option><option value="frozen">냉장·냉동</option><option value="production">생산</option><option value="packing">포장</option><option value="shipping">출하</option></select>)}
-        {field('블록 색상', <span className="factory-color-input"><input type="color" value={block.color} disabled={!canManage} onChange={(event) => onChange({ color: event.target.value })} /><code>{block.color}</code></span>)}
+        {field('블록 색상', <select value={layoutColorOptions.some((option) => option.value === block.color) ? block.color : 'var(--color-gray-200)'} disabled={!canManage} onChange={(event) => onChange({ color: event.target.value })}>{layoutColorOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>)}
       </div>
       <div className="factory-layout-size-grid" aria-label="블록 위치와 크기">
         {field('X', <input type="number" min="0" max={100 - block.width} step="1" value={Math.round(block.x)} disabled={!canManage} onChange={(event) => onChange({ x: Math.min(100 - block.width, Math.max(0, number(event.target.value, block.x))) })} />)}
@@ -947,28 +766,32 @@ function LocationModal({
   )
 }
 
-export function FactoryManagement({ onToast, canManage, companyName, workspaceScope, seedDemoData = true }: FactoryManagementProps) {
-  const availableFactories = useMemo(
-    () => seedDemoData ? factories : [createCustomerFactory(companyName)],
-    [companyName, seedDemoData],
-  )
-  const [selectedFactoryId, setSelectedFactoryId] = useState(availableFactories[0].id)
+export function FactoryManagement({ onToast, canManage, companyName, workspaceScope }: FactoryManagementProps) {
+  const [locations, setLocations] = useWorkspaceState<FactoryLocation[]>('factory-locations', emptyFactoryLocations, { scope: workspaceScope, seedWhenEmpty: false, validate: isFactoryLocationList })
+  const [layouts, setLayouts] = useWorkspaceState<FactoryLayouts>('factory-layouts', emptyFactoryLayouts, { scope: workspaceScope, seedWhenEmpty: false, validate: isFactoryLayouts })
+  const availableFactories = useMemo(() => {
+    const ids = Array.from(new Set([...Object.keys(layouts), ...locations.map((location) => location.factoryId)]))
+    return ids.map((id, index) => {
+      const definition = createCustomerFactory(companyName, id)
+      return { ...definition, name: `${companyName?.trim() || '우리 회사'} ${ids.length === 1 ? '제1공장' : `${index + 1}공장`}`, code: id.replace(/^FAC-/, '').slice(0, 16) || `SITE-${index + 1}` }
+    })
+  }, [companyName, layouts, locations])
+  const placeholderFactory = useMemo(() => createCustomerFactory(companyName, 'FAC-PENDING'), [companyName])
+  const [selectedFactoryId, setSelectedFactoryId] = useState('')
   const [selectedZoneId, setSelectedZoneId] = useState<ZoneKind>('raw')
-  const [locations, setLocations] = useWorkspaceState<FactoryLocation[]>('factory-locations', seedDemoData ? initialLocations : emptyFactoryLocations, { scope: workspaceScope, seedWhenEmpty: canManage, validate: isFactoryLocationList })
-  const [layouts, setLayouts] = useWorkspaceState<FactoryLayouts>('factory-layouts', seedDemoData ? initialFactoryLayouts : emptyFactoryLayouts, { scope: workspaceScope, seedWhenEmpty: canManage, validate: isFactoryLayouts })
   const [drawings, setDrawings] = useState<Record<string, DrawingMeta>>({})
   const [drawingsLoading, setDrawingsLoading] = useState(true)
   const [drawingBusy, setDrawingBusy] = useState(false)
   const [showBackground, setShowBackground] = useState(true)
   const [editMode, setEditMode] = useState(false)
   const [overviewExpanded, setOverviewExpanded] = useState(false)
-  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(initialFactoryLayouts[availableFactories[0].id]?.[0]?.id ?? null)
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const [modalState, setModalState] = useState<LocationModalState | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const objectUrlsRef = useRef(new Set<string>())
 
-  const factory = availableFactories.find((item) => item.id === selectedFactoryId) ?? availableFactories[0]
+  const factory = availableFactories.find((item) => item.id === selectedFactoryId) ?? availableFactories[0] ?? placeholderFactory
   const factoryBlocks = layouts[factory.id] ?? []
   const selectedBlock = factoryBlocks.find((block) => block.id === selectedBlockId)
   const selectedZone = factory.zones.find((zone) => zone.id === (selectedBlock?.zoneId ?? selectedZoneId)) ?? factory.zones[0]
@@ -1042,6 +865,11 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
   useEffect(() => {
     if (availableFactories.some((item) => item.id === selectedFactoryId)) return
     const first = availableFactories[0]
+    if (!first) {
+      setSelectedFactoryId('')
+      setSelectedBlockId(null)
+      return
+    }
     setSelectedFactoryId(first.id)
     setSelectedZoneId('raw')
     setSelectedBlockId((layouts[first.id] ?? [])[0]?.id ?? null)
@@ -1061,6 +889,18 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
     setSelectedZoneId('raw')
     setSelectedBlockId((layouts[nextFactoryId] ?? [])[0]?.id ?? null)
     setEditMode(false)
+  }
+
+  const registerFirstFactory = async () => {
+    if (!canManage || availableFactories.length > 0) return
+    const next = createCustomerFactory(companyName)
+    const result = await setLayouts((current) => ({ ...current, [next.id]: [] }))
+    if (!result.ok) {
+      onToast(result.message ?? '공장을 등록하지 못했습니다.')
+      return
+    }
+    setSelectedFactoryId(next.id)
+    onToast(`${next.name}을 등록했습니다. 배치 블록과 운영 위치를 추가해 주세요.`)
   }
 
   const setDrawingReference = async (drawingId: string, factoryId: string, attached: boolean) => {
@@ -1269,7 +1109,7 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
       y: freePosition.y,
       width: 24,
       height: 22,
-      color: '#e8eee9',
+      color: 'var(--color-gray-200)',
       item: '',
       current: 0,
       capacity: 100,
@@ -1294,6 +1134,19 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
     onToast(`${selectedBlock.name} 블록을 삭제했습니다.`)
   }
 
+  if (availableFactories.length === 0) {
+    return <div className="factory-page">
+      <header className="factory-page__head">
+        <div><span className="factory-page__kicker">FACTORY CONTROL</span><h1>공장관리</h1><p>공장과 배치 블록을 등록하면 재고·생산 위치를 한눈에 관리할 수 있습니다.</p></div>
+      </header>
+      <section className="factory-overview factory-empty-state" aria-label="공장 등록 안내">
+        <FactoryIcon size={32} aria-hidden="true" />
+        <div><h2>등록된 공장이 없습니다</h2><p>{canManage ? '첫 공장을 등록한 뒤 도면 또는 블록 편집기로 실제 공간을 구성하세요.' : '회사 관리자가 공장을 등록하면 이곳에서 운영 위치를 확인할 수 있습니다.'}</p></div>
+        {canManage && <button className="factory-button factory-button--primary" type="button" onClick={() => void registerFirstFactory()}><Plus size={17} /> 첫 공장 등록</button>}
+      </section>
+    </div>
+  }
+
   return (
     <div className="factory-page">
       <header className="factory-page__head">
@@ -1315,7 +1168,7 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
           <div className="factory-identity factory-identity--compact">
             <span className="factory-identity__mark"><FactoryIcon size={20} aria-hidden="true" /></span>
             <div><strong>{factory.name}</strong><span>{factory.code} · {factory.address} · {factory.area}</span></div>
-            <span className="factory-identity__live"><i />{seedDemoData ? '운영 중' : '초기 설정'}</span>
+            <span className="factory-identity__live"><i />{factoryBlocks.length || factoryLocations.length ? '운영 중' : '초기 설정'}</span>
           </div>
           <div className="factory-summary factory-summary--compact" aria-label="핵심 지표">
             <article><Layers3 size={16} /><span>블록 <strong>{factoryBlocks.length}</strong></span></article>
@@ -1412,7 +1265,7 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
                       <div><strong>{location.name}</strong><span>{location.code} · {location.kind} 위치</span></div>
                        {canManage && <button type="button" aria-label={`${location.name} 수정`} onClick={() => setModalState({ mode: 'edit', location })}><Edit3 size={16} /></button>}
                     </div>
-                    <div className="factory-location-card__item"><span>{location.item}</span><StatusBadge state={location.status} /></div>
+                    <div className="factory-location-card__item"><span>{location.item}</span><FactoryStatusBadge state={location.status} /></div>
                     <div className="factory-location-card__quantity"><strong>{location.current.toLocaleString()} {location.unit}</strong><span>/ {location.capacity.toLocaleString()} {location.unit}</span></div>
                     <div
                       className="factory-location-card__bar"
