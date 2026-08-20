@@ -4,7 +4,7 @@
 :root {
   font-family: 'Noto Sans KR', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   color: var(--color-blue-deep);
-  background: var(--color-blue-soft);
+  background: var(--color-page);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --ink: var(--color-blue-deep);
@@ -14,9 +14,9 @@
   --forest-dark: var(--color-blue-deep);
   --forest-soft: var(--color-blue-soft);
   --lime: var(--color-warning-soft);
-  --line: var(--color-blue-soft);
+  --line: var(--color-gray-200);
   --surface: var(--color-surface);
-  --canvas: var(--color-blue-soft);
+  --canvas: var(--color-page);
   --blue: var(--color-blue);
   --blue-soft: var(--color-blue-soft);
   --amber: var(--color-warning);
@@ -2017,4 +2017,399 @@ html[data-theme='dark'] .work-now-stepper i { background: var(--surface); }
   .work-now-meta > div { padding-left: var(--space-4); }
   .work-now-meta dd { font-size: var(--font-13); }
   .work-now-stepper { padding-inline: var(--space-8); }
+}
+
+/* A-D: two-surface shell, compact AI home, and master-detail work queue */
+.main-content,
+:where(.content-page,.home-page,.business-page) { min-height: 0; }
+
+:where(.content-page,.home-page) > :where(.panel,.ai-chat,.my-work-card),
+.dashboard-widget-preview > :where(.panel,.ai-chat,.my-work-card,.home-calendar-card,.dashboard-quick-links,.priority-alert-bar) {
+  box-shadow: var(--shadow-none);
+}
+
+/* Login keeps two equal planes. The form remains centered at every desktop height. */
+.auth-shell { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+.auth-brand-panel,
+.auth-form-panel { min-width: 0; min-height: 100svh; }
+.auth-brand-panel { display: grid; grid-template-columns: minmax(0,560px); align-content: center; justify-content: center; gap: var(--space-24); }
+.auth-brand-copy { max-width: none; margin: var(--space-0); padding: var(--space-0); }
+.auth-trust-row { margin-top: var(--space-8); }
+.auth-form-panel { display: flex; align-items: center; justify-content: center; overflow-y: auto; }
+.auth-form-card { width: min(470px,calc(100% - var(--space-32))); margin: auto; }
+
+/* The tenant identity belongs to the rail instead of looking like a third card. */
+.company-switcher {
+  width: 100%;
+  min-height: 54px;
+  gap: var(--space-8);
+  margin: var(--space-4) var(--space-0) var(--space-16);
+  padding: var(--space-8);
+  border: 0;
+  border-radius: var(--radius-8);
+  background: transparent;
+  box-shadow: none;
+}
+.company-switcher:hover,
+.company-switcher:focus-visible { background: var(--color-overlay-subtle); }
+.company-switcher .company-logo { width: 34px; height: 34px; }
+.company-switcher small { margin-bottom: var(--space-0); color: var(--color-blue-soft); }
+
+/* Home: compact sticky page actions, followed by content-height widgets. */
+.ai-home-page .page-header {
+  position: sticky;
+  z-index: 20;
+  top: 68px;
+  align-items: center;
+  margin-bottom: var(--space-12);
+  padding: var(--space-8) var(--space-0);
+  background: color-mix(in srgb,var(--canvas) 92%,transparent);
+  backdrop-filter: blur(12px);
+}
+.ai-home-page .page-header .eyebrow { margin-bottom: var(--space-0); }
+.ai-home-page .page-header p { display: none; }
+.ai-home-page .page-header-actions { flex-wrap: nowrap; }
+.home-header-chips { min-width: 0; display: flex; align-items: center; gap: var(--space-4); }
+.home-header-chips > button {
+  height: 36px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-0) var(--space-8);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  color: var(--muted);
+  background: var(--surface);
+  font-size: var(--font-13);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.home-header-chips > button:hover { border-color: var(--line-strong); background: var(--forest-soft); }
+.home-header-chips > button strong { color: var(--forest); font-size: var(--font-15); font-weight: var(--weight-medium); }
+.home-header-chips > button.is-neutral strong { color: var(--muted); }
+.ai-home-page .dashboard-widget-grid { align-items: start; }
+.ai-home-page .dashboard-editable-widget:not(.is-editing),
+.ai-home-page .dashboard-widget-preview { border: 0; background: transparent; box-shadow: none; }
+.ai-home-page .dashboard-widget-ai { align-self: start; }
+.ai-home-page .dashboard-widget-ai .ai-chat { height: auto; min-height: 0; }
+.ai-home-page .ai-chat-messages { flex: 0 1 auto; min-height: 0; max-height: min(420px,48vh); overflow-y: auto; }
+.ai-home-page :is(.dashboard-widget-schedule .home-calendar-card,.dashboard-widget-work .my-work-card,.dashboard-widget-links .dashboard-quick-links) { height: auto; min-height: 0; }
+.chat-message-content { min-width: 0; max-width: min(78%,640px); display: flex; align-items: flex-start; flex-direction: column; }
+.chat-message.user .chat-message-content { align-items: flex-end; }
+.chat-message-content .chat-bubble { max-width: 100%; }
+.chat-message-content .chat-message-meta { justify-content: flex-start; gap: var(--space-4); margin-top: var(--space-4); padding-inline: var(--space-4); }
+.chat-message.user .chat-message-meta { justify-content: flex-end; }
+.chat-message-content .chat-message-meta :is(small,time) { font-size: var(--font-11); line-height: 1.35; }
+
+/* Work queue: 64px master rows and one focused detail surface. */
+.workflow-page .page-header { margin-bottom: var(--space-16); }
+.workflow-master-detail { overflow: clip; padding: var(--space-0); }
+.workflow-board-toolbar {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-16);
+  padding: var(--space-8) var(--space-12);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.workflow-board-toolbar > p { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.workflow-simple-tabs { display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-4); border-radius: var(--radius-8); background: var(--canvas); }
+.workflow-simple-tabs button {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-0) var(--space-12);
+  border: 0;
+  border-radius: var(--radius-8);
+  color: var(--muted);
+  background: transparent;
+  font-size: var(--font-13);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.workflow-simple-tabs button[aria-selected='true'] { color: var(--forest); background: var(--surface); box-shadow: var(--shadow-none); }
+.workflow-simple-tabs em { min-width: 22px; height: 22px; display: grid; place-items: center; padding-inline: var(--space-4); border-radius: var(--radius-8); background: var(--forest-soft); font-size: var(--font-13); font-style: normal; }
+.workflow-master-detail-grid { min-width: 0; display: grid; grid-template-columns: minmax(560px,1.15fr) minmax(390px,.85fr); align-items: stretch; }
+.workflow-list-pane { min-width: 0; max-height: min(720px,calc(100vh - 230px)); overflow-y: auto; border-right: var(--hairline) solid var(--line); background: var(--surface); }
+.workflow-list-section { background: var(--surface); }
+.workflow-list-section + .workflow-list-section { margin-top: var(--space-8); }
+.workflow-list-section > header {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  padding: var(--space-8) var(--space-12);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.workflow-list-section > header h2,
+.workflow-list-section > header p { margin: var(--space-0); }
+.workflow-list-section > header h2 { font-size: var(--font-15); }
+.workflow-list-section > header p { margin-top: var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.workflow-list-section > header > span { min-width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--forest); background: var(--forest-soft); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.workflow-row-list { display: grid; }
+.workflow-row-list > article {
+  width: 100%;
+  min-width: 0;
+  height: 64px;
+  display: grid;
+  grid-template-columns: 12px minmax(170px,1fr) 112px auto;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  border-bottom: var(--hairline) solid var(--line);
+  color: var(--ink);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+.workflow-row-list > article:last-child { border-bottom: 0; }
+.workflow-row-list > article:hover { background: color-mix(in srgb,var(--forest-soft),var(--surface) 62%); }
+.workflow-row-list > article.is-selected { border-left: var(--hairline) solid var(--forest); background: var(--forest-soft); box-shadow: var(--shadow-none); }
+.workflow-status-dot { width: 10px; height: 10px; display: block; border-radius: var(--radius-8); background: var(--color-success); }
+.workflow-status-dot.danger { background: var(--color-danger); }
+.workflow-status-dot.warning { background: var(--color-warning); }
+.workflow-status-dot.success { background: var(--color-success); }
+.workflow-row-title,
+.workflow-row-list time { min-width: 0; }
+.workflow-row-title strong,
+.workflow-row-title small,
+.workflow-row-list time strong,
+.workflow-row-list time small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-row-title strong { font-size: var(--font-15); }
+.workflow-row-title small,
+.workflow-row-list time small { color: var(--muted); font-size: var(--font-13); }
+.workflow-row-list time strong { margin-top: var(--space-0); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.workflow-row-list time.is-overdue strong { color: var(--color-danger); }
+.workflow-row-action { min-width: 58px; min-height: 36px; justify-self: end; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-8); color: var(--surface); background: var(--forest); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; white-space: nowrap; }
+.workflow-list-empty { min-height: 56px; display: flex; align-items: center; gap: var(--space-8); padding: var(--space-8) var(--space-12); color: var(--muted); font-size: var(--font-13); }
+.workflow-empty-state { min-height: 360px; }
+.workflow-detail-pane { min-width: 0; max-height: min(720px,calc(100vh - 230px)); overflow-y: auto; padding: var(--space-16); background: var(--surface); }
+.workflow-detail-empty { min-height: 360px; display: grid; place-content: center; justify-items: center; gap: var(--space-8); color: var(--muted); text-align: center; }
+.workflow-detail-empty strong { color: var(--ink); font-size: var(--font-15); }
+.workflow-detail-empty p { max-width: 320px; margin: var(--space-0); font-size: var(--font-13); line-height: 1.55; }
+.workflow-detail-head h2 { margin: var(--space-0) var(--space-0) var(--space-8); font-size: var(--font-22); line-height: 1.3; letter-spacing: -.03em; }
+.workflow-detail-status { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-8); margin-bottom: var(--space-12); }
+.workflow-detail-status > span:not(.status-pill) { color: var(--muted); font-size: var(--font-13); }
+.workflow-detail-action { padding: var(--space-12); border-left: var(--hairline) solid var(--forest); border-radius: var(--radius-8); background: var(--forest-soft); }
+.workflow-detail-action.is-review { border-left-color: var(--color-blue); background: var(--color-blue-soft); }
+.workflow-detail-action.is-revision { border-left-color: var(--danger); background: var(--danger-soft); }
+.workflow-detail-action > span,
+.workflow-detail-criteria > span,
+.workflow-detail-history > span { color: var(--muted); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.workflow-detail-action > strong { display: block; margin-top: var(--space-0); font-size: var(--font-15); }
+.workflow-detail-action > p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); line-height: 1.5; }
+.workflow-action-revision { margin-top: var(--space-8); padding-top: var(--space-8); border-top: var(--hairline) solid color-mix(in srgb,var(--danger),transparent 70%); }
+.workflow-action-revision span,
+.workflow-action-revision strong { display: block; font-size: var(--font-13); }
+.workflow-action-revision span { color: var(--danger); font-weight: var(--weight-medium); }
+.workflow-detail-primary-action { width: 100%; min-height: 46px; justify-content: center; margin-top: var(--space-12); }
+.workflow-detail-criteria { margin-top: var(--space-12); padding: var(--space-12) var(--space-0); border-block: var(--hairline) solid var(--line); }
+.workflow-detail-criteria p { margin: var(--space-4) var(--space-0) var(--space-0); font-size: var(--font-15); line-height: 1.55; }
+.workflow-detail-meta { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: var(--space-8); margin: var(--space-12) var(--space-0) var(--space-0); padding-top: var(--space-12); border-top: var(--hairline) solid var(--line); }
+.workflow-detail-meta > div { min-width: 0; }
+.workflow-detail-meta dt { color: var(--muted); font-size: var(--font-13); }
+.workflow-detail-meta dd { min-width: 0; display: flex; align-items: center; gap: var(--space-4); overflow: hidden; margin: var(--space-0); font-size: var(--font-13); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.workflow-detail-stepper { min-width: 0; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); margin: var(--space-0); padding: var(--space-12) var(--space-0); border-top: var(--hairline) solid var(--line); list-style: none; }
+.workflow-detail-stepper li { position: relative; min-width: 0; display: flex; align-items: center; justify-content: center; gap: var(--space-4); color: var(--subtle); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.workflow-detail-stepper li:not(:last-child)::after { position: absolute; z-index: 0; top: 10px; left: calc(50% + 13px); right: calc(-50% + 13px); height: 1px; background: var(--line); content: ''; }
+.workflow-detail-stepper i { position: relative; z-index: 1; width: 20px; height: 20px; display: grid; place-items: center; flex: 0 0 auto; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-8); background: var(--surface); font-style: normal; font-size: var(--font-13); }
+.workflow-detail-stepper li > span { position: relative; z-index: 1; overflow: hidden; padding-inline: var(--space-4); background: var(--surface); text-overflow: ellipsis; white-space: nowrap; }
+.workflow-detail-stepper :is(.done,.current) { color: var(--forest); }
+.workflow-detail-stepper :is(.done,.current) i { color: var(--surface); border-color: var(--forest); background: var(--forest); }
+.workflow-detail-stepper .done::after { background: var(--forest); }
+.workflow-detail-history { padding: var(--space-12) var(--space-0); }
+.workflow-detail-history > p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.workflow-detail-records { display: grid; gap: var(--space-8); padding-top: var(--space-8); }
+.workflow-detail-records .workflow-record { min-width: 0; margin: var(--space-0); }
+.workflow-detail-records .workflow-record > div { min-width: 0; }
+.workflow-review-decision { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-8); margin-bottom: var(--space-16); padding: var(--space-4); border-radius: var(--radius-8); background: var(--canvas); }
+.workflow-review-decision button { min-height: 42px; display: flex; align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-8); color: var(--muted); background: transparent; font-weight: var(--weight-medium); cursor: pointer; }
+.workflow-review-decision button[aria-checked='true'] { color: var(--forest); background: var(--surface); }
+.workflow-page .recurring-work-panel { margin-top: var(--space-16); }
+
+html[data-theme='dark'] .workflow-simple-tabs,
+html[data-theme='dark'] .workflow-review-decision { background: var(--canvas); }
+html[data-theme='dark'] .workflow-simple-tabs button[aria-selected='true'],
+html[data-theme='dark'] .workflow-review-decision button[aria-checked='true'],
+html[data-theme='dark'] .workflow-row-list > article,
+html[data-theme='dark'] .workflow-detail-pane,
+html[data-theme='dark'] .workflow-list-pane,
+html[data-theme='dark'] .workflow-detail-stepper :is(i,li > span) { background: var(--surface); }
+
+@media (max-width: 1180px) {
+  .workflow-master-detail-grid { grid-template-columns: minmax(490px,1.08fr) minmax(350px,.92fr); }
+  .workflow-row-list > article { grid-template-columns: 12px minmax(160px,1fr) 104px auto; }
+}
+
+@media (max-width: 1140px) {
+  .workflow-master-detail-grid { grid-template-columns: 1fr; }
+  .workflow-list-pane { max-height: none; border-right: 0; }
+  .workflow-detail-pane { max-height: none; margin-top: var(--space-8); border-top: 0; }
+}
+
+@media (max-width: 999px) {
+  .auth-shell { display: block; }
+  .auth-brand-panel { display: none; }
+  .auth-form-panel { width: 100%; min-height: 100svh; padding: var(--space-24); }
+  .auth-form-card { width: min(470px,100%); }
+  .auth-mobile-brand { display: flex; align-items: center; gap: var(--space-8); margin-bottom: var(--space-32); color: var(--forest); font-size: var(--font-22); font-weight: var(--weight-medium); }
+  .auth-mobile-brand > svg { color: var(--lime); }
+}
+
+@media (max-width: 760px) {
+  .ai-home-page .page-header { top: 64px; padding-block: var(--space-8); }
+  .ai-home-page .page-header > div:first-child { display: none; }
+  .ai-home-page .page-header-actions { width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: var(--space-4); scrollbar-width: none; }
+  .ai-home-page .page-header-actions::-webkit-scrollbar { display: none; }
+  .home-header-chips { flex: 0 0 auto; }
+  .home-header-chips > button { height: 36px; }
+  .ai-home-page .page-header-actions > .button {
+    width: auto;
+    min-height: 40px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .ai-home-page .chat-suggestions { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .ai-home-page .chat-suggestions button:nth-child(n+3) { display: block; }
+  .ai-home-page .ai-chat-messages { max-height: min(360px,46vh); }
+  .workflow-board-toolbar { align-items: flex-start; flex-direction: column; gap: var(--space-4); }
+  .workflow-board-toolbar > p { padding-left: var(--space-4); }
+  .workflow-simple-tabs { width: 100%; }
+  .workflow-simple-tabs button { min-height: 44px; flex: 1; justify-content: center; }
+  .workflow-row-list > article { height: 64px; grid-template-columns: 10px minmax(0,1fr) 76px auto; gap: var(--space-4); padding-inline: var(--space-8); }
+  .workflow-row-list time small { display: none; }
+  .workflow-row-list time strong { text-align: right; }
+  .workflow-row-action { min-width: 56px; min-height: 44px; padding-inline: var(--space-4); }
+  .workflow-detail-pane { padding: var(--space-12); }
+  .workflow-detail-primary-action { min-height: 44px; }
+  .workflow-detail-stepper li { align-items: center; flex-direction: column; gap: var(--space-0); text-align: center; }
+  .workflow-detail-stepper li > span { width: 100%; padding-inline: var(--space-0); }
+}
+
+@media (max-width: 420px) {
+  .auth-form-panel { padding: var(--space-16); }
+  .workflow-list-section > header p { display: none; }
+  .workflow-row-title small { display: none; }
+  .workflow-row-list > article { grid-template-columns: 10px minmax(0,1fr) 70px auto; }
+  .workflow-row-action { font-size: var(--font-13); }
+  .workflow-detail-meta { grid-template-columns: 1.2fr .8fr .8fr; }
+  .workflow-detail-stepper li > span { font-size: var(--font-13); }
+}
+
+/* Global surface contract -------------------------------------------------
+   Pages use the canvas and one white content surface. Leaf cards share one
+   inset and never grow merely to fill an available track. */
+:is(
+  .metric-card,
+  .master-card,
+  .business-summary-card,
+  .warehouse-card,
+  .warehouse-card.warehouse-inventory-block,
+  .home-calendar-card,
+  .dashboard-quick-links,
+  .my-work-card,
+  .ai-findings,
+  .recurring-work-panel,
+  .sales-channel-card,
+  .factory-upload-panel,
+  .factory-location-card,
+  .journal-summary > div,
+  .leave-balance-summary article
+) {
+  height: auto;
+  min-height: 0;
+  padding: var(--card-inset);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+  box-shadow: var(--shadow-none);
+}
+
+:is(.home-metrics,.three-metric-grid,.work-summary-grid,.warehouse-grid,.business-summary-grid,.master-grid) {
+  gap: var(--space-16);
+}
+
+:is(
+  .ai-chat-head,
+  .panel-heading,
+  .business-panel-head,
+  .people-content-card > header,
+  .notification-panel > header
+) {
+  min-height: 0;
+  padding: var(--card-inset);
+}
+
+.ai-home-page .ai-chat-head {
+  position: sticky;
+  z-index: 2;
+  top: var(--space-0);
+  background: var(--surface);
+}
+
+/* These summaries already live in a card. Rows and hairlines replace a third
+   nested surface while preserving their semantic grouping. */
+.ai-findings .finding-card,
+.warehouse-card .inventory-summary-cards > div,
+.recurring-work-panel .recurring-rule-grid > article {
+  height: auto;
+  min-height: 0;
+  padding: var(--space-12) var(--space-0);
+  border: none;
+  border-top: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: transparent;
+  box-shadow: var(--shadow-none);
+}
+
+.workflow-detail-pane { padding: var(--card-inset); }
+
+/* Surface contract applies to legacy domain cards as well. Controls and data
+   rows inside a white panel are flattened instead of creating a third layer. */
+:is(
+  .business-summary-strip > div,
+  .people-overview-strip > div,
+  .people-overview-strip > button
+) {
+  min-height: 0;
+  padding: var(--card-inset);
+}
+
+:is(.sea-product-card-body,.modal-card > header,.modal-card form,.chat-drawer > header) {
+  min-height: 0;
+  padding: var(--card-inset);
+}
+
+.sea-product-card-body > p { min-height: 0; }
+.product-card-stock,
+.channel-card-metrics > div,
+.label-score-card,
+.lot-detail-card {
+  min-height: 0;
+  padding: var(--space-12) var(--space-0);
+  border: none;
+  border-top: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: transparent;
+  box-shadow: var(--shadow-none);
+}
+
+.density-compact :is(.metric-card,.business-summary-card) {
+  min-height: 0;
+  padding: var(--card-inset);
+}
+
+:is(.people-empty-state,.workflow-empty-state,.workflow-detail-empty) {
+  min-height: 0;
+  align-content: start;
+  align-items: flex-start;
+  justify-content: flex-start;
+  place-content: start;
+  justify-items: start;
+  padding: var(--card-inset);
+  text-align: left;
 }

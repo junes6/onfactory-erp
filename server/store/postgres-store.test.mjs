@@ -1,21 +1,27 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import { newDb } from 'pg-mem'
 
 import { emptyWorkspaceStore } from './constants.mjs'
-import { PostgresStoreAdapter } from './postgres-store.mjs'
+import { applyPostgresServiceContext, PostgresStoreAdapter } from './postgres-store.mjs'
 import { UnknownWorkspaceKeyError } from './errors.mjs'
 import { assertKnownWorkspaceKeys } from './workspace-codec.mjs'
 
 async function testAdapter() {
   const memory = newDb({ autoCreateForeignKeyIndices: true })
+  const contextCalls = []
   const pg = memory.adapters.createPg()
   const pool = new pg.Pool()
-  const adapter = new PostgresStoreAdapter({ pool })
+  const serviceContextApplier = async (client) => {
+    contextCalls.push({ role: 'service', orgId: '__service__' })
+    await applyPostgresServiceContext(client)
+  }
+  const adapter = new PostgresStoreAdapter({ pool, serviceContextApplier })
   await adapter.applySchema()
   await adapter.connect()
-  return { adapter, pool }
+  return { adapter, pool, contextCalls, serviceContextApplier }
 }
 
 function fixture() {
@@ -53,6 +59,14 @@ function fixture() {
       data: [{ id: 'JR-1', status: '결재요청', updatedAt: '2026-08-20T06:00:00.000Z', submittedAt: '2026-08-20T05:50:00.000Z', reviews: [] }],
       updatedAt: '2026-08-20T06:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
     },
+    'performance-settings': {
+      data: { weights: { completedTasks: 20, dueCompliance: 25, revisionRate: 15, averageCycleHours: 15, journalSubmission: 15, approvalResponseHours: 10 }, employeeVisible: false },
+      updatedAt: '2026-08-20T06:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
+    },
+    'performance-reports': {
+      data: [{ id: 'PERFS-1', periodType: 'month', periodStart: '2026-07-31T15:00:00.000Z', periodEnd: '2026-08-31T15:00:00.000Z', immutable: true, reports: [] }],
+      updatedAt: '2026-08-20T06:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
+    },
     'company-documents': {
       data: [{ id: 'DOC-1', name: '점검표.pdf', mime: 'application/pdf', size: 123, hash: 'sha256-document', storageKey: 'TENANT-HSB/DOC-1' }],
       updatedAt: '2026-08-20T06:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
@@ -79,7 +93,7 @@ test('unknown workspace keys fail instead of falling back to an app-state blob',
 })
 
 test('postgres adapter normalizes tenant rows, restores the facade, and writes safe outbox events atomically', async () => {
-  const { adapter, pool } = await testAdapter()
+  const { adapter, pool, contextCalls, serviceContextApplier } = await testAdapter()
   try {
     const source = fixture()
     await adapter.commitSnapshot(source, { referenceDate: '2026-08-20', rawDueByEntity: { 'TENANT-HSB:WORK-1': '오늘 18:00' } })
@@ -105,6 +119,13 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.deepEqual(documents.rows.map((row) => [row.org_id, row.id]), [['TENANT-HSB', 'DOC-1']])
     assert.equal(documents.rows[0].mime, 'application/pdf')
     assert.equal(Number(documents.rows[0].size), 123)
+
+    const performanceSettings = await pool.query('SELECT id, payload FROM performance_settings WHERE org_id = $1', ['TENANT-HSB'])
+    const performanceSnapshots = await pool.query('SELECT id, payload FROM performance_report_snapshots WHERE org_id = $1', ['TENANT-HSB'])
+    assert.equal(performanceSettings.rows[0].id, '__singleton__')
+    assert.equal(performanceSettings.rows[0].payload.employeeVisible, false)
+    assert.equal(performanceSnapshots.rows[0].id, 'PERFS-1')
+    assert.equal(performanceSnapshots.rows[0].payload.immutable, true)
 
     const persistedAccounts = await pool.query('SELECT payload FROM core_accounts WHERE id = $1', ['USR-HSB-ADMIN'])
     assert.equal(persistedAccounts.rows[0].payload.password, undefined)
@@ -135,7 +156,7 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.ok(events.rows.some((row) => row.event_type === 'messenger.message_created'))
     assert.equal(JSON.stringify(events.rows).includes('민감 본문'), false)
 
-    const reloaded = new PostgresStoreAdapter({ pool })
+    const reloaded = new PostgresStoreAdapter({ pool, serviceContextApplier })
     await reloaded.connect()
     const facade = await reloaded.loadSnapshot()
     assert.equal(facade.tenantMetadata['TENANT-HSB'].isDemo, true)
@@ -143,10 +164,14 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.equal(facade.tenants['TENANT-HSB']['messenger-conversations'].data[0].messages[0].time, '14:42')
     assert.equal(facade.tenants['TENANT-HSB']['work-items'].data[0].due, '오늘 18:00')
     assert.equal(facade.tenants['TENANT-HSB']['company-documents'].data[0].name, '점검표.pdf')
+    assert.equal(facade.tenants['TENANT-HSB']['performance-settings'].data.employeeVisible, false)
+    assert.equal(facade.tenants['TENANT-HSB']['performance-reports'].data[0].id, 'PERFS-1')
     assert.equal(facade.passwordResetRequests[0].tokenHash, 'b'.repeat(64))
     assert.equal(facade.passwordResetRequests[0].token, undefined)
     assert.equal(facade.platform.integrations[0].lastSync, '14:41')
     assert.equal(facade.platform.auditEvents[0].at, '2026-08-18 14:24')
+    assert.ok(contextCalls.length >= 2, JSON.stringify(contextCalls))
+    assert.ok(contextCalls.every((call) => call.role === 'service' && call.orgId === '__service__'), JSON.stringify(contextCalls))
 
     const failed = structuredClone(source)
     failed.tenants['TENANT-HSB']['work-items'].data[0].title = '롤백되어야 함'
@@ -170,6 +195,27 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
   } finally {
     await adapter.close()
   }
+})
+
+test('performance tables force RLS for service DAL and tenant admins without direct member access', async () => {
+  const schema = await readFile(new URL('../../db/postgres-schema.sql', import.meta.url), 'utf8')
+  for (const table of ['performance_settings', 'performance_report_snapshots']) {
+    assert.match(schema, new RegExp(`ALTER TABLE ${table} FORCE ROW LEVEL SECURITY`))
+  }
+  assert.match(schema, /CREATE POLICY performance_settings_service[\s\S]*app\.role'[\s\S]*'service'/)
+  assert.match(schema, /CREATE POLICY performance_reports_service[\s\S]*app\.role'[\s\S]*'service'/)
+  assert.match(schema, /CREATE POLICY performance_settings_tenant_admin[\s\S]*app\.org_id/)
+  assert.match(schema, /CREATE POLICY performance_reports_tenant_admin[\s\S]*app\.org_id/)
+  assert.doesNotMatch(schema, /CREATE POLICY performance_[\w]+_tenant_member/)
+})
+
+test('postgres service context is transaction-local and never derived from request input', async () => {
+  const calls = []
+  await applyPostgresServiceContext({ query: async (...args) => { calls.push(args) } })
+  assert.deepEqual(calls, [[
+    "SELECT set_config('app.role', $1, TRUE), set_config('app.org_id', $2, TRUE)",
+    ['service', '__service__'],
+  ]])
 })
 
 test('DATABASE_URL postgres E2E applies only when explicitly configured', { skip: !process.env.DATABASE_URL }, async () => {

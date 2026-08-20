@@ -1,11 +1,15 @@
 import { env as cloudflareEnv } from 'cloudflare:workers'
 import { httpServerHandler as cloudflareHttpServerHandler } from 'cloudflare:node'
+import Anthropic from '@anthropic-ai/sdk'
 import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 import currentWorkspaceSeed from './initial-workspace-state.json' with { type: 'json' }
 import { createApp as createExpressApp } from '../server/app.mjs'
+import { createD1BillingRepository } from '../server/billing-repository.mjs'
+import { createBillingService } from '../server/billing-service.mjs'
+import { performanceMaintenanceErrors, runPerformanceMonthlyMaintenance } from '../server/performance-maintenance.mjs'
 
 const STATE_ID = 'onfactory'
 const REQUEST_LOCK_ID = 'onfactory-api'
@@ -440,6 +444,8 @@ export function createSitesWorker(dependencies = {}) {
   const documentDirectory = dependencies.documentDirectory ?? DOCUMENT_DIRECTORY
   const expressPort = dependencies.expressPort ?? EXPRESS_PORT
   const lockOptions = dependencies.lockOptions ?? {}
+  const billingService = dependencies.billingService ?? createBillingService({ repository: createD1BillingRepository(runtimeEnv.DB) })
+  const runPerformanceMaintenance = dependencies.runPerformanceMonthlyMaintenance ?? runPerformanceMonthlyMaintenance
   let schemaPromise
   const ensureSchema = () => {
     schemaPromise ??= ensureRuntimeTables(runtimeEnv).catch((error) => {
@@ -484,6 +490,7 @@ export function createSitesWorker(dependencies = {}) {
           seedPassword,
           requireSeedPasswordChange: true,
           exposePasswordResetTokens: false,
+          billingService,
           onWorkspaceStoreChange: () => { workspaceDirty = true },
         })
         expressServer = app.listen(expressPort)
@@ -545,6 +552,78 @@ export function createSitesWorker(dependencies = {}) {
         try { await heartbeat?.stop() } catch (error) { console.error('[sites-worker] Lock heartbeat failed', { message: error?.message }) }
         try { await lock?.release() } catch (error) { console.error('[sites-worker] Lock release failed', { message: error?.message }) }
       }
+    },
+    async scheduled(_controller, workerEnv, ctx) {
+      const activeEnv = workerEnv ?? runtimeEnv
+      const task = (async () => {
+        let lock
+        let heartbeat
+        try {
+          await ensureRuntimeTables(activeEnv)
+          lock = await acquireRequestLock(activeEnv, lockOptions)
+          heartbeat = startLockHeartbeat(lock, lockOptions.heartbeatMs ?? LOCK_HEARTBEAT_MS)
+          const service = dependencies.billingService ?? createBillingService({ repository: createD1BillingRepository(activeEnv.DB) })
+          const performanceClient = activeEnv.ANTHROPIC_API_KEY?.trim()
+            ? new Anthropic({ apiKey: activeEnv.ANTHROPIC_API_KEY.trim(), maxRetries: 1, timeout: 60_000 })
+            : null
+          const snapshot = await loadRuntimeState(activeEnv, workspaceSeed)
+          const beforePayload = serializeRuntimeState(snapshot.workspaceStore, new Map(snapshot.sessions))
+          const now = new Date()
+          const seoul = new Date(now.getTime() + 9 * 60 * 60 * 1_000)
+          const previous = new Date(Date.UTC(seoul.getUTCFullYear(), seoul.getUTCMonth() - 1, 1))
+          const previousMonth = `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, '0')}`
+          const tenantIds = new Set([
+            ...Object.keys(snapshot.workspaceStore.tenants ?? {}),
+            ...(snapshot.workspaceStore.platform?.tenants ?? []).map((tenant) => tenant.id),
+          ])
+          const maintenanceErrors = []
+          for (const tenantId of tenantIds) {
+            const collector = { id: 'system:billing-reconciliation', role: 'system', trusted: true, tenantId }
+            try {
+              await service.reconcilePendingUsageBatch(collector, { tenantId })
+            } catch (error) {
+              maintenanceErrors.push(Object.assign(error instanceof Error ? error : new Error(String(error)), { tenantId, operation: 'billing-reconciliation' }))
+            }
+            try {
+              const documents = snapshot.workspaceStore.tenants?.[tenantId]?.['company-documents']?.data ?? []
+              const bytes = documents.reduce((sum, document) => sum + Math.max(0, Number(document?.size || 0)), 0)
+              await service.recordDailyStorageSnapshot(
+                { id: 'system:storage-snapshot', role: 'system', trusted: true, tenantId },
+                { tenantId, bytes: Math.trunc(bytes), objectCount: documents.length, measuredAt: now },
+              )
+              await service.createMonthlySnapshot(
+                { id: 'system:billing-month-close', role: 'platform-operator', tenantId: null },
+                { tenantId, month: previousMonth },
+              )
+            } catch (error) {
+              maintenanceErrors.push(Object.assign(error instanceof Error ? error : new Error(String(error)), { tenantId, operation: 'billing-snapshot' }))
+            }
+          }
+          const performanceResults = await runPerformanceMaintenance({
+            workspaceStore: snapshot.workspaceStore,
+            accounts: snapshot.workspaceStore.accounts ?? [],
+            tenantIds,
+            commitWorkspaceStore: async () => {},
+            client: performanceClient,
+            model: activeEnv.CLAUDE_MODEL?.trim() || 'claude-sonnet-5',
+            billingService: service,
+            clock: () => now,
+          })
+          maintenanceErrors.push(...performanceMaintenanceErrors(performanceResults))
+          await heartbeat.assertHealthy()
+          const afterPayload = serializeRuntimeState(snapshot.workspaceStore, new Map(snapshot.sessions))
+          if (afterPayload !== beforePayload) {
+            const stored = await compareAndSwapState(activeEnv, afterPayload, snapshot.revision)
+            if (!stored) throw new RequestLockLostError()
+          }
+          if (maintenanceErrors.length) throw new AggregateError(maintenanceErrors, '정기 유지관리 일부 작업이 실패했습니다.')
+        } finally {
+          try { await heartbeat?.stop() } catch { /* cron will retry the idempotent work */ }
+          try { await lock?.release() } catch { /* the lease expires automatically */ }
+        }
+      })()
+      if (ctx?.waitUntil) ctx.waitUntil(task)
+      else await task
     },
   }
 }

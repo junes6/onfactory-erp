@@ -442,6 +442,7 @@
 }
 
 .messenger-person-row > svg { color: var(--color-gray-400); }
+.messenger-system-label { display: inline-flex; align-items: center; margin-left: var(--space-8); padding: var(--space-0) var(--space-4); border-radius: var(--radius-8); color: var(--forest-dark); background: var(--forest-soft); font-size: var(--font-13); font-style: normal; font-weight: var(--weight-medium); }
 
 .messenger-chat {
   min-width: 0;
@@ -559,6 +560,26 @@
 .messenger-message-meta { display: grid; justify-items: end; gap: var(--space-0); }
 .messenger-message-meta small { color: var(--color-blue-deep); font-size: var(--font-13); font-weight: var(--weight-medium); white-space: nowrap; }
 .messenger-message-meta time { margin: var(--space-0); }
+.messenger-message-attachments { display: grid; gap: var(--space-4); margin-top: var(--space-8); }
+.messenger-message.mine .messenger-message-attachments { justify-items: end; }
+.messenger-message-attachments > button {
+  min-width: min(280px, 100%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  color: var(--ink);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+.messenger-message-attachments > button:hover { border-color: var(--forest); background: var(--forest-soft); }
+.messenger-message-attachments > button > svg { flex: 0 0 auto; color: var(--forest); }
+.messenger-message-attachments > button > span { min-width: 0; display: grid; }
+.messenger-message-attachments strong { overflow: hidden; font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
+.messenger-message-attachments small { color: var(--muted); font-size: var(--font-13); }
 
 .messenger-confirm-overlay { z-index: 20; }
 .messenger-action-dialog { width: min(520px, calc(100vw - 28px)); }
@@ -571,12 +592,18 @@
 .messenger-composer {
   min-height: 79px;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--space-8);
   padding: var(--space-12) var(--space-16);
   border-top: var(--hairline) solid var(--line);
   background: var(--surface);
 }
+.messenger-pending-attachments { min-width: 0; display: flex; flex: 1 0 100%; gap: var(--space-8); overflow-x: auto; }
+.messenger-pending-attachments > span { min-width: 0; display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-8); border-radius: var(--radius-8); color: var(--forest-dark); background: var(--forest-soft); font-size: var(--font-13); }
+.messenger-pending-attachments > span > span { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.messenger-pending-attachments button { width: 24px; height: 24px; display: grid; place-items: center; flex: 0 0 auto; border: none; border-radius: var(--radius-8); color: var(--forest-dark); background: transparent; cursor: pointer; }
+.messenger-pending-attachments button:hover { background: var(--surface); }
 
 .messenger-composer > button {
   width: 46px;
@@ -767,27 +794,28 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-12);
-  padding: var(--space-16);
+  padding: var(--card-inset);
   border-bottom: var(--hairline) solid var(--line);
 }
 
 .schedule-day-head > div > span { color: var(--forest); font-size: var(--font-15); font-weight: var(--weight-medium); letter-spacing: .08em; }
 .schedule-day-head h2 { margin: var(--space-4) var(--space-0) var(--space-0); font-size: var(--font-22); letter-spacing: -.035em; }
 .schedule-day-head p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-15); }
-.schedule-day-list { min-height: 320px; display: flex; flex-direction: column; gap: var(--space-8); padding: var(--space-12); }
+.schedule-day-list { min-height: 0; display: flex; flex-direction: column; gap: var(--space-0); padding: var(--space-0) var(--card-inset); }
 
 .schedule-agenda-item {
   width: 100%;
-  min-height: 92px;
+  min-height: 0;
   display: grid;
   grid-template-columns: 55px minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-8);
-  padding: var(--space-12);
-  border: var(--hairline) solid var(--line);
+  padding: var(--space-12) var(--space-0);
+  border: none;
+  border-bottom: var(--hairline) solid var(--line);
   border-left: var(--hairline) solid var(--color-blue-deep);
   border-radius: var(--radius-8);
-  background: var(--surface);
+  background: transparent;
   text-align: left;
   cursor: pointer;
 }
@@ -806,11 +834,11 @@
   display: flex;
   align-items: center;
   gap: var(--space-12);
-  margin: var(--space-0) var(--space-12) var(--space-12);
-  padding: var(--space-12);
-  border-radius: var(--radius-8);
+  margin: var(--space-16);
+  padding: var(--space-12) var(--space-0);
+  border-top: var(--hairline) solid var(--line);
   color: var(--color-blue-deep);
-  background: var(--forest-soft);
+  background: transparent;
 }
 
 .schedule-day-summary strong { display: block; font-size: var(--font-15); }
@@ -905,7 +933,7 @@
 .journal-list-heading > strong { min-width: 58px; padding: var(--space-8) var(--space-8); border-radius: var(--radius-8); color: var(--forest); background: var(--forest-soft); font-size: var(--font-15); text-align: center; }
 
 .journal-list-panel { position: sticky; top: 94px; }
-.journal-list-tools { display: grid; gap: var(--space-12); padding: var(--space-12); border-bottom: var(--hairline) solid var(--line); }
+.journal-list-tools { display: grid; gap: var(--space-12); padding: var(--card-inset); border-bottom: var(--hairline) solid var(--line); }
 .journal-filter { display: flex; flex-wrap: wrap; gap: var(--space-4); }
 .journal-filter button {
   min-height: 38px;
@@ -920,7 +948,7 @@
 }
 
 .journal-filter button.active { border-color: var(--forest); color: var(--color-surface); background: var(--forest); }
-.journal-list { max-height: 760px; overflow-y: auto; padding: var(--space-12); }
+.journal-list { max-height: 760px; overflow-y: auto; padding: var(--space-0) var(--card-inset) var(--card-inset); }
 
 .journal-date-group + .journal-date-group { margin-top: var(--space-16); }
 .journal-date-group-header {
@@ -1256,3 +1284,42 @@
   .collab-dialog,
   .messenger-drawer { animation: none; }
 }
+
+/* Dialogs and the journal editor keep one white surface. Histories and files
+   are rows inside it, not another set of cards. */
+.collab-dialog-header,
+.collab-dialog-body,
+.collab-dialog-footer,
+.journal-editor-header,
+.journal-editor-body,
+.journal-editor-footer {
+  min-height: 0;
+  padding: var(--card-inset);
+}
+
+.journal-editor-footer { background: var(--surface); }
+.journal-review-history,
+.journal-attachments {
+  margin-inline: var(--space-16);
+  border: none;
+  border-top: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: transparent;
+}
+.journal-review-history-head,
+.journal-attachment-head {
+  min-height: 0;
+  padding: var(--space-12) var(--space-0);
+  background: transparent;
+}
+.journal-review-history ol,
+.journal-attachment-list { padding: var(--space-0); }
+.journal-attachment-item {
+  min-height: 0;
+  padding: var(--space-12) var(--space-0);
+  border: none;
+  border-top: var(--hairline) solid var(--line);
+  background: transparent;
+}
+.journal-summary { gap: var(--space-16); }
+.journal-summary > div { min-height: 0; padding: var(--card-inset); }

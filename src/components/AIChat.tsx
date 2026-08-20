@@ -277,16 +277,18 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
         {messages.map((message, index) => (
           <div className={'chat-message ' + message.role} key={message.id}>
             {message.role === 'assistant' && <span className="chat-avatar"><Sparkles size={15} /></span>}
-            <div className="chat-bubble">
-              <p>{message.content}</p>
-              {message.attachments?.length ? <ul className="chat-message-files" aria-label="이 메시지의 첨부 파일">
-                {message.attachments.map((file) => <li key={file.documentId}><FileText size={14} /><span>{file.name}</span><small>{fileSizeLabel(file.size)}</small></li>)}
-              </ul> : null}
-              {canCreateTask && message.role === 'assistant' && index > 0 && message.sourcePrompt && (
-                <button type="button" className="message-action" onClick={() => onCreateTask(message.sourcePrompt!)}>
-                  <ClipboardPlus size={14} /> 이 내용으로 업무 만들기
-                </button>
-              )}
+            <div className="chat-message-content">
+              <div className="chat-bubble">
+                <p>{message.content}</p>
+                {message.attachments?.length ? <ul className="chat-message-files" aria-label="이 메시지의 첨부 파일">
+                  {message.attachments.map((file) => <li key={file.documentId}><FileText size={14} /><span>{file.name}</span><small>{fileSizeLabel(file.size)}</small></li>)}
+                </ul> : null}
+                {canCreateTask && message.role === 'assistant' && index > 0 && message.sourcePrompt && (
+                  <button type="button" className="message-action" onClick={() => onCreateTask(message.sourcePrompt!)}>
+                    <ClipboardPlus size={14} /> 이 내용으로 업무 만들기
+                  </button>
+                )}
+              </div>
               <div className="chat-message-meta">{message.model && <small>{message.model}</small>}<time dateTime={message.createdAt}>{formatDateTime(message.createdAt)}</time></div>
             </div>
           </div>

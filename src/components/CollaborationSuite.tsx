@@ -39,6 +39,7 @@ import {
   deleteDocumentAttachments,
   downloadDocumentAttachment,
   isStoredDocumentAttachment,
+  type StoredDocumentAttachment,
   uploadDocumentAttachments,
 } from '../utils/documentAttachments'
 import './CollaborationSuite.css'
@@ -161,6 +162,7 @@ type Person = {
   team: string
   role: string
   status: 'online' | 'away' | 'offline'
+  system?: boolean
 }
 
 type ChatMessage = {
@@ -170,6 +172,8 @@ type ChatMessage = {
   text: string
   time: string
   readBy?: string[]
+  createdAt?: string
+  attachments?: StoredDocumentAttachment[]
 }
 
 type Conversation = {
@@ -189,6 +193,9 @@ type Conversation = {
   lifecycle?: 'active' | 'closed' | 'deleted'
   closedAt?: string
   deletedAt?: string
+  systemChannel?: 'developer-support'
+  supportRequesterId?: string
+  supportTicketId?: string
 }
 
 type MessengerListMode = 'recent' | 'teams' | 'people'
@@ -217,6 +224,8 @@ export function MessengerDrawer({
   const [query, setQuery] = useState('')
   const [message, setMessage] = useState('')
   const [messageSending, setMessageSending] = useState(false)
+  const [attachmentUploading, setAttachmentUploading] = useState(false)
+  const [pendingAttachments, setPendingAttachments] = useState<Record<string, StoredDocumentAttachment[]>>({})
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const [listMode, setListMode] = useState<MessengerListMode>('recent')
   const [mobilePane, setMobilePane] = useState<'list' | 'chat'>('list')
@@ -246,6 +255,7 @@ export function MessengerDrawer({
     return legacyParticipantIds(item).some((participantId) => currentIdentityIds.includes(participantId))
   })
   const activeConversation = myConversations.find((item) => item.id === selectedId) ?? myConversations[0]
+  const activePendingAttachments = activeConversation ? pendingAttachments[activeConversation.id] ?? [] : []
   const selectedConversation: Conversation = activeConversation ?? {
     id: '',
     type: 'direct',
@@ -292,7 +302,7 @@ export function MessengerDrawer({
     fetch('/api/directory')
       .then(async (response) => {
         if (!response.ok) throw new Error('directory-load')
-        return response.json() as Promise<{ members?: Array<{ id: string; name: string; team: string; role: string; status: Person['status'] }> }>
+        return response.json() as Promise<{ members?: Array<{ id: string; name: string; team: string; role: string; status: Person['status']; system?: boolean }> }>
       })
       .then(({ members }) => {
         if (!active || !Array.isArray(members)) return
@@ -387,7 +397,7 @@ export function MessengerDrawer({
   const sendMessage = async (event: FormEvent) => {
     event.preventDefault()
     const text = message.trim()
-    if (!text || !activeConversation || messageSending) return
+    if (!text || !activeConversation || messageSending || attachmentUploading) return
     setMessageSending(true)
     try {
       const response = await fetch(`/api/messenger/conversations/${encodeURIComponent(activeConversation.id)}/messages`, {
@@ -396,7 +406,7 @@ export function MessengerDrawer({
           'content-type': 'application/json',
           ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}),
         },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, attachments: activePendingAttachments }),
       })
       const body = await response.json().catch(() => null) as { conversation?: Conversation; error?: { message?: string } } | null
       if (!response.ok || !body?.conversation) {
@@ -405,6 +415,11 @@ export function MessengerDrawer({
       }
       await replaceConversationLocally(body.conversation)
       setMessage('')
+      setPendingAttachments((current) => {
+        const next = { ...current }
+        delete next[activeConversation.id]
+        return next
+      })
     } catch {
       onToast('메신저 서버에 연결하지 못해 메시지를 보내지 않았습니다.')
     } finally {
@@ -448,14 +463,45 @@ export function MessengerDrawer({
     }
   }
 
-  const chooseAttachment = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
+  const chooseAttachment = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
     event.target.value = ''
-    if (!file) return
-    if (file.size > 10 * 1024 * 1024) { onToast('첨부파일은 10MB 이하로 선택해 주세요.'); return }
-    const size = file.size >= 1024 * 1024 ? `${(file.size / 1024 / 1024).toFixed(1)}MB` : `${Math.max(1, Math.round(file.size / 1024))}KB`
-    setMessage((current) => `${current}${current.trim() ? '\n' : ''}📎 ${file.name} (${size})`)
-    onToast('첨부파일을 메시지에 추가했습니다. 로컬 버전은 파일 메타데이터를 기록합니다.')
+    if (!files.length || !activeConversation || attachmentUploading) return
+    if (activePendingAttachments.length + files.length > 10) { onToast('한 메시지에는 파일을 최대 10개까지 첨부할 수 있습니다.'); return }
+    setAttachmentUploading(true)
+    try {
+      const additions = await uploadDocumentAttachments(files, {
+        workspaceScope,
+        category: activeConversation.systemChannel === 'developer-support' ? '개발운영지원' : '사내메신저',
+        summary: `${conversationName(activeConversation)} 대화 첨부`,
+        tags: [activeConversation.systemChannel ?? 'messenger', `conversation:${activeConversation.id}`],
+      })
+      setPendingAttachments((current) => ({
+        ...current,
+        [activeConversation.id]: [...(current[activeConversation.id] ?? []), ...additions],
+      }))
+      onToast(`${additions.length}개 파일을 안전하게 업로드했습니다. 메시지를 보내면 대화에 연결됩니다.`)
+    } catch (reason) {
+      onToast(reason instanceof Error ? reason.message : '첨부파일을 업로드하지 못했습니다.')
+    } finally {
+      setAttachmentUploading(false)
+    }
+  }
+
+  const removePendingAttachment = async (attachment: StoredDocumentAttachment) => {
+    if (!activeConversation || attachmentUploading) return
+    setAttachmentUploading(true)
+    try {
+      await deleteDocumentAttachment(attachment.id, workspaceScope)
+      setPendingAttachments((current) => ({
+        ...current,
+        [activeConversation.id]: (current[activeConversation.id] ?? []).filter((item) => item.id !== attachment.id),
+      }))
+    } catch (reason) {
+      onToast(reason instanceof Error ? reason.message : '첨부파일을 제거하지 못했습니다.')
+    } finally {
+      setAttachmentUploading(false)
+    }
   }
 
   return (
@@ -516,7 +562,7 @@ export function MessengerDrawer({
                   {filteredPeople.map((person) => (
                     <button className="messenger-person-row" type="button" onClick={() => startDirectConversation(person)} key={person.id}>
                       <Avatar name={person.name} status={person.status} />
-                      <span><strong>{person.name}</strong><small>{person.team} · {person.role}</small></span>
+                      <span><strong>{person.name}{person.system && <em className="messenger-system-label">공식 지원</em>}</strong><small>{person.team} · {person.role}</small></span>
                       <MessageCircle size={18} aria-hidden="true" />
                     </button>
                   ))}
@@ -558,8 +604,8 @@ export function MessengerDrawer({
               {selectedConversation.type === 'team'
                 ? <span className="messenger-team-icon"><Hash size={20} /></span>
                 : <Avatar name={conversationName(selectedConversation)} status={conversationPeer(selectedConversation)?.status} compact />}
-              <div><strong>{conversationName(selectedConversation)}</strong><span>{conversationSubtitle(selectedConversation)}</span></div>
-              {activeConversation && (
+              <div><strong>{conversationName(selectedConversation)}</strong><span>{selectedConversation.systemChannel === 'developer-support' ? '요청자와 개발운영진만 보는 공식 1:1 지원 채널' : conversationSubtitle(selectedConversation)}</span></div>
+              {activeConversation && activeConversation.systemChannel !== 'developer-support' && (
                 <div className="messenger-room-actions">
                   <button type="button" aria-label="대화방 관리" aria-expanded={showConversationMenu} onClick={() => setShowConversationMenu((current) => !current)}><MoreHorizontal size={20} /></button>
                   {showConversationMenu && (
@@ -589,6 +635,21 @@ export function MessengerDrawer({
                         <p>{item.text}</p>
                         {!mine && <time>{item.time}</time>}
                       </div>
+                      {item.attachments && item.attachments.length > 0 && (
+                        <div className="messenger-message-attachments" aria-label="메시지 첨부파일">
+                          {item.attachments.map((attachment) => (
+                            <button
+                              type="button"
+                              key={attachment.id}
+                              onClick={() => void downloadDocumentAttachment(attachment, workspaceScope)
+                                .catch((reason) => onToast(reason instanceof Error ? reason.message : '첨부파일을 내려받지 못했습니다.'))}
+                            >
+                              <Download size={15} aria-hidden="true" />
+                              <span><strong>{attachment.name}</strong><small>{attachment.size}</small></span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </article>
                 )
@@ -597,8 +658,19 @@ export function MessengerDrawer({
             </div>
 
             <form className="messenger-composer" onSubmit={sendMessage}>
-              <input ref={attachmentInputRef} className="sr-only" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt" onChange={chooseAttachment} />
-              <button type="button" aria-label="파일 첨부" disabled={!activeConversation} onClick={() => attachmentInputRef.current?.click()}><Paperclip size={20} /></button>
+              {activePendingAttachments.length > 0 && (
+                <div className="messenger-pending-attachments" aria-label="전송 대기 첨부파일">
+                  {activePendingAttachments.map((attachment) => (
+                    <span key={attachment.id}>
+                      <Paperclip size={14} aria-hidden="true" />
+                      <span>{attachment.name} · {attachment.size}</span>
+                      <button type="button" aria-label={`${attachment.name} 첨부 취소`} disabled={attachmentUploading || messageSending} onClick={() => void removePendingAttachment(attachment)}><X size={14} /></button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <input ref={attachmentInputRef} className="sr-only" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt" onChange={(event) => void chooseAttachment(event)} />
+              <button type="button" aria-label="파일 첨부" disabled={!activeConversation || attachmentUploading || messageSending} onClick={() => attachmentInputRef.current?.click()}>{attachmentUploading ? <Upload size={20} /> : <Paperclip size={20} />}</button>
               <label>
                   <span className="sr-only">{conversationName(selectedConversation)}에게 메시지 작성</span>
                 <textarea
@@ -615,7 +687,7 @@ export function MessengerDrawer({
                   placeholder={activeConversation ? '메시지를 입력하세요' : '직원 목록에서 새 대화를 시작하세요'}
                 />
               </label>
-              <button className="send" type="submit" aria-label="메시지 보내기" disabled={!activeConversation || !message.trim() || messageSending}><Send size={20} /></button>
+              <button className="send" type="submit" aria-label="메시지 보내기" disabled={!activeConversation || !message.trim() || messageSending || attachmentUploading}><Send size={20} /></button>
             </form>
           </section>
         </div>

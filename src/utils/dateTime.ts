@@ -137,16 +137,15 @@ export function formatWorkDue(value: DateValue, now = new Date()) {
   const target = new Date(iso)
   const targetKey = seoulDateKey(target)
   const todayKey = seoulDateKey(now)
+  const daysFromToday = Math.round((new Date(`${targetKey}T00:00:00Z`).getTime() - new Date(`${todayKey}T00:00:00Z`).getTime()) / 86_400_000)
   const relative = targetKey === todayKey
     ? '오늘'
-    : targetKey === shiftDateKey(todayKey, 1)
-      ? '내일'
-      : targetKey === shiftDateKey(todayKey, -1)
-        ? '어제'
-        : new Intl.DateTimeFormat('ko-KR', { timeZone: SEOUL_TIME_ZONE, month: 'short', day: 'numeric', weekday: 'short' }).format(target)
+    : daysFromToday > 0 && daysFromToday < 7
+      ? new Intl.DateTimeFormat('ko-KR', { timeZone: SEOUL_TIME_ZONE, weekday: 'long' }).format(target)
+      : `${Number(targetKey.slice(5, 7))}.${Number(targetKey.slice(8, 10))}`
   const source = typeof value === 'string' ? value.trim() : ''
   const hasTime = value instanceof Date || typeof value === 'number' || /(?:T|\s)\d{1,2}:\d{2}|^(?:오늘|내일|어제)\s+\d{1,2}:\d{2}$/.test(source)
-  if (!hasTime) return relative
+  if (!hasTime || targetKey !== todayKey) return relative
   const time = new Intl.DateTimeFormat('ko-KR', { timeZone: SEOUL_TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(target)
   return `${relative} ${time}`
 }

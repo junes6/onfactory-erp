@@ -61,7 +61,9 @@ export type WorkItem = {
   status: '업무요청' | '수행중' | '결재대기' | '결재완료'
   category: string
   completion?: WorkCompletion
+  completionHistory?: WorkCompletion[]
   review?: WorkReview
+  reviewHistory?: WorkReview[]
   ruleId?: string
   ruleOccurrence?: string
   createdAt?: string

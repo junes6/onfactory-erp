@@ -39,6 +39,11 @@ export default defineConfig({
           not_found_handling: 'single-page-application',
           run_worker_first: ['/api/*'],
         },
+        triggers: {
+          // Daily at 00:00 KST. Storage snapshots are idempotent per day and
+          // the previous-month ledger is created once, then remains immutable.
+          crons: ['0 15 * * *'],
+        },
         d1_databases: hostingConfig.d1
           ? [{
               binding: hostingConfig.d1,

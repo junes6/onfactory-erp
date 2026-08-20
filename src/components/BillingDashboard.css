@@ -1,0 +1,351 @@
+.billing-root {
+  min-width: 0;
+  padding: var(--space-0);
+  color: var(--ink);
+  background: transparent;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.tenant-point-card {
+  display: grid;
+  grid-template-columns: auto minmax(180px,1fr) minmax(160px,.7fr) auto;
+  align-items: center;
+  gap: var(--space-16);
+  padding: var(--card-inset);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+}
+.tenant-point-card__icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--forest); background: var(--forest-soft); }
+.tenant-point-card h2 { margin: var(--space-0); font-size: var(--font-15); }
+.tenant-point-card p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.tenant-point-card__meter { display: grid; gap: var(--space-4); }
+.tenant-point-card__meter progress { width: 100%; height: 8px; }
+.tenant-point-card > button { min-height: 40px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); cursor: pointer; }
+
+.billing-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-24);
+  margin-bottom: var(--space-24);
+}
+
+.billing-section-kicker {
+  display: block;
+  color: var(--forest);
+  font-size: var(--font-11);
+  font-weight: var(--weight-medium);
+  letter-spacing: .1em;
+}
+
+.billing-head h1 {
+  margin: var(--space-4) var(--space-0);
+  font-size: var(--font-22);
+  font-weight: var(--weight-medium);
+  letter-spacing: -.03em;
+}
+
+.billing-head p,
+.billing-config > header p {
+  margin: var(--space-0);
+  color: var(--muted);
+  font-size: var(--font-15);
+}
+
+.billing-head__controls {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.billing-head__controls label,
+.billing-config-form label {
+  min-width: 0;
+}
+
+.billing-head__controls label > span,
+.billing-config-form label > span {
+  display: block;
+  margin-bottom: var(--space-4);
+  color: var(--muted);
+  font-size: var(--font-13);
+  font-weight: var(--weight-medium);
+}
+
+.billing-head__controls :is(select, input),
+.billing-config-form :is(input, select) {
+  min-height: 42px;
+  width: 100%;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  padding: var(--space-0) var(--space-12);
+  color: var(--ink);
+  background: var(--surface);
+  font-size: var(--font-15);
+}
+
+.billing-head__controls select { min-width: 180px; }
+
+.billing-head__controls button,
+.billing-config-form > button,
+.billing-notice button {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  padding: var(--space-0) var(--space-16);
+  color: var(--ink);
+  background: var(--surface);
+  font-size: var(--font-15);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.billing-head__controls button:hover,
+.billing-notice button:hover { border-color: var(--forest); background: var(--forest-soft); }
+.billing-head__controls button.billing-primary,
+.billing-config-form > button { border-color: var(--forest-dark); color: var(--color-surface); background: var(--forest-dark); }
+.billing-head__controls button:disabled,
+.billing-config-form > button:disabled { opacity: .5; cursor: not-allowed; }
+
+.billing-notice,
+.billing-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  padding: var(--space-12) var(--space-16);
+  background: var(--surface);
+  font-size: var(--font-15);
+}
+
+.billing-notice > span { flex: 1; }
+.billing-notice--error { border-color: var(--color-danger); color: var(--color-danger); background: var(--color-danger-soft); }
+.billing-loading { align-items: flex-start; justify-content: flex-start; min-height: 0; padding: var(--card-inset); color: var(--muted); }
+
+.billing-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-16);
+  margin-bottom: var(--space-16);
+}
+
+.billing-metric {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  padding: var(--card-inset);
+  background: var(--surface);
+  box-shadow: var(--shadow-none);
+}
+
+.billing-metric__icon {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-8);
+  color: var(--muted);
+  background: var(--canvas);
+}
+
+.billing-metric--info .billing-metric__icon { color: var(--color-blue); background: var(--color-blue-soft); }
+.billing-metric--success .billing-metric__icon { color: var(--color-success); background: var(--color-success-soft); }
+.billing-metric--warning .billing-metric__icon { color: var(--color-warning); background: var(--color-warning-soft); }
+.billing-metric--danger .billing-metric__icon { color: var(--color-danger); background: var(--color-danger-soft); }
+
+.billing-metric > div { min-width: 0; }
+.billing-metric > div > span,
+.billing-metric small { display: block; color: var(--muted); font-size: var(--font-13); }
+.billing-metric strong { display: block; overflow: hidden; margin: var(--space-4) var(--space-0); font-size: var(--font-22); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+
+.billing-gauge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, .9fr);
+  align-items: center;
+  gap: var(--space-24);
+  margin-bottom: var(--space-16);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  padding: var(--card-inset);
+  background: var(--surface);
+}
+
+.billing-gauge h2,
+.billing-panel h2,
+.billing-config h2 {
+  margin: var(--space-4) var(--space-0) var(--space-0);
+  font-size: var(--font-22);
+  font-weight: var(--weight-medium);
+}
+
+.billing-gauge p { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-15); }
+.billing-gauge__meter > div { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); }
+.billing-gauge__meter strong { font-size: var(--font-22); font-weight: var(--weight-medium); }
+.billing-gauge__meter small { display: block; margin-top: var(--space-8); color: var(--muted); font-size: var(--font-13); }
+
+.billing-gauge progress,
+.billing-trend-list progress {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border: none;
+  border-radius: var(--radius-8);
+  color: var(--forest);
+  background: var(--line);
+}
+
+.billing-gauge progress { margin-top: var(--space-12); }
+.billing-gauge progress::-webkit-progress-bar,
+.billing-trend-list progress::-webkit-progress-bar { background: var(--line); }
+.billing-gauge progress::-webkit-progress-value,
+.billing-trend-list progress::-webkit-progress-value { background: var(--forest); }
+.billing-gauge progress::-moz-progress-bar,
+.billing-trend-list progress::-moz-progress-bar { background: var(--forest); }
+
+.billing-overview-grid,
+.billing-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-16);
+  margin-bottom: var(--space-16);
+}
+
+.billing-panel,
+.billing-config {
+  min-width: 0;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+  box-shadow: var(--shadow-none);
+}
+
+.billing-panel > header,
+.billing-config > header,
+.billing-config-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-12);
+  padding: var(--card-inset);
+  border-bottom: var(--hairline) solid var(--line);
+}
+
+.billing-trend-list { padding: var(--space-8) var(--card-inset); }
+.billing-trend-list article { display: grid; grid-template-columns: 76px minmax(0, 1fr) minmax(110px, auto); align-items: center; gap: var(--space-12); padding: var(--space-12) var(--space-0); border-bottom: var(--hairline) solid var(--line); }
+.billing-trend-list article:last-child { border-bottom: none; }
+.billing-trend-list time { font-size: var(--font-13); font-weight: var(--weight-medium); }
+.billing-trend-list article > div { min-width: 0; }
+.billing-trend-list small { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); }
+.billing-trend-list article > strong { text-align: right; font-size: var(--font-15); font-weight: var(--weight-medium); }
+
+.billing-cost-summary dl { margin: var(--space-0); padding: var(--space-8) var(--card-inset); }
+.billing-cost-summary dl > div { display: flex; align-items: center; justify-content: space-between; gap: var(--space-16); padding: var(--space-12) var(--space-0); border-bottom: var(--hairline) solid var(--line); }
+.billing-cost-summary dl > div:last-child { border-bottom: none; color: var(--forest-dark); }
+.billing-cost-summary dt { color: var(--muted); font-size: var(--font-15); }
+.billing-cost-summary dd { margin: var(--space-0); font-size: var(--font-15); font-weight: var(--weight-medium); }
+.billing-cost-summary p { display: flex; align-items: center; gap: var(--space-8); margin: var(--space-0); padding: var(--space-12) var(--card-inset); border-top: var(--hairline) solid var(--line); color: var(--muted); font-size: var(--font-13); }
+
+.billing-tenant-detail,
+.billing-snapshots { margin-bottom: var(--space-16); }
+.billing-table-wrap { overflow-x: auto; }
+.billing-table-wrap table { width: 100%; border-collapse: collapse; font-size: var(--font-13); }
+.billing-table-wrap th,
+.billing-table-wrap td { padding: var(--space-12) var(--card-inset); border-bottom: var(--hairline) solid var(--line); text-align: left; vertical-align: middle; white-space: nowrap; }
+.billing-table-wrap th { color: var(--muted); background: var(--canvas); font-weight: var(--weight-medium); }
+.billing-table-wrap tbody tr:last-child td { border-bottom: none; }
+.billing-table-wrap td > strong,
+.billing-table-wrap td > small { display: block; }
+.billing-table-wrap td > small { margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); }
+.billing-empty { padding: var(--card-inset); color: var(--muted); text-align: center; font-size: var(--font-15); }
+
+.billing-snapshot-list { padding: var(--space-8) var(--card-inset); }
+.billing-snapshot-list article { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-12); padding: var(--space-12) var(--space-0); border-bottom: var(--hairline) solid var(--line); }
+.billing-snapshot-list article:last-child { border-bottom: none; }
+.billing-snapshot-list article > svg { color: var(--forest); }
+.billing-snapshot-list strong,
+.billing-snapshot-list small { display: block; }
+.billing-snapshot-list strong,
+.billing-snapshot-list article > span { font-size: var(--font-15); font-weight: var(--weight-medium); }
+.billing-snapshot-list small { margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); }
+
+.billing-config { margin-top: var(--space-24); }
+.billing-config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-16); padding: var(--card-inset); }
+/* Configuration groups belong to the surrounding card.  Dividers, rather
+   than nested cards, preserve the global two-surface hierarchy. */
+.billing-config-card { min-width: 0; border: none; background: transparent; }
+.billing-config-card--assignment { grid-column: 1 / -1; }
+.billing-config-card > header { align-items: center; }
+.billing-config-card > header > div { display: flex; align-items: center; gap: var(--space-8); }
+.billing-config-card > header strong { font-size: var(--font-15); font-weight: var(--weight-medium); }
+.billing-config-list { max-height: 220px; overflow-y: auto; padding: var(--space-8); }
+.billing-config-list > button { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-8); border: none; border-bottom: var(--hairline) solid var(--line); padding: var(--space-12) var(--space-8); color: var(--ink); background: transparent; text-align: left; cursor: pointer; }
+.billing-config-list > button:last-child { border-bottom: none; }
+.billing-config-list > button:hover { background: var(--forest-soft); }
+.billing-config-list span > strong,
+.billing-config-list span > small { display: block; }
+.billing-config-list span > strong { font-size: var(--font-15); font-weight: var(--weight-medium); }
+.billing-config-list span > small { margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); }
+
+.billing-config-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-12); padding: var(--card-inset); border-top: var(--hairline) solid var(--line); background: transparent; }
+.billing-config-form > button { align-self: end; }
+.billing-check { display: flex; align-items: center; gap: var(--space-8); min-height: 42px; }
+.billing-check input { width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--forest); }
+.billing-check > span { margin-bottom: var(--space-0) !important; }
+.billing-assignment-form { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.billing-assignment-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-16); padding: var(--card-inset); border-top: var(--hairline) solid var(--line); }
+.billing-assignment-list article { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); border: none; border-bottom: var(--hairline) solid var(--line); padding: var(--space-12) var(--space-0); background: transparent; }
+.billing-assignment-list strong,
+.billing-assignment-list small { display: block; }
+.billing-assignment-list strong { font-size: var(--font-15); font-weight: var(--weight-medium); }
+.billing-assignment-list small { margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); }
+
+html[data-theme='dark'] .billing-root { color: var(--ink); background: var(--canvas); }
+
+@media (max-width: 1180px) {
+  .billing-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .billing-head { align-items: flex-start; flex-direction: column; }
+  .billing-head__controls { width: 100%; justify-content: flex-start; }
+  .billing-assignment-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .tenant-point-card { grid-template-columns: auto minmax(0,1fr) auto; }
+  .tenant-point-card__meter { grid-column: 1 / -1; }
+}
+
+@media (max-width: 820px) {
+  .billing-root { padding: var(--space-0); }
+  .billing-overview-grid,
+  .billing-breakdown-grid,
+  .billing-config-grid,
+  .billing-gauge { grid-template-columns: 1fr; }
+  .billing-assignment-list { grid-template-columns: 1fr; }
+  .billing-config-card--assignment { grid-column: auto; }
+}
+
+@media (max-width: 560px) {
+  .billing-metrics,
+  .billing-config-form,
+  .billing-assignment-form { grid-template-columns: 1fr; }
+  .billing-head__controls,
+  .billing-head__controls label,
+  .billing-head__controls :is(select, input, button) { width: 100%; }
+  .billing-gauge { padding: var(--card-inset); }
+  .billing-trend-list article { grid-template-columns: 64px minmax(0, 1fr); }
+  .billing-trend-list article > strong { grid-column: 2; text-align: left; }
+  .billing-snapshot-list article { grid-template-columns: auto minmax(0, 1fr); }
+  .billing-snapshot-list article > span { grid-column: 2; }
+}

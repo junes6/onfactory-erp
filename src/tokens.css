@@ -1,6 +1,7 @@
 :root {
   /* Core palette: no component may introduce colors outside these tokens. */
-  --color-surface: #FAFAF9;
+  --color-page: #F4F4F2;
+  --color-surface: #FFFFFF;
   --color-ink: #1C1C1B;
   --color-blue-deep: #16324F;
   --color-blue: #2F6B8F;
@@ -36,7 +37,10 @@
   --space-24: 24px;
   --space-32: 32px;
 
-  --radius-8: 8px;
+  /* Product surface contract: cards use 20px inset and 12px corners. */
+  --card-inset: 20px;
+  --radius-12: 12px;
+  --radius-8: var(--radius-12);
   --hairline: .5px;
   --shadow-none: none;
 
@@ -53,7 +57,7 @@
   --lime: var(--color-success);
   --line: var(--color-gray-200);
   --surface: var(--color-surface);
-  --canvas: var(--color-gray-50);
+  --canvas: var(--color-page);
   --blue: var(--color-blue);
   --blue-soft: var(--color-blue-soft);
   --amber: var(--color-warning);

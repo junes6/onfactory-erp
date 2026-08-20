@@ -10,8 +10,12 @@ async function loadWorkerFactory() {
   source = source
     .replace("import { env as cloudflareEnv } from 'cloudflare:workers'", 'const cloudflareEnv = {}')
     .replace("import { httpServerHandler as cloudflareHttpServerHandler } from 'cloudflare:node'", "const cloudflareHttpServerHandler = () => { throw new Error('test dependency required') }")
+    .replace("import Anthropic from '@anthropic-ai/sdk'", 'class Anthropic {}')
     .replace(/import currentWorkspaceSeed from '[^']+' with \{ type: 'json' \}/, 'const currentWorkspaceSeed = {}')
     .replace(/import \{ createApp as createExpressApp \} from '[^']+'/, "const createExpressApp = () => { throw new Error('test dependency required') }")
+    .replace(/import \{ createD1BillingRepository \} from '[^']+'/, 'const createD1BillingRepository = () => ({})')
+    .replace(/import \{ createBillingService \} from '[^']+'/, 'const createBillingService = () => ({ reconcilePendingUsageBatch: async () => {}, recordDailyStorageSnapshot: async () => {}, createMonthlySnapshot: async () => {} })')
+    .replace(/import \{ performanceMaintenanceErrors, runPerformanceMonthlyMaintenance \} from '[^']+'/, 'const performanceMaintenanceErrors = (results) => (results ?? []).filter((result) => result?.error).map((result) => result.error); const runPerformanceMonthlyMaintenance = async () => []')
   assert.equal(source.includes("from 'cloudflare:workers'"), false)
   assert.equal(source.includes("from '../server/app.mjs'"), false)
   const url = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
@@ -255,7 +259,7 @@ function createMockExpress(documentDirectory) {
   }
 }
 
-function workerOptions(createSitesWorker, database, bucket, mock, seed) {
+function workerOptions(createSitesWorker, database, bucket, mock, seed, overrides = {}) {
   return createSitesWorker({
     env: { DB: database, FILES: bucket, ERP_SEED_PASSWORD: 'Hosted-Seed!2026' },
     createApp: mock.createApp,
@@ -263,6 +267,7 @@ function workerOptions(createSitesWorker, database, bucket, mock, seed) {
     initialWorkspaceSeed: seed,
     documentDirectory: mock.documentDirectory,
     lockOptions: { waitMs: 2_000, leaseMs: 500, heartbeatMs: 100 },
+    ...overrides,
   })
 }
 
@@ -285,6 +290,74 @@ test('Sites Worker seeds current state once and preserves it across worker insta
     const seededTenant = database.payload().workspaceStore.tenants['TENANT-SUNSEA']
     assert.deepEqual(seededTenant['inventory-locations'].data.map((item) => item.id), ['WH-KEEP'])
     assert.deepEqual(seededTenant['inventory-movements'].data.map((item) => item.id), ['MOV-KEEP'])
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true })
+  }
+})
+
+test('scheduled maintenance materializes performance and persists the resulting workspace snapshot', async () => {
+  const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), 'onfactory-sites-performance-'))
+  try {
+    const database = new FakeD1()
+    const bucket = new FakeR2()
+    const mock = createMockExpress(temporaryDirectory)
+    mock.documentDirectory = temporaryDirectory
+    const calls = []
+    const worker = workerOptions(createSitesWorker, database, bucket, mock, makeSeed(), {
+      billingService: { reconcilePendingUsageBatch: async () => {}, recordDailyStorageSnapshot: async () => {}, createMonthlySnapshot: async () => {} },
+      runPerformanceMonthlyMaintenance: async ({ workspaceStore, tenantIds }) => {
+        for (const tenantId of tenantIds) {
+          calls.push(tenantId)
+          workspaceStore.tenants[tenantId]['performance-reports'] = {
+            data: [{ id: `PERFS-${tenantId}`, immutable: true }],
+            updatedAt: '2026-08-21T00:00:00.000Z',
+          }
+        }
+        return calls.map((tenantId) => ({ tenantId, created: true }))
+      },
+    })
+    let scheduledTask
+    await worker.scheduled({}, undefined, { waitUntil(task) { scheduledTask = task } })
+    await scheduledTask
+
+    assert.deepEqual(calls, ['TENANT-SUNSEA'])
+    assert.equal(database.payload().workspaceStore.tenants['TENANT-SUNSEA']['performance-reports'].data[0].immutable, true)
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true })
+  }
+})
+
+test('scheduled billing reconciliation failure is isolated per tenant and does not skip snapshots or performance', async () => {
+  const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), 'onfactory-sites-billing-reconciliation-'))
+  try {
+    const database = new FakeD1()
+    const bucket = new FakeR2()
+    const mock = createMockExpress(temporaryDirectory)
+    mock.documentDirectory = temporaryDirectory
+    const seed = makeSeed()
+    seed.tenants['TENANT-POHANG'] = {}
+    const calls = { reconcile: [], storage: [], monthly: [], performance: [] }
+    const worker = workerOptions(createSitesWorker, database, bucket, mock, seed, {
+      billingService: {
+        async reconcilePendingUsageBatch(_actor, { tenantId }) {
+          calls.reconcile.push(tenantId)
+          if (tenantId === 'TENANT-SUNSEA') throw new Error('simulated reconciliation outage')
+        },
+        async recordDailyStorageSnapshot(_actor, { tenantId }) { calls.storage.push(tenantId) },
+        async createMonthlySnapshot(_actor, { tenantId }) { calls.monthly.push(tenantId) },
+      },
+      runPerformanceMonthlyMaintenance: async ({ tenantIds }) => {
+        calls.performance.push(...tenantIds)
+        return [...tenantIds].map((tenantId) => ({ tenantId, created: false }))
+      },
+    })
+    let scheduledTask
+    await worker.scheduled({}, undefined, { waitUntil(task) { scheduledTask = task } })
+    await assert.rejects(scheduledTask, /정기 유지관리 일부 작업이 실패했습니다/)
+    assert.deepEqual(calls.reconcile, ['TENANT-SUNSEA', 'TENANT-POHANG'])
+    assert.deepEqual(calls.storage, ['TENANT-SUNSEA', 'TENANT-POHANG'])
+    assert.deepEqual(calls.monthly, ['TENANT-SUNSEA', 'TENANT-POHANG'])
+    assert.deepEqual(calls.performance, ['TENANT-SUNSEA', 'TENANT-POHANG'])
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true })
   }

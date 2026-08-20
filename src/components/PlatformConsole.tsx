@@ -7,6 +7,7 @@ import {
   Building2,
   CheckCircle2,
   ChevronRight,
+  Download,
   ExternalLink,
   FileClock,
   Filter,
@@ -16,9 +17,12 @@ import {
   Layers3,
   LifeBuoy,
   LockKeyhole,
+  MessageCircle,
+  Paperclip,
   Plus,
   RefreshCw,
   Search,
+  Send,
   ShieldCheck,
   UserCheck,
   X,
@@ -82,6 +86,35 @@ type SupportTicket = {
   history: { id: string; at: string; title: string; detail: string; actor: string }[]
   createdAt: string
   updatedAt: string
+  source?: 'developer-support'
+  conversationId?: string
+  requesterId?: string
+  requesterName?: string
+  messageCount?: number
+  attachmentCount?: number
+  newRequest?: boolean
+  unanswered?: boolean
+  lastCustomerMessageAt?: string
+  lastOperatorReplyAt?: string | null
+}
+
+type SupportAttachment = { id: string; name: string; size: string }
+
+type SupportConversation = {
+  id: string
+  name: string
+  systemChannel?: 'developer-support'
+  supportTicketId?: string
+  messages: Array<{
+    id: string
+    senderId: string
+    senderName: string
+    text: string
+    time: string
+    createdAt?: string
+    readBy?: string[]
+    attachments?: SupportAttachment[]
+  }>
 }
 
 type PlatformTenant = Tenant & {
@@ -116,6 +149,8 @@ type PlatformState = {
   integrations: IntegrationState[]
   actions: PlatformAction[]
   auditEvents: AuditEvent[]
+  newSupportRequestCount?: number
+  unansweredSupportCount?: number
 }
 
 type PlatformContextValue = PlatformState & {
@@ -127,6 +162,11 @@ type PlatformContextValue = PlatformState & {
   updateTicket: (id: string, input: { status?: string; priority?: string; owner?: string }) => Promise<SupportTicket>
   createAction: (input: { tenantId: string; kind: PlatformAction['kind']; target: string; message: string; reference?: string }) => Promise<PlatformAction>
   downloadEvidence: (ticket: SupportTicket) => Promise<void>
+  loadSupportConversation: (ticketId: string) => Promise<{ conversation: SupportConversation; ticket: SupportTicket }>
+  replySupportConversation: (ticketId: string, text: string, attachments?: SupportAttachment[]) => Promise<{ conversation: SupportConversation; ticket: SupportTicket }>
+  uploadSupportAttachments: (ticketId: string, files: File[]) => Promise<SupportAttachment[]>
+  deleteSupportAttachment: (ticketId: string, attachmentId: string) => Promise<void>
+  downloadSupportAttachment: (ticketId: string, attachment: SupportAttachment) => Promise<void>
 }
 
 const emptyPlatformState: PlatformState = { tenants: [], supportTickets: [], integrations: [], actions: [], auditEvents: [] }
@@ -520,12 +560,36 @@ function TenantsView({ scope, scopedTenants, selectedTenantId, onSelectTenant, o
 }
 
 function TicketDetail({ ticket, props, onOpenDialog }: { ticket?: SupportTicket; props: PlatformConsoleProps; onOpenDialog: (dialog: PlatformDialogState) => void }) {
-  const { tenants, updateTicket, downloadEvidence } = usePlatformData()
+  const { tenants, updateTicket, downloadEvidence, loadSupportConversation, replySupportConversation, uploadSupportAttachments, deleteSupportAttachment, downloadSupportAttachment } = usePlatformData()
   const tenant = ticket ? tenantForTicket(ticket, tenants) : undefined
   const [statusDraft, setStatusDraft] = useState(ticket?.status ?? '접수')
   const [ownerDraft, setOwnerDraft] = useState(ticket?.owner ?? '미배정')
   const [saving, setSaving] = useState(false)
+  const [supportConversation, setSupportConversation] = useState<SupportConversation | null>(null)
+  const [conversationLoading, setConversationLoading] = useState(false)
+  const [conversationError, setConversationError] = useState('')
+  const [reply, setReply] = useState('')
+  const [replySending, setReplySending] = useState(false)
+  const [replyAttachmentUploading, setReplyAttachmentUploading] = useState(false)
+  const [replyAttachmentsByTicket, setReplyAttachmentsByTicket] = useState<Record<string, SupportAttachment[]>>({})
+  const replyAttachmentInputRef = useRef<HTMLInputElement>(null)
+  const replyAttachments = ticket ? replyAttachmentsByTicket[ticket.id] ?? [] : []
   useEffect(() => { setStatusDraft(ticket?.status ?? '접수'); setOwnerDraft(ticket?.owner ?? '미배정') }, [ticket?.id, ticket?.owner, ticket?.status])
+  useEffect(() => {
+    if (!ticket || ticket.source !== 'developer-support') {
+      setSupportConversation(null)
+      setConversationError('')
+      return
+    }
+    let active = true
+    setConversationLoading(true)
+    setConversationError('')
+    void loadSupportConversation(ticket.id)
+      .then((result) => { if (active) setSupportConversation(result.conversation) })
+      .catch((reason) => { if (active) setConversationError(reason instanceof Error ? reason.message : '지원 대화를 불러오지 못했습니다.') })
+      .finally(() => { if (active) setConversationLoading(false) })
+    return () => { active = false }
+  }, [loadSupportConversation, ticket?.id, ticket?.source, ticket?.updatedAt])
   if (!ticket) return <aside className="pc-detail"><EmptyState label="조건에 맞는 CS 티켓이 없습니다." /></aside>
   const saveAssignment = async () => {
     setSaving(true)
@@ -533,18 +597,93 @@ function TicketDetail({ ticket, props, onOpenDialog }: { ticket?: SupportTicket;
     catch (reason) { props.onToast(reason instanceof Error ? reason.message : '티켓 상태를 저장하지 못했습니다.') }
     finally { setSaving(false) }
   }
+  const sendSupportReply = async (event: FormEvent) => {
+    event.preventDefault()
+    const text = reply.trim()
+    if (!text || replySending) return
+    setReplySending(true)
+    try {
+      const result = await replySupportConversation(ticket.id, text, replyAttachments)
+      setSupportConversation(result.conversation)
+      setReply('')
+      setReplyAttachmentsByTicket((current) => {
+        const next = { ...current }
+        delete next[ticket.id]
+        return next
+      })
+      props.onToast(`${ticket.id} 고객사 메신저로 답변을 보냈습니다.`)
+    } catch (reason) {
+      props.onToast(reason instanceof Error ? reason.message : '고객사 메신저로 답변을 보내지 못했습니다.')
+    } finally {
+      setReplySending(false)
+    }
+  }
+  const chooseReplyAttachments = async (files: File[]) => {
+    if (!files.length || replyAttachmentUploading || replySending) return
+    if (replyAttachments.length + files.length > 10) { props.onToast('한 답장에는 파일을 최대 10개까지 첨부할 수 있습니다.'); return }
+    setReplyAttachmentUploading(true)
+    try {
+      const additions = await uploadSupportAttachments(ticket.id, files)
+      setReplyAttachmentsByTicket((current) => ({ ...current, [ticket.id]: [...(current[ticket.id] ?? []), ...additions] }))
+      props.onToast(`${additions.length}개 지원 파일을 업로드했습니다. 답장을 보내면 고객사 메신저에 연결됩니다.`)
+    } catch (reason) {
+      props.onToast(reason instanceof Error ? reason.message : '지원 첨부파일을 업로드하지 못했습니다.')
+    } finally {
+      setReplyAttachmentUploading(false)
+    }
+  }
+  const removeReplyAttachment = async (attachment: SupportAttachment) => {
+    if (replyAttachmentUploading || replySending) return
+    setReplyAttachmentUploading(true)
+    try {
+      await deleteSupportAttachment(ticket.id, attachment.id)
+      setReplyAttachmentsByTicket((current) => ({ ...current, [ticket.id]: (current[ticket.id] ?? []).filter((item) => item.id !== attachment.id) }))
+    } catch (reason) {
+      props.onToast(reason instanceof Error ? reason.message : '지원 첨부파일을 제거하지 못했습니다.')
+    } finally {
+      setReplyAttachmentUploading(false)
+    }
+  }
   return <aside className="pc-detail" aria-label={`${ticket.id} 상세`}>
-    <div className="pc-detail-head"><div className="pc-detail-eyebrow"><span>{ticket.id}</span><Badge tone={toneForService(ticket.priority)}>{ticket.priority}</Badge></div><h2>{ticket.title}</h2></div>
+    <div className="pc-detail-head"><div className="pc-detail-eyebrow"><span>{ticket.id}</span><div className="pc-actions">{ticket.newRequest && <Badge tone="danger">새 요청</Badge>}{ticket.unanswered && !ticket.newRequest && <Badge tone="warning">미답변</Badge>}<Badge tone={toneForService(ticket.priority)}>{ticket.priority}</Badge></div></div><h2>{ticket.title}</h2></div>
     <div className="pc-detail-body">
       <div>
-        <div className="pc-detail-grid"><DetailStat label="고객사" value={ticket.tenant} /><DetailStat label="SLA" value={ticket.sla} /><DetailStat label="상태" value={ticket.status} /><DetailStat label="담당" value={ticket.owner} /></div>
+        <div className="pc-detail-grid"><DetailStat label="고객사" value={ticket.tenant} /><DetailStat label="SLA" value={ticket.sla} /><DetailStat label="상태" value={ticket.status} /><DetailStat label={ticket.requesterName ? '요청자' : '담당'} value={ticket.requesterName || ticket.owner} /></div>
         <div className="pc-detail-section"><strong>접수 내용</strong><p>{ticket.description || '상세 내용이 없습니다.'}</p></div>
         {ticket.evidence && <button type="button" className="pc-button small" onClick={() => void downloadEvidence(ticket).catch((reason) => props.onToast(reason instanceof Error ? reason.message : 'CS 증빙을 다운로드하지 못했습니다.'))}><FileClock size={15} /> {ticket.evidence.name} 다운로드</button>}
+        {ticket.source === 'developer-support' && (
+          <section className="pc-support-thread" aria-label="고객사 개발 지원 대화">
+            <div className="pc-support-thread-head"><div><MessageCircle size={16} /><strong>고객사 메신저</strong></div><span>{ticket.messageCount ?? supportConversation?.messages.length ?? 0}개 메시지</span></div>
+            {conversationLoading && <div className="pc-support-thread-state">지원 대화를 불러오는 중입니다.</div>}
+            {conversationError && <div className="pc-support-thread-state error">{conversationError}</div>}
+            {!conversationLoading && !conversationError && supportConversation && (
+              <div className="pc-support-messages">
+                {supportConversation.messages.map((message) => {
+                  const fromOperator = message.senderId === 'SYS-DEVELOPER-OPS'
+                  return <article key={message.id} className={fromOperator ? 'operator' : 'customer'}>
+                    <header><strong>{message.senderName}</strong><time>{message.createdAt ? formatDateTime(message.createdAt) : message.time}</time></header>
+                    <p>{message.text}</p>
+                    {message.attachments?.map((attachment) => <button type="button" key={attachment.id} onClick={() => void downloadSupportAttachment(ticket.id, attachment).catch((reason) => props.onToast(reason instanceof Error ? reason.message : '지원 첨부파일을 내려받지 못했습니다.'))}><Download size={14} /><span>{attachment.name}</span><small>{attachment.size}</small></button>)}
+                  </article>
+                })}
+              </div>
+            )}
+            <form className="pc-support-reply" onSubmit={sendSupportReply}>
+              <label><span>개발운영진 답장</span><textarea rows={3} value={reply} maxLength={4_000} onChange={(event) => setReply(event.target.value)} placeholder="고객사 메신저로 전송할 답변을 입력하세요." /></label>
+              {replyAttachments.length > 0 && <div className="pc-support-pending-files">{replyAttachments.map((attachment) => <span key={attachment.id}><Paperclip size={13} /><span>{attachment.name} · {attachment.size}</span><button type="button" aria-label={`${attachment.name} 첨부 취소`} onClick={() => void removeReplyAttachment(attachment)} disabled={replyAttachmentUploading || replySending}><X size={13} /></button></span>)}</div>}
+              <div className="pc-support-reply-actions">
+                <input ref={replyAttachmentInputRef} className="pc-visually-hidden" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void chooseReplyAttachments(files) }} />
+                <button className="pc-button" type="button" disabled={replyAttachmentUploading || replySending || conversationLoading || Boolean(conversationError)} onClick={() => replyAttachmentInputRef.current?.click()}><Paperclip size={15} /> {replyAttachmentUploading ? '업로드 중…' : '파일 첨부'}</button>
+                <button className="pc-button primary" type="submit" disabled={!reply.trim() || replySending || replyAttachmentUploading || conversationLoading || Boolean(conversationError)}><Send size={15} /> {replySending ? '전송 중…' : '메신저 답장'}</button>
+              </div>
+            </form>
+          </section>
+        )}
         <div className="pc-safe-note"><LockKeyhole size={16} /> 티켓만으로 고객사 화면에 접근할 수 없습니다. 별도 승인형 지원 세션이 필요합니다.</div>
       </div>
       <div className="pc-detail-actions">
         <label className="pc-field"><span>상태</span><select value={statusDraft} onChange={(event) => setStatusDraft(event.target.value)}><option>접수</option><option>기술팀 처리중</option><option>고객 회신 대기</option><option>수정본 검증중</option><option>해결</option><option>종료</option></select></label>
-        <label className="pc-field"><span>담당자</span><select value={ownerDraft} onChange={(event) => setOwnerDraft(event.target.value)}><option>이민지</option><option>박하늘</option><option>김도윤</option><option>미배정</option></select></label>
+        <label className="pc-field"><span>담당자</span><select value={ownerDraft} onChange={(event) => setOwnerDraft(event.target.value)}><option>개발운영진</option><option>이민지</option><option>박하늘</option><option>김도윤</option><option>미배정</option></select></label>
         <Button primary disabled={saving || (statusDraft === ticket.status && ownerDraft === ticket.owner)} onClick={() => void saveAssignment()}><CheckCircle2 size={15} /> {saving ? '저장 중…' : '상태 저장'}</Button>
         <Button onClick={() => onOpenDialog({ kind: 'timeline', ticket })}><FileClock size={15} /> 처리 이력</Button>
         <Button onClick={() => onOpenDialog({ kind: 'owner-notice', ticket })}><UserCheck size={15} /> 담당자 알림</Button>
@@ -557,7 +696,10 @@ function TicketDetail({ ticket, props, onOpenDialog }: { ticket?: SupportTicket;
 function SupportView({ scopedTickets, onOpenDialog, props }: SectionProps) {
   const [priority, setPriority] = useState<'all' | 'P1' | 'P2' | 'P3'>('all')
   const [selectedTicketId, setSelectedTicketId] = useState(scopedTickets[0]?.id ?? '')
-  const tickets = scopedTickets.filter((ticket) => priority === 'all' || ticket.priority === priority)
+  const tickets = scopedTickets
+    .filter((ticket) => priority === 'all' || ticket.priority === priority)
+    .sort((left, right) => Number(Boolean(right.unanswered)) - Number(Boolean(left.unanswered))
+      || (Date.parse(right.updatedAt) || 0) - (Date.parse(left.updatedAt) || 0))
   const selectedTicket = tickets.find((ticket) => ticket.id === selectedTicketId) ?? tickets[0]
   useEffect(() => {
     if (props.focusId && scopedTickets.some((ticket) => ticket.id === props.focusId)) {
@@ -566,11 +708,11 @@ function SupportView({ scopedTickets, onOpenDialog, props }: SectionProps) {
     }
   }, [props.focusId, scopedTickets])
   return <div className="pc-workspace">
-    <Panel title="CS 티켓" subtitle="고객사 범위와 우선순위 필터가 유지됩니다." tools={<div className="pc-toolbar">{(['all', 'P1', 'P2', 'P3'] as const).map((value) => <button type="button" key={value} className={`pc-filter-button${priority === value ? ' active' : ''}`} onClick={() => setPriority(value)}>{value === 'all' ? '전체' : value}</button>)}</div>} footer={`${tickets.length}개 티켓 · SLA 임박순`}>
+    <Panel title="CS 티켓" subtitle="미답변 고객 요청을 먼저 보여주고, 그 안에서 최근 요청 순으로 정렬합니다." tools={<div className="pc-toolbar">{(['all', 'P1', 'P2', 'P3'] as const).map((value) => <button type="button" key={value} className={`pc-filter-button${priority === value ? ' active' : ''}`} onClick={() => setPriority(value)}>{value === 'all' ? '전체' : value}</button>)}</div>} footer={`${tickets.length}개 티켓 · 미답변 우선`}>
       {tickets.length ? <div className="pc-table-wrap"><table className="pc-table">
         <thead><tr><th>티켓</th><th>고객사</th><th>우선순위</th><th>상태</th><th>담당</th><th>SLA</th><th aria-label="상세" /></tr></thead>
         <tbody>{tickets.map((ticket) => <tr key={ticket.id} className={selectedTicket?.id === ticket.id ? 'selected' : undefined}>
-          <td><span className="pc-cell-copy"><strong>{ticket.title}</strong><span>{ticket.id}</span></span></td><td>{ticket.tenant}</td><td><Badge tone={toneForService(ticket.priority)}>{ticket.priority}</Badge></td><td><Badge tone={ticket.status.includes('대기') ? 'warning' : 'info'}>{ticket.status}</Badge></td><td>{ticket.owner}</td><td className="pc-code"><strong>{ticket.sla}</strong></td><td><button type="button" className="pc-row-button" aria-label={`${ticket.id} 상세 보기`} onClick={() => setSelectedTicketId(ticket.id)}><ChevronRight size={17} /></button></td>
+          <td><span className="pc-cell-copy"><strong>{ticket.title}</strong><span>{ticket.id}{ticket.newRequest && <Badge tone="danger">새 요청</Badge>}{ticket.unanswered && !ticket.newRequest && <Badge tone="warning">미답변</Badge>}</span></span></td><td>{ticket.tenant}</td><td><Badge tone={toneForService(ticket.priority)}>{ticket.priority}</Badge></td><td><Badge tone={ticket.status.includes('대기') ? 'warning' : 'info'}>{ticket.status}</Badge></td><td>{ticket.owner}</td><td className="pc-code"><strong>{ticket.sla}</strong></td><td><button type="button" className="pc-row-button" aria-label={`${ticket.id} 상세 보기`} onClick={() => setSelectedTicketId(ticket.id)}><ChevronRight size={17} /></button></td>
         </tr>)}</tbody>
       </table></div> : <EmptyState label="선택한 조건의 티켓이 없습니다." />}
     </Panel>
@@ -724,6 +866,71 @@ export function PlatformConsole(props: PlatformConsoleProps) {
     window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
   }, [])
 
+  const loadSupportConversation = useCallback(async (ticketId: string) => {
+    let result = await platformJson<{ conversation: SupportConversation; ticket: SupportTicket }>(`/api/platform/tickets/${encodeURIComponent(ticketId)}/conversation`)
+    if (result.ticket.newRequest) {
+      result = await platformJson<{ conversation: SupportConversation; ticket: SupportTicket }>(`/api/platform/tickets/${encodeURIComponent(ticketId)}/conversation/read`, { method: 'POST' })
+      await refresh()
+    }
+    return result
+  }, [refresh])
+
+  const replySupportConversation = useCallback(async (ticketId: string, text: string, attachments: SupportAttachment[] = []) => {
+    const result = await platformJson<{ conversation: SupportConversation; ticket: SupportTicket }>(`/api/platform/tickets/${encodeURIComponent(ticketId)}/reply`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, attachments }),
+    })
+    await refresh()
+    props.onDataChanged?.()
+    return result
+  }, [props.onDataChanged, refresh])
+
+  const deleteSupportAttachment = useCallback(async (ticketId: string, attachmentId: string) => {
+    await platformJson<{ deleted: boolean }>(`/api/platform/tickets/${encodeURIComponent(ticketId)}/attachments/${encodeURIComponent(attachmentId)}`, { method: 'DELETE' })
+  }, [])
+
+  const uploadSupportAttachments = useCallback(async (ticketId: string, files: File[]) => {
+    const uploaded: SupportAttachment[] = []
+    try {
+      for (const file of files) {
+        if (!file.size) throw new Error(`${file.name}: 비어 있는 파일은 업로드할 수 없습니다.`)
+        if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name}: 파일은 10MB 이하만 첨부할 수 있습니다.`)
+        const result = await platformJson<{ attachment: SupportAttachment }>(`/api/platform/tickets/${encodeURIComponent(ticketId)}/attachments`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/octet-stream',
+            'x-file-name': encodeURIComponent(file.name),
+            'x-file-type': file.type || 'application/octet-stream',
+          },
+          body: file,
+        })
+        uploaded.push(result.attachment)
+      }
+      return uploaded
+    } catch (reason) {
+      const rollback = await Promise.allSettled(uploaded.map((attachment) => deleteSupportAttachment(ticketId, attachment.id)))
+      const failedRollback = rollback.filter((result) => result.status === 'rejected').length
+      const message = reason instanceof Error ? reason.message : '지원 첨부파일을 업로드하지 못했습니다.'
+      throw new Error(failedRollback ? `${message} 업로드 롤백 중 ${failedRollback}개 파일을 정리하지 못했습니다.` : `${message} 이번에 선택한 파일은 모두 롤백했습니다.`)
+    }
+  }, [deleteSupportAttachment])
+
+  const downloadSupportAttachment = useCallback(async (ticketId: string, attachment: SupportAttachment) => {
+    const response = await fetch(`/api/platform/tickets/${encodeURIComponent(ticketId)}/attachments/${encodeURIComponent(attachment.id)}`)
+    if (!response.ok) {
+      let message = '지원 첨부파일을 다운로드하지 못했습니다.'
+      try { message = (await response.json() as { error?: { message?: string } }).error?.message || message } catch { /* keep generic message */ }
+      throw new Error(message)
+    }
+    const url = URL.createObjectURL(await response.blob())
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = attachment.name
+    anchor.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
+  }, [])
+
   const { tenants, supportTickets, integrations, actions, auditEvents } = platformState
   const scopedTenants = useMemo(() => scope === 'all' ? tenants : tenants.filter((tenant) => tenant.id === scope), [scope, tenants])
   const scopedTickets = useMemo(() => supportTickets.filter((ticket) => scope === 'all' || ticket.tenantId === scope), [scope, supportTickets])
@@ -733,6 +940,8 @@ export function PlatformConsole(props: PlatformConsoleProps) {
   const healthyIntegrations = scopedIntegrations.filter((item) => item.status === '정상').length
   const openTickets = scopedTickets.filter((ticket) => !['해결', '종료'].includes(ticket.status))
   const p1Count = openTickets.filter((ticket) => ticket.priority === 'P1').length
+  const newRequestCount = scopedTickets.filter((ticket) => ticket.newRequest).length
+  const unansweredCount = scopedTickets.filter((ticket) => ticket.unanswered).length
   const meta = sectionMeta[props.section]
   const HeadIcon = meta.icon
 
@@ -764,7 +973,22 @@ export function PlatformConsole(props: PlatformConsoleProps) {
     props,
   }
 
-  const contextValue = useMemo<PlatformContextValue>(() => ({ ...platformState, loading, error: loadError, refresh, createTenant, createTicket, updateTicket, createAction, downloadEvidence }), [createAction, createTenant, createTicket, downloadEvidence, loadError, loading, platformState, refresh, updateTicket])
+  const contextValue = useMemo<PlatformContextValue>(() => ({
+    ...platformState,
+    loading,
+    error: loadError,
+    refresh,
+    createTenant,
+    createTicket,
+    updateTicket,
+    createAction,
+    downloadEvidence,
+    loadSupportConversation,
+    replySupportConversation,
+    uploadSupportAttachments,
+    deleteSupportAttachment,
+    downloadSupportAttachment,
+  }), [createAction, createTenant, createTicket, deleteSupportAttachment, downloadEvidence, downloadSupportAttachment, loadError, loading, loadSupportConversation, platformState, refresh, replySupportConversation, updateTicket, uploadSupportAttachments])
 
   return (
     <PlatformDataContext.Provider value={contextValue}><div className="pc-root">
@@ -787,14 +1011,14 @@ export function PlatformConsole(props: PlatformConsoleProps) {
           {(Object.keys(sectionMeta) as PlatformSection[]).map((id) => {
             const item = sectionMeta[id]
             const Icon = item.icon
-            return <button key={id} type="button" className={`pc-section-tab${props.section === id ? ' active' : ''}`} aria-current={props.section === id ? 'page' : undefined} onClick={() => props.onSectionChange(id)}><Icon size={16} />{item.label}{id === 'support' && <Badge tone={p1Count ? 'danger' : 'neutral'}>{openTickets.length}</Badge>}</button>
+            return <button key={id} type="button" className={`pc-section-tab${props.section === id ? ' active' : ''}`} aria-current={props.section === id ? 'page' : undefined} onClick={() => props.onSectionChange(id)}><Icon size={16} />{item.label}{id === 'support' && <Badge tone={newRequestCount || p1Count ? 'danger' : unansweredCount ? 'warning' : 'neutral'}>{newRequestCount ? `신규 ${newRequestCount}` : unansweredCount ? `미답변 ${unansweredCount}` : openTickets.length}</Badge>}</button>
           })}
         </nav>
 
         <section className="pc-summary" aria-label="선택 범위 핵심 지표">
           <Metric icon={Building2} label="관리 고객사" value={`${scopedTenants.length}곳`} note={scope === 'all' ? '전체' : '선택'} />
           <Metric icon={Activity} label="평균 건강도" value={`${averageHealth}점`} note={averageHealth >= 90 ? '안정' : '확인 필요'} warning={averageHealth < 90} />
-          <Metric icon={LifeBuoy} label="열린 CS" value={`${openTickets.length}건`} note={p1Count ? `P1 ${p1Count}` : 'P1 없음'} warning={p1Count > 0} />
+          <Metric icon={LifeBuoy} label="열린 CS" value={`${openTickets.length}건`} note={newRequestCount ? `새 요청 ${newRequestCount}` : unansweredCount ? `미답변 ${unansweredCount}` : p1Count ? `P1 ${p1Count}` : '대기 없음'} warning={newRequestCount > 0 || p1Count > 0} />
           <Metric icon={CheckCircle2} label="정상 연동" value={`${healthyIntegrations}/${scopedIntegrations.length}`} note={healthyIntegrations === scopedIntegrations.length ? '전체 정상' : '점검 필요'} warning={healthyIntegrations < scopedIntegrations.length} />
         </section>
 

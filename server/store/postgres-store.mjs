@@ -29,6 +29,33 @@ const clone = (value) => structuredClone(value)
 const json = (value) => JSON.stringify(value ?? {})
 const schemaFile = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../db/postgres-schema.sql')
 
+function withoutPgMemUnsupportedRls(sql) {
+  return sql
+    .replace(/ALTER TABLE performance_(?:settings|report_snapshots) (?:ENABLE|FORCE) ROW LEVEL SECURITY;\s*/g, '')
+    .replace(/DROP POLICY IF EXISTS performance_[\w]+ ON performance_(?:settings|report_snapshots);\s*/g, '')
+    .replace(/CREATE POLICY performance_[\s\S]*?WITH CHECK \([^;]+\);\s*/g, '')
+}
+
+async function applyStoreSchema(pool, sql) {
+  try {
+    await pool.query(sql)
+  } catch (error) {
+    const message = `${error?.message ?? ''}\n${error?.data?.error ?? ''}`
+    if (!message.includes('pg-mem')) throw error
+    // pg-mem deliberately does not implement PostgreSQL RLS DDL. Production
+    // Postgres/Supabase still receives the policies; the in-memory SQL engine
+    // is used only to validate row normalization in isolated tests.
+    await pool.query(withoutPgMemUnsupportedRls(sql))
+  }
+}
+
+export async function applyPostgresServiceContext(client) {
+  await client.query(
+    "SELECT set_config('app.role', $1, TRUE), set_config('app.org_id', $2, TRUE)",
+    ['service', '__service__'],
+  )
+}
+
 function isoOrNull(value) {
   if (!value) return null
   const date = new Date(value)
@@ -569,13 +596,14 @@ async function loadWorkspace(client, snapshot) {
 }
 
 export class PostgresStoreAdapter {
-  constructor({ databaseUrl, pool, schemaPath = schemaFile, autoMigrate = false, logger = console } = {}) {
+  constructor({ databaseUrl, pool, schemaPath = schemaFile, autoMigrate = false, logger = console, serviceContextApplier = applyPostgresServiceContext } = {}) {
     this.kind = 'postgres'
     this.readOnly = false
     this.logger = logger
     this.schemaPath = schemaPath
     this.autoMigrate = autoMigrate
     this.pool = pool ?? new Pool({ connectionString: databaseUrl, max: 10, idleTimeoutMillis: 30_000 })
+    this.serviceContextApplier = serviceContextApplier
     this.ownsPool = !pool
     this.snapshot = emptyWorkspaceStore()
     this.commitTail = Promise.resolve()
@@ -584,7 +612,7 @@ export class PostgresStoreAdapter {
   async connect() {
     if (this.autoMigrate) {
       const sql = await readFile(this.schemaPath, 'utf8')
-      await this.pool.query(sql)
+      await applyStoreSchema(this.pool, sql)
     }
     await this.pool.query('SELECT 1 AS ready')
     return this
@@ -592,19 +620,25 @@ export class PostgresStoreAdapter {
 
   async applySchema() {
     const sql = await readFile(this.schemaPath, 'utf8')
-    await this.pool.query(sql)
+    await applyStoreSchema(this.pool, sql)
   }
 
   async loadSnapshot() {
     const client = await this.pool.connect()
     try {
+      await client.query('BEGIN')
+      await this.serviceContextApplier(client)
       const snapshot = emptyWorkspaceStore()
       await loadWorkspace(client, snapshot)
       await loadPlatform(client, snapshot)
       await loadAccounts(client, snapshot)
       assertKnownWorkspaceKeys(snapshot)
+      await client.query('COMMIT')
       this.snapshot = clone(snapshot)
       return snapshot
+    } catch (error) {
+      try { await client.query('ROLLBACK') } catch { /* retain original failure */ }
+      throw error
     } finally {
       client.release()
     }
@@ -624,6 +658,7 @@ export class PostgresStoreAdapter {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await this.serviceContextApplier(client)
       const tenantIds = new Set([
         ...Object.keys(nextSnapshot.tenants ?? {}),
         ...(nextSnapshot.platform?.tenants ?? []).map((tenant) => tenant?.id).filter(Boolean),

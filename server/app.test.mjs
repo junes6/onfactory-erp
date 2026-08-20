@@ -139,6 +139,78 @@ test('chat uses the configured Claude client and response contract', async () =>
   )
 })
 
+test('chat billing feature allowlist preserves approved scopes and rejects client feature tampering', async () => {
+  let providerCall = 0
+  const calls = { reservations: [], events: [] }
+  const fakeClient = {
+    messages: {
+      create: async () => ({
+        id: `feature-provider-${providerCall++}`, model: 'claude-test',
+        content: [{ type: 'text', text: '기능별 사용량 기록 완료' }],
+        usage: { input_tokens: 5, output_tokens: 3 },
+      }),
+    },
+  }
+  const billingService = {
+    reserveUsage: async (_actor, input) => { calls.reservations.push(input); return { reservation: { ...input, status: 'pending' } } },
+    recordUsageEvent: async (_actor, input) => { calls.events.push(input); return { event: input } },
+    recordReconciliationPending: async () => { throw new Error('not expected') },
+    releaseUsageReservation: async () => {},
+  }
+  await withServer(createApp({
+    apiKey: 'test-key', model: 'claude-test', client: fakeClient, billingService, authDisabled: true,
+  }), async (origin) => {
+    const requested = ['document-search', 'compliance-review', 'ai-chat', 'document-search<script>', undefined]
+    for (const feature of requested) {
+      const response = await fetch(`${origin}/api/chat`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ feature, messages: [{ role: 'user', content: '사용량 기능을 기록해줘' }] }),
+      })
+      assert.equal(response.status, 200)
+    }
+  })
+  const expected = ['document-search', 'compliance-review', 'ai-chat', 'ai-chat', 'ai-chat']
+  assert.deepEqual(calls.reservations.map((item) => item.feature), expected)
+  assert.deepEqual(calls.events.map((item) => item.feature), expected)
+  assert.deepEqual(calls.events.map((item) => item.feature), calls.reservations.map((item) => item.feature))
+})
+
+test('chat returns the completed provider result and queues reconciliation when ledger recording fails', async () => {
+  const calls = { reservations: [], pending: [], released: [] }
+  const fakeClient = {
+    messages: {
+      create: async () => ({
+        id: 'provider-success-ledger-failure', model: 'claude-test',
+        content: [{ type: 'text', text: '공급자 응답은 정상 완료되었습니다.' }],
+        usage: { input_tokens: 12, output_tokens: 7 },
+      }),
+    },
+  }
+  const billingService = {
+    reserveUsage: async (_actor, input) => { calls.reservations.push(input); return { reservation: { ...input, status: 'pending' } } },
+    recordUsageEvent: async () => { throw new Error('ledger temporarily unavailable') },
+    recordReconciliationPending: async (_actor, input) => { calls.pending.push(input); return { reconciliation: { ...input, status: 'pending' } } },
+    releaseUsageReservation: async (_actor, input) => { calls.released.push(input) },
+  }
+  await withServer(createApp({
+    apiKey: 'test-key', model: 'claude-test', client: fakeClient, billingService, authDisabled: true,
+  }), async (origin) => {
+    const response = await fetch(`${origin}/api/chat`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ feature: 'compliance-review', messages: [{ role: 'user', content: '완료 결과를 알려줘' }] }),
+    })
+    const body = await response.json()
+    assert.equal(response.status, 200)
+    assert.equal(body.text, '공급자 응답은 정상 완료되었습니다.')
+    assert.equal(body.usageAccounting, 'reconciliation-pending')
+    assert.equal(calls.pending.length, 1)
+    assert.equal(calls.pending[0].usageEventId, 'anthropic:provider-success-ledger-failure')
+    assert.equal(calls.reservations[0].feature, 'compliance-review')
+    assert.equal(calls.pending[0].feature, 'compliance-review')
+    assert.equal(calls.released.length, 0)
+  })
+})
+
 test('login validates approval, workspace role and creates an HttpOnly session', async () => {
   await withServer(createApp({ apiKey: '' }), async (origin) => {
     const invalid = await fetch(`${origin}/api/auth/login`, {
@@ -1177,6 +1249,10 @@ test('audited work transitions and recurring rules enforce evidence, comments an
     assert.equal(approved.status, '결재완료')
     assert.equal(approved.review.decision, 'approved')
     assert.equal(approved.review.reviewerId, 'USR-SUNSEA-ADMIN')
+    assert.equal(approved.completionHistory.length, 2)
+    assert.equal(approved.completionHistory[0].summary, '점검표 확인과 보완 조치를 완료했습니다.')
+    assert.equal(approved.completionHistory[1].summary, '측정값이 보이는 현장 사진까지 보완했습니다.')
+    assert.deepEqual(approved.reviewHistory.map((review) => review.decision), ['changes-requested', 'approved'])
 
     const todayParts = Object.fromEntries(new Intl.DateTimeFormat('en', {
       timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -1740,6 +1816,233 @@ test('messenger capacity rejects a new room without truncating existing records'
     assert.equal(afterData.length, 2_000)
     assert.equal(afterData.at(-1).id, 'team-capacity-1999')
   })
+})
+
+test('developer operations support is a private immutable messenger channel with real attachments and one accumulated platform ticket', async () => {
+  const temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'onfactory-developer-support-'))
+  const storeFile = path.join(temporaryDirectory, 'workspace-state.json')
+  const documentUploadDirectory = path.join(temporaryDirectory, 'documents')
+  const screenshot = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4])
+  try {
+    await withServer(createApp({ apiKey: '', workspaceStoreFile: storeFile, documentUploadDirectory }), async (origin) => {
+      const requester = await login(origin, 'taesik.oh@sunsea.co.kr')
+      const tenantAdmin = await login(origin, 'admin@sunsea.co.kr')
+      const colleague = await login(origin, 'jihyun.park@sunsea.co.kr')
+      const otherTenant = await login(origin, 'admin@pohangcoop.co.kr')
+      const operator = await login(origin, 'operator@onfactory.co.kr', 'platform')
+
+      const directory = await fetch(`${origin}/api/directory`, { headers: { cookie: requester.cookie } }).then((response) => response.json())
+      const systemAccounts = directory.members.filter((member) => member.id === 'SYS-DEVELOPER-OPS')
+      assert.equal(systemAccounts.length, 1)
+      assert.equal(systemAccounts[0].name, '개발운영진')
+      assert.equal(systemAccounts[0].system, true)
+
+      const createRoom = await fetch(`${origin}/api/messenger/conversations/direct`, {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie: requester.cookie },
+        body: JSON.stringify({ participantId: 'SYS-DEVELOPER-OPS' }),
+      })
+      const roomBody = await createRoom.json()
+      assert.equal(createRoom.status, 201)
+      assert.equal(roomBody.conversation.systemChannel, 'developer-support')
+      assert.deepEqual(roomBody.conversation.participantIds, ['USR-SUNSEA-OH', 'SYS-DEVELOPER-OPS'])
+
+      const uploadParams = new URLSearchParams({
+        name: '주문오류.png', category: '개발운영지원', visibility: 'restricted', tags: 'developer-support,screenshot',
+      })
+      const upload = await fetch(`${origin}/api/documents?${uploadParams}`, {
+        method: 'POST',
+        headers: {
+          cookie: requester.cookie,
+          'content-type': 'application/octet-stream',
+          'x-file-type': 'image/png',
+          'x-file-name': encodeURIComponent('주문오류.png'),
+        },
+        body: screenshot,
+      })
+      const uploadedDocument = (await upload.json()).document
+      assert.equal(upload.status, 201)
+      assert.match(uploadedDocument.id, /^DOC-/)
+
+      const firstMessage = await fetch(`${origin}/api/messenger/conversations/${roomBody.conversation.id}/messages`, {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie: requester.cookie },
+        body: JSON.stringify({ text: '온라인 주문 수집 화면에서 오류가 납니다.', attachments: [{ id: uploadedDocument.id, name: '위조 이름', size: '0 KB' }] }),
+      })
+      const firstMessageBody = await firstMessage.json()
+      assert.equal(firstMessage.status, 201)
+      assert.equal(firstMessageBody.message.attachments[0].name, '주문오류.png')
+      assert.notEqual(firstMessageBody.message.attachments[0].size, '0 KB')
+      assert.equal(firstMessageBody.ticket.source, 'developer-support')
+      assert.equal(firstMessageBody.ticket.unanswered, true)
+      assert.equal(firstMessageBody.ticket.newRequest, true)
+      const ticketId = firstMessageBody.ticket.id
+      const reopenSupportRoom = await fetch(`${origin}/api/messenger/conversations/direct`, {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie: requester.cookie }, body: JSON.stringify({ participantId: 'SYS-DEVELOPER-OPS' }),
+      })
+      const reopenedSupportRoom = await reopenSupportRoom.json()
+      assert.equal(reopenSupportRoom.status, 200)
+      assert.equal(reopenedSupportRoom.created, false)
+      assert.equal(reopenedSupportRoom.conversation.id, roomBody.conversation.id)
+      assert.equal(reopenedSupportRoom.conversation.supportTicketId, ticketId)
+
+      const deleteReferencedAttachment = await fetch(`${origin}/api/documents/${uploadedDocument.id}`, {
+        method: 'DELETE', headers: { cookie: requester.cookie },
+      })
+      assert.equal(deleteReferencedAttachment.status, 409)
+      assert.equal((await deleteReferencedAttachment.json()).error.code, 'DOCUMENT_IN_USE')
+
+      const requesterRooms = await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: { cookie: requester.cookie } }).then((response) => response.json())
+      assert.ok(requesterRooms.data.some((conversation) => conversation.id === roomBody.conversation.id))
+      for (const restrictedAccount of [tenantAdmin, colleague, otherTenant]) {
+        const rooms = await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: { cookie: restrictedAccount.cookie } }).then((response) => response.json())
+        assert.equal(rooms.data?.some((conversation) => conversation.id === roomBody.conversation.id) ?? false, false)
+      }
+      const adminDocumentRead = await fetch(`${origin}/api/documents/${uploadedDocument.id}/download`, { headers: { cookie: tenantAdmin.cookie } })
+      assert.equal(adminDocumentRead.status, 404)
+      const colleagueDocumentRead = await fetch(`${origin}/api/documents/${uploadedDocument.id}/download`, { headers: { cookie: colleague.cookie } })
+      assert.equal(colleagueDocumentRead.status, 404)
+      const requesterDocumentRead = await fetch(`${origin}/api/documents/${uploadedDocument.id}/download`, { headers: { cookie: requester.cookie } })
+      assert.equal(requesterDocumentRead.status, 200)
+      assert.deepEqual(Buffer.from(await requesterDocumentRead.arrayBuffer()), screenshot)
+
+      const tenantPlatformRead = await fetch(`${origin}/api/platform/tickets/${ticketId}/conversation`, { headers: { cookie: tenantAdmin.cookie } })
+      assert.equal(tenantPlatformRead.status, 403)
+      const tenantPlatformUpload = await fetch(`${origin}/api/platform/tickets/${ticketId}/attachments`, {
+        method: 'POST', headers: { cookie: requester.cookie, 'content-type': 'application/octet-stream', 'x-file-name': 'forged.txt' }, body: Buffer.from('forged'),
+      })
+      assert.equal(tenantPlatformUpload.status, 403)
+      const operatorConversation = await fetch(`${origin}/api/platform/tickets/${ticketId}/conversation`, { headers: { cookie: operator.cookie } })
+      assert.equal(operatorConversation.status, 200)
+      assert.equal((await operatorConversation.json()).conversation.messages.length, 1)
+      const operatorAttachment = await fetch(`${origin}/api/platform/tickets/${ticketId}/attachments/${uploadedDocument.id}`, { headers: { cookie: operator.cookie } })
+      assert.equal(operatorAttachment.status, 200)
+      assert.deepEqual(Buffer.from(await operatorAttachment.arrayBuffer()), screenshot)
+      const arbitraryAttachment = await fetch(`${origin}/api/platform/tickets/${ticketId}/attachments/DOC-NOT-REFERENCED`, { headers: { cookie: operator.cookie } })
+      assert.equal(arbitraryAttachment.status, 404)
+
+      const followup = await fetch(`${origin}/api/messenger/conversations/${roomBody.conversation.id}/messages`, {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie: requester.cookie },
+        body: JSON.stringify({ text: '재현 시간은 오늘 14시 20분입니다.' }),
+      })
+      assert.equal(followup.status, 201)
+      assert.equal((await followup.json()).ticket.id, ticketId)
+
+      const platformStateBeforeReply = await fetch(`${origin}/api/platform/state`, { headers: { cookie: operator.cookie } }).then((response) => response.json())
+      const supportTickets = platformStateBeforeReply.supportTickets.filter((ticket) => ticket.conversationId === roomBody.conversation.id)
+      assert.equal(supportTickets.length, 1)
+      assert.equal(supportTickets[0].messageCount, 2)
+      assert.equal(platformStateBeforeReply.supportTickets[0].id, ticketId)
+      assert.ok(platformStateBeforeReply.newSupportRequestCount >= 1)
+      assert.ok(platformStateBeforeReply.unansweredSupportCount >= 1)
+
+      const markRead = await fetch(`${origin}/api/platform/tickets/${ticketId}/conversation/read`, {
+        method: 'POST', headers: { cookie: operator.cookie },
+      })
+      const markedRead = await markRead.json()
+      assert.equal(markRead.status, 200)
+      assert.equal(markedRead.ticket.newRequest, false)
+      assert.equal(markedRead.ticket.unanswered, true)
+      assert.ok(markedRead.conversation.messages.every((message) => message.readBy.includes('SYS-DEVELOPER-OPS')))
+
+      const operatorGuide = Buffer.from('주문 커넥터 재연결 안내', 'utf8')
+      const uploadOperatorAttachment = await fetch(`${origin}/api/platform/tickets/${ticketId}/attachments`, {
+        method: 'POST',
+        headers: {
+          cookie: operator.cookie,
+          'content-type': 'application/octet-stream',
+          'x-file-type': 'text/plain; charset=utf-8',
+          'x-file-name': encodeURIComponent('재연결-안내.txt'),
+        },
+        body: operatorGuide,
+      })
+      const operatorAttachmentBody = await uploadOperatorAttachment.json()
+      assert.equal(uploadOperatorAttachment.status, 201)
+      assert.match(operatorAttachmentBody.attachment.id, /^DOC-/)
+      const hiddenUntilReply = await fetch(`${origin}/api/documents/${operatorAttachmentBody.attachment.id}/download`, { headers: { cookie: requester.cookie } })
+      assert.equal(hiddenUntilReply.status, 404)
+
+      const removableUpload = await fetch(`${origin}/api/platform/tickets/${ticketId}/attachments`, {
+        method: 'POST', headers: { cookie: operator.cookie, 'content-type': 'application/octet-stream', 'x-file-type': 'text/plain', 'x-file-name': 'draft.txt' }, body: Buffer.from('draft'),
+      })
+      const removableAttachment = (await removableUpload.json()).attachment
+      const removePendingOperatorAttachment = await fetch(`${origin}/api/platform/tickets/${ticketId}/attachments/${removableAttachment.id}`, { method: 'DELETE', headers: { cookie: operator.cookie } })
+      assert.equal(removePendingOperatorAttachment.status, 200)
+
+      const reply = await fetch(`${origin}/api/platform/tickets/${ticketId}/reply`, {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie: operator.cookie },
+        body: JSON.stringify({ text: '확인했습니다. 주문 커넥터 로그를 점검하겠습니다.', attachments: [operatorAttachmentBody.attachment] }),
+      })
+      const replyBody = await reply.json()
+      assert.equal(reply.status, 201)
+      assert.equal(replyBody.message.senderId, 'SYS-DEVELOPER-OPS')
+      assert.equal(replyBody.message.senderName, '개발운영진')
+      assert.equal(replyBody.message.attachments[0].name, '재연결-안내.txt')
+      assert.equal(replyBody.ticket.unanswered, false)
+      assert.equal(replyBody.ticket.newRequest, false)
+
+      const requesterAfterReply = await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: { cookie: requester.cookie } }).then((response) => response.json())
+      const persistedRoom = requesterAfterReply.data.find((conversation) => conversation.id === roomBody.conversation.id)
+      assert.equal(persistedRoom.messages.at(-1).senderId, 'SYS-DEVELOPER-OPS')
+      assert.equal(persistedRoom.messages.at(-1).text, '확인했습니다. 주문 커넥터 로그를 점검하겠습니다.')
+      const requesterOperatorAttachment = await fetch(`${origin}/api/documents/${operatorAttachmentBody.attachment.id}/download`, { headers: { cookie: requester.cookie } })
+      assert.equal(requesterOperatorAttachment.status, 200)
+      assert.deepEqual(Buffer.from(await requesterOperatorAttachment.arrayBuffer()), operatorGuide)
+      const tenantAdminOperatorAttachment = await fetch(`${origin}/api/documents/${operatorAttachmentBody.attachment.id}/download`, { headers: { cookie: tenantAdmin.cookie } })
+      assert.equal(tenantAdminOperatorAttachment.status, 404)
+      const deleteSentOperatorAttachment = await fetch(`${origin}/api/platform/tickets/${ticketId}/attachments/${operatorAttachmentBody.attachment.id}`, { method: 'DELETE', headers: { cookie: operator.cookie } })
+      assert.equal(deleteSentOperatorAttachment.status, 409)
+
+      const leaveSystemRoom = await fetch(`${origin}/api/messenger/conversations/${roomBody.conversation.id}/leave`, {
+        method: 'POST', headers: { cookie: requester.cookie },
+      })
+      assert.equal(leaveSystemRoom.status, 403)
+      assert.equal((await leaveSystemRoom.json()).error.code, 'SYSTEM_CONVERSATION_IMMUTABLE')
+      const adminDeleteSomeoneElsesRoom = await fetch(`${origin}/api/messenger/conversations/${roomBody.conversation.id}`, {
+        method: 'DELETE', headers: { cookie: tenantAdmin.cookie },
+      })
+      assert.equal(adminDeleteSomeoneElsesRoom.status, 404)
+
+      const forgedOtherTenantRoom = {
+        id: 'direct-forged-support', type: 'direct', name: '개발운영진', subtitle: '온팩토리 · 기술 지원',
+        memberId: 'SYS-DEVELOPER-OPS', participantIds: ['USR-POHANG-ADMIN', 'SYS-DEVELOPER-OPS'], hiddenFor: [],
+        lineageId: 'developer-support:TENANT-POHANG:USR-POHANG-ADMIN', generation: 1, lifecycle: 'active',
+        systemChannel: 'developer-support', supportRequesterId: 'USR-POHANG-ADMIN', unread: 0,
+        lastMessage: '위조', lastTime: '14:20', messages: [],
+      }
+      const forgeSystemRoom = await fetch(`${origin}/api/workspace/messenger-conversations`, {
+        method: 'PUT', headers: { 'content-type': 'application/json', cookie: otherTenant.cookie },
+        body: JSON.stringify({ data: [forgedOtherTenantRoom] }),
+      })
+      assert.equal(forgeSystemRoom.status, 400)
+      assert.equal((await forgeSystemRoom.json()).error.code, 'INVALID_CONVERSATIONS')
+
+      const adminRoom = await fetch(`${origin}/api/messenger/conversations/direct`, {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie: tenantAdmin.cookie },
+        body: JSON.stringify({ participantId: 'SYS-DEVELOPER-OPS' }),
+      }).then((response) => response.json())
+      const adminFirstMessage = await fetch(`${origin}/api/messenger/conversations/${adminRoom.conversation.id}/messages`, {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie: tenantAdmin.cookie }, body: JSON.stringify({ text: '관리자 지원 요청입니다.' }),
+      })
+      assert.equal(adminFirstMessage.status, 201)
+      const deleteOwnSystemRoom = await fetch(`${origin}/api/messenger/conversations/${adminRoom.conversation.id}`, {
+        method: 'DELETE', headers: { cookie: tenantAdmin.cookie },
+      })
+      assert.equal(deleteOwnSystemRoom.status, 403)
+      assert.equal((await deleteOwnSystemRoom.json()).error.code, 'SYSTEM_CONVERSATION_IMMUTABLE')
+    })
+
+    await withServer(createApp({ apiKey: '', workspaceStoreFile: storeFile, documentUploadDirectory }), async (origin) => {
+      const requester = await login(origin, 'taesik.oh@sunsea.co.kr')
+      const operator = await login(origin, 'operator@onfactory.co.kr', 'platform')
+      const rooms = await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: { cookie: requester.cookie } }).then((response) => response.json())
+      const persistedSupportRoom = rooms.data.find((conversation) => conversation.systemChannel === 'developer-support')
+      assert.ok(persistedSupportRoom)
+      assert.equal(persistedSupportRoom.messages.at(-1).senderName, '개발운영진')
+      const persistedState = await fetch(`${origin}/api/platform/state`, { headers: { cookie: operator.cookie } }).then((response) => response.json())
+      assert.ok(persistedState.supportTickets.some((ticket) => ticket.id === persistedSupportRoom.supportTicketId && ticket.unanswered === false))
+    })
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true })
+  }
 })
 
 test('company library stores real files and enforces tenant document permissions', async () => {

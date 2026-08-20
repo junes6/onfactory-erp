@@ -7,4 +7,4 @@
 - JSON writes are disabled unless `STORE_BACKEND=json` and `STORE_JSON_READONLY=false` are both explicit.
 - Supabase CLI is a development dependency, but Docker and `psql` are not available on every workstation. A real Postgres E2E test therefore runs only against an explicitly supplied `DATABASE_URL`.
 
-The application still receives its existing in-memory facade. Postgres reads and writes the 18 allow-listed workspace domains through separate entity tables, stores document metadata in core `items`, and rejects unknown keys. Messenger messages use child rows with canonical `created_at`. Every committed domain diff and its `events` outbox rows share one transaction.
+The application still receives its existing in-memory facade. Postgres reads and writes the 20 allow-listed workspace domains (the original 18 plus performance settings and immutable performance report snapshots) through separate entity tables, stores document metadata in core `items`, and rejects unknown keys. Messenger messages use child rows with canonical `created_at`. Every committed domain diff and its `events` outbox rows share one transaction.

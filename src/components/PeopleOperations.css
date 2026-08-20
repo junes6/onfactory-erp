@@ -1,17 +1,17 @@
 .leave-balance-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-12);
-  margin-bottom: var(--space-12);
+  gap: var(--space-16);
+  margin-bottom: var(--space-16);
 }
 
 .leave-balance-summary article {
   min-width: 0;
-  min-height: 112px;
+  min-height: 0;
   display: flex;
   align-items: center;
   gap: var(--space-12);
-  padding: var(--space-16);
+  padding: var(--card-inset);
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius-8);
   background: var(--surface);
@@ -55,24 +55,24 @@
 .leave-policy-modes {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-8);
-  padding: var(--space-16) var(--space-16) var(--space-0);
+  gap: var(--space-16);
+  padding: var(--card-inset) var(--card-inset) var(--space-0);
 }
 
 .leave-policy-modes button {
   position: relative;
   min-width: 0;
-  min-height: 142px;
+  min-height: 0;
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto;
   align-items: center;
   gap: var(--space-4) var(--space-12);
-  padding: var(--space-16);
-  border: var(--hairline) solid var(--line);
-  border-radius: var(--radius-8);
+  padding: var(--card-inset);
+  border: none;
+  border-bottom: var(--hairline) solid var(--line);
   color: var(--ink);
-  background: var(--surface);
+  background: transparent;
   text-align: left;
   cursor: pointer;
 }
@@ -89,10 +89,9 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-8);
-  margin: var(--space-12) var(--space-16) var(--space-16);
-  padding: var(--space-12);
-  border-radius: var(--radius-8);
-  background: var(--canvas);
+  margin: var(--space-12) var(--space-0) var(--space-0);
+  padding: var(--space-0) var(--card-inset) var(--card-inset);
+  background: transparent;
 }
 
 .leave-policy-settings label {
@@ -119,7 +118,7 @@
   border-top: var(--hairline) solid var(--line);
 }
 
-.leave-admin-grid > section { min-width: 0; padding: var(--space-16); }
+.leave-admin-grid > section { min-width: 0; padding: var(--card-inset); }
 .leave-admin-grid > section + section { border-left: var(--hairline) solid var(--line); }
 .people-subsection-head { min-height: 55px; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-12); }
 .people-subsection-head h3 { margin: var(--space-0); font-size: var(--font-15); }
@@ -172,9 +171,9 @@
 .leave-ledger-list article small { margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); }
 .leave-ledger-list article > em { color: var(--muted); font-size: var(--font-11); font-style: normal; font-weight: var(--weight-medium); white-space: nowrap; }
 
-.my-leave-ledger { margin: var(--space-4) var(--space-16) var(--space-16); padding: var(--space-16); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--canvas); }
-.my-leave-ledger .people-empty-state { min-height: 130px; }
-.my-leave-ledger .leave-ledger-list { border-radius: var(--radius-8); background: var(--surface); }
+.my-leave-ledger { margin: var(--space-16); padding: var(--space-0); border-top: var(--hairline) solid var(--line); background: transparent; }
+.my-leave-ledger .people-empty-state { min-height: 0; }
+.my-leave-ledger .leave-ledger-list { background: transparent; }
 .my-leave-ledger .leave-ledger-list article { padding-right: var(--space-12); padding-left: var(--space-12); }
 
 .people-sync-status {
@@ -206,7 +205,7 @@
 .people-sync-status p { margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); }
 .people-sync-status em { min-height: 27px; display: inline-flex; align-items: center; padding: var(--space-0) var(--space-8); border-radius: var(--radius-8); color: var(--color-warning); background: var(--color-warning-soft); font-size: var(--font-11); font-style: normal; font-weight: var(--weight-medium); white-space: nowrap; }
 
-.people-profile-detail { display: flex; flex-direction: column; gap: var(--space-16); padding: var(--space-16); }
+.people-profile-detail { display: flex; flex-direction: column; gap: var(--space-16); padding: var(--card-inset); }
 .people-profile-detail > footer { display: flex; justify-content: flex-end; padding-top: var(--space-0); }
 .people-profile-identity { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-12); padding-bottom: var(--space-16); border-bottom: var(--hairline) solid var(--line); }
 .people-profile-identity > div { min-width: 0; }
@@ -215,11 +214,11 @@
 .people-profile-identity p { margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); }
 .people-profile-identity small { margin-top: var(--space-4); overflow: hidden; color: var(--muted); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
 .people-profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-8); }
-.people-profile-grid article { min-width: 0; min-height: 75px; padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--canvas); }
+.people-profile-grid article { min-width: 0; min-height: 0; padding: var(--space-12) var(--space-0); border: none; border-top: var(--hairline) solid var(--line); background: transparent; }
 .people-profile-grid small, .people-profile-grid strong { display: block; }
 .people-profile-grid small { color: var(--muted); font-size: var(--font-13); font-weight: var(--weight-medium); }
 .people-profile-grid strong { margin-top: var(--space-4); overflow-wrap: anywhere; font-size: var(--font-15); line-height: 1.45; }
-.people-profile-leaves { padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.people-profile-leaves { padding: var(--space-12) var(--space-0); border: none; border-top: var(--hairline) solid var(--line); background: transparent; }
 .people-profile-leaves .people-subsection-head { min-height: 48px; }
 .people-profile-leaves article { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding: var(--space-8) var(--space-0); border-top: var(--hairline) solid var(--line); }
 .people-profile-leaves article > div { min-width: 0; }
@@ -244,7 +243,7 @@
 .account-onboarding.expired { color: var(--color-danger); background: var(--color-danger-soft); }
 .account-credential-actions { min-width: 174px; display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-8); }
 .account-credential-actions .small-button { min-height: 32px; display: inline-flex; align-items: center; gap: var(--space-4); white-space: nowrap; }
-.people-credential-panel { display: flex; flex-direction: column; gap: var(--space-12); padding: var(--space-16); }
+.people-credential-panel { display: flex; flex-direction: column; gap: var(--space-16); padding: var(--card-inset); }
 .credential-warning { display: flex; align-items: flex-start; gap: var(--space-8); padding: var(--space-12); border-radius: var(--radius-8); color: var(--color-warning); background: var(--amber-soft); }
 .credential-warning svg { flex: 0 0 auto; margin-top: var(--space-0); }
 .credential-warning strong, .credential-warning span { display: block; }
@@ -303,4 +302,14 @@ html[data-theme='dark'] .leave-duration-preview { border-color: var(--color-blue
   .people-profile-grid { grid-template-columns: 1fr; }
   .people-profile-identity { grid-template-columns: auto minmax(0, 1fr); }
   .people-profile-identity .people-state-badge { grid-column: 2; justify-self: start; }
+}
+
+/* Mobile keeps the same natural height and 20px content inset. */
+@media (max-width: 760px) {
+  .leave-policy-modes,
+  .leave-admin-grid > section,
+  .people-profile-detail,
+  .people-credential-panel { padding: var(--card-inset); }
+  .leave-policy-modes button { min-height: 0; }
+  .my-leave-ledger { margin: var(--space-16); padding: var(--space-0); }
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import {
   AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, BarChart3, Boxes, Building2, Check,
   CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCheck, Clock3,
-  Database, Factory, FileClock, FileText, Headphones, Home, Layers3, ListChecks, LockKeyhole, Menu,
+  Database, Factory, FileClock, FileText, Gauge, Headphones, Home, Layers3, ListChecks, LockKeyhole, Menu,
   NotebookPen, Package, Paperclip, PauseCircle, PlayCircle, Plus, Repeat2, Search, Settings2, ShieldCheck, ShoppingCart,
   Sparkles, Store, Upload, Users, Warehouse, X, GripVertical, EyeOff, RotateCcw,
 } from 'lucide-react'
@@ -10,6 +10,7 @@ import AIChat from './components/AIChat'
 import { ChatBubbleIcon, NotificationBellIcon, OnFactoryMark } from './components/AppIcons'
 import { LoginPage, PasswordChangePage, SettingsDrawer, type DensityChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
 import { ProductManagement, SalesChannels } from './components/BusinessPages'
+import { BillingDashboard, TenantPointGaugeCard } from './components/BillingDashboard'
 import { CompanyLibrary } from './components/CompanyLibrary'
 import { DailyJournalPage, MessengerDrawer, SchedulePage } from './components/CollaborationSuite'
 import { ComplianceCenter } from './components/ComplianceCenter'
@@ -20,18 +21,19 @@ import {
 import { FactoryManagement } from './components/FactoryManagement'
 import './components/InventoryEnhancements.css'
 import { PeopleOperationsPage } from './components/PeopleOperations'
+import { PerformanceReports } from './components/PerformanceReports'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
 import { WorkspaceNavigationEditButton, WorkspaceNavigationEditor, usePersonalNavigation } from './components/WorkspaceNavigation'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
 import { deleteDocumentAttachment, deleteDocumentAttachments } from './utils/documentAttachments'
-import { formatDateLabel, formatDateTime, formatMonthLabel, formatWorkDue, formatWorkRuleRun, seoulDateInputValue, seoulDateTimeInputValue, seoulLocalToUtcIso } from './utils/dateTime'
+import { formatDateLabel, formatDateTime, formatMonthLabel, formatWorkDue, formatWorkRuleRun, seoulDateInputValue, seoulDateTimeInputValue, seoulLocalToUtcIso, toIsoUtc } from './utils/dateTime'
 import {
   type Tenant, type WorkEvidence, type WorkItem, type WorkRule,
 } from './domainData'
 
-type TenantPage = 'ai' | 'schedule' | 'tasks' | 'journal' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'documents' | 'compliance'
-type PageId = TenantPage | PlatformSection
+type TenantPage = 'ai' | 'schedule' | 'tasks' | 'journal' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'performance' | 'documents' | 'compliance'
+type PageId = TenantPage | PlatformSection | 'billing'
 type AppMode = 'tenant' | 'platform'
 type NavItem = { id: PageId; label: string; icon: typeof Sparkles; badge?: number }
 type AuthAccount = { id: string; name: string; email: string; role: 'tenant-admin' | 'tenant-member' | 'platform-operator'; tenantId: string | null; tenantName: string | null; approved: boolean; team?: string; jobRole?: string; requiresPasswordChange?: boolean }
@@ -40,7 +42,7 @@ type PlatformTicketSummary = { id: string; tenantId: string; tenant: string; tit
 type PlatformDirectoryState = { tenants: Tenant[]; supportTickets: PlatformTicketSummary[] }
 type SupportSessionRequest = { tenantId: string; ticketId: string; scope: string; duration: string; reason: string }
 
-const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'products', 'inventory', 'factory', 'people', 'documents', 'compliance'])
+const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'products', 'inventory', 'factory', 'people', 'performance', 'documents', 'compliance'])
 const AUTH_SYNC_KEY = 'onfactory-auth-sync'
 const emptyWorkItems: WorkItem[] = []
 const emptyWorkRules: WorkRule[] = []
@@ -120,6 +122,8 @@ const pageTitles: Record<PageId, string> = {
   ai: 'AI 업무허브', schedule: '일정관리', tasks: '업무지시 · 결재', journal: '일일업무일지',
   products: '제품관리', inventory: '재고 · LOT', factory: '공장관리',
   sales: '판매채널', people: '인사 · 조직', documents: '기업 자료실', compliance: '식품안전 · 인증',
+  performance: '직원 성과',
+  billing: '비용 · 포인트',
   platform: '플랫폼 운영 개요', tenants: '고객사 관리', support: 'CS 지원센터',
   integrations: '연동 상태', audit: '지원 세션 · 감사로그',
 }
@@ -217,7 +221,7 @@ type DashboardDropTarget = {
   edge: 'before' | 'after'
 }
 
-function AIHome({ workItems, products, salesChannels, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, onAdvanceTask, onCreateTask, onNavigate, onToast }: {
+function AIHome({ workItems, products, salesChannels, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, onAdvanceTask, onCreateTask, onNavigate, onOpenAlerts, onToast }: {
   workItems: WorkItem[]
   products: DashboardProduct[]
   salesChannels: DashboardSalesChannel[]
@@ -230,6 +234,7 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
   onAdvanceTask: (item: WorkItem) => void
   onCreateTask: (text?: string) => void
   onNavigate: (page: PageId) => void
+  onOpenAlerts: () => void
   onToast: (message: string) => void
 }) {
   const openWork = workItems.filter((item) => item.status !== '결재완료')
@@ -239,7 +244,6 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
   const todayLabel = formatDateLabel(today)
   const todayEvents = calendarEvents.filter((event) => event.date.slice(0, 10) === todayIso)
   const totalOrders = salesChannels.reduce((sum, channel) => sum + (Number.isFinite(channel.orders) ? channel.orders : 0), 0)
-  const connectedChannels = salesChannels.filter((channel) => channel.connectionStatus && channel.connectionStatus !== 'setup-required').length
   const productAlerts = products.filter((product) => product.status !== '정상' || !['승인', '정상'].includes(product.labelStatus))
   const channelAlerts = salesChannels.filter((channel) => ['주의', '오류'].includes(channel.status))
   const urgentWork = openWork.filter((item) => item.priority === '긴급')
@@ -273,8 +277,8 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
     openWork: canAssignTasks ? openWork : myWork,
   }
 
-  const visibleWidgets = widgetPreferences.filter((item) => item.visible)
-  const hiddenWidgets = widgetPreferences.filter((item) => !item.visible)
+  const visibleWidgets = widgetPreferences.filter((item) => item.id !== 'summary' && item.visible)
+  const hiddenWidgets = widgetPreferences.filter((item) => item.id !== 'summary' && !item.visible)
 
   const updateWidget = (id: DashboardWidgetPreference['id'], patch: Partial<DashboardWidgetPreference>) => {
     setWidgetPreferences((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item))
@@ -282,14 +286,14 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
 
   const moveWidgetBy = (id: DashboardWidgetPreference['id'], direction: -1 | 1) => {
     setWidgetPreferences((current) => {
-      const visible = current.filter((item) => item.visible)
+      const visible = current.filter((item) => item.id !== 'summary' && item.visible)
       const sourceIndex = visible.findIndex((item) => item.id === id)
       const targetIndex = sourceIndex + direction
       if (sourceIndex < 0 || targetIndex < 0 || targetIndex >= visible.length) return current
       const ordered = [...visible]
       ;[ordered[sourceIndex], ordered[targetIndex]] = [ordered[targetIndex], ordered[sourceIndex]]
       let visibleIndex = 0
-      return current.map((item) => item.visible ? ordered[visibleIndex++] : item)
+      return current.map((item) => item.id !== 'summary' && item.visible ? ordered[visibleIndex++] : item)
     })
     setLayoutAnnouncement(`${dashboardWidgetLabels[id]} 위젯을 ${direction < 0 ? '앞' : '뒤'} 칸으로 이동했습니다.`)
   }
@@ -297,26 +301,26 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
   const moveWidgetRelative = (sourceId: DashboardWidgetPreference['id'], targetId: DashboardWidgetPreference['id'], edge: 'before' | 'after') => {
     if (sourceId === targetId) return
     setWidgetPreferences((current) => {
-      const visible = current.filter((item) => item.visible)
+      const visible = current.filter((item) => item.id !== 'summary' && item.visible)
       const moving = visible.find((item) => item.id === sourceId)
       if (!moving || !visible.some((item) => item.id === targetId)) return current
       const ordered = visible.filter((item) => item.id !== sourceId)
       const targetIndex = ordered.findIndex((item) => item.id === targetId)
       ordered.splice(targetIndex + (edge === 'after' ? 1 : 0), 0, moving)
       let visibleIndex = 0
-      return current.map((item) => item.visible ? ordered[visibleIndex++] : item)
+      return current.map((item) => item.id !== 'summary' && item.visible ? ordered[visibleIndex++] : item)
     })
     setLayoutAnnouncement(`${dashboardWidgetLabels[sourceId]} 위젯이 빈 슬롯에 맞춰 정렬되었습니다.`)
   }
 
   const moveWidgetToEnd = (sourceId: DashboardWidgetPreference['id']) => {
     setWidgetPreferences((current) => {
-      const visible = current.filter((item) => item.visible)
+      const visible = current.filter((item) => item.id !== 'summary' && item.visible)
       const moving = visible.find((item) => item.id === sourceId)
       if (!moving || visible.at(-1)?.id === sourceId) return current
       const ordered = [...visible.filter((item) => item.id !== sourceId), moving]
       let visibleIndex = 0
-      return current.map((item) => item.visible ? ordered[visibleIndex++] : item)
+      return current.map((item) => item.id !== 'summary' && item.visible ? ordered[visibleIndex++] : item)
     })
     setLayoutAnnouncement(`${dashboardWidgetLabels[sourceId]} 위젯을 마지막 슬롯으로 이동했습니다.`)
   }
@@ -330,17 +334,9 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
   }
 
   const renderWidget = (preference: DashboardWidgetPreference) => {
-    if (!preference.visible) return null
+    if (!preference.visible || preference.id === 'summary') return null
     let content: ReactNode
-    if (preference.id === 'summary') {
-      content = <section className="home-action-strip compact" aria-label="오늘 핵심 현황">
-        {canAssignTasks
-          ? <button type="button" onClick={() => onNavigate('sales')}><span className="quick-icon green"><ShoppingCart size={19} /></span><div><span>수집 온라인 주문</span><strong>{totalOrders.toLocaleString('ko-KR')}<small>건</small></strong><em>{salesChannels.length > 0 ? `${connectedChannels}/${salesChannels.length}개 연결` : '연결 필요'}</em></div></button>
-          : <button type="button" onClick={() => onNavigate('schedule')}><span className="quick-icon green"><CalendarDays size={19} /></span><div><span>오늘 공유 일정</span><strong>{todayEvents.length}<small>건</small></strong><em>{todayEvents.length > 0 ? '일정 확인' : '등록 없음'}</em></div></button>}
-        <button type="button" onClick={() => onNavigate('tasks')}><span className="quick-icon blue"><ListChecks size={19} /></span><div><span>내가 확인할 업무</span><strong>{myWork.length}<small>건</small></strong><em>결재 {myWork.filter((item) => item.status === '결재대기').length}</em></div></button>
-        <button type="button" onClick={() => onNavigate(dashboardAlert.page)}><span className="quick-icon amber"><Sparkles size={19} /></span><div><span>AI 선제 알림</span><strong>{attentionCount}<small>건</small></strong><em>{operatingDataAvailable ? urgentWork.length > 0 ? `긴급 ${urgentWork.length}` : '점검 결과' : '설정 대기'}</em></div></button>
-      </section>
-    } else if (preference.id === 'ai') {
+    if (preference.id === 'ai') {
       content = <AIChat companyName={companyName} canCreateTask={canAssignTasks} canViewCommercial={canAssignTasks} operatingDataAvailable={operatingDataAvailable} workspaceScope={workspaceScope} onCreateTask={(text) => onCreateTask(text)} context={aiContext} />
     } else if (preference.id === 'schedule') {
       content = <SharedCalendarPreview events={calendarEvents} onOpen={() => onNavigate('schedule')} />
@@ -430,12 +426,18 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
   }
 
   return (
-    <div className="home-page">
+    <div className="home-page ai-home-page">
       <PageHeader
         eyebrow={`${todayLabel} · ${companyName}`}
         title={`안녕하세요, ${currentUserName}님`}
         description="AI에게 업무 정보를 묻거나, 오늘 처리할 일정과 결재를 확인하세요."
-        action={<>{layoutOpen ? <button className="button primary" type="button" onClick={finishLayoutEdit}><Check size={18} /> 편집 완료</button> : <DashboardLayoutButton onClick={() => setLayoutOpen(true)} />}{canAssignTasks ? <button className="button primary" type="button" onClick={() => onCreateTask()}><Plus size={18} /> 새 업무 지시</button> : <StatusBadge className="status-pill" tone="neutral">직원용 업무 화면</StatusBadge>}</>}
+        action={<><div className="home-header-chips" aria-label="오늘 핵심 현황">
+          {canAssignTasks
+            ? <button className={totalOrders === 0 ? 'is-neutral' : ''} type="button" aria-label={`온라인 주문 ${totalOrders}건`} onClick={() => onNavigate('sales')}><ShoppingCart size={15} /><span>온라인 주문</span><strong>{totalOrders.toLocaleString('ko-KR')}</strong></button>
+            : <button className={todayEvents.length === 0 ? 'is-neutral' : ''} type="button" aria-label={`오늘 일정 ${todayEvents.length}건`} onClick={() => onNavigate('schedule')}><CalendarDays size={15} /><span>오늘 일정</span><strong>{todayEvents.length}</strong></button>}
+          <button className={myWork.length === 0 ? 'is-neutral' : ''} type="button" aria-label={`확인할 업무 ${myWork.length}건`} onClick={() => onNavigate('tasks')}><ListChecks size={15} /><span>확인 업무</span><strong>{myWork.length}</strong></button>
+          <button className={attentionCount === 0 ? 'is-neutral' : ''} type="button" aria-label={`AI 알림 ${attentionCount}건`} onClick={onOpenAlerts}><Sparkles size={15} /><span>AI 알림</span><strong>{attentionCount}</strong></button>
+        </div>{layoutOpen ? <button className="button primary" type="button" onClick={finishLayoutEdit}><Check size={18} /> 편집 완료</button> : <DashboardLayoutButton onClick={() => setLayoutOpen(true)} />}{canAssignTasks ? <button className="button primary" type="button" onClick={() => onCreateTask()}><Plus size={18} /> 새 업무 지시</button> : <StatusBadge className="status-pill" tone="neutral">직원용 업무 화면</StatusBadge>}</>}
       />
       {layoutOpen && <section className="dashboard-layout-workbench" aria-labelledby="dashboard-layout-workbench-title">
         <div className="dashboard-layout-guide"><span className="dashboard-layout-guide-icon"><GripVertical size={19} /></span><div><h2 id="dashboard-layout-workbench-title">블록을 잡아 원하는 빈 슬롯에 놓으세요</h2><p>블록은 자동으로 격자에 맞춰지고 순서와 너비는 이 계정에 바로 저장됩니다. 핸들을 누른 뒤 방향키·이동 버튼으로도 조정할 수 있습니다.</p></div><span className="dashboard-layout-saved"><Check size={15} /> 개인 저장</span><button type="button" className="small-button" onClick={() => { setWidgetPreferences(defaultDashboardWidgets.map((item) => ({ ...item }))); setKeyboardWidgetId(null); setLayoutAnnouncement('기본 위젯 배치로 되돌렸습니다.') }}><RotateCcw size={15} /> 기본 배치</button></div>
@@ -449,6 +451,7 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
           onDrop={(event) => { event.preventDefault(); const sourceId = (draggingWidgetId || event.dataTransfer.getData('text/plain')) as DashboardWidgetPreference['id']; if (widgetPreferences.some((item) => item.id === sourceId)) moveWidgetToEnd(sourceId); setDraggingWidgetId(null); setDropTarget(null) }}
         ><GripVertical size={16} /><span>마지막 빈 슬롯</span><small>여기에 놓으면 자동 정렬됩니다</small></div>}
       </div>
+      {canAssignTasks && workspaceScope && <TenantPointGaugeCard tenantId={workspaceScope.split(':')[0]} tenantName={companyName} workspaceScope={workspaceScope} onOpen={() => onNavigate('billing')} />}
       <p className="sr-only" role="status" aria-live="polite">{layoutAnnouncement}</p>
     </div>
   )
@@ -578,16 +581,18 @@ function CompletionModal({ item, workspaceScope, onToast, onClose, onSubmit }: {
   </div>
 }
 
-function WorkReviewModal({ item, mode, workspaceScope, onToast, onClose, onSubmit }: { item: WorkItem; mode: 'approve' | 'request-changes'; workspaceScope?: string; onToast: (message: string) => void; onClose: () => void; onSubmit: (comment: string, requestedChanges?: string) => Promise<boolean> }) {
+function WorkReviewModal({ item, workspaceScope, onToast, onClose, onSubmit }: { item: WorkItem; workspaceScope?: string; onToast: (message: string) => void; onClose: () => void; onSubmit: (decision: 'approve' | 'request-changes', comment: string, requestedChanges?: string) => Promise<boolean> }) {
   const dialogRef = useDialogFocus()
+  const [mode, setMode] = useState<'approve' | 'request-changes'>('approve')
   const [comment, setComment] = useState('')
   const [busy, setBusy] = useState(false)
   const valid = comment.trim().length >= 2
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section ref={dialogRef} className="modal-card workflow-modal" role="dialog" aria-modal="true" aria-labelledby="review-modal-title">
       <header><div><span className="eyebrow">WORK REVIEW</span><h2 id="review-modal-title">{mode === 'approve' ? '결재 승인' : '수정 요청'}</h2><p>{item.title}</p></div><button type="button" className="icon-button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
-      <form onSubmit={async (event) => { event.preventDefault(); if (!valid) return; setBusy(true); const message = comment.trim(); if (await onSubmit(message, mode === 'request-changes' ? message : undefined)) onClose(); else setBusy(false) }}>
+      <form onSubmit={async (event) => { event.preventDefault(); if (!valid) return; setBusy(true); const message = comment.trim(); if (await onSubmit(mode, message, mode === 'request-changes' ? message : undefined)) onClose(); else setBusy(false) }}>
         <div className="workflow-submission-preview"><strong>담당자 완료 보고</strong><p>{item.completion?.summary || '레거시 업무로 완료내용이 등록되지 않았습니다.'}</p>{item.completion?.evidence.map((file) => file.id.startsWith('DOC-') ? <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={14} /> {file.name} · {file.size}</button> : <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}</span>)}</div>
+        <div className="workflow-review-decision" role="radiogroup" aria-label="검토 결정"><button type="button" role="radio" aria-checked={mode === 'approve'} onClick={() => { setMode('approve'); setComment('') }}><Check size={16} /> 승인</button><button type="button" role="radio" aria-checked={mode === 'request-changes'} onClick={() => { setMode('request-changes'); setComment('') }}>수정 요청</button></div>
         <label className="form-field full"><span>{mode === 'approve' ? '승인 코멘트' : '수정 요청 내용'} <em>필수</em></span><textarea autoFocus data-autofocus rows={4} value={comment} onChange={(event) => setComment(event.target.value)} placeholder={mode === 'approve' ? '검토한 내용과 승인 근거를 남겨 주세요.' : '무엇을 왜, 어떻게 보완해야 하는지 한 번에 작성해 주세요. 예: LOT 번호와 조치 전·후 사진을 보완해 주세요.'} required /></label>
         <footer><button type="button" className="button ghost" onClick={onClose}>취소</button><button type="submit" className={`button ${mode === 'approve' ? 'primary' : 'danger'}`} disabled={busy || !valid}>{mode === 'approve' && <Check size={18} />}{mode === 'approve' ? ' 승인 완료' : '수정 요청 보내기'}</button></footer>
       </form>
@@ -643,74 +648,145 @@ function WorkRuleModal({ assignees, onClose, onSubmit }: { assignees: WorkAssign
   </div>
 }
 
-function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, workspaceScope, onToast, onCreate, onTransition, onCreateRule, onToggleRule }: {
+function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, workspaceScope, focusId, onToast, onCreate, onTransition, onCreateRule, onToggleRule }: {
   items: WorkItem[]; rules: WorkRule[]; currentUserId: string; canAssignTasks: boolean; assignees: WorkAssignee[]
   workspaceScope?: string
+  focusId?: string
   onToast: (message: string) => void
   onCreate: () => void
   onTransition: (id: string, action: WorkTransitionAction, input?: Record<string, unknown>) => Promise<boolean>
   onCreateRule: (input: Record<string, unknown>) => Promise<boolean>
   onToggleRule: (rule: WorkRule) => Promise<boolean>
 }) {
-  const [tab, setTab] = useState<'mine' | 'requested' | 'approval' | 'done'>('mine')
-  const [dialog, setDialog] = useState<{ type: 'completion' | 'approve' | 'changes'; item: WorkItem } | { type: 'rule' } | null>(null)
-  const visible = items.filter((item) => tab === 'done' ? item.status === '결재완료' : tab === 'approval' ? item.requesterId === currentUserId && item.status === '결재대기' : tab === 'requested' ? item.requesterId === currentUserId && item.status !== '결재완료' : item.ownerId === currentUserId && item.status !== '결재완료')
+  const [tab, setTab] = useState<'mine' | 'requested' | 'done'>('mine')
+  const [selectedWorkId, setSelectedWorkId] = useState<string | null>(null)
+  const [dialog, setDialog] = useState<{ type: 'completion' | 'review'; item: WorkItem } | { type: 'rule' } | null>(null)
   const stages: WorkItem['status'][] = ['업무요청', '수행중', '결재대기', '결재완료']
-  return <div className="content-page">
+  const myItems = items.filter((item) => item.status !== '결재완료' && item.ownerId === currentUserId)
+  const requestedItems = items.filter((item) => item.status !== '결재완료' && item.requesterId === currentUserId)
+  const doneItems = items.filter((item) => item.status === '결재완료')
+  const visible = tab === 'done' ? doneItems : tab === 'requested' ? requestedItems : myItems
+
+  useEffect(() => {
+    if (!focusId) return
+    const focused = items.find((item) => item.id === focusId)
+    if (!focused) return
+    setTab(focused.status === '결재완료' ? 'done' : focused.ownerId === currentUserId ? 'mine' : 'requested')
+    setSelectedWorkId(focused.id)
+  }, [focusId, items])
+  const needsCurrentUserAction = (item: WorkItem) => (
+    (item.ownerId === currentUserId && (item.status === '업무요청' || item.status === '수행중'))
+    || (item.requesterId === currentUserId && item.status === '결재대기')
+  )
+  const byDue = (left: WorkItem, right: WorkItem) => {
+    const leftTime = new Date(toIsoUtc(left.due) ?? '9999-12-31').getTime()
+    const rightTime = new Date(toIsoUtc(right.due) ?? '9999-12-31').getTime()
+    return leftTime - rightTime
+  }
+  const actionItems = visible.filter(needsCurrentUserAction).sort(byDue)
+  const trackingItems = visible.filter((item) => !needsCurrentUserAction(item)).sort(byDue)
+  const selectedId = visible.some((item) => item.id === selectedWorkId) ? selectedWorkId : visible[0]?.id ?? null
+  const selectedItem = visible.find((item) => item.id === selectedId) ?? null
+  const selectedStep = selectedItem ? stages.indexOf(selectedItem.status) : -1
+  const selectedOwnerAction = Boolean(selectedItem && selectedItem.ownerId === currentUserId)
+  const selectedReviewerAction = Boolean(selectedItem && selectedItem.requesterId === currentUserId)
+  const selectedReviewAction = Boolean(selectedItem && selectedReviewerAction && selectedItem.status === '결재대기')
+  const selectedChangeRequested = selectedItem?.review?.decision === 'changes-requested'
+  const selectedReviewHistory = selectedItem
+    ? (selectedItem.reviewHistory?.length ? selectedItem.reviewHistory : selectedItem.review ? [selectedItem.review] : [])
+      .slice().sort((left, right) => left.reviewedAt.localeCompare(right.reviewedAt))
+    : []
+  const selectedCompletionHistory = selectedItem
+    ? (selectedItem.completionHistory?.length ? selectedItem.completionHistory : selectedItem.completion ? [selectedItem.completion] : [])
+    : []
+  const selectedTimeline = [
+    ...selectedCompletionHistory.map((completion) => ({ kind: 'completion' as const, at: completion.submittedAt, completion })),
+    ...selectedReviewHistory.map((review) => ({ kind: 'review' as const, at: review.reviewedAt, review })),
+  ].sort((left, right) => left.at.localeCompare(right.at))
+  const selectedActionLabel = selectedReviewAction ? '지금 검토할 일' : selectedOwnerAction ? '지금 내가 할 일' : '현재 업무 상태'
+  const selectedActionTitle = selectedReviewAction
+    ? '제출 결과를 검토해 결정하세요'
+    : selectedOwnerAction
+      ? selectedItem?.status === '업무요청'
+        ? '업무를 수락하고 바로 시작하세요'
+        : selectedItem?.status === '수행중'
+          ? selectedChangeRequested ? '수정 요청을 반영해 다시 제출하세요' : '완료 결과와 증빙을 제출하세요'
+          : selectedItem?.status === '결재대기' ? '요청자의 결재를 기다리고 있어요' : '승인까지 모두 완료됐어요'
+      : selectedItem?.status === '결재완료' ? '승인과 업무 처리가 완료됐어요' : '담당자의 진행 상태를 확인하세요'
+  const selectedActionDetail = selectedReviewAction
+    ? '완료 보고와 증빙을 확인한 뒤 승인하거나, 한 번에 이해되는 보완 내용을 남겨 주세요.'
+    : selectedOwnerAction && selectedItem?.status === '업무요청'
+      ? '수락하면 상태가 수행중으로 바뀌며 담당자에게 수행 책임이 확정됩니다.'
+      : selectedOwnerAction && selectedItem?.status === '수행중'
+        ? selectedChangeRequested ? '수정 요청 사유를 먼저 반영하고 새 완료 보고와 증빙을 올려 주세요.' : '완료 기준을 충족한 뒤 결과 요약과 필요한 증빙을 올려 주세요.'
+        : selectedOwnerAction && selectedItem?.status === '결재대기'
+          ? '제출은 완료됐습니다. 요청자가 승인하거나 수정 요청을 보내면 다음 행동이 열립니다.'
+          : '상태와 처리 이력은 모든 참여자에게 공유됩니다.'
+  const rowActionLabel = (item: WorkItem) => {
+    if (item.requesterId === currentUserId && item.status === '결재대기') return '결재하기'
+    if (item.ownerId === currentUserId && item.status === '업무요청') return '시작'
+    return item.review?.decision === 'changes-requested' ? '보완 재제출' : '완료 제출'
+  }
+  const rowSubline = (item: WorkItem) => item.review?.decision === 'changes-requested'
+    ? `“${item.review.requestedChanges || item.review.comment || '보완 내용을 확인해 주세요'}”`
+    : item.ruleId ? '자동 반복업무' : `요청 · ${item.requestedBy}`
+  const rowStatusTone = (item: WorkItem) => {
+    const dueAt = Date.parse(item.due)
+    if (item.review?.decision === 'changes-requested' || (Number.isFinite(dueAt) && dueAt < Date.now() && item.status !== '결재완료')) return 'danger'
+    return needsCurrentUserAction(item) ? 'warning' : 'success'
+  }
+  const rowStatusLabel = (item: WorkItem) => item.status === '결재완료' ? '완료' : rowStatusTone(item) === 'danger' ? '보완 또는 지연' : rowStatusTone(item) === 'warning' ? '오늘 처리 또는 시작 전' : '상대방 처리 대기'
+  const runRowAction = (item: WorkItem) => {
+    if (item.requesterId === currentUserId && item.status === '결재대기') { setDialog({ type: 'review', item }); return }
+    if (item.ownerId === currentUserId && item.status === '업무요청') { void onTransition(item.id, 'accept'); return }
+    setDialog({ type: 'completion', item })
+  }
+  const renderWorkSection = (sectionId: string, title: string, description: string, sectionItems: WorkItem[]) => <section className="workflow-list-section" aria-labelledby={`work-section-${sectionId}`}>
+    <header><div><h2 id={`work-section-${sectionId}`}>{title}</h2><p>{description}</p></div><span>{sectionItems.length}</span></header>
+    {sectionItems.length === 0
+      ? <div className="workflow-list-empty"><CheckCircle2 size={18} /><span>{tab === 'done' ? '완료된 업무가 없습니다.' : '이 구역에서 확인할 업무가 없습니다.'}</span></div>
+      : <div className="workflow-row-list" role="listbox" aria-label={title}>{sectionItems.map((item) => <article className={item.id === selectedId ? 'is-selected' : ''} role="option" aria-selected={item.id === selectedId} tabIndex={0} key={item.id} onClick={() => setSelectedWorkId(item.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedWorkId(item.id) } }}>
+        <span className={`workflow-status-dot ${rowStatusTone(item)}`} role="img" aria-label={rowStatusLabel(item)} />
+        <span className="workflow-row-title"><strong>{item.title}</strong><small>{rowSubline(item)}</small></span>
+        <time className={new Date(toIsoUtc(item.due) ?? Number.POSITIVE_INFINITY).getTime() < Date.now() && item.status !== '결재완료' ? 'is-overdue' : ''} dateTime={toIsoUtc(item.due) ?? item.due}><strong>{formatWorkDue(item.due)}</strong></time>
+        {needsCurrentUserAction(item) && <button className="workflow-row-action" type="button" onClick={(event) => { event.stopPropagation(); setSelectedWorkId(item.id); runRowAction(item) }}>{rowActionLabel(item)}</button>}
+      </article>)}</div>}
+  </section>
+
+  return <div className="content-page workflow-page">
     <PageHeader eyebrow="WORKFLOW" title="업무지시 · 결재" description="수행 결과와 증빙, 결재 코멘트를 한 흐름에서 확인합니다." action={canAssignTasks ? <div className="page-action-row"><button className="button secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Repeat2 size={18} /> 반복 업무</button><button className="button primary" type="button" onClick={onCreate}><Plus size={18} /> 새 업무 지시</button></div> : <StatusBadge className="status-pill" tone="neutral">내 업무 수행</StatusBadge>} />
-    <section className="workflow-summary-strip" aria-label="업무 상태 요약">{stages.map((status, index) => <div className={status === '결재대기' ? 'attention' : ''} key={status}><span>{status}</span><strong>{items.filter((item) => item.status === status).length}</strong>{index < stages.length - 1 && <ArrowRight size={17} />}</div>)}</section>
-    <section className="panel work-panel workflow-board"><div className="segmented-tabs" role="tablist" aria-label="업무 구분"><button type="button" role="tab" aria-selected={tab === 'mine'} onClick={() => setTab('mine')}>내 업무</button>{canAssignTasks && <button type="button" role="tab" aria-selected={tab === 'requested'} onClick={() => setTab('requested')}>지시한 업무</button>}{canAssignTasks && <button type="button" role="tab" aria-selected={tab === 'approval'} onClick={() => setTab('approval')}>결재 대기 <em>{items.filter((item) => item.requesterId === currentUserId && item.status === '결재대기').length}</em></button>}<button type="button" role="tab" aria-selected={tab === 'done'} onClick={() => setTab('done')}>완료</button></div>
-      <div className="workflow-card-list">{visible.length === 0 && <div className="empty-state"><CheckCircle2 size={34} /><h3>이 구간의 업무가 없습니다</h3><p>다른 상태 탭을 확인해 보세요.</p></div>}{visible.map((item) => {
-        const step = stages.indexOf(item.status)
-        const ownerAction = item.ownerId === currentUserId
-        const reviewerAction = item.requesterId === currentUserId
-        const reviewAction = reviewerAction && item.status === '결재대기'
-        const changeRequested = item.review?.decision === 'changes-requested'
-        const actionLabel = reviewAction ? '지금 검토할 일' : ownerAction ? '지금 내가 할 일' : '현재 업무 상태'
-        const actionTitle = reviewAction
-          ? '제출 결과를 검토해 결정하세요'
-          : ownerAction
-            ? item.status === '업무요청'
-              ? '업무를 수락하고 바로 시작하세요'
-              : item.status === '수행중'
-                ? changeRequested ? '수정 요청을 반영해 다시 제출하세요' : '완료 결과와 증빙을 제출하세요'
-                : item.status === '결재대기' ? '요청자의 결재를 기다리고 있어요' : '승인까지 모두 완료됐어요'
-            : item.status === '결재완료' ? '승인과 업무 처리가 완료됐어요' : '담당자의 진행 상태를 확인하세요'
-        const actionDetail = reviewAction
-          ? '완료 보고와 증빙을 확인한 뒤 승인하거나, 한 번에 이해되는 보완 내용을 남겨 주세요.'
-          : ownerAction && item.status === '업무요청'
-            ? '수락하면 상태가 수행중으로 바뀌며 담당자에게 수행 책임이 확정됩니다.'
-            : ownerAction && item.status === '수행중'
-              ? changeRequested ? '아래 수정 사유를 먼저 반영하고 새 완료 보고와 증빙을 올려 주세요.' : '아래 완료 기준을 충족한 뒤 결과 요약과 필요한 증빙을 올려 주세요.'
-              : ownerAction && item.status === '결재대기'
-                ? '제출은 완료됐습니다. 요청자가 승인하거나 수정 요청을 보내면 다음 행동이 열립니다.'
-                : '상태와 처리 이력은 모든 참여자에게 공유됩니다.'
-        return <article className={`workflow-task-card task-focused status-${step}`} key={item.id}>
-          <div className="workflow-task-progress" aria-hidden="true"><span style={{ width: `${Math.max(0, step) / (stages.length - 1) * 100}%` }} /></div>
-          <header className="workflow-card-head"><div className="work-row-meta"><StatusBadge className="status-pill" dot tone={item.priority === '긴급' ? 'danger' : item.priority === '높음' ? 'warning' : 'neutral'}>{item.priority}</StatusBadge><span>{item.category}</span>{item.ruleId && <span><Repeat2 size={13} /> 반복</span>}<span>{item.id}</span></div><StatusBadge className="status-pill" dot tone={item.status === '결재완료' ? 'success' : item.status === '결재대기' ? 'info' : item.status === '수행중' ? 'warning' : 'neutral'}>{item.status}</StatusBadge></header>
-          <div className="work-now-grid">
-            <section className={`work-now-action ${reviewAction ? 'is-review' : changeRequested ? 'is-revision' : ''}`} aria-label={actionLabel}>
-              <span>{actionLabel}</span><strong>{actionTitle}</strong><p>{actionDetail}</p>
-              <div className="work-now-actions">{ownerAction && item.status === '업무요청' && <button className="button primary compact-action" type="button" onClick={() => void onTransition(item.id, 'accept')}><PlayCircle size={16} /> 업무 수락</button>}{ownerAction && item.status === '수행중' && <button className="button primary compact-action" type="button" onClick={() => setDialog({ type: 'completion', item })}><Upload size={16} /> {changeRequested ? '보완 재제출' : '완료·증빙 제출'}</button>}{reviewAction && <><button className="button danger compact-action" type="button" onClick={() => setDialog({ type: 'changes', item })}>수정 요청</button><button className="button primary compact-action" type="button" onClick={() => setDialog({ type: 'approve', item })}><Check size={16} /> 승인</button></>}</div>
+    <section className="panel workflow-master-detail">
+      <header className="workflow-board-toolbar"><div className="workflow-simple-tabs" role="tablist" aria-label="업무 구분"><button type="button" role="tab" aria-selected={tab === 'mine'} onClick={() => { setTab('mine'); setSelectedWorkId(null) }}>내 업무 <em>{myItems.length}</em></button>{canAssignTasks && <button type="button" role="tab" aria-selected={tab === 'requested'} onClick={() => { setTab('requested'); setSelectedWorkId(null) }}>지시한 업무 <em>{requestedItems.length}</em></button>}<button type="button" role="tab" aria-selected={tab === 'done'} onClick={() => { setTab('done'); setSelectedWorkId(null) }}>완료 <em>{doneItems.length}</em></button></div><p>{tab === 'done' ? '완료 기록과 첨부 증빙을 확인할 수 있습니다.' : '내 행동이 필요한 업무부터 마감순으로 표시합니다.'}</p></header>
+      <div className="workflow-master-detail-grid">
+        <div className="workflow-list-pane">
+          {visible.length === 0 && <div className="empty-state workflow-empty-state"><CheckCircle2 size={30} /><h3>{tab === 'done' ? '완료된 업무가 없습니다' : '진행 중인 업무가 없습니다'}</h3><p>{tab === 'done' ? '완료된 업무와 결재 기록이 여기에 모입니다.' : '새 업무가 배정되면 이 목록에 표시됩니다.'}</p></div>}
+          {visible.length > 0 && tab !== 'done' && <>{renderWorkSection('action', '지금 처리할 것', '수락·제출·검토처럼 내 행동이 필요한 업무', actionItems)}{renderWorkSection('tracking', '기다리는 것', '상대방 처리나 결재 결과를 기다리는 업무', trackingItems)}</>}
+          {visible.length > 0 && tab === 'done' && renderWorkSection('done', '완료 내역', '승인과 처리가 끝난 업무 기록', visible)}
+        </div>
+        <aside className="workflow-detail-pane" aria-label="선택한 업무 상세" aria-live="polite">
+          {!selectedItem && <div className="workflow-detail-empty"><ListChecks size={28} /><strong>업무를 선택해 주세요</strong><p>목록에서 업무를 선택하면 완료 기준과 현재 행동이 표시됩니다.</p></div>}
+          {selectedItem && <>
+            <header className="workflow-detail-head"><h2>{selectedItem.title}</h2><div className="workflow-detail-status"><StatusBadge className="status-pill" dot tone={selectedItem.status === '결재완료' ? 'success' : selectedItem.status === '결재대기' ? 'info' : selectedItem.status === '수행중' ? 'warning' : 'neutral'}>{selectedItem.status}</StatusBadge><StatusBadge className="status-pill" dot tone={selectedItem.priority === '긴급' ? 'danger' : selectedItem.priority === '높음' ? 'warning' : 'neutral'}>{selectedItem.priority}</StatusBadge><span>{selectedItem.category}</span>{selectedItem.ruleId && <span><Repeat2 size={13} /> 반복</span>}</div></header>
+            <section className={`workflow-detail-action ${selectedReviewAction ? 'is-review' : selectedChangeRequested ? 'is-revision' : ''}`} aria-label={selectedActionLabel}>
+              <span>{selectedActionLabel}</span><strong>{selectedActionTitle}</strong><p>{selectedActionDetail}</p>
+              {selectedChangeRequested && <div className="workflow-action-revision"><span>수정 요청</span><strong>{selectedItem.review?.requestedChanges || selectedItem.review?.comment || '요청자가 보완 내용을 남기지 않았습니다.'}</strong></div>}
+              {needsCurrentUserAction(selectedItem) && <button className="button primary workflow-detail-primary-action" type="button" onClick={() => runRowAction(selectedItem)}>{selectedReviewAction ? <ShieldCheck size={18} /> : selectedItem.status === '업무요청' ? <PlayCircle size={18} /> : <Upload size={18} />}{selectedReviewAction ? '검토하기' : selectedItem.status === '업무요청' ? '업무 수락' : selectedChangeRequested ? '보완 재제출' : '완료·증빙 제출'}</button>}
             </section>
-            <div className="work-now-brief">
-              <div className="work-now-title"><span className={`workflow-state-icon ${item.status}`} aria-hidden="true">{step + 1}</span><h3>{item.title}</h3></div>
-              {changeRequested && <section className="work-now-revision" aria-label="수정 요청 사유"><span>먼저 반영할 수정 요청</span><strong>{item.review?.requestedChanges || item.review?.comment || '요청자가 보완 내용을 남기지 않았습니다.'}</strong>{item.review?.comment && item.review.comment !== item.review.requestedChanges && <p>검토 코멘트 · {item.review.comment}</p>}</section>}
-              <section className="work-now-criteria" aria-label="업무 완료 기준"><span>완료 기준</span><p>{item.description || '요청자가 등록한 상세 기준이 없습니다. 수행 전에 완료 조건을 확인해 주세요.'}</p></section>
-              <dl className="work-now-meta"><div><dt>마감</dt><dd><Clock3 size={15} /> {formatWorkDue(item.due)}</dd></div><div><dt>담당</dt><dd>{item.owner}</dd></div><div><dt>요청</dt><dd>{item.requestedBy}</dd></div></dl>
-            </div>
-          </div>
-          <ol className="work-now-stepper" aria-label={`업무 단계. 현재 ${item.status}`}>{stages.map((status, index) => <li className={index < step ? 'done' : index === step ? 'current' : ''} aria-current={index === step ? 'step' : undefined} key={status}><i>{index < step ? <Check size={11} /> : index + 1}</i><span>{status}</span></li>)}</ol>
-          {(item.completion || item.review) && <div className="workflow-record-stack">
-            {item.completion && <div className="workflow-record"><ClipboardCheck size={17} /><div><strong>제출한 결과 <time dateTime={item.completion.submittedAt}>{formatDateTime(item.completion.submittedAt)}</time></strong><p>{item.completion.summary}</p><div className="workflow-record-files">{item.completion.evidence.length === 0 && <span>첨부 증빙 없음</span>}{item.completion.evidence.map((file) => file.id.startsWith('DOC-') ? <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={12} /> {file.name} · {file.size}</button> : <span key={file.id}><Paperclip size={12} /> {file.name} · {file.size}</span>)}</div></div></div>}
-            {item.review && <div className={`workflow-record ${item.review.decision === 'approved' ? 'approved' : 'changes'}`}><ShieldCheck size={17} /><div><strong>{item.review.decision === 'approved' ? '승인 기록' : '수정 요청 기록'} <time dateTime={item.review.reviewedAt}>{formatDateTime(item.review.reviewedAt)}</time></strong><p>{item.review.requestedChanges || item.review.comment}</p></div></div>}
-          </div>}
-        </article>
-      })}</div>
+            <section className="workflow-detail-criteria" aria-label="업무 완료 기준"><span>완료 기준</span><p>{selectedItem.description || '요청자가 등록한 상세 기준이 없습니다. 수행 전에 완료 조건을 확인해 주세요.'}</p></section>
+            <section className="workflow-detail-history" aria-label="업무 이력"><span>업무 이력</span>{selectedTimeline.length > 0 ? <div className="workflow-detail-records">
+              {selectedTimeline.map((entry, index) => entry.kind === 'completion'
+                ? <div className="workflow-record" key={`completion-${entry.at}-${index}`}><ClipboardCheck size={17} /><div><strong>결과 제출 <time dateTime={entry.completion.submittedAt}>{formatDateTime(entry.completion.submittedAt)}</time></strong><p>{entry.completion.summary}</p><div className="workflow-record-files">{entry.completion.evidence.length === 0 && <span>첨부 증빙 없음</span>}{entry.completion.evidence.map((file) => file.id.startsWith('DOC-') ? <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={12} /> {file.name} · {file.size}</button> : <span key={file.id}><Paperclip size={12} /> {file.name} · {file.size}</span>)}</div></div></div>
+                : <div className={`workflow-record ${entry.review.decision === 'approved' ? 'approved' : 'changes'}`} key={`review-${entry.at}-${index}`}><ShieldCheck size={17} /><div><strong>{entry.review.decision === 'approved' ? '승인 기록' : '수정 요청 기록'} <time dateTime={entry.review.reviewedAt}>{formatDateTime(entry.review.reviewedAt)}</time></strong><p>{entry.review.requestedChanges || entry.review.comment}</p></div></div>)}
+            </div> : <p>아직 제출되거나 검토된 이력이 없습니다.</p>}</section>
+            <ol className="workflow-detail-stepper" aria-label={`업무 단계. 현재 ${selectedItem.status}`}>{stages.map((status, index) => <li className={index < selectedStep ? 'done' : index === selectedStep ? 'current' : ''} aria-current={index === selectedStep ? 'step' : undefined} key={status}><i>{index < selectedStep ? <Check size={11} /> : index + 1}</i><span>{status}</span></li>)}</ol>
+            <dl className="workflow-detail-meta"><div><dt>마감</dt><dd><Clock3 size={15} /> {formatWorkDue(selectedItem.due)}</dd></div><div><dt>담당</dt><dd>{selectedItem.owner}</dd></div><div><dt>요청</dt><dd>{selectedItem.requestedBy}</dd></div></dl>
+          </>}
+        </aside>
+      </div>
     </section>
     {canAssignTasks && <section className="panel recurring-work-panel"><header><div><span className="eyebrow">RECURRING RULES</span><h2>반복 업무 규칙</h2><p>도래한 규칙은 공유 업무로 자동 생성됩니다.</p></div><button className="button secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Plus size={17} /> 규칙 추가</button></header><div className="recurring-rule-grid">{rules.map((rule) => <article key={rule.id}><div><span className={`rule-state ${rule.active ? 'active' : 'paused'}`}>{rule.active ? '활성' : '중지'}</span><strong>{rule.title}</strong><p>{rule.description}</p></div><dl><div><dt>주기</dt><dd>{workRuleScheduleLabel(rule)}</dd></div><div><dt>담당자</dt><dd>{rule.owner}</dd></div><div><dt>다음 실행</dt><dd>{formatWorkRuleRun(rule.nextRun, rule.dueTime)}</dd></div></dl><button className="button ghost" type="button" onClick={() => void onToggleRule(rule)}>{rule.active ? <PauseCircle size={17} /> : <PlayCircle size={17} />}{rule.active ? ' 일시 중지' : ' 다시 활성화'}</button></article>)}{rules.length === 0 && <div className="empty-state"><Repeat2 size={30} /><h3>반복 규칙이 없습니다</h3><p>매주·매월 반복되는 점검을 자동화해 보세요.</p></div>}</div></section>}
     {dialog?.type === 'completion' && <CompletionModal item={dialog.item} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(summary, evidence) => onTransition(dialog.item.id, 'submit', { completion: { summary, evidence } })} />}
-    {(dialog?.type === 'approve' || dialog?.type === 'changes') && <WorkReviewModal item={dialog.item} mode={dialog.type === 'approve' ? 'approve' : 'request-changes'} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(comment, requestedChanges) => onTransition(dialog.item.id, dialog.type === 'approve' ? 'approve' : 'request-changes', { review: { comment, requestedChanges } })} />}
+    {dialog?.type === 'review' && <WorkReviewModal item={dialog.item} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(decision, comment, requestedChanges) => onTransition(dialog.item.id, decision, { review: { comment, requestedChanges } })} />}
     {dialog?.type === 'rule' && <WorkRuleModal assignees={assignees} onClose={() => setDialog(null)} onSubmit={onCreateRule} />}
   </div>
 }
@@ -1076,6 +1152,7 @@ export default function App() {
   const [taskDraft, setTaskDraft] = useState<string | null>(null)
   const [supportTenant, setSupportTenant] = useState<Tenant | null>(null)
   const [platformFocusId, setPlatformFocusId] = useState<string>()
+  const [workFocusId, setWorkFocusId] = useState<string>()
   const [platformDirectory, setPlatformDirectory] = useState<PlatformDirectoryState>({ tenants: [], supportTickets: [] })
   const [platformRefreshToken, setPlatformRefreshToken] = useState(0)
   const [toast, setToast] = useState('')
@@ -1310,6 +1387,8 @@ export default function App() {
     { id: 'factory', label: '공장관리', icon: Factory },
     { id: 'sales', label: '판매채널', icon: Store },
     { id: 'people', label: '인사 · 조직', icon: Users },
+    { id: 'performance', label: '직원 성과', icon: BarChart3 },
+    { id: 'billing', label: '포인트 사용량', icon: Gauge },
     { id: 'documents', label: '기업 자료실', icon: FileText },
     { id: 'compliance', label: '식품안전 · 인증', icon: ShieldCheck },
   ]
@@ -1336,6 +1415,7 @@ export default function App() {
     { id: 'tenants', label: '고객사 관리', icon: Building2, badge: platformTenants.length },
     { id: 'support', label: 'CS 지원센터', icon: Headphones, badge: openPlatformTickets.length },
     { id: 'integrations', label: '연동 상태', icon: Layers3 },
+    { id: 'billing', label: '비용 · 포인트', icon: BarChart3 },
     { id: 'audit', label: '지원 세션 · 감사', icon: ShieldCheck },
   ]
   const nav = mode === 'tenant' ? personalizedTenantNav : platformNav
@@ -1509,23 +1589,26 @@ export default function App() {
 
   const renderPage = () => {
     if (mode === 'platform' && account?.role === 'platform-operator') {
+      if (page === 'billing') return <BillingDashboard mode="platform" tenantOptions={platformTenants.map((tenant) => ({ id: tenant.id, name: tenant.name }))} onToast={setToast} />
       return <PlatformConsole section={page as PlatformSection} focusId={platformFocusId} refreshToken={platformRefreshToken} onSectionChange={(section) => navigate(section)} onReturnTenant={requestTenantSupportAccess} onRequestSupport={setSupportTenant} onDataChanged={() => setPlatformRefreshToken((current) => current + 1)} onToast={setToast} />
     }
     if (account?.role === 'tenant-member' && !tenantMemberPages.has(page)) {
-      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onToast={setToast} />
+      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
     switch (page) {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
-      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} workspaceScope={workspaceScope} onToast={setToast} onCreate={() => setTaskDraft('')} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} />
+      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onCreate={() => setTaskDraft('')} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'products': return <ProductManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
       case 'inventory': return <InventoryPage onToast={setToast} canManage={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} />
       case 'factory': return <FactoryManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
       case 'sales': return <SalesChannels onToast={setToast} workspaceScope={workspaceScope} companyName={tenantName} canManage={account?.role === 'tenant-admin'} />
       case 'people': return <PeopleOperationsPage onToast={setToast} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
+      case 'performance': return <PerformanceReports workspaceScope={workspaceScope ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} />
+      case 'billing': return <BillingDashboard mode="tenant" tenantId={account?.tenantId ?? ''} tenantName={tenantName} workspaceScope={workspaceScope} onToast={setToast} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} onToast={setToast} />
       case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} companyName={tenantName} onToast={setToast} />
-      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onToast={setToast} />
+      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
   }
 

@@ -17,7 +17,10 @@ import { isDeepStrictEqual } from 'node:util'
 import Anthropic from '@anthropic-ai/sdk'
 import express from 'express'
 
+import { registerBillingRoutes } from './billing-routes.mjs'
+import { BillingServiceError, createBillingService, createMemoryBillingRepository } from './billing-service.mjs'
 import { attachBlocksToLatestUserMessage, ChatAttachmentError, normalizeChatAttachmentRequest, resolveChatAttachments } from './chat-attachments.mjs'
+import { registerPerformanceRoutes } from './performance-routes.mjs'
 import {
   deletePlatformEvidence,
   deleteTenantDocument,
@@ -52,7 +55,7 @@ const WORKSPACE_STORE_KEYS = new Set([
   'work-items', 'inventory-locations', 'sales-channels', 'messenger-conversations',
   'calendar-events', 'daily-journals', 'leave-requests', 'account-requests',
   'factory-locations', 'factory-layouts', 'leave-management', 'work-rules', 'product-catalog', 'inventory-movements', 'calendar-departments',
-  'sales-shipments', 'compliance-records', 'document-storage-settings',
+  'sales-shipments', 'compliance-records', 'document-storage-settings', 'performance-settings', 'performance-reports',
 ])
 const TENANT_MEMBER_READ_KEYS = new Set([
   'work-items', 'inventory-locations', 'messenger-conversations', 'calendar-events', 'daily-journals',
@@ -66,7 +69,7 @@ const WORK_ITEM_BASE_FIELDS = [
   'id', 'title', 'description', 'owner', 'requestedBy', 'due', 'priority', 'status', 'category',
 ]
 const WORK_ITEM_ID_FIELDS = ['ownerId', 'requesterId']
-const WORK_ITEM_OPTIONAL_FIELDS = ['completion', 'review', 'ruleId', 'ruleOccurrence', 'createdAt']
+const WORK_ITEM_OPTIONAL_FIELDS = ['completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt']
 const WORK_ITEM_FIELDS = [...WORK_ITEM_BASE_FIELDS, ...WORK_ITEM_ID_FIELDS, ...WORK_ITEM_OPTIONAL_FIELDS]
 const WORK_ITEM_STATUSES = new Set(['업무요청', '수행중', '결재대기', '결재완료'])
 const WORK_ITEM_PRIORITIES = new Set(['긴급', '높음', '보통'])
@@ -89,19 +92,20 @@ function accountIdentityIds(account) {
 }
 const CALENDAR_FIELDS = ['id', 'title', 'date', 'start', 'end', 'scope', 'department', 'location', 'owner', 'note']
 const CALENDAR_SCOPES = new Set(['company', 'department', 'personal'])
+const DEVELOPER_OPERATIONS_ID = 'SYS-DEVELOPER-OPS'
+const DEVELOPER_OPERATIONS_NAME = '개발운영진'
+const DEVELOPER_SUPPORT_CHANNEL = 'developer-support'
 const CONVERSATION_FIELDS = ['id', 'type', 'name', 'subtitle', 'unread', 'lastMessage', 'lastTime', 'messages']
 const MESSAGE_FIELDS = ['id', 'senderId', 'senderName', 'text', 'time']
-const MESSAGE_OPTIONAL_FIELDS = ['readBy', 'createdAt']
-const CONVERSATION_OPTIONAL_FIELDS = ['memberId', 'participantIds', 'hiddenFor', 'lineageId', 'generation', 'lifecycle', 'closedAt', 'deletedAt']
+const MESSAGE_OPTIONAL_FIELDS = ['readBy', 'createdAt', 'attachments']
+const CONVERSATION_OPTIONAL_FIELDS = [
+  'memberId', 'participantIds', 'hiddenFor', 'lineageId', 'generation', 'lifecycle', 'closedAt', 'deletedAt',
+  'systemChannel', 'supportRequesterId', 'supportTicketId',
+]
 const CONVERSATION_LIFECYCLES = new Set(['active', 'closed', 'deleted'])
 const PLATFORM_TICKET_PRIORITIES = new Set(['P1', 'P2', 'P3'])
 const PLATFORM_TICKET_STATUSES = new Set(['접수', '기술팀 처리중', '고객 회신 대기', '수정본 검증중', '해결', '종료'])
 const PLATFORM_ACTION_KINDS = new Set(['담당자 알림', '재연결 요청', '지원 세션 요청'])
-const PLATFORM_PLAN_LIMITS = {
-  Starter: { aiUsage: '0 / 1,000', storage: '0 / 20GB' },
-  Growth: { aiUsage: '0 / 2,000', storage: '0 / 50GB' },
-  Enterprise: { aiUsage: '0 / 5,000', storage: '0 / 100GB' },
-}
 function hasExactFields(value, fields) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const actual = Object.keys(value).sort()
@@ -140,7 +144,9 @@ function hasWorkItemShape(value) {
   if (WORK_ITEM_ID_FIELDS.some((key) => value[key] !== undefined && (typeof value[key] !== 'string' || !value[key]))) return false
   if (['ruleId', 'ruleOccurrence', 'createdAt'].some((key) => value[key] !== undefined && typeof value[key] !== 'string')) return false
   if (value.completion !== undefined && !hasWorkCompletionShape(value.completion)) return false
+  if (value.completionHistory !== undefined && (!Array.isArray(value.completionHistory) || value.completionHistory.length > 100 || !value.completionHistory.every(hasWorkCompletionShape))) return false
   if (value.review !== undefined && !hasWorkReviewShape(value.review)) return false
+  if (value.reviewHistory !== undefined && (!Array.isArray(value.reviewHistory) || value.reviewHistory.length > 100 || !value.reviewHistory.every(hasWorkReviewShape))) return false
   return Boolean(value.id) && WORK_ITEM_STATUSES.has(value.status) && WORK_ITEM_PRIORITIES.has(value.priority)
 }
 
@@ -765,6 +771,29 @@ function hasMessageShape(value) {
     && value.text.length <= 4_000
     && (value.readBy === undefined || (Array.isArray(value.readBy) && value.readBy.length <= 500 && value.readBy.every((id) => typeof id === 'string' && id)))
     && (value.createdAt === undefined || (typeof value.createdAt === 'string' && !Number.isNaN(Date.parse(value.createdAt))))
+    && (value.attachments === undefined || (Array.isArray(value.attachments) && value.attachments.length <= 10
+      && value.attachments.every((attachment) => hasExactFields(attachment, ['id', 'name', 'size'])
+        && typeof attachment.id === 'string' && attachment.id.startsWith('DOC-')
+        && typeof attachment.name === 'string' && attachment.name.trim().length > 0 && attachment.name.length <= 180
+        && typeof attachment.size === 'string' && attachment.size.length <= 40)))
+}
+
+function isDeveloperSupportConversation(conversation) {
+  return conversation?.systemChannel === DEVELOPER_SUPPORT_CHANNEL
+}
+
+function hasDeveloperSupportConversationIntegrity(conversation) {
+  if (!isDeveloperSupportConversation(conversation)) {
+    return conversation?.supportRequesterId === undefined && conversation?.supportTicketId === undefined
+  }
+  if (conversation.type !== 'direct' || conversation.name !== DEVELOPER_OPERATIONS_NAME
+    || conversation.memberId !== DEVELOPER_OPERATIONS_ID
+    || typeof conversation.supportRequesterId !== 'string' || !conversation.supportRequesterId
+    || !Array.isArray(conversation.participantIds) || conversation.participantIds.length !== 2) return false
+  const participants = new Set(conversation.participantIds)
+  if (participants.size !== 2 || !participants.has(DEVELOPER_OPERATIONS_ID) || !participants.has(conversation.supportRequesterId)) return false
+  return conversation.supportTicketId === undefined
+    || (typeof conversation.supportTicketId === 'string' && /^CS-[A-Za-z0-9-]{4,80}$/.test(conversation.supportTicketId))
 }
 
 function hasConversationShape(value) {
@@ -782,7 +811,11 @@ function hasConversationShape(value) {
   if (value.lifecycle !== undefined && !CONVERSATION_LIFECYCLES.has(value.lifecycle)) return false
   if (value.closedAt !== undefined && (typeof value.closedAt !== 'string' || !value.closedAt)) return false
   if (value.deletedAt !== undefined && (typeof value.deletedAt !== 'string' || !value.deletedAt)) return false
-  return Array.isArray(value.messages) && value.messages.every(hasMessageShape)
+  if (value.systemChannel !== undefined && value.systemChannel !== DEVELOPER_SUPPORT_CHANNEL) return false
+  if (value.supportRequesterId !== undefined && typeof value.supportRequesterId !== 'string') return false
+  if (value.supportTicketId !== undefined && typeof value.supportTicketId !== 'string') return false
+  return hasDeveloperSupportConversationIntegrity(value)
+    && Array.isArray(value.messages) && value.messages.every(hasMessageShape)
 }
 
 function conversationLifecycle(conversation) {
@@ -793,8 +826,13 @@ function directLineageId(leftId, rightId) {
   return `direct:${[String(leftId), String(rightId)].sort().join(':')}`
 }
 
+function developerSupportLineageId(tenantId, requesterId) {
+  return `${DEVELOPER_SUPPORT_CHANNEL}:${String(tenantId)}:${String(requesterId)}`
+}
+
 function isConversationVisibleToMember(conversation, account) {
   if (conversationLifecycle(conversation) !== 'active') return false
+  if (isDeveloperSupportConversation(conversation)) return conversation.supportRequesterId === account?.id
   const identityIds = accountIdentityIds(account)
   if (conversation?.hiddenFor?.some((id) => identityIds.includes(id))) return false
   if (conversation?.type === 'team') {
@@ -831,7 +869,9 @@ function normalizeAdminConversations(previousData, nextData) {
     return previousData
   }
 
-  return nextData.every((conversation) => conversationLifecycle(conversation) === 'active'
+  return nextData.every((conversation) => !isDeveloperSupportConversation(conversation)
+    && !legacyConversationParticipantIds(conversation).includes(DEVELOPER_OPERATIONS_ID)
+    && conversationLifecycle(conversation) === 'active'
     && conversation.closedAt === undefined && conversation.deletedAt === undefined)
     ? nextData
     : null
@@ -850,6 +890,11 @@ function mergeMemberConversations(previousData, nextData, account) {
     seen.add(requested.id)
     const previous = previousById.get(requested.id)
     if (!previous || !hasConversationShape(previous)) return null
+    if (isDeveloperSupportConversation(previous)) {
+      if (!isDeepStrictEqual(requested, previous)) return null
+      replacements.set(requested.id, previous)
+      continue
+    }
     const immutableFields = ['id', 'type', 'name', 'subtitle', 'memberId', 'participantIds']
     if (immutableFields.some((field) => !isDeepStrictEqual(requested[field], previous[field]))) return null
     if (requested.messages.length < previous.messages.length
@@ -909,6 +954,12 @@ function normalizeMessages(value) {
       content: normalizeContent(message?.content).slice(0, MAX_MESSAGE_LENGTH),
     }))
     .filter((message) => message.content.length > 0)
+}
+
+const CHAT_USAGE_FEATURES = new Set(['ai-chat', 'document-search', 'compliance-review'])
+
+function normalizeChatUsageFeature(value) {
+  return typeof value === 'string' && CHAT_USAGE_FEATURES.has(value) ? value : 'ai-chat'
 }
 
 function serializeContext(context) {
@@ -1281,6 +1332,7 @@ export function createApp(options = {}) {
     env: options.env ?? process.env,
     documentUploadDirectory,
   })
+  const billingService = options.billingService ?? createBillingService({ repository: createMemoryBillingRepository() })
   const workspaceStore = options.initialWorkspaceStore && typeof options.initialWorkspaceStore === 'object'
     ? options.initialWorkspaceStore
     : readWorkspaceStore(workspaceStoreFile)
@@ -1474,8 +1526,12 @@ export function createApp(options = {}) {
   }
 
   const documentRecord = (tenantId) => workspaceStore.tenants[tenantId]?.['company-documents']
+  const isDeveloperSupportDocument = (document) => document?.category === '개발운영지원'
+    || (Array.isArray(document?.tags) && document.tags.includes(DEVELOPER_SUPPORT_CHANNEL))
   const canReadDocument = (document, account) => {
     if (!document || !account || document.tenantId && document.tenantId !== account.tenantId) return false
+    if (isDeveloperSupportDocument(document)) return document.uploadedById === account.id
+      || (document.visibility === 'restricted' && Array.isArray(document.allowedUserIds) && document.allowedUserIds.includes(account.id))
     if (account.role === 'tenant-admin' || document.uploadedById === account.id) return true
     if (document.visibility === 'all') return true
     if (document.visibility === 'department') return Array.isArray(document.departments) && document.departments.includes(account.team)
@@ -1499,6 +1555,9 @@ export function createApp(options = {}) {
   const linkedDocumentIds = (data) => Array.isArray(data)
     ? [...new Set(data.flatMap((item) => [
       ...(Array.isArray(item?.attachments) ? item.attachments.map((attachment) => attachment?.id) : []),
+      ...(Array.isArray(item?.messages) ? item.messages.flatMap((message) => Array.isArray(message?.attachments)
+        ? message.attachments.map((attachment) => attachment?.id)
+        : []) : []),
       ...(Array.isArray(item?.completion?.evidence) ? item.completion.evidence.map((attachment) => attachment?.id) : []),
       item?.evidenceId,
       item?.drawingDocumentId,
@@ -1523,11 +1582,33 @@ export function createApp(options = {}) {
     }))
     return results.every(Boolean)
   }
+  const displayDocumentSize = (size) => {
+    const bytes = Number(size)
+    if (!Number.isFinite(bytes) || bytes < 0) return '크기 확인 불가'
+    return bytes < 1024 * 1024
+      ? `${Math.max(1, Math.round(bytes / 1024))} KB`
+      : `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  }
+  const resolveMessengerAttachments = async (value, account) => {
+    if (value === undefined) return []
+    if (!Array.isArray(value) || value.length > 10) return null
+    const ids = value.map((attachment) => String(attachment?.id ?? '').trim())
+    if (ids.some((id) => !id.startsWith('DOC-')) || new Set(ids).size !== ids.length) return null
+    const documents = Array.isArray(documentRecord(account.tenantId)?.data) ? documentRecord(account.tenantId).data : []
+    const resolved = []
+    for (const id of ids) {
+      const document = documents.find((candidate) => candidate?.id === id)
+      if (!document || !canReadDocument(document, account)) return null
+      try { await getTenantDocument(documentStorage, document, account.tenantId) } catch { return null }
+      resolved.push({ id: document.id, name: String(document.name || document.originalName || '첨부파일').slice(0, 180), size: displayDocumentSize(document.size) })
+    }
+    return resolved
+  }
   const documentIsReferenced = (tenantId, id) => {
     const tenantStore = workspaceStore.tenants[tenantId] ?? {}
     const document = (Array.isArray(documentRecord(tenantId)?.data) ? documentRecord(tenantId).data : []).find((item) => item.id === id)
     return isFactoryDrawingDocument(document)
-      || ['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts']
+      || ['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations']
         .some((key) => linkedDocumentIds(tenantStore[key]?.data).includes(id))
   }
   const safeDownloadName = (value) => String(value || 'document').replace(/[\r\n"]/g, '_').slice(0, 180)
@@ -1666,7 +1747,7 @@ export function createApp(options = {}) {
     if (!document) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } }); return }
     if (isFactoryDrawingDocument(document) && request.auth.role !== 'tenant-admin') { response.status(403).json({ error: { code: 'FACTORY_DRAWING_WRITE_FORBIDDEN', message: '공장 배경 도면은 회사 관리자만 삭제할 수 있습니다.' } }); return }
     if (request.auth.role !== 'tenant-admin' && document.uploadedById !== request.auth.id) { response.status(403).json({ error: { code: 'DOCUMENT_DELETE_FORBIDDEN', message: '본인이 업로드한 자료만 삭제할 수 있습니다.' } }); return }
-    if (documentIsReferenced(request.auth.tenantId, document.id)) { response.status(409).json({ error: { code: 'DOCUMENT_IN_USE', message: '업무·일지·인증·재고 또는 공장 화면에서 사용 중인 자료입니다. 해당 화면에서 먼저 연결을 해제해 주세요.' } }); return }
+    if (documentIsReferenced(request.auth.tenantId, document.id)) { response.status(409).json({ error: { code: 'DOCUMENT_IN_USE', message: '업무·일지·인증·재고·공장 또는 메신저에서 사용 중인 자료입니다. 해당 화면에서 먼저 연결을 해제해 주세요.' } }); return }
     let originalBytes = null
     let removedFile = false
     try {
@@ -1700,7 +1781,13 @@ export function createApp(options = {}) {
   }
   const publicPlatformState = () => ({
     tenants: workspaceStore.platform.tenants.map(publicPlatformTenant),
-    supportTickets: workspaceStore.platform.supportTickets,
+    supportTickets: [...workspaceStore.platform.supportTickets].sort((left, right) => {
+      const unanswered = Number(Boolean(right?.unanswered)) - Number(Boolean(left?.unanswered))
+      if (unanswered) return unanswered
+      return (Date.parse(right?.updatedAt || '') || 0) - (Date.parse(left?.updatedAt || '') || 0)
+    }),
+    newSupportRequestCount: workspaceStore.platform.supportTickets.filter((ticket) => ticket?.newRequest === true).length,
+    unansweredSupportCount: workspaceStore.platform.supportTickets.filter((ticket) => ticket?.unanswered === true).length,
     integrations: workspaceStore.platform.integrations,
     actions: workspaceStore.platform.actions,
     auditEvents: workspaceStore.platform.auditEvents,
@@ -1710,6 +1797,295 @@ export function createApp(options = {}) {
     response.json(publicPlatformState())
   })
 
+  const developerSupportContext = (ticketId) => {
+    const ticketIndex = workspaceStore.platform.supportTickets.findIndex((ticket) => ticket?.id === ticketId
+      && ticket.source === DEVELOPER_SUPPORT_CHANNEL && typeof ticket.conversationId === 'string')
+    if (ticketIndex < 0) return null
+    const ticket = workspaceStore.platform.supportTickets[ticketIndex]
+    const tenantStore = workspaceStore.tenants[ticket.tenantId]
+    const conversations = Array.isArray(tenantStore?.['messenger-conversations']?.data)
+      ? tenantStore['messenger-conversations'].data
+      : []
+    const conversationIndex = conversations.findIndex((conversation) => conversation?.id === ticket.conversationId
+      && conversation.supportTicketId === ticket.id
+      && conversation.supportRequesterId === ticket.requesterId
+      && isDeveloperSupportConversation(conversation)
+      && hasDeveloperSupportConversationIntegrity(conversation))
+    if (conversationIndex < 0) return null
+    return { ticket, ticketIndex, tenantStore, conversations, conversation: conversations[conversationIndex], conversationIndex }
+  }
+
+  const resolveOperatorSupportAttachments = async (value, context) => {
+    if (value === undefined) return []
+    if (!Array.isArray(value) || value.length > 10) return null
+    const ids = value.map((attachment) => String(attachment?.id ?? '').trim())
+    if (ids.some((id) => !id.startsWith('DOC-')) || new Set(ids).size !== ids.length) return null
+    const documents = Array.isArray(documentRecord(context.ticket.tenantId)?.data) ? documentRecord(context.ticket.tenantId).data : []
+    const resolved = []
+    for (const id of ids) {
+      const document = documents.find((candidate) => candidate?.id === id)
+      const belongsToTicket = document?.uploadedById === DEVELOPER_OPERATIONS_ID
+        && document?.category === '개발운영지원'
+        && document?.tags?.includes(`support-ticket:${context.ticket.id}`)
+        && document?.visibility === 'restricted'
+      if (!belongsToTicket) return null
+      try { await getTenantDocument(documentStorage, document, context.ticket.tenantId) } catch { return null }
+      resolved.push({ id: document.id, name: String(document.name || document.originalName || '첨부파일').slice(0, 180), size: displayDocumentSize(document.size) })
+    }
+    return resolved
+  }
+
+  app.get('/api/platform/tickets/:id/conversation', requireAuth, requirePlatformOperator, (request, response) => {
+    const context = developerSupportContext(request.params.id)
+    if (!context) {
+      response.status(404).json({ error: { code: 'SUPPORT_CONVERSATION_NOT_FOUND', message: '이 티켓에 연결된 개발 지원 대화를 찾을 수 없습니다.' } })
+      return
+    }
+    response.json({ conversation: context.conversation, ticket: context.ticket })
+  })
+
+  app.post('/api/platform/tickets/:id/conversation/read', requireAuth, requirePlatformOperator, async (request, response) => {
+    const context = developerSupportContext(request.params.id)
+    if (!context) {
+      response.status(404).json({ error: { code: 'SUPPORT_CONVERSATION_NOT_FOUND', message: '이 티켓에 연결된 개발 지원 대화를 찾을 수 없습니다.' } })
+      return
+    }
+    const viewedAt = new Date().toISOString()
+    const conversation = {
+      ...context.conversation,
+      messages: context.conversation.messages.map((message) => ({
+        ...message,
+        readBy: Array.from(new Set([...(message.readBy ?? []), DEVELOPER_OPERATIONS_ID])),
+      })),
+    }
+    const ticket = { ...context.ticket, newRequest: false, firstViewedAt: context.ticket.firstViewedAt || viewedAt, lastViewedAt: viewedAt }
+    if (isDeepStrictEqual(conversation, context.conversation) && isDeepStrictEqual(ticket, context.ticket)) {
+      response.json({ conversation, ticket })
+      return
+    }
+    const previousRecord = context.tenantStore['messenger-conversations']
+    const previousTickets = workspaceStore.platform.supportTickets
+    context.tenantStore['messenger-conversations'] = {
+      data: context.conversations.map((item, index) => index === context.conversationIndex ? conversation : item),
+      updatedAt: viewedAt,
+      updatedBy: request.auth.id,
+    }
+    workspaceStore.platform.supportTickets = previousTickets.map((item, index) => index === context.ticketIndex ? ticket : item)
+    try { await commitWorkspaceStore() }
+    catch {
+      context.tenantStore['messenger-conversations'] = previousRecord
+      workspaceStore.platform.supportTickets = previousTickets
+      response.status(500).json({ error: { code: 'SUPPORT_READ_WRITE_FAILED', message: '지원 대화의 읽음 상태를 저장하지 못했습니다.' } })
+      return
+    }
+    response.json({ conversation, ticket })
+  })
+
+  app.post('/api/platform/tickets/:id/reply', requireAuth, requirePlatformOperator, async (request, response) => {
+    const text = String(request.body?.text ?? '').trim()
+    if (!text || text.length > 4_000) {
+      response.status(400).json({ error: { code: 'INVALID_SUPPORT_REPLY', message: '답장은 1자 이상 4,000자 이하로 입력해 주세요.' } })
+      return
+    }
+    const context = developerSupportContext(request.params.id)
+    if (!context) {
+      response.status(404).json({ error: { code: 'SUPPORT_CONVERSATION_NOT_FOUND', message: '이 티켓에 연결된 개발 지원 대화를 찾을 수 없습니다.' } })
+      return
+    }
+    if (context.conversation.messages.length >= 5_000) {
+      response.status(409).json({ error: { code: 'MESSENGER_MESSAGE_CAPACITY_REACHED', message: '이 지원 대화의 메시지 보관 한도에 도달했습니다.' } })
+      return
+    }
+    const attachments = await resolveOperatorSupportAttachments(request.body?.attachments, context)
+    if (!attachments) {
+      response.status(400).json({ error: { code: 'INVALID_SUPPORT_REPLY_ATTACHMENTS', message: '이 티켓에 업로드한 첨부파일만 답장에 연결할 수 있습니다.' } })
+      return
+    }
+    const createdAt = new Date().toISOString()
+    const sentAt = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(createdAt))
+    const message = {
+      id: `m-${Date.now()}-${randomBytes(3).toString('hex')}`,
+      senderId: DEVELOPER_OPERATIONS_ID,
+      senderName: DEVELOPER_OPERATIONS_NAME,
+      text,
+      time: sentAt,
+      createdAt,
+      readBy: [DEVELOPER_OPERATIONS_ID],
+      ...(attachments.length ? { attachments } : {}),
+    }
+    const messages = context.conversation.messages.map((item) => ({
+      ...item,
+      readBy: Array.from(new Set([...(item.readBy ?? []), DEVELOPER_OPERATIONS_ID])),
+    }))
+    const conversation = { ...context.conversation, messages: [...messages, message], lastMessage: text, lastTime: sentAt }
+    const ticket = {
+      ...context.ticket,
+      status: ['해결', '종료'].includes(context.ticket.status) ? context.ticket.status : '고객 회신 대기',
+      owner: DEVELOPER_OPERATIONS_NAME,
+      messageCount: Number(context.ticket.messageCount || 0) + 1,
+      attachmentCount: Number(context.ticket.attachmentCount || 0) + attachments.length,
+      newRequest: false,
+      unanswered: false,
+      lastOperatorReplyAt: createdAt,
+      updatedAt: createdAt,
+      history: [...(Array.isArray(context.ticket.history) ? context.ticket.history : []), {
+        id: `H-${Date.now()}-${randomBytes(2).toString('hex')}`,
+        at: createdAt,
+        title: '개발운영진 답변',
+        detail: '메신저로 고객사에 답변을 전송했습니다.',
+        actor: DEVELOPER_OPERATIONS_NAME,
+      }],
+    }
+    const previousRecord = context.tenantStore['messenger-conversations']
+    const previousDocumentsRecord = context.tenantStore['company-documents']
+    const previousTickets = workspaceStore.platform.supportTickets
+    const previousAudits = workspaceStore.platform.auditEvents
+    context.tenantStore['messenger-conversations'] = {
+      data: context.conversations.map((item, index) => index === context.conversationIndex ? conversation : item),
+      updatedAt: createdAt,
+      updatedBy: DEVELOPER_OPERATIONS_ID,
+    }
+    if (attachments.length) {
+      const sharedIds = new Set(attachments.map((attachment) => attachment.id))
+      const documents = Array.isArray(previousDocumentsRecord?.data) ? previousDocumentsRecord.data : []
+      context.tenantStore['company-documents'] = {
+        data: documents.map((document) => sharedIds.has(document.id)
+          ? { ...document, allowedUserIds: [context.ticket.requesterId], sharedAt: createdAt }
+          : document),
+        updatedAt: createdAt,
+        updatedBy: DEVELOPER_OPERATIONS_ID,
+      }
+    }
+    workspaceStore.platform.supportTickets = previousTickets.map((item, index) => index === context.ticketIndex ? ticket : item)
+    appendPlatformAudit(workspaceStore.platform, { tenantId: ticket.tenantId, event: '개발운영진 메신저 답변', scope: '고객사 1:1 지원 채널', actor: request.auth.name, reference: ticket.id })
+    try { await commitWorkspaceStore() }
+    catch {
+      context.tenantStore['messenger-conversations'] = previousRecord
+      if (previousDocumentsRecord) context.tenantStore['company-documents'] = previousDocumentsRecord
+      else delete context.tenantStore['company-documents']
+      workspaceStore.platform.supportTickets = previousTickets
+      workspaceStore.platform.auditEvents = previousAudits
+      response.status(500).json({ error: { code: 'SUPPORT_REPLY_WRITE_FAILED', message: '답장과 티켓 상태를 함께 저장하지 못했습니다. 전송되지 않았으니 다시 시도해 주세요.' } })
+      return
+    }
+    response.status(201).json({ conversation, message, ticket })
+  })
+
+  app.post('/api/platform/tickets/:id/attachments', requireAuth, requirePlatformOperator, express.raw({ type: 'application/octet-stream', limit: '10mb' }), async (request, response) => {
+    const context = developerSupportContext(request.params.id)
+    if (!context) {
+      response.status(404).json({ error: { code: 'SUPPORT_CONVERSATION_NOT_FOUND', message: '이 티켓에 연결된 개발 지원 대화를 찾을 수 없습니다.' } })
+      return
+    }
+    if (!documentStorage) {
+      response.status(503).json({ error: { code: 'DOCUMENT_STORAGE_UNAVAILABLE', message: '지원 첨부파일 저장소가 설정되지 않았습니다.' } })
+      return
+    }
+    if (!Buffer.isBuffer(request.body) || request.body.length === 0) {
+      response.status(400).json({ error: { code: 'DOCUMENT_FILE_REQUIRED', message: '업로드할 파일을 선택해 주세요.' } })
+      return
+    }
+    let originalName = 'support-file'
+    try { originalName = decodeURIComponent(String(request.get('x-file-name') || 'support-file')) } catch { originalName = 'support-file' }
+    originalName = safeDownloadName(originalName)
+    const id = `DOC-${Date.now()}-${randomBytes(4).toString('hex')}`
+    let storedFile = null
+    const document = {
+      id,
+      tenantId: context.ticket.tenantId,
+      name: originalName,
+      originalName,
+      mime: String(request.get('x-file-type') || 'application/octet-stream').slice(0, 120),
+      size: request.body.length,
+      category: '개발운영지원',
+      visibility: 'restricted',
+      departments: [],
+      allowedUserIds: [],
+      tags: [DEVELOPER_SUPPORT_CHANNEL, 'operator-reply', `support-ticket:${context.ticket.id}`],
+      summary: `${context.ticket.id} 개발운영진 답장 첨부`,
+      uploadedAt: new Date().toISOString(),
+      uploadedById: DEVELOPER_OPERATIONS_ID,
+      uploadedByName: DEVELOPER_OPERATIONS_NAME,
+      storage: documentStorage.backend,
+    }
+    try {
+      storedFile = await putTenantDocument(documentStorage, { tenantId: context.ticket.tenantId, id, body: request.body, contentType: document.mime })
+      Object.assign(document, storedFile)
+      const documents = Array.isArray(documentRecord(context.ticket.tenantId)?.data) ? [...documentRecord(context.ticket.tenantId).data] : []
+      documents.unshift(document)
+      await persistDocumentList(context.ticket.tenantId, documents, DEVELOPER_OPERATIONS_ID)
+      response.status(201).json({ attachment: { id: document.id, name: document.name, size: displayDocumentSize(document.size) } })
+    } catch {
+      if (storedFile) {
+        try { await deleteTenantDocument(documentStorage, document, context.ticket.tenantId) } catch { /* best-effort cleanup */ }
+      }
+      response.status(500).json({ error: { code: 'SUPPORT_ATTACHMENT_UPLOAD_FAILED', message: '지원 답장 첨부파일을 저장하지 못했습니다.' } })
+    }
+  })
+
+  app.get('/api/platform/tickets/:id/attachments/:documentId', requireAuth, requirePlatformOperator, async (request, response) => {
+    const context = developerSupportContext(request.params.id)
+    const referenced = context?.conversation.messages.some((message) => Array.isArray(message.attachments)
+      && message.attachments.some((attachment) => attachment?.id === request.params.documentId))
+    if (!context || !referenced || !documentStorage) {
+      response.status(404).json({ error: { code: 'SUPPORT_ATTACHMENT_NOT_FOUND', message: '이 지원 대화에 첨부된 파일을 찾을 수 없습니다.' } })
+      return
+    }
+    const documents = Array.isArray(documentRecord(context.ticket.tenantId)?.data) ? documentRecord(context.ticket.tenantId).data : []
+    const document = documents.find((item) => item?.id === request.params.documentId)
+    if (!document) {
+      response.status(404).json({ error: { code: 'SUPPORT_ATTACHMENT_NOT_FOUND', message: '이 지원 대화에 첨부된 파일을 찾을 수 없습니다.' } })
+      return
+    }
+    try {
+      const signedUrl = await tenantDocumentSignedUrl(documentStorage, document, context.ticket.tenantId)
+      if (signedUrl) { response.redirect(302, signedUrl); return }
+      const body = await getTenantDocument(documentStorage, document, context.ticket.tenantId)
+      response.setHeader('content-type', document.mime || 'application/octet-stream')
+      response.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeDownloadName(document.originalName || document.name))}`)
+      response.send(body)
+    } catch (error) {
+      const status = error instanceof DocumentStorageError ? error.status : 500
+      const code = error instanceof DocumentStorageError ? error.code : 'SUPPORT_ATTACHMENT_DOWNLOAD_FAILED'
+      response.status(status).json({ error: { code, message: status === 410 ? '지원 첨부 원본을 찾을 수 없습니다.' : '지원 첨부를 다운로드하지 못했습니다.' } })
+    }
+  })
+
+  app.delete('/api/platform/tickets/:id/attachments/:documentId', requireAuth, requirePlatformOperator, async (request, response) => {
+    const context = developerSupportContext(request.params.id)
+    if (!context || !documentStorage) {
+      response.status(404).json({ error: { code: 'SUPPORT_ATTACHMENT_NOT_FOUND', message: '삭제할 지원 첨부파일을 찾을 수 없습니다.' } })
+      return
+    }
+    const documents = Array.isArray(documentRecord(context.ticket.tenantId)?.data) ? [...documentRecord(context.ticket.tenantId).data] : []
+    const document = documents.find((item) => item?.id === request.params.documentId)
+    const belongsToTicket = document?.uploadedById === DEVELOPER_OPERATIONS_ID
+      && document?.tags?.includes(`support-ticket:${context.ticket.id}`)
+    if (!belongsToTicket) {
+      response.status(404).json({ error: { code: 'SUPPORT_ATTACHMENT_NOT_FOUND', message: '삭제할 지원 첨부파일을 찾을 수 없습니다.' } })
+      return
+    }
+    if (documentIsReferenced(context.ticket.tenantId, document.id)) {
+      response.status(409).json({ error: { code: 'DOCUMENT_IN_USE', message: '이미 메신저로 전송된 첨부파일은 삭제할 수 없습니다.' } })
+      return
+    }
+    let originalBytes = null
+    let removedFile = false
+    try {
+      try { originalBytes = await getTenantDocument(documentStorage, document, context.ticket.tenantId) }
+      catch (error) { if (!(error instanceof DocumentStorageError && error.code === 'DOCUMENT_FILE_MISSING')) throw error }
+      removedFile = await deleteTenantDocument(documentStorage, document, context.ticket.tenantId)
+      await persistDocumentList(context.ticket.tenantId, documents.filter((item) => item.id !== document.id), DEVELOPER_OPERATIONS_ID)
+      response.json({ deleted: true })
+    } catch {
+      if (removedFile && originalBytes) {
+        try { await documentStorage.put(documentStorageKey(document, context.ticket.tenantId), originalBytes, { contentType: document.mime }) }
+        catch { /* best-effort rollback */ }
+      }
+      response.status(500).json({ error: { code: 'SUPPORT_ATTACHMENT_DELETE_FAILED', message: '지원 답장 첨부파일을 삭제하지 못했습니다.' } })
+    }
+  })
+
   app.post('/api/platform/tenants', requireAuth, requirePlatformOperator, async (request, response) => {
     const companyName = String(request.body?.companyName ?? '').trim()
     const industry = String(request.body?.industry ?? '').trim()
@@ -1717,7 +2093,7 @@ export function createApp(options = {}) {
     const adminName = String(request.body?.adminName ?? '').trim()
     const adminEmail = String(request.body?.adminEmail ?? '').trim().toLowerCase()
     const targetDate = String(request.body?.targetDate ?? '')
-    if (companyName.length < 2 || companyName.length > 80 || !industry || industry.length > 120 || !Object.prototype.hasOwnProperty.call(PLATFORM_PLAN_LIMITS, plan)
+    if (companyName.length < 2 || companyName.length > 80 || !industry || industry.length > 120 || !plan || plan.length > 80
       || adminName.length < 2 || adminName.length > 40 || !/^\S+@\S+\.\S+$/.test(adminEmail) || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
       response.status(400).json({ error: { code: 'INVALID_PLATFORM_TENANT', message: '고객사명, 업종, 요금제, 목표일과 최초 관리자 정보를 확인해 주세요.' } })
       return
@@ -1735,9 +2111,8 @@ export function createApp(options = {}) {
     const adminId = `USR-${tenantId}-ADMIN`
     const account = { id: adminId, name: adminName, email: adminEmail, role: 'tenant-admin', tenantId, tenantName: companyName, team: '경영지원', jobRole: '운영 관리자', requested: new Date().toISOString(), approved: true, approvalStatus: 'approved', password: Buffer.alloc(32) }
     const onboarding = provisionAccountCredential(workspaceStore, account, { ttlHours: 72 })
-    const limits = PLATFORM_PLAN_LIMITS[plan]
     const createdAt = new Date().toISOString()
-    const tenant = { id: tenantId, name: companyName, industry, contract: '온보딩', service: '정상', health: 100, plan, sites: 1, users: 1, activeUsers: 1, integrations: '0 / 5', sync: '설정 대기', tickets: 0, aiUsage: limits.aiUsage, storage: limits.storage, csm: '미배정', adminEmail, targetDate, createdAt, adminAccount: { id: adminId, name: adminName, email: adminEmail, team: account.team, jobRole: account.jobRole } }
+    const tenant = { id: tenantId, name: companyName, industry, contract: '온보딩', service: '정상', health: 100, plan, sites: 1, users: 1, activeUsers: 1, integrations: '0 / 5', sync: '설정 대기', tickets: 0, aiUsage: '미확정', storage: '미확정', csm: '미배정', adminEmail, targetDate, createdAt, adminAccount: { id: adminId, name: adminName, email: adminEmail, team: account.team, jobRole: account.jobRole } }
     const integrationTemplates = [['COUPANG', '쿠팡', 'C', '판매채널'], ['NAVER', '네이버 스마트스토어', 'N', '판매채널'], ['GMARKET', 'G마켓', 'G', '판매채널'], ['DELIVERY', '택배 연동', 'T', '물류'], ['CLAUDE', 'Claude AI', 'AI', 'AI']]
     const integrations = integrationTemplates.map(([suffix, name, short, kind]) => ({ id: `${tenantId}-${suffix}`, tenantId, name, short, kind, status: '설정중', lastSync: '—', result: '고객사 설정 대기', successRate: '—' }))
     const previousTenants = workspaceStore.platform.tenants
@@ -2077,6 +2452,14 @@ export function createApp(options = {}) {
         role: account.jobRole || (account.role === 'tenant-admin' ? '운영 관리자' : '일반 사용자'),
         status: account.id === request.auth.id ? 'online' : 'offline',
       }))
+    members.unshift({
+      id: DEVELOPER_OPERATIONS_ID,
+      name: DEVELOPER_OPERATIONS_NAME,
+      team: '온팩토리',
+      role: '기술 지원 · 시스템 계정',
+      status: 'online',
+      system: true,
+    })
     response.json({ members })
   })
 
@@ -2190,8 +2573,11 @@ export function createApp(options = {}) {
       return
     }
     const participantId = String(request.body?.participantId ?? '').trim()
-    const participant = accounts.find((account) => account.id === participantId
-      && account.tenantId === request.auth.tenantId && account.approved)
+    const developerSupport = participantId === DEVELOPER_OPERATIONS_ID
+    const participant = developerSupport
+      ? { id: DEVELOPER_OPERATIONS_ID, name: DEVELOPER_OPERATIONS_NAME, team: '온팩토리', jobRole: '기술 지원' }
+      : accounts.find((account) => account.id === participantId
+        && account.tenantId === request.auth.tenantId && account.approved)
     if (!participant || participant.id === request.auth.id) {
       response.status(400).json({ error: { code: 'INVALID_PARTICIPANT', message: '같은 회사의 활성 직원 계정을 선택해 주세요.' } })
       return
@@ -2199,11 +2585,18 @@ export function createApp(options = {}) {
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const conversations = Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []
     const requesterIds = accountIdentityIds(request.auth)
-    const participantIds = accountIdentityIds(participant)
-    const lineageId = directLineageId(request.auth.id, participant.id)
-    const related = conversations.filter((conversation) => conversation?.type === 'direct'
-      && legacyConversationParticipantIds(conversation).some((id) => requesterIds.includes(id))
-      && legacyConversationParticipantIds(conversation).some((id) => participantIds.includes(id)))
+    const participantIds = developerSupport ? [DEVELOPER_OPERATIONS_ID] : accountIdentityIds(participant)
+    const lineageId = developerSupport
+      ? developerSupportLineageId(request.auth.tenantId, request.auth.id)
+      : directLineageId(request.auth.id, participant.id)
+    const related = developerSupport
+      ? conversations.filter((conversation) => isDeveloperSupportConversation(conversation)
+        && conversation.supportRequesterId === request.auth.id
+        && (!conversation.lineageId || conversation.lineageId === lineageId))
+      : conversations.filter((conversation) => conversation?.type === 'direct'
+        && !isDeveloperSupportConversation(conversation)
+        && legacyConversationParticipantIds(conversation).some((id) => requesterIds.includes(id))
+        && legacyConversationParticipantIds(conversation).some((id) => participantIds.includes(id)))
     const generationOf = (conversation) => Number.isInteger(conversation?.generation) ? conversation.generation : 1
     const maxGeneration = related.reduce((maximum, conversation) => Math.max(maximum, generationOf(conversation)), 0)
     const maxHistoricalGeneration = related
@@ -2274,6 +2667,10 @@ export function createApp(options = {}) {
       lastMessage: '새 대화를 시작해 보세요.',
       lastTime: '방금',
       messages: [],
+      ...(developerSupport ? {
+        systemChannel: DEVELOPER_SUPPORT_CHANNEL,
+        supportRequesterId: request.auth.id,
+      } : {}),
     }
     try {
       await commitConversationData(request.auth.tenantId, [conversation, ...nextConversations], request.auth.id)
@@ -2323,6 +2720,15 @@ export function createApp(options = {}) {
       response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '참여 중인 대화를 찾을 수 없습니다.' } })
       return
     }
+    if (previous.messages.length >= 5_000) {
+      response.status(409).json({ error: { code: 'MESSENGER_MESSAGE_CAPACITY_REACHED', message: '이 대화의 메시지 보관 한도에 도달했습니다. 개발운영진에게 보관 처리를 요청해 주세요.' } })
+      return
+    }
+    const attachments = await resolveMessengerAttachments(request.body?.attachments, request.auth)
+    if (!attachments) {
+      response.status(400).json({ error: { code: 'INVALID_MESSAGE_ATTACHMENTS', message: '첨부파일을 찾을 수 없거나 현재 계정에 열람 권한이 없습니다. 파일을 다시 첨부해 주세요.' } })
+      return
+    }
     const createdAt = new Date().toISOString()
     const sentAt = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(createdAt))
     const message = {
@@ -2333,12 +2739,96 @@ export function createApp(options = {}) {
       time: sentAt,
       createdAt,
       readBy: [request.auth.id],
+      ...(attachments.length ? { attachments } : {}),
     }
     const conversation = {
       ...previous,
-      messages: [...previous.messages, message].slice(-5_000),
+      messages: [...previous.messages, message],
       lastMessage: text,
       lastTime: sentAt,
+    }
+    if (isDeveloperSupportConversation(previous)) {
+      const ticketIndex = previous.supportTicketId
+        ? workspaceStore.platform.supportTickets.findIndex((ticket) => ticket?.id === previous.supportTicketId
+          && ticket.tenantId === request.auth.tenantId && ticket.source === DEVELOPER_SUPPORT_CHANNEL
+          && ticket.conversationId === previous.id)
+        : -1
+      if (previous.supportTicketId && ticketIndex < 0) {
+        response.status(409).json({ error: { code: 'SUPPORT_TICKET_LINK_BROKEN', message: '지원 티켓 연결을 확인할 수 없어 메시지를 저장하지 않았습니다. 개발운영진에게 채널 복구를 요청해 주세요.' } })
+        return
+      }
+      const platformTenantRecord = platformTenant(request.auth.tenantId)
+      const ticketId = previous.supportTicketId
+        || `CS-${createdAt.slice(2, 10).replaceAll('-', '')}-${randomBytes(3).toString('hex').toUpperCase()}`
+      const supportConversation = { ...conversation, supportTicketId: ticketId }
+      const previousTickets = workspaceStore.platform.supportTickets
+      const previousAudits = workspaceStore.platform.auditEvents
+      const previousRecord = tenantStore['messenger-conversations']
+      let ticket
+      if (ticketIndex < 0) {
+        const firstLine = text.split(/\r?\n/).find((line) => line.trim())?.trim() || '개발 지원 요청'
+        ticket = {
+          id: ticketId,
+          tenantId: request.auth.tenantId,
+          tenant: platformTenantRecord?.name || request.auth.tenantName || request.auth.tenantId,
+          title: firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine,
+          priority: 'P2',
+          status: '접수',
+          sla: '4시간 이내',
+          owner: DEVELOPER_OPERATIONS_NAME,
+          description: text,
+          source: DEVELOPER_SUPPORT_CHANNEL,
+          conversationId: previous.id,
+          requesterId: request.auth.id,
+          requesterName: request.auth.name,
+          messageCount: 1,
+          attachmentCount: attachments.length,
+          newRequest: true,
+          unanswered: true,
+          lastCustomerMessageAt: createdAt,
+          lastOperatorReplyAt: null,
+          createdAt,
+          updatedAt: createdAt,
+          history: [{ id: `H-${Date.now()}-${randomBytes(2).toString('hex')}`, at: createdAt, title: '개발 지원 요청 접수', detail: `메신저 요청 · 첨부 ${attachments.length}개`, actor: request.auth.name }],
+        }
+        workspaceStore.platform.supportTickets = [ticket, ...previousTickets]
+        appendPlatformAudit(workspaceStore.platform, { tenantId: request.auth.tenantId, event: '개발 지원 요청 접수', scope: `메신저 · 첨부 ${attachments.length}개`, actor: request.auth.name, reference: ticket.id })
+      } else {
+        const previousTicket = previousTickets[ticketIndex]
+        ticket = {
+          ...previousTicket,
+          status: ['해결', '종료'].includes(previousTicket.status) ? '접수' : previousTicket.status,
+          messageCount: Number(previousTicket.messageCount || 0) + 1,
+          attachmentCount: Number(previousTicket.attachmentCount || 0) + attachments.length,
+          newRequest: true,
+          unanswered: true,
+          lastCustomerMessageAt: createdAt,
+          updatedAt: createdAt,
+          history: [...(Array.isArray(previousTicket.history) ? previousTicket.history : []), {
+            id: `H-${Date.now()}-${randomBytes(2).toString('hex')}`,
+            at: createdAt,
+            title: '고객사 추가 메시지',
+            detail: `메신저 후속 요청 · 첨부 ${attachments.length}개`,
+            actor: request.auth.name,
+          }],
+        }
+        workspaceStore.platform.supportTickets = previousTickets.map((item, index) => index === ticketIndex ? ticket : item)
+        appendPlatformAudit(workspaceStore.platform, { tenantId: request.auth.tenantId, event: '개발 지원 후속 메시지', scope: `메신저 · 첨부 ${attachments.length}개`, actor: request.auth.name, reference: ticket.id })
+      }
+      tenantStore['messenger-conversations'] = { data: conversations.map((item) => item.id === supportConversation.id ? supportConversation : item), updatedAt: createdAt, updatedBy: request.auth.id }
+      workspaceStore.tenants[request.auth.tenantId] = tenantStore
+      try {
+        await commitWorkspaceStore()
+      } catch {
+        if (previousRecord) tenantStore['messenger-conversations'] = previousRecord
+        else delete tenantStore['messenger-conversations']
+        workspaceStore.platform.supportTickets = previousTickets
+        workspaceStore.platform.auditEvents = previousAudits
+        response.status(500).json({ error: { code: 'SUPPORT_MESSAGE_WRITE_FAILED', message: '메시지와 지원 티켓을 함께 저장하지 못했습니다. 전송되지 않았으니 다시 시도해 주세요.' } })
+        return
+      }
+      response.status(201).json({ conversation: supportConversation, message, ticket })
+      return
     }
     try {
       await commitConversationData(request.auth.tenantId, conversations.map((item) => item.id === conversation.id ? conversation : item), request.auth.id)
@@ -2357,6 +2847,10 @@ export function createApp(options = {}) {
       response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '참여 중인 대화를 찾을 수 없습니다.' } })
       return
     }
+    if (isDeveloperSupportConversation(previous)) {
+      response.status(403).json({ error: { code: 'SYSTEM_CONVERSATION_IMMUTABLE', message: '개발운영진 지원 채널은 요청 이력 보호를 위해 나갈 수 없습니다.' } })
+      return
+    }
     const conversation = { ...previous, hiddenFor: Array.from(new Set([...(previous.hiddenFor ?? []), request.auth.id])) }
     try {
       await commitConversationData(request.auth.tenantId, conversations.map((item) => item.id === conversation.id ? conversation : item), request.auth.id)
@@ -2373,6 +2867,10 @@ export function createApp(options = {}) {
     const target = conversations.find((conversation) => conversation?.id === request.params.id)
     if (!target || !isConversationVisibleToMember(target, request.auth)) {
       response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '삭제할 대화를 찾을 수 없습니다.' } })
+      return
+    }
+    if (isDeveloperSupportConversation(target)) {
+      response.status(403).json({ error: { code: 'SYSTEM_CONVERSATION_IMMUTABLE', message: '개발운영진 지원 채널과 지원 이력은 고객사에서 삭제할 수 없습니다.' } })
       return
     }
     const deletedAt = new Date().toISOString()
@@ -2929,10 +3427,12 @@ export function createApp(options = {}) {
         response.status(400).json({ error: { code: 'INVALID_DOCUMENT_REFERENCE', message: '증빙파일을 찾을 수 없거나 현재 계정에 열람 권한이 없습니다. 파일을 다시 첨부해 주세요.' } })
         return
       }
+      const completion = { summary, evidence, submittedAt: now, submittedById: request.auth.id, submittedByName: request.auth.name }
       next = {
         ...previous,
         status: '결재대기',
-        completion: { summary, evidence, submittedAt: now, submittedById: request.auth.id, submittedByName: request.auth.name },
+        completion,
+        completionHistory: [...(Array.isArray(previous.completionHistory) ? previous.completionHistory : previous.completion ? [previous.completion] : []), completion],
       }
     } else if (action === 'approve' && isRequester && previous.status === '결재대기') {
       const comment = String(request.body?.review?.comment ?? '').trim()
@@ -2940,10 +3440,12 @@ export function createApp(options = {}) {
         response.status(400).json({ error: { code: 'INVALID_REVIEW', message: '승인 코멘트를 2자 이상 입력해 주세요.' } })
         return
       }
+      const review = { decision: 'approved', comment, reviewedAt: now, reviewerId: request.auth.id, reviewerName: request.auth.name }
       next = {
         ...previous,
         status: '결재완료',
-        review: { decision: 'approved', comment, reviewedAt: now, reviewerId: request.auth.id, reviewerName: request.auth.name },
+        review,
+        reviewHistory: [...(Array.isArray(previous.reviewHistory) ? previous.reviewHistory : previous.review ? [previous.review] : []), review],
       }
     } else if (action === 'request-changes' && isRequester && previous.status === '결재대기') {
       const comment = String(request.body?.review?.comment ?? '').trim()
@@ -2952,10 +3454,12 @@ export function createApp(options = {}) {
         response.status(400).json({ error: { code: 'INVALID_REVIEW', message: '수정 사유와 수정할 항목을 각각 2자 이상 입력해 주세요.' } })
         return
       }
+      const review = { decision: 'changes-requested', comment, requestedChanges, reviewedAt: now, reviewerId: request.auth.id, reviewerName: request.auth.name }
       next = {
         ...previous,
         status: '수행중',
-        review: { decision: 'changes-requested', comment, requestedChanges, reviewedAt: now, reviewerId: request.auth.id, reviewerName: request.auth.name },
+        review,
+        reviewHistory: [...(Array.isArray(previous.reviewHistory) ? previous.reviewHistory : previous.review ? [previous.review] : []), review],
       }
     } else {
       response.status(403).json({ error: { code: 'WORK_TRANSITION_FORBIDDEN', message: '현재 담당자와 업무 상태에서는 이 작업을 수행할 수 없습니다.' } })
@@ -3108,6 +3612,10 @@ export function createApp(options = {}) {
     }
     const record = workspaceStore.tenants[request.auth.tenantId]?.[key]
     let data = record?.data ?? null
+    if (key === 'messenger-conversations' && Array.isArray(record?.data)) {
+      data = record.data.filter((conversation) => !isDeveloperSupportConversation(conversation)
+        || conversation.supportRequesterId === request.auth.id)
+    }
     if (request.auth.role === 'tenant-member' && Array.isArray(record?.data)) {
       if (key === 'work-items') data = record.data.filter((item) => isMemberWorkItem(item, request.auth))
       if (key === 'leave-requests') data = record.data.filter((leave) => leave?.requesterId === request.auth.id)
@@ -3162,7 +3670,7 @@ export function createApp(options = {}) {
       return
     }
     let nextData = request.body.data
-    if (['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts'].includes(key) && !await canReferenceDocuments(nextData, request.auth)) {
+    if (['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations'].includes(key) && !await canReferenceDocuments(nextData, request.auth)) {
       response.status(400).json({ error: { code: 'INVALID_DOCUMENT_REFERENCE', message: '첨부파일을 찾을 수 없거나 현재 계정에 열람 권한이 없습니다. 파일을 다시 첨부해 주세요.' } })
       return
     }
@@ -3288,8 +3796,30 @@ export function createApp(options = {}) {
     response.json({ updatedAt: record.updatedAt, version })
   })
 
+  registerPerformanceRoutes({
+    app,
+    requireAuth,
+    requireTenantAdmin,
+    requireMatchingWorkspaceIdentity,
+    workspaceStore,
+    accounts,
+    commitWorkspaceStore,
+    client,
+    model,
+    billingService,
+  })
+
+  registerBillingRoutes(app, {
+    service: billingService,
+    requireAuth,
+    requirePlatformOperator,
+    requireMatchingWorkspaceIdentity,
+    listPlatformTenantIds: () => workspaceStore.platform.tenants.map((tenant) => tenant.id),
+  })
+
   app.post('/api/chat', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     const messages = normalizeMessages(request.body?.messages)
+    const usageFeature = normalizeChatUsageFeature(request.body?.feature)
     let requestedAttachments
     try { requestedAttachments = normalizeChatAttachmentRequest(request.body?.attachments) }
     catch (error) {
@@ -3344,6 +3874,10 @@ export function createApp(options = {}) {
       return
     }
 
+    let usageReservation = null
+    let usageActor = null
+    let providerSucceeded = false
+    const usageStartedAt = new Date()
     try {
       const attachmentResult = await resolveChatAttachments({
         requested: requestedAttachments,
@@ -3353,6 +3887,23 @@ export function createApp(options = {}) {
         storage: documentStorage,
       })
       const claudeMessages = attachBlocksToLatestUserMessage(messages, attachmentResult.blocks)
+      if (request.auth.tenantId) {
+        usageActor = { id: 'server:ai-chat', role: 'system', trusted: true, tenantId: request.auth.tenantId }
+        const count = typeof client.messages.countTokens === 'function'
+          ? await client.messages.countTokens({ model, system: buildSystemPrompt({ ...chatContext, selectedDocuments: attachmentResult.documents }), messages: claudeMessages })
+          : { input_tokens: Math.ceil(JSON.stringify(claudeMessages).length / 4) }
+        const reservationId = `chat-res:${request.auth.tenantId}:${request.auth.id}:${randomBytes(12).toString('hex')}`
+        usageReservation = (await billingService.reserveUsage(usageActor, {
+          id: reservationId,
+          tenantId: request.auth.tenantId,
+          userId: request.auth.id,
+          feature: usageFeature,
+          model,
+          estimatedInputTokens: Number(count.input_tokens || 0),
+          estimatedOutputTokens: 2_048,
+          occurredAt: usageStartedAt.toISOString(),
+        })).reservation
+      }
       const result = await client.messages.create({
         model,
         max_tokens: 2_048,
@@ -3362,18 +3913,65 @@ export function createApp(options = {}) {
       const text = extractText(result)
 
       if (!text) throw new Error('Claude returned no text content')
+      providerSucceeded = true
+
+      let usageAccounting = usageReservation && usageActor ? 'recorded' : 'not-applicable'
+      if (usageReservation && usageActor) {
+        const usageEvent = {
+          id: `anthropic:${result.id || randomBytes(12).toString('hex')}`,
+          reservationId: usageReservation.id,
+          tenantId: request.auth.tenantId,
+          userId: request.auth.id,
+          feature: usageFeature,
+          // The reservation is made against the model requested from the provider.
+          // Keep that immutable billing identity even when a provider (or test
+          // double) reports an alias in its response; retain the reported value
+          // separately for audit instead of invalidating the reservation.
+          model: usageReservation.model,
+          inputTokens: Number(result.usage?.input_tokens || 0),
+          outputTokens: Number(result.usage?.output_tokens || 0),
+          occurredAt: usageStartedAt.toISOString(),
+          durationMs: Date.now() - usageStartedAt.getTime(),
+          metadata: { providerResponseModel: result.model || model },
+        }
+        try {
+          await billingService.recordUsageEvent(usageActor, usageEvent)
+        } catch (ledgerError) {
+          usageAccounting = 'reconciliation-pending'
+          try {
+            await billingService.recordReconciliationPending(usageActor, {
+              ...usageEvent,
+              usageEventId: usageEvent.id,
+              id: `reconciliation:${usageEvent.id}`,
+              lastError: ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
+            })
+          } catch (reconciliationError) {
+            usageAccounting = 'reconciliation-unavailable'
+            console.error('AI usage reconciliation persistence failed after provider success', reconciliationError)
+          }
+        }
+      }
 
       response.json({
         text,
         model: result.model || model,
         mode: 'claude',
         usage: result.usage,
+        usageAccounting,
         attachmentMode: attachmentResult.documents.length > 0 && attachmentResult.contentDocuments === attachmentResult.documents.length ? 'content' : 'metadata',
         attachmentsProcessed: attachmentResult.contentDocuments,
       })
     } catch (error) {
+      if (!providerSucceeded && usageReservation && usageActor) {
+        try { await billingService.releaseUsageReservation(usageActor, { tenantId: request.auth.tenantId, reservationId: usageReservation.id }) }
+        catch { /* the pending reservation expires automatically and prevents double-spend meanwhile */ }
+      }
       if (error instanceof ChatAttachmentError) {
         response.status(error.status).json({ error: { code: error.code, message: error.message }, model, mode: 'claude' })
+        return
+      }
+      if (error instanceof BillingServiceError) {
+        response.status(error.status).json({ error: { code: error.code, message: error.message, details: error.details }, model, mode: 'claude' })
         return
       }
       const mapped = mapAnthropicError(error)

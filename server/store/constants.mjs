@@ -17,6 +17,8 @@ export const WORKSPACE_TABLES = Object.freeze({
   'sales-shipments': 'sales_shipments',
   'compliance-records': 'compliance_records',
   'document-storage-settings': 'document_storage_settings',
+  'performance-settings': 'performance_settings',
+  'performance-reports': 'performance_report_snapshots',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))
@@ -27,6 +29,7 @@ export const WORKSPACE_SHAPES = Object.freeze({
   'factory-layouts': 'object-map',
   'leave-management': 'singleton',
   'document-storage-settings': 'singleton',
+  'performance-settings': 'singleton',
 })
 
 export const ARRAY_WORKSPACE_KEYS = new Set(
@@ -50,4 +53,3 @@ export const emptyWorkspaceStore = () => ({
   invitedAccounts: [],
   passwordResetRequests: [],
 })
-

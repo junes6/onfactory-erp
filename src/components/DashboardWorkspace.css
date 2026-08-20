@@ -1,5 +1,5 @@
 .dashboard-layout-trigger { white-space: nowrap; }
-.dashboard-widget-grid { display: grid; grid-template-columns: repeat(12,minmax(0,1fr)); align-items: start; gap: var(--space-12); }
+.dashboard-widget-grid { display: grid; grid-template-columns: repeat(12,minmax(0,1fr)); align-items: start; gap: var(--space-16); }
 .dashboard-widget { min-width: 0; }
 .dashboard-widget-half { grid-column: span 4; }
 .dashboard-widget-wide { grid-column: span 8; }
@@ -12,12 +12,12 @@
 
 .dashboard-modal-backdrop { position: fixed; z-index: 180; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: var(--space-24); background: var(--color-overlay); backdrop-filter: blur(5px); }
 .dashboard-layout-modal { width: min(760px,100%); max-height: min(800px,calc(100vh - 44px)); overflow-y: auto; border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); box-shadow: var(--shadow-none); }
-.dashboard-layout-modal > header { position: sticky; z-index: 1; top: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-16); padding: var(--space-24) var(--space-24) var(--space-16); border-bottom: var(--hairline) solid var(--line); background: var(--surface); }
+.dashboard-layout-modal > header { position: sticky; z-index: 1; top: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-16); padding: var(--card-inset); border-bottom: var(--hairline) solid var(--line); background: var(--surface); }
 .dashboard-layout-modal > header span { color: var(--forest); font-size: var(--font-13); font-weight: var(--weight-medium); letter-spacing: .08em; }
 .dashboard-layout-modal > header h2 { margin: var(--space-4) var(--space-0) var(--space-4); font-size: var(--font-22); letter-spacing: -.035em; }
 .dashboard-layout-modal > header p { margin: var(--space-0); color: var(--muted); font-size: var(--font-15); }
 .dashboard-layout-modal > header button { width: 40px; height: 40px; flex: 0 0 auto; display: grid; place-items: center; border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); cursor: pointer; }
-.dashboard-widget-settings { display: flex; flex-direction: column; padding: var(--space-8) var(--space-24); }
+.dashboard-widget-settings { display: flex; flex-direction: column; padding: var(--space-0) var(--card-inset); }
 .dashboard-widget-settings article { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-16); padding: var(--space-16) var(--space-0); border-bottom: var(--hairline) solid var(--line); }
 .dashboard-widget-settings article:last-child { border-bottom: none; }
 .dashboard-widget-settings label { min-width: 0; display: flex; align-items: center; gap: var(--space-12); cursor: pointer; }
@@ -29,7 +29,7 @@
 .dashboard-widget-setting-actions { display: flex; align-items: center; gap: var(--space-4); }
 .dashboard-widget-setting-actions select { min-height: 40px; padding: var(--space-0) var(--space-32) var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); }
 .dashboard-widget-setting-actions button { width: 40px; height: 40px; display: grid; place-items: center; border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); cursor: pointer; }
-.dashboard-layout-modal > footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); padding: var(--space-16) var(--space-24) var(--space-24); border-top: var(--hairline) solid var(--line); }
+.dashboard-layout-modal > footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); padding: var(--card-inset); border-top: var(--hairline) solid var(--line); }
 
 .dashboard-quick-links { min-width: 0; padding: var(--space-16); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); box-shadow: var(--shadow-none); }
 .dashboard-quick-links > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-8); }
@@ -76,7 +76,7 @@ html[data-theme='dark'] .dashboard-link-form :is(input,select) { color: var(--in
   .dashboard-widget-ai .ai-chat { height: min(650px,calc(100vh - 100px)); }
   .dashboard-modal-backdrop { align-items: end; padding: var(--space-0); }
   .dashboard-layout-modal { max-height: 90vh; border-radius: var(--radius-8); }
-  .dashboard-layout-modal > header, .dashboard-widget-settings, .dashboard-layout-modal > footer { padding-inline: var(--space-16); }
+  .dashboard-layout-modal > header, .dashboard-widget-settings, .dashboard-layout-modal > footer { padding-inline: var(--card-inset); }
   .dashboard-widget-settings article { align-items: flex-start; flex-direction: column; }
   .dashboard-widget-setting-actions { width: 100%; }
   .dashboard-widget-setting-actions select { min-width: 0; flex: 1; }

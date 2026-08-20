@@ -91,7 +91,7 @@ const workspaceTables = [
   'work_items', 'messenger_conversations', 'calendar_events', 'sales_channels', 'inventory_locations',
   'factory_locations', 'leave_requests', 'account_requests', 'daily_journals', 'work_rules',
   'inventory_movements', 'product_catalog', 'leave_management', 'factory_layouts', 'calendar_departments',
-  'document_storage_settings', 'compliance_records', 'sales_shipments',
+  'document_storage_settings', 'compliance_records', 'sales_shipments', 'performance_settings', 'performance_report_snapshots',
 ]
 for (const table of workspaceTables) {
   const definition = schema.match(new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+${table}\\s*\\(([\\s\\S]*?)\\);`, 'i'))?.[1] ?? ''
@@ -109,6 +109,15 @@ const requiredArtifacts = [
   'server/store/index.mjs',
   'server/store/json-store.mjs',
   'server/store/postgres-store.mjs',
+  'server/billing-service.mjs',
+  'server/billing-repository.mjs',
+  'server/billing-routes.mjs',
+  'server/performance-service.mjs',
+  'server/performance-routes.mjs',
+  'drizzle/0002_billing.sql',
+  'supabase/migrations/20260821000000_billing.sql',
+  'src/components/BillingDashboard.tsx',
+  'src/components/PerformanceReports.tsx',
   'src/tokens.css',
   'src/utils/dateTime.ts',
 ]
@@ -131,10 +140,20 @@ try {
   if (!/FILE_STORAGE_BACKEND/.test(storageSource)) errors.push('server/storage/index.mjs:1 FILE_STORAGE_BACKEND 스위치 누락')
 } catch { /* required artifact errors above are clearer */ }
 
+try {
+  const billingSchema = readFileSync(path.join(root, 'supabase', 'migrations', '20260821000000_billing.sql'), 'utf8').toLowerCase()
+  for (const table of ['billing_model_rates', 'billing_plans', 'billing_tenant_assignments', 'billing_usage_reservations', 'billing_usage_events', 'billing_storage_daily_snapshots', 'billing_monthly_snapshots']) {
+    if (!new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+${table}\\b`, 'i').test(billingSchema)) {
+      errors.push(`supabase/migrations/20260821000000_billing.sql:1 비용 원장 테이블 누락: ${table}`)
+    }
+  }
+  if (!/billing_monthly_snapshots_immutable/i.test(billingSchema)) errors.push('supabase/migrations/20260821000000_billing.sql:1 월 청구 불변성 트리거 누락')
+} catch { /* required artifact errors above are clearer */ }
+
 if (errors.length) {
   console.error(`[architecture] ${errors.length}개 위반을 발견했습니다.`)
   console.error(errors.join('\n'))
   process.exitCode = 1
 } else {
-  console.log('[architecture] 데모 분리·필수 코어 테이블·18개 행 테이블 공통 컬럼 계약을 통과했습니다.')
+  console.log('[architecture] 데모 분리·필수 코어 테이블·20개 행 테이블 공통 컬럼 계약을 통과했습니다.')
 }

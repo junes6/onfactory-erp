@@ -258,7 +258,7 @@ export function ComplianceCenter({ workspaceScope, canManage, companyName, onToa
   const runAiReview = async () => {
     setAiBusy(true)
     try {
-      const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ messages: [{ role: 'user', content: `${companyName}의 식품안전 인증·검토 일정을 검토하고 지금 해야 할 조치를 우선순위 3개로 제안해 주세요.` }], context: { records: records.map(({ name, category: recordCategory, expiresAt, status, checklist, attachments }) => ({ name, category: recordCategory, expiresAt, status, checklist, attachmentCount: attachments.length })) } }) })
+      const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ feature: 'compliance-review', messages: [{ role: 'user', content: `${companyName}의 식품안전 인증·검토 일정을 검토하고 지금 해야 할 조치를 우선순위 3개로 제안해 주세요.` }], context: { records: records.map(({ name, category: recordCategory, expiresAt, status, checklist, attachments }) => ({ name, category: recordCategory, expiresAt, status, checklist, attachmentCount: attachments.length })) } }) })
       const body = await response.json() as { text?: string; error?: { message?: string } }
       if (!response.ok || !body.text) throw new Error(body.error?.message || 'AI 검토에 실패했습니다.')
       setAiResult(body.text)
