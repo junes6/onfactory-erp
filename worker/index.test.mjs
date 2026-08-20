@@ -13,7 +13,7 @@ async function loadWorkerFactory() {
     .replace("import Anthropic from '@anthropic-ai/sdk'", 'class Anthropic {}')
     .replace(/import currentWorkspaceSeed from '[^']+' with \{ type: 'json' \}/, 'const currentWorkspaceSeed = {}')
     .replace(/import \{ createApp as createExpressApp \} from '[^']+'/, "const createExpressApp = () => { throw new Error('test dependency required') }")
-    .replace(/import \{ createD1BillingRepository \} from '[^']+'/, 'const createD1BillingRepository = () => ({})')
+    .replace(/import \{ createD1BillingRepository \} from '[^']+'/, "const createD1BillingRepository = (database) => { if (!database) throw new Error('D1 binding required'); return {} }")
     .replace(/import \{ createBillingService \} from '[^']+'/, 'const createBillingService = () => ({ reconcilePendingUsageBatch: async () => {}, recordDailyStorageSnapshot: async () => {}, createMonthlySnapshot: async () => {} })')
     .replace(/import \{ performanceMaintenanceErrors, runPerformanceMonthlyMaintenance \} from '[^']+'/, 'const performanceMaintenanceErrors = (results) => (results ?? []).filter((result) => result?.error).map((result) => result.error); const runPerformanceMonthlyMaintenance = async () => []')
   assert.equal(source.includes("from 'cloudflare:workers'"), false)
@@ -272,6 +272,29 @@ function workerOptions(createSitesWorker, database, bucket, mock, seed, override
 }
 
 const createSitesWorker = await loadWorkerFactory()
+
+test('module entrypoint defers binding access and uses request-time Cloudflare env', async () => {
+  const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), 'onfactory-sites-runtime-env-'))
+  try {
+    const database = new FakeD1()
+    const bucket = new FakeR2()
+    const mock = createMockExpress(temporaryDirectory)
+    mock.documentDirectory = temporaryDirectory
+    const worker = createSitesWorker({
+      createApp: mock.createApp,
+      httpServerHandler: mock.httpServerHandler,
+      initialWorkspaceSeed: makeSeed(),
+      documentDirectory: temporaryDirectory,
+      lockOptions: { waitMs: 2_000, leaseMs: 500, heartbeatMs: 100 },
+    })
+    const runtimeEnv = { DB: database, FILES: bucket, ERP_SEED_PASSWORD: 'Hosted-Seed!2026' }
+    const response = await worker.fetch(new Request('https://erp.test/api/test/read'), runtimeEnv)
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).marker, 'seed-a')
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true })
+  }
+})
 
 test('Sites Worker seeds current state once and preserves it across worker instances', async () => {
   const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), 'onfactory-sites-seed-'))

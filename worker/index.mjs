@@ -437,26 +437,34 @@ async function closeExpressServer(server) {
 }
 
 export function createSitesWorker(dependencies = {}) {
-  const runtimeEnv = dependencies.env ?? cloudflareEnv
+  // Cloudflare supplies bindings as the second argument to each module-worker
+  // handler.  Do not dereference D1/R2 bindings while this module is imported:
+  // deployment tooling imports the entrypoint before request bindings exist.
+  const configuredEnv = dependencies.env
   const createApplication = dependencies.createApp ?? createExpressApp
   const createHttpHandler = dependencies.httpServerHandler ?? cloudflareHttpServerHandler
   const workspaceSeed = dependencies.initialWorkspaceSeed ?? currentWorkspaceSeed
   const documentDirectory = dependencies.documentDirectory ?? DOCUMENT_DIRECTORY
   const expressPort = dependencies.expressPort ?? EXPRESS_PORT
   const lockOptions = dependencies.lockOptions ?? {}
-  const billingService = dependencies.billingService ?? createBillingService({ repository: createD1BillingRepository(runtimeEnv.DB) })
   const runPerformanceMaintenance = dependencies.runPerformanceMonthlyMaintenance ?? runPerformanceMonthlyMaintenance
-  let schemaPromise
-  const ensureSchema = () => {
-    schemaPromise ??= ensureRuntimeTables(runtimeEnv).catch((error) => {
-      schemaPromise = undefined
+  const schemaPromises = new WeakMap()
+  const resolveRuntimeEnv = (workerEnv) => configuredEnv ?? workerEnv ?? cloudflareEnv
+  const ensureSchema = (runtimeEnv) => {
+    const database = runtimeEnv?.DB
+    let schemaPromise = database && typeof database === 'object' ? schemaPromises.get(database) : undefined
+    if (schemaPromise) return schemaPromise
+    schemaPromise = ensureRuntimeTables(runtimeEnv).catch((error) => {
+      if (database && typeof database === 'object') schemaPromises.delete(database)
       throw error
     })
+    if (database && typeof database === 'object') schemaPromises.set(database, schemaPromise)
     return schemaPromise
   }
 
   return {
     async fetch(request, workerEnv, ctx) {
+      const runtimeEnv = resolveRuntimeEnv(workerEnv)
       const pathname = new URL(request.url).pathname
       if (!pathname.startsWith('/api/')) {
         if (runtimeEnv.ASSETS?.fetch) return runtimeEnv.ASSETS.fetch(request)
@@ -468,7 +476,7 @@ export function createSitesWorker(dependencies = {}) {
       let binaryPlan = emptyBinaryPlan()
       try {
         const seedPassword = validSeedPassword(runtimeEnv)
-        await ensureSchema()
+        await ensureSchema(runtimeEnv)
         lock = await acquireRequestLock(runtimeEnv, lockOptions)
         heartbeat = startLockHeartbeat(lock, lockOptions.heartbeatMs ?? LOCK_HEARTBEAT_MS)
         const limited = await enforceAuthRateLimit(runtimeEnv, request)
@@ -480,6 +488,8 @@ export function createSitesWorker(dependencies = {}) {
         const beforePayload = serializeRuntimeState(workspaceStore, sessions)
         const beforeWorkspaceStore = structuredClone(workspaceStore)
         let workspaceDirty = false
+        const billingService = dependencies.billingService
+          ?? createBillingService({ repository: createD1BillingRepository(runtimeEnv.DB) })
         const app = createApplication({
           initialWorkspaceStore: workspaceStore,
           sessions,
@@ -554,7 +564,7 @@ export function createSitesWorker(dependencies = {}) {
       }
     },
     async scheduled(_controller, workerEnv, ctx) {
-      const activeEnv = workerEnv ?? runtimeEnv
+      const activeEnv = resolveRuntimeEnv(workerEnv)
       const task = (async () => {
         let lock
         let heartbeat
