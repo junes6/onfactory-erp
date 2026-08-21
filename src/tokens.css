@@ -13,6 +13,7 @@
   --color-gray-400: #A7A7A1;
   --color-gray-600: #6B6B67;
   --color-gray-800: #3B3B39;
+  --color-card-line: #E2E2DD;
 
   --color-blue-soft: color-mix(in srgb, var(--color-blue) 12%, var(--color-surface));
   --color-success-soft: color-mix(in srgb, var(--color-success) 12%, var(--color-surface));
@@ -36,6 +37,10 @@
   --space-16: 16px;
   --space-24: 24px;
   --space-32: 32px;
+
+  /* v3 dashboard section rhythm and stronger card boundary. */
+  --dashboard-spacing: 20px;
+  --dashboard-stroke: 1px;
 
   /* Product surface contract: cards use 20px inset and 12px corners. */
   --card-inset: 20px;

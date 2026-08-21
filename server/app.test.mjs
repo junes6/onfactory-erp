@@ -139,6 +139,142 @@ test('chat uses the configured Claude client and response contract', async () =>
   )
 })
 
+test('journal draft uses only the signed-in employee today records and records journal-draft usage', async () => {
+  const now = new Date().toISOString()
+  const initialWorkspaceStore = {
+    version: 2,
+    tenants: {
+      'TENANT-SUNSEA': {
+        'work-items': {
+          data: [
+            {
+              id: 'WK-JOURNAL-OWN', title: '냉동 원료 입고 검수', owner: '오태식', ownerId: 'USR-SUNSEA-OH', status: '결재완료',
+              completion: { summary: '입고 12팔레트의 LOT와 온도를 확인했습니다.', submittedAt: now },
+            },
+            {
+              id: 'WK-JOURNAL-REVIEW', title: '생산 수율 결재', owner: '박지현', ownerId: 'USR-SUNSEA-PARK', status: '결재완료',
+              review: { decision: 'approved', comment: '수율 기록을 확인했습니다.', reviewedAt: now, reviewerId: 'USR-SUNSEA-OH', reviewerName: '오태식' },
+            },
+            {
+              id: 'WK-JOURNAL-OTHER', title: '다른 직원 비공개 작업', owner: '박지현', ownerId: 'USR-SUNSEA-PARK', status: '결재완료',
+              completion: { summary: '초안 근거에 포함되면 안 됩니다.', submittedAt: now },
+            },
+          ],
+          updatedAt: now,
+          updatedBy: 'test',
+        },
+      },
+    },
+    platform: {},
+    accountApprovals: {},
+    accountCredentials: {},
+    invitedAccounts: [],
+    passwordResetRequests: [],
+  }
+  const calls = { reservations: [], events: [], prompt: '' }
+  const fakeClient = {
+    messages: {
+      countTokens: async () => ({ input_tokens: 24 }),
+      create: async (request) => {
+        calls.prompt = request.system
+        return {
+          id: 'journal-draft-provider', model: 'claude-test',
+          content: [{ type: 'text', text: '- 냉동 원료 입고 12팔레트의 LOT와 온도를 확인함\n- 생산 수율 기록을 검토하고 승인함' }],
+          usage: { input_tokens: 24, output_tokens: 18 },
+        }
+      },
+    },
+  }
+  const billingService = {
+    reserveUsage: async (_actor, input) => { calls.reservations.push(input); return { reservation: { ...input, status: 'pending' } } },
+    recordUsageEvent: async (_actor, input) => { calls.events.push(input); return { event: input } },
+    recordReconciliationPending: async () => { throw new Error('not expected') },
+    releaseUsageReservation: async () => {},
+  }
+
+  await withServer(createApp({
+    apiKey: 'test-key', model: 'claude-test', client: fakeClient, billingService, initialWorkspaceStore,
+  }), async (origin) => {
+    const member = await login(origin, 'taesik.oh@sunsea.co.kr')
+    assert.equal(member.response.status, 200)
+    const response = await fetch(`${origin}/api/daily-journals/draft`, { method: 'POST', headers: { cookie: member.cookie } })
+    const body = await response.json()
+    assert.equal(response.status, 200)
+    assert.equal(body.mode, 'claude')
+    assert.equal(body.sourceCount, 2)
+    assert.match(body.draft, /^• 냉동 원료/m)
+    assert.deepEqual(body.sources.map((source) => source.id), ['WK-JOURNAL-OWN', 'WK-JOURNAL-REVIEW'])
+  })
+
+  assert.match(calls.prompt, /냉동 원료 입고 검수/)
+  assert.match(calls.prompt, /생산 수율 결재/)
+  assert.doesNotMatch(calls.prompt, /다른 직원 비공개 작업/)
+  assert.deepEqual(calls.reservations.map((item) => item.feature), ['journal-draft'])
+  assert.deepEqual(calls.events.map((item) => item.feature), ['journal-draft'])
+  assert.equal(calls.events[0].metadata.sourceCount, 2)
+})
+
+test('journal autosave persists one editable draft and never overwrites a submitted journal', async () => {
+  const initialWorkspaceStore = {
+    version: 2,
+    tenants: { 'TENANT-SUNSEA': {} },
+    platform: {},
+    accountApprovals: {},
+    accountCredentials: {},
+    invitedAccounts: [],
+    passwordResetRequests: [],
+  }
+  await withServer(createApp({ apiKey: '', initialWorkspaceStore }), async (origin) => {
+    const member = await login(origin, 'taesik.oh@sunsea.co.kr')
+    assert.equal(member.response.status, 200)
+    const journal = {
+      id: 'JR-AUTOSAVE', date: '2026-08-21', title: '2026-08-21_오태식_업무일지', author: '위조 이름', department: '위조 부서',
+      completed: '• 원료 LOT를 확인했습니다.', issue: '', nextPlan: '', approver: '소속 관리자', status: '임시저장',
+      updatedAt: '방금', feedback: '', attachments: [], reviews: [],
+    }
+    const autosave = await fetch(`${origin}/api/daily-journals/${journal.id}/draft`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', cookie: member.cookie }, body: JSON.stringify({ journal }),
+    })
+    const saved = (await autosave.json()).journal
+    assert.equal(autosave.status, 200)
+    assert.equal(saved.authorId, 'USR-SUNSEA-OH')
+    assert.equal(saved.author, '오태식')
+    assert.equal(saved.department, '생산 1팀')
+    assert.equal(saved.status, '임시저장')
+    assert.equal(saved.draftRevision, 1, 'legacy drafts without a revision start safely at revision 1')
+
+    const newerResponse = await fetch(`${origin}/api/daily-journals/${journal.id}/draft`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', cookie: member.cookie },
+      body: JSON.stringify({ journal: { ...saved, draftRevision: 3, completed: '• 자동저장 중 추가한 최신 입력' } }),
+    })
+    const newerBody = await newerResponse.json()
+    assert.equal(newerResponse.status, 200)
+    assert.equal(newerBody.stale, false)
+    assert.equal(newerBody.journal.draftRevision, 3)
+
+    const delayedOlderResponse = await fetch(`${origin}/api/daily-journals/${journal.id}/draft`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', cookie: member.cookie },
+      body: JSON.stringify({ journal: { ...saved, draftRevision: 2, completed: '• 늦게 도착한 이전 입력' } }),
+    })
+    const delayedOlderBody = await delayedOlderResponse.json()
+    assert.equal(delayedOlderResponse.status, 200)
+    assert.equal(delayedOlderBody.stale, true)
+    assert.equal(delayedOlderBody.journal.draftRevision, 3)
+    assert.equal(delayedOlderBody.journal.completed, '• 자동저장 중 추가한 최신 입력')
+
+    const submit = await fetch(`${origin}/api/workspace/daily-journals`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', cookie: member.cookie },
+      body: JSON.stringify({ data: [{ ...newerBody.journal, status: '결재요청' }] }),
+    })
+    assert.equal(submit.status, 200)
+    const blocked = await fetch(`${origin}/api/daily-journals/${journal.id}/draft`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', cookie: member.cookie }, body: JSON.stringify({ journal: saved }),
+    })
+    assert.equal(blocked.status, 409)
+    assert.equal((await blocked.json()).error.code, 'JOURNAL_NOT_EDITABLE')
+  })
+})
+
 test('chat billing feature allowlist preserves approved scopes and rejects client feature tampering', async () => {
   let providerCall = 0
   const calls = { reservations: [], events: [] }
@@ -160,7 +296,7 @@ test('chat billing feature allowlist preserves approved scopes and rejects clien
   await withServer(createApp({
     apiKey: 'test-key', model: 'claude-test', client: fakeClient, billingService, authDisabled: true,
   }), async (origin) => {
-    const requested = ['document-search', 'compliance-review', 'ai-chat', 'document-search<script>', undefined]
+    const requested = ['document-search', 'compliance-review', 'journal-draft', 'ai-chat', 'document-search<script>', undefined]
     for (const feature of requested) {
       const response = await fetch(`${origin}/api/chat`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -169,7 +305,7 @@ test('chat billing feature allowlist preserves approved scopes and rejects clien
       assert.equal(response.status, 200)
     }
   })
-  const expected = ['document-search', 'compliance-review', 'ai-chat', 'ai-chat', 'ai-chat']
+  const expected = ['document-search', 'compliance-review', 'journal-draft', 'ai-chat', 'ai-chat', 'ai-chat']
   assert.deepEqual(calls.reservations.map((item) => item.feature), expected)
   assert.deepEqual(calls.events.map((item) => item.feature), expected)
   assert.deepEqual(calls.events.map((item) => item.feature), calls.reservations.map((item) => item.feature))

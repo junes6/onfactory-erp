@@ -263,10 +263,10 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
 
   return (
     <section className={'ai-chat ' + (compact ? 'compact' : '')} aria-label="Claude AI 채팅">
-      <div className="ai-chat-head">
-        <div className="ai-chat-identity">
+      <div className="ai-chat-head dashboard-section-header">
+        <div className="ai-chat-identity dashboard-section-title">
           <span className="claude-mark"><Sparkles size={20} /></span>
-          <div><strong>온팩토리 AI</strong><span>Claude 기반 운영 어시스턴트</span></div>
+          <div><strong>AI 업무 대화</strong><span>온팩토리 운영 어시스턴트</span></div>
         </div>
         <span className={'connection-pill ' + apiMode}>
           <i />{apiMode === 'claude' ? 'Claude 연결됨' : apiMode === 'checking' ? '연결 확인 중' : '데모 모드'}

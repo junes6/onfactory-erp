@@ -69,7 +69,7 @@ const WORK_ITEM_BASE_FIELDS = [
   'id', 'title', 'description', 'owner', 'requestedBy', 'due', 'priority', 'status', 'category',
 ]
 const WORK_ITEM_ID_FIELDS = ['ownerId', 'requesterId']
-const WORK_ITEM_OPTIONAL_FIELDS = ['completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt']
+const WORK_ITEM_OPTIONAL_FIELDS = ['attachments', 'completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt']
 const WORK_ITEM_FIELDS = [...WORK_ITEM_BASE_FIELDS, ...WORK_ITEM_ID_FIELDS, ...WORK_ITEM_OPTIONAL_FIELDS]
 const WORK_ITEM_STATUSES = new Set(['업무요청', '수행중', '결재대기', '결재완료'])
 const WORK_ITEM_PRIORITIES = new Set(['긴급', '높음', '보통'])
@@ -82,12 +82,14 @@ const JOURNAL_FIELDS = [
   'id', 'date', 'title', 'author', 'department', 'completed', 'issue', 'nextPlan',
   'approver', 'status', 'updatedAt', 'feedback', 'attachments',
 ]
-const JOURNAL_OPTIONAL_FIELDS = ['reviews', 'submittedAt']
+const JOURNAL_OPTIONAL_FIELDS = ['reviews', 'submittedAt', 'draftRevision']
 const JOURNAL_STATUSES = new Set(['임시저장', '결재요청', '승인', '반려'])
 const MEMBER_EDITABLE_JOURNAL_STATUSES = new Set(['임시저장', '반려'])
 const MEMBER_WRITABLE_JOURNAL_STATUSES = new Set(['임시저장', '결재요청'])
-function accountIdentityIds(account) {
-  const legacyId = LEGACY_ID_BY_NAME.get(account?.name)
+function accountIdentityIds(account, accounts = []) {
+  const legacyId = uniqueActiveTenantAccountId(accounts, account?.tenantId, account?.name) === account?.id
+    ? LEGACY_ID_BY_NAME.get(account?.name)
+    : null
   return legacyId ? [account.id, legacyId] : [account.id]
 }
 const CALENDAR_FIELDS = ['id', 'title', 'date', 'start', 'end', 'scope', 'department', 'location', 'owner', 'note']
@@ -143,6 +145,7 @@ function hasWorkItemShape(value) {
   if (WORK_ITEM_BASE_FIELDS.some((key) => typeof value[key] !== 'string')) return false
   if (WORK_ITEM_ID_FIELDS.some((key) => value[key] !== undefined && (typeof value[key] !== 'string' || !value[key]))) return false
   if (['ruleId', 'ruleOccurrence', 'createdAt'].some((key) => value[key] !== undefined && typeof value[key] !== 'string')) return false
+  if (value.attachments !== undefined && (!Array.isArray(value.attachments) || value.attachments.length > 10 || !value.attachments.every(hasWorkEvidenceShape))) return false
   if (value.completion !== undefined && !hasWorkCompletionShape(value.completion)) return false
   if (value.completionHistory !== undefined && (!Array.isArray(value.completionHistory) || value.completionHistory.length > 100 || !value.completionHistory.every(hasWorkCompletionShape))) return false
   if (value.review !== undefined && !hasWorkReviewShape(value.review)) return false
@@ -270,6 +273,14 @@ function normalizeAdminWorkRules(data, tenantId, accounts) {
 
 function koreaDate() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+}
+
+function seoulLocalDateTimeToUtcIso(date, time) {
+  if (!validIsoDate(date) || !/^\d{2}:\d{2}$/.test(time)) return null
+  const [year, month, day] = date.split('-').map(Number)
+  const [hour, minute] = time.split(':').map(Number)
+  if (hour > 23 || minute > 59) return null
+  return new Date(Date.UTC(year, month - 1, day, hour - 9, minute)).toISOString()
 }
 
 function isoDate(date) {
@@ -441,6 +452,18 @@ function normalizeFactoryLayouts(value) {
   const zoneIds = new Set(['raw', 'frozen', 'production', 'packing', 'shipping'])
   const purposes = new Set(['원료·자재', '냉장·냉동', '생산', '포장', '출하', '통로', '기타'])
   const kinds = new Set(['재고', '생산'])
+  // Existing layouts may still contain their pre-token hex value, while every
+  // layout created or edited by the current client stores one of these design
+  // token references. Keeping both formats readable lets old tenants edit their
+  // factories without weakening validation to arbitrary CSS input.
+  const tokenColors = new Set([
+    'var(--color-success-soft)',
+    'var(--color-blue-soft)',
+    'var(--color-warning-soft)',
+    'var(--color-danger-soft)',
+    'var(--color-gray-200)',
+    'var(--color-gray-50)',
+  ])
   const normalized = {}
 
   for (const [factoryId, sourceBlocks] of Object.entries(value)) {
@@ -468,7 +491,8 @@ function normalizeFactoryLayouts(value) {
         note: String(source.note ?? '').trim().slice(0, 1_000),
       }
       if (!block.id || ids.has(block.id) || block.factoryId !== factoryId || !block.name || !zoneIds.has(block.zoneId)
-        || !purposes.has(block.purpose) || !kinds.has(block.kind) || !/^#[0-9a-f]{6}$/i.test(block.color)
+        || !purposes.has(block.purpose) || !kinds.has(block.kind)
+        || (!/^#[0-9a-f]{6}$/i.test(block.color) && !tokenColors.has(block.color))
         || !block.unit || ![block.x, block.y, block.width, block.height, block.current, block.capacity].every(Number.isFinite)
         || block.x < 0 || block.y < 0 || block.width < 8 || block.height < 8
         || block.x + block.width > 100 || block.y + block.height > 100
@@ -497,6 +521,7 @@ function hasJournalShape(value) {
   if (JOURNAL_FIELDS.some((key) => !Object.prototype.hasOwnProperty.call(value, key))) return false
   if (JOURNAL_FIELDS.filter((key) => key !== 'attachments').some((key) => typeof value[key] !== 'string')) return false
   if (value.authorId !== undefined && (typeof value.authorId !== 'string' || !value.authorId)) return false
+  if (value.draftRevision !== undefined && (!Number.isSafeInteger(value.draftRevision) || value.draftRevision < 0)) return false
   if (value.submittedAt !== undefined) {
     if (typeof value.submittedAt !== 'string' || !value.submittedAt) return false
     const submittedAt = new Date(value.submittedAt)
@@ -526,7 +551,7 @@ function hasJournalReviewShape(value) {
     && ['reviewedAt', 'reviewerId', 'reviewerName'].every((key) => typeof value[key] === 'string' && Boolean(value[key]))
 }
 
-function normalizeAdminJournals(previousData, nextData, account) {
+function normalizeAdminJournals(previousData, nextData, account, accounts) {
   if (!Array.isArray(previousData) || !Array.isArray(nextData) || nextData.length > 1_000) return null
   const seen = new Set()
   for (const journal of nextData) {
@@ -536,7 +561,13 @@ function normalizeAdminJournals(previousData, nextData, account) {
 
   const now = new Date().toISOString()
   if (previousData.length === 0) {
-    if (nextData.some((journal) => !isMemberJournal(journal, account))) return null
+    if (nextData.some((journal) => {
+      const reviews = Array.isArray(journal.reviews) ? journal.reviews : []
+      return !isMemberJournal(journal, account, accounts)
+        || !MEMBER_WRITABLE_JOURNAL_STATUSES.has(journal.status)
+        || journal.feedback || reviews.length > 0
+        || (journal.status === '결재요청' && !journal.completed.trim())
+    })) return null
     return nextData.map((journal) => stampJournalSubmission(null, {
       ...journal,
       authorId: account.id,
@@ -553,10 +584,10 @@ function normalizeAdminJournals(previousData, nextData, account) {
     const previous = previousById.get(requested.id)
     if (!previous) {
       const reviews = Array.isArray(requested.reviews) ? requested.reviews : []
-      if (!isMemberJournal(requested, account)
+      if (!isMemberJournal(requested, account, accounts)
         || !MEMBER_WRITABLE_JOURNAL_STATUSES.has(requested.status)
         || requested.feedback || reviews.length > 0
-        || (requested.status === '결재요청' && (!requested.completed.trim() || !requested.nextPlan.trim()))) return null
+        || (requested.status === '결재요청' && !requested.completed.trim())) return null
       additions.push(stampJournalSubmission(null, {
         ...requested,
         authorId: account.id,
@@ -569,7 +600,7 @@ function normalizeAdminJournals(previousData, nextData, account) {
     }
 
     const normalizedPrevious = { ...previous, reviews: Array.isArray(previous.reviews) ? previous.reviews : [] }
-    if (!isMemberJournal(previous, account)) {
+    if (!isMemberJournal(previous, account, accounts)) {
       const normalizedRequested = { ...requested, reviews: Array.isArray(requested.reviews) ? requested.reviews : [] }
       if (!isDeepStrictEqual(normalizedRequested, normalizedPrevious)) return null
       replacements.set(requested.id, previous)
@@ -586,7 +617,7 @@ function normalizeAdminJournals(previousData, nextData, account) {
       if (!MEMBER_WRITABLE_JOURNAL_STATUSES.has(normalized.status)
         || normalized.feedback !== previous.feedback
         || !isDeepStrictEqual(normalized.reviews, normalizedPrevious.reviews)
-        || (normalized.status === '결재요청' && (!normalized.completed.trim() || !normalized.nextPlan.trim()))) return null
+        || (normalized.status === '결재요청' && !normalized.completed.trim())) return null
       replacements.set(requested.id, stampJournalSubmission(previous, { ...normalized, updatedAt: now }, now))
     } else {
       if (!isDeepStrictEqual(normalized, { ...normalizedPrevious, authorId: previous.authorId || account.id })) return null
@@ -594,21 +625,51 @@ function normalizeAdminJournals(previousData, nextData, account) {
     }
   }
 
-  if (previousData.some((journal) => !seen.has(journal.id))) return null
+  // A private draft has no approval history yet, so its author may discard it.
+  // Submitted, approved and returned journals remain immutable audit records.
+  if (previousData.some((journal) => !seen.has(journal.id)
+    && (!isMemberJournal(journal, account, accounts) || journal.status !== '임시저장'))) return null
   return [
-    ...previousData.map((journal) => replacements.get(journal.id) ?? journal),
+    ...previousData.flatMap((journal) => seen.has(journal.id) ? [replacements.get(journal.id) ?? journal] : []),
     ...additions,
   ]
 }
 
-function isMemberJournal(journal, account) {
-  return journal?.authorId === account.id || (!journal?.authorId && journal?.author === account.name)
+function uniqueActiveTenantAccountId(accounts, tenantId, name) {
+  if (!Array.isArray(accounts) || !tenantId || typeof name !== 'string' || !name.trim()) return null
+  const matches = accounts.filter((candidate) => candidate?.tenantId === tenantId
+    && candidate?.approved === true
+    && candidate?.approvalStatus !== 'rejected'
+    && candidate?.name === name)
+  return matches.length === 1 ? matches[0].id : null
 }
 
-function mergeMemberJournals(previousData, nextData, account) {
+function resolvedLegacyOwnerId(record, idField, nameField, tenantId, accounts) {
+  const explicitId = record?.[idField]
+  if (typeof explicitId === 'string' && explicitId) return explicitId
+  return uniqueActiveTenantAccountId(accounts, tenantId, record?.[nameField])
+}
+
+function isMemberJournal(journal, account, accounts) {
+  return resolvedLegacyOwnerId(journal, 'authorId', 'author', account?.tenantId, accounts) === account?.id
+}
+
+function backfillLegacyJournalOwner(journal, tenantId, accounts) {
+  if (!journal || journal.authorId) return journal
+  const authorId = resolvedLegacyOwnerId(journal, 'authorId', 'author', tenantId, accounts)
+  return authorId ? { ...journal, authorId } : journal
+}
+
+function backfillLegacyLeaveRequester(leave, tenantId, accounts) {
+  if (!leave || leave.requesterId) return leave
+  const requesterId = resolvedLegacyOwnerId(leave, 'requesterId', 'name', tenantId, accounts)
+  return requesterId ? { ...leave, requesterId } : leave
+}
+
+function mergeMemberJournals(previousData, nextData, account, accounts) {
   if (!Array.isArray(previousData) || !Array.isArray(nextData)) return null
   const now = new Date().toISOString()
-  const visiblePrevious = previousData.filter((journal) => isMemberJournal(journal, account))
+  const visiblePrevious = previousData.filter((journal) => isMemberJournal(journal, account, accounts))
   const previousById = new Map(visiblePrevious.map((journal) => [journal?.id, journal]))
   const allIds = new Set(previousData.map((journal) => journal?.id))
   const seen = new Set()
@@ -630,7 +691,7 @@ function mergeMemberJournals(previousData, nextData, account) {
     if (!previous) {
       if (allIds.has(requested.id) || !MEMBER_WRITABLE_JOURNAL_STATUSES.has(normalized.status)
         || normalized.feedback || normalized.reviews.length > 0
-        || (normalized.status === '결재요청' && (!normalized.completed.trim() || !normalized.nextPlan.trim()))) return null
+        || (normalized.status === '결재요청' && !normalized.completed.trim())) return null
       additions.push(stampJournalSubmission(null, { ...normalized, updatedAt: now }, now))
       continue
     }
@@ -640,7 +701,7 @@ function mergeMemberJournals(previousData, nextData, account) {
       if (!MEMBER_WRITABLE_JOURNAL_STATUSES.has(normalized.status)
         || normalized.feedback !== previous.feedback
         || !isDeepStrictEqual(normalized.reviews, normalizedPrevious.reviews)
-        || (normalized.status === '결재요청' && (!normalized.completed.trim() || !normalized.nextPlan.trim()))) return null
+        || (normalized.status === '결재요청' && !normalized.completed.trim())) return null
     } else if (!isDeepStrictEqual(normalized, normalizedPrevious)) {
       return null
     }
@@ -649,9 +710,13 @@ function mergeMemberJournals(previousData, nextData, account) {
       : previous)
   }
 
-  if (visiblePrevious.some((journal) => !seen.has(journal.id))) return null
+  if (visiblePrevious.some((journal) => !seen.has(journal.id) && journal.status !== '임시저장')) return null
   return [
-    ...previousData.map((journal) => isMemberJournal(journal, account) ? replacements.get(journal.id) : journal),
+    ...previousData.flatMap((journal) => {
+      if (!isMemberJournal(journal, account, accounts)) return [journal]
+      if (!seen.has(journal.id)) return []
+      return [replacements.get(journal.id) ?? journal]
+    }),
     ...additions,
   ]
 }
@@ -698,9 +763,10 @@ function calendarDatesForLeave(leave) {
   return dates
 }
 
-function isCalendarEventVisibleToMember(event, account) {
+function isCalendarEventVisibleToMember(event, account, accounts) {
   if (event?.scope === 'company') return true
-  const isOwner = accountIdentityIds(account).includes(event?.ownerId) || (!event?.ownerId && event?.owner === account.name)
+  const isOwner = accountIdentityIds(account, accounts).includes(event?.ownerId)
+    || resolvedLegacyOwnerId(event, 'ownerId', 'owner', account?.tenantId, accounts) === account?.id
   if (event?.scope === 'department') {
     const normalizeTeam = (value) => String(value ?? '').replace(/\s+/g, '').replace(/팀$/, '')
     return normalizeTeam(event.department) === normalizeTeam(account.team) || isOwner
@@ -708,8 +774,9 @@ function isCalendarEventVisibleToMember(event, account) {
   return event?.scope === 'personal' && isOwner
 }
 
-function isMemberCalendarOwner(event, account) {
-  return accountIdentityIds(account).includes(event?.ownerId) || (!event?.ownerId && event?.owner === account.name)
+function isMemberCalendarOwner(event, account, accounts) {
+  return accountIdentityIds(account, accounts).includes(event?.ownerId)
+    || resolvedLegacyOwnerId(event, 'ownerId', 'owner', account?.tenantId, accounts) === account?.id
 }
 
 function normalizeMemberCalendarEvent(event, account) {
@@ -721,9 +788,9 @@ function normalizeMemberCalendarEvent(event, account) {
   }
 }
 
-function mergeMemberCalendarEvents(previousData, nextData, account) {
+function mergeMemberCalendarEvents(previousData, nextData, account, accounts) {
   if (!Array.isArray(previousData) || !Array.isArray(nextData)) return null
-  const visiblePrevious = previousData.filter((event) => isCalendarEventVisibleToMember(event, account))
+  const visiblePrevious = previousData.filter((event) => isCalendarEventVisibleToMember(event, account, accounts))
   const previousById = new Map(visiblePrevious.map((event) => [event?.id, event]))
   const allIds = new Set(previousData.map((event) => event?.id))
   const seen = new Set()
@@ -744,7 +811,7 @@ function mergeMemberCalendarEvents(previousData, nextData, account) {
       replacements.set(requested.id, previous)
       continue
     }
-    if (!isMemberCalendarOwner(previous, account)) {
+    if (!isMemberCalendarOwner(previous, account, accounts)) {
       if (!isDeepStrictEqual(requested, previous)) return null
       replacements.set(requested.id, previous)
       continue
@@ -752,10 +819,10 @@ function mergeMemberCalendarEvents(previousData, nextData, account) {
     replacements.set(requested.id, normalizeMemberCalendarEvent(requested, account))
   }
 
-  if (visiblePrevious.some((event) => !isMemberCalendarOwner(event, account) && !seen.has(event.id))) return null
+  if (visiblePrevious.some((event) => !isMemberCalendarOwner(event, account, accounts) && !seen.has(event.id))) return null
   return [
     ...previousData.flatMap((event) => {
-      if (!isMemberCalendarOwner(event, account)) return [event]
+      if (!isMemberCalendarOwner(event, account, accounts)) return [event]
       const replacement = replacements.get(event.id)
       return replacement ? [replacement] : []
     }),
@@ -830,10 +897,10 @@ function developerSupportLineageId(tenantId, requesterId) {
   return `${DEVELOPER_SUPPORT_CHANNEL}:${String(tenantId)}:${String(requesterId)}`
 }
 
-function isConversationVisibleToMember(conversation, account) {
+function isConversationVisibleToMember(conversation, account, accounts) {
   if (conversationLifecycle(conversation) !== 'active') return false
   if (isDeveloperSupportConversation(conversation)) return conversation.supportRequesterId === account?.id
-  const identityIds = accountIdentityIds(account)
+  const identityIds = accountIdentityIds(account, accounts)
   if (conversation?.hiddenFor?.some((id) => identityIds.includes(id))) return false
   if (conversation?.type === 'team') {
     if (Array.isArray(conversation.participantIds)) return conversation.participantIds.some((id) => identityIds.includes(id))
@@ -877,9 +944,9 @@ function normalizeAdminConversations(previousData, nextData) {
     : null
 }
 
-function mergeMemberConversations(previousData, nextData, account) {
+function mergeMemberConversations(previousData, nextData, account, accounts) {
   if (!Array.isArray(previousData) || !Array.isArray(nextData)) return null
-  const visiblePrevious = previousData.filter((conversation) => isConversationVisibleToMember(conversation, account))
+  const visiblePrevious = previousData.filter((conversation) => isConversationVisibleToMember(conversation, account, accounts))
   if (visiblePrevious.length !== nextData.length) return null
   const previousById = new Map(visiblePrevious.map((conversation) => [conversation?.id, conversation]))
   const replacements = new Map()
@@ -956,10 +1023,92 @@ function normalizeMessages(value) {
     .filter((message) => message.content.length > 0)
 }
 
-const CHAT_USAGE_FEATURES = new Set(['ai-chat', 'document-search', 'compliance-review'])
+const CHAT_USAGE_FEATURES = new Set(['ai-chat', 'document-search', 'compliance-review', 'journal-draft'])
 
 function normalizeChatUsageFeature(value) {
   return typeof value === 'string' && CHAT_USAGE_FEATURES.has(value) ? value : 'ai-chat'
+}
+
+function seoulCalendarDate(value) {
+  const parsed = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(parsed)
+  const pick = (type) => parts.find((part) => part.type === type)?.value || ''
+  return `${pick('year')}-${pick('month')}-${pick('day')}`
+}
+
+function journalDraftEvidence(workspaceStore, account, accounts, now = new Date()) {
+  if (!account?.tenantId) return []
+  const tasks = workspaceStore.tenants?.[account.tenantId]?.['work-items']?.data
+  if (!Array.isArray(tasks)) return []
+  const today = seoulCalendarDate(now)
+  const identityIds = new Set(accountIdentityIds(account, accounts))
+  const evidence = []
+  const seen = new Set()
+  const add = (item, kind, at, detail) => {
+    if (seoulCalendarDate(at) !== today) return
+    const key = `${item.id}:${kind}:${at}`
+    if (seen.has(key)) return
+    seen.add(key)
+    evidence.push({
+      id: item.id,
+      title: String(item.title || '제목 없는 업무').slice(0, 200),
+      kind,
+      at,
+      detail: String(detail || '').trim().slice(0, 1_000),
+    })
+  }
+
+  for (const item of tasks) {
+    if (!item || typeof item !== 'object') continue
+    const ownedByAccount = identityIds.has(item.ownerId)
+      || resolvedLegacyOwnerId(item, 'ownerId', 'owner', account.tenantId, accounts) === account.id
+    if (ownedByAccount) {
+      const completions = Array.isArray(item.completionHistory) && item.completionHistory.length
+        ? item.completionHistory
+        : item.completion ? [item.completion] : []
+      for (const completion of completions) {
+        if (completion?.submittedAt) add(item, '완료 보고', completion.submittedAt, completion.summary)
+      }
+    }
+
+    const reviews = Array.isArray(item.reviewHistory) && item.reviewHistory.length
+      ? item.reviewHistory
+      : item.review ? [item.review] : []
+    for (const review of reviews) {
+      const reviewedByAccount = identityIds.has(review?.reviewerId)
+        || resolvedLegacyOwnerId(review, 'reviewerId', 'reviewerName', account.tenantId, accounts) === account.id
+      if (reviewedByAccount && review?.reviewedAt) {
+        add(item, review.decision === 'approved' ? '결재 승인' : '보완 요청', review.reviewedAt, review.comment || review.requestedChanges)
+      }
+    }
+  }
+
+  return evidence.sort((left, right) => left.at.localeCompare(right.at)).slice(0, 30)
+}
+
+function normalizeJournalDraftText(value) {
+  if (typeof value !== 'string') return ''
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^(?:[-*•]|\d+[.)])\s*/, '').trim())
+    .filter(Boolean)
+    .slice(0, 12)
+    .map((line) => `• ${line.slice(0, 240)}`)
+    .join('\n')
+    .slice(0, 2_000)
+}
+
+function fallbackJournalDraft(evidence) {
+  return normalizeJournalDraftText(evidence.map((source) => {
+    const detail = source.detail ? ` — ${source.detail}` : ''
+    return `${source.title} (${source.kind})${detail}`
+  }).join('\n'))
 }
 
 function serializeContext(context) {
@@ -2284,7 +2433,7 @@ export function createApp(options = {}) {
             ownerId: rule.ownerId,
             requestedBy: rule.requester,
             requesterId: rule.requesterId,
-            due: `${occurrence} ${rule.dueTime}`,
+            due: seoulLocalDateTimeToUtcIso(occurrence, rule.dueTime),
             priority: rule.priority,
             status: '업무요청',
             category: rule.category,
@@ -2584,8 +2733,8 @@ export function createApp(options = {}) {
     }
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const conversations = Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []
-    const requesterIds = accountIdentityIds(request.auth)
-    const participantIds = developerSupport ? [DEVELOPER_OPERATIONS_ID] : accountIdentityIds(participant)
+    const requesterIds = accountIdentityIds(request.auth, accounts)
+    const participantIds = developerSupport ? [DEVELOPER_OPERATIONS_ID] : accountIdentityIds(participant, accounts)
     const lineageId = developerSupport
       ? developerSupportLineageId(request.auth.tenantId, request.auth.id)
       : directLineageId(request.auth.id, participant.id)
@@ -2685,7 +2834,7 @@ export function createApp(options = {}) {
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const conversations = Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []
     const previous = conversations.find((conversation) => conversation?.id === request.params.id)
-    if (!previous || !isConversationVisibleToMember(previous, request.auth)) {
+    if (!previous || !isConversationVisibleToMember(previous, request.auth, accounts)) {
       response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '참여 중인 대화를 찾을 수 없습니다.' } })
       return
     }
@@ -2716,7 +2865,7 @@ export function createApp(options = {}) {
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const conversations = Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []
     const previous = conversations.find((conversation) => conversation?.id === request.params.id)
-    if (!previous || !isConversationVisibleToMember(previous, request.auth)) {
+    if (!previous || !isConversationVisibleToMember(previous, request.auth, accounts)) {
       response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '참여 중인 대화를 찾을 수 없습니다.' } })
       return
     }
@@ -2843,7 +2992,7 @@ export function createApp(options = {}) {
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const conversations = Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []
     const previous = conversations.find((conversation) => conversation?.id === request.params.id)
-    if (!previous || !isConversationVisibleToMember(previous, request.auth)) {
+    if (!previous || !isConversationVisibleToMember(previous, request.auth, accounts)) {
       response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '참여 중인 대화를 찾을 수 없습니다.' } })
       return
     }
@@ -2865,7 +3014,7 @@ export function createApp(options = {}) {
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const conversations = Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []
     const target = conversations.find((conversation) => conversation?.id === request.params.id)
-    if (!target || !isConversationVisibleToMember(target, request.auth)) {
+    if (!target || !isConversationVisibleToMember(target, request.auth, accounts)) {
       response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '삭제할 대화를 찾을 수 없습니다.' } })
       return
     }
@@ -2876,7 +3025,7 @@ export function createApp(options = {}) {
     const deletedAt = new Date().toISOString()
     const participantAccounts = target.type === 'direct'
       ? accounts.filter((account) => account.tenantId === request.auth.tenantId
-        && legacyConversationParticipantIds(target).some((id) => accountIdentityIds(account).includes(id)))
+        && legacyConversationParticipantIds(target).some((id) => accountIdentityIds(account, accounts).includes(id)))
       : []
     const canonicalParticipantIds = participantAccounts.map((account) => account.id)
     const tombstone = {
@@ -3209,7 +3358,110 @@ export function createApp(options = {}) {
       response.status(500).json({ error: { code: 'LEAVE_WRITE_FAILED', message: '휴가 신청을 저장하지 못했습니다.' } })
       return
     }
-    response.status(201).json({ leave, updatedAt: record.updatedAt })
+    response.status(201).json({ leave, updatedAt: record.updatedAt, version: workspaceRecordVersion(record) })
+  })
+
+  app.patch('/api/leave-requests/:id', requireAuth, async (request, response) => {
+    if (!request.auth.tenantId) {
+      response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } })
+      return
+    }
+    const input = normalizeLeaveInput(request.body)
+    if (!input) {
+      response.status(400).json({ error: { code: 'INVALID_LEAVE_REQUEST', message: '휴가 종류, 시작·종료일, 결재자와 사유를 확인해 주세요.' } })
+      return
+    }
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
+    const previousRecord = tenantStore['leave-requests']
+    const previousData = Array.isArray(previousRecord?.data) ? previousRecord.data : []
+    const target = previousData.find((leave) => leave?.id === request.params.id)
+    if (!target) {
+      response.status(404).json({ error: { code: 'LEAVE_NOT_FOUND', message: '수정할 휴가 신청을 찾을 수 없습니다.' } })
+      return
+    }
+    const resolvedRequesterId = resolvedLegacyOwnerId(target, 'requesterId', 'name', request.auth.tenantId, accounts)
+    const isRequester = resolvedRequesterId === request.auth.id
+    if (!isRequester) {
+      response.status(403).json({ error: { code: 'LEAVE_REQUESTER_REQUIRED', message: '휴가를 신청한 본인만 수정할 수 있습니다.' } })
+      return
+    }
+    if (target.status !== '결재대기') {
+      response.status(409).json({ error: { code: 'LEAVE_ALREADY_DECIDED', message: '결재가 끝난 휴가 신청은 수정할 수 없습니다.' } })
+      return
+    }
+    const approver = input.approverId
+      ? accounts.find((account) => account.id === input.approverId && account.tenantId === request.auth.tenantId && account.role === 'tenant-admin' && account.approved)
+      : accounts.find((account) => account.tenantId === request.auth.tenantId && account.role === 'tenant-admin' && account.approved)
+    if (!approver) {
+      response.status(400).json({ error: { code: 'INVALID_LEAVE_APPROVER', message: '선택한 결재자가 이 회사의 활성 관리자가 아닙니다.' } })
+      return
+    }
+    const now = new Date().toISOString()
+    const updated = {
+      ...target,
+      ...input,
+      requesterId: resolvedRequesterId,
+      approverId: approver.id,
+      approverName: approver.name,
+      updatedAt: now,
+    }
+    tenantStore['leave-requests'] = {
+      data: previousData.map((leave) => leave?.id === request.params.id ? updated : leave),
+      updatedAt: now,
+      updatedBy: request.auth.id,
+    }
+    workspaceStore.tenants[request.auth.tenantId] = tenantStore
+    try {
+      await commitWorkspaceStore()
+    } catch (error) {
+      if (previousRecord) tenantStore['leave-requests'] = previousRecord
+      else delete tenantStore['leave-requests']
+      console.error('[leave-update] Failed to persist request update', { message: error?.message })
+      response.status(500).json({ error: { code: 'LEAVE_WRITE_FAILED', message: '휴가 신청 수정을 저장하지 못했습니다.' } })
+      return
+    }
+    response.json({ leave: updated, updatedAt: now, version: workspaceRecordVersion(tenantStore['leave-requests']) })
+  })
+
+  app.delete('/api/leave-requests/:id', requireAuth, async (request, response) => {
+    if (!request.auth.tenantId) {
+      response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } })
+      return
+    }
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
+    const previousRecord = tenantStore['leave-requests']
+    const previousData = Array.isArray(previousRecord?.data) ? previousRecord.data : []
+    const target = previousData.find((leave) => leave?.id === request.params.id)
+    if (!target) {
+      response.status(404).json({ error: { code: 'LEAVE_NOT_FOUND', message: '취소할 휴가 신청을 찾을 수 없습니다.' } })
+      return
+    }
+    const isRequester = resolvedLegacyOwnerId(target, 'requesterId', 'name', request.auth.tenantId, accounts) === request.auth.id
+    if (!isRequester) {
+      response.status(403).json({ error: { code: 'LEAVE_REQUESTER_REQUIRED', message: '휴가를 신청한 본인만 취소할 수 있습니다.' } })
+      return
+    }
+    if (target.status !== '결재대기') {
+      response.status(409).json({ error: { code: 'LEAVE_ALREADY_DECIDED', message: '결재가 끝난 휴가 신청은 취소할 수 없습니다.' } })
+      return
+    }
+    const now = new Date().toISOString()
+    tenantStore['leave-requests'] = {
+      data: previousData.filter((leave) => leave?.id !== request.params.id),
+      updatedAt: now,
+      updatedBy: request.auth.id,
+    }
+    workspaceStore.tenants[request.auth.tenantId] = tenantStore
+    try {
+      await commitWorkspaceStore()
+    } catch (error) {
+      if (previousRecord) tenantStore['leave-requests'] = previousRecord
+      else delete tenantStore['leave-requests']
+      console.error('[leave-cancel] Failed to persist cancellation', { message: error?.message })
+      response.status(500).json({ error: { code: 'LEAVE_WRITE_FAILED', message: '휴가 신청 취소를 저장하지 못했습니다.' } })
+      return
+    }
+    response.json({ deleted: true, id: request.params.id, updatedAt: now, version: workspaceRecordVersion(tenantStore['leave-requests']) })
   })
 
   app.patch('/api/leave-requests/:id/decision', requireAuth, requireTenantAdmin, async (request, response) => {
@@ -3302,7 +3554,13 @@ export function createApp(options = {}) {
       response.status(500).json({ error: { code: 'LEAVE_WRITE_FAILED', message: '휴가 결재 상태를 저장하지 못했습니다.' } })
       return
     }
-    response.json({ leave: nextData.find((leave) => leave?.id === request.params.id), leaveManagement: nextLeaveManagement, updatedAt: record.updatedAt })
+    response.json({
+      leave: nextData.find((leave) => leave?.id === request.params.id),
+      leaveManagement: nextLeaveManagement,
+      updatedAt: record.updatedAt,
+      version: workspaceRecordVersion(record),
+      leaveManagementVersion: nextLeaveManagement ? workspaceRecordVersion(tenantStore['leave-management']) : undefined,
+    })
   })
 
   app.get('/api/calendar/approved-leaves', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
@@ -3328,6 +3586,248 @@ export function createApp(options = {}) {
         source: 'leave',
       })))
     response.json({ events, updatedAt: record?.updatedAt ?? null })
+  })
+
+  app.put('/api/daily-journals/:id/draft', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    if (!request.auth.tenantId) {
+      response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 업무일지를 저장할 수 있습니다.' } })
+      return
+    }
+    const requested = request.body?.journal
+    if (!hasJournalShape(requested) || requested.id !== request.params.id) {
+      response.status(400).json({ error: { code: 'INVALID_JOURNAL', message: '자동 저장할 업무일지 형식을 확인해 주세요.' } })
+      return
+    }
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
+    const previousRecord = tenantStore['daily-journals']
+    const previousData = Array.isArray(previousRecord?.data) ? previousRecord.data : []
+    const index = previousData.findIndex((journal) => journal?.id === request.params.id)
+    const previous = index >= 0 ? previousData[index] : null
+    if (previous && !isMemberJournal(previous, request.auth, accounts)) {
+      response.status(403).json({ error: { code: 'JOURNAL_WRITE_FORBIDDEN', message: '본인의 업무일지만 자동 저장할 수 있습니다.' } })
+      return
+    }
+    if (previous && !MEMBER_EDITABLE_JOURNAL_STATUSES.has(previous.status)) {
+      response.status(409).json({ error: { code: 'JOURNAL_NOT_EDITABLE', message: '결재 요청 또는 승인된 업무일지는 자동 저장할 수 없습니다.' } })
+      return
+    }
+
+    const storedDraftRevision = Number.isSafeInteger(previous?.draftRevision) && previous.draftRevision >= 0
+      ? previous.draftRevision
+      : 0
+    let requestedDraftRevision = Number.isSafeInteger(requested.draftRevision) && requested.draftRevision >= 0
+      ? requested.draftRevision
+      : storedDraftRevision + 1
+    if (!previous && requestedDraftRevision <= 0) requestedDraftRevision = 1
+    if (previous && requestedDraftRevision <= storedDraftRevision) {
+      response.json({
+        journal: previous,
+        updatedAt: previous.updatedAt,
+        draftRevision: storedDraftRevision,
+        stale: true,
+        version: workspaceRecordVersion(previousRecord),
+      })
+      return
+    }
+
+    const candidate = stampJournalSubmission(previous, {
+      ...requested,
+      draftRevision: requestedDraftRevision,
+      authorId: request.auth.id,
+      author: request.auth.name,
+      department: previous?.department || request.auth.team || '미지정',
+      status: '임시저장',
+      updatedAt: new Date().toISOString(),
+      feedback: previous?.feedback || '',
+      reviews: Array.isArray(previous?.reviews) ? previous.reviews : [],
+    }, new Date().toISOString())
+    if (!hasJournalShape(candidate) || !await canReferenceDocuments([candidate], request.auth)) {
+      response.status(400).json({ error: { code: 'INVALID_JOURNAL', message: '업무일지 또는 첨부파일 정보를 확인해 주세요.' } })
+      return
+    }
+
+    // Attachment authorization yields to the event loop. Re-read the active
+    // row afterwards so an older request can never overwrite a newer draft
+    // that committed while this request was waiting.
+    const latestRecord = tenantStore['daily-journals']
+    const latestData = Array.isArray(latestRecord?.data) ? latestRecord.data : []
+    const latestIndex = latestData.findIndex((journal) => journal?.id === request.params.id)
+    const latestPrevious = latestIndex >= 0 ? latestData[latestIndex] : null
+    if (latestPrevious && !isMemberJournal(latestPrevious, request.auth, accounts)) {
+      response.status(403).json({ error: { code: 'JOURNAL_WRITE_FORBIDDEN', message: '본인의 업무일지만 자동 저장할 수 있습니다.' } })
+      return
+    }
+    if (latestPrevious && !MEMBER_EDITABLE_JOURNAL_STATUSES.has(latestPrevious.status)) {
+      response.status(409).json({ error: { code: 'JOURNAL_NOT_EDITABLE', message: '결재 요청 또는 승인된 업무일지는 자동 저장할 수 없습니다.' } })
+      return
+    }
+    const latestDraftRevision = Number.isSafeInteger(latestPrevious?.draftRevision) && latestPrevious.draftRevision >= 0
+      ? latestPrevious.draftRevision
+      : 0
+    if (latestPrevious && requestedDraftRevision <= latestDraftRevision) {
+      response.json({
+        journal: latestPrevious,
+        updatedAt: latestPrevious.updatedAt,
+        draftRevision: latestDraftRevision,
+        stale: true,
+        version: workspaceRecordVersion(latestRecord),
+      })
+      return
+    }
+
+    const now = new Date().toISOString()
+    const next = stampJournalSubmission(latestPrevious, {
+      ...requested,
+      draftRevision: requestedDraftRevision,
+      authorId: request.auth.id,
+      author: request.auth.name,
+      department: latestPrevious?.department || request.auth.team || '미지정',
+      status: '임시저장',
+      updatedAt: now,
+      feedback: latestPrevious?.feedback || '',
+      reviews: Array.isArray(latestPrevious?.reviews) ? latestPrevious.reviews : [],
+    }, now)
+    const nextData = latestIndex >= 0
+      ? latestData.map((journal, journalIndex) => journalIndex === latestIndex ? next : journal)
+      : [next, ...latestData]
+    const record = { data: nextData, updatedAt: now, updatedBy: request.auth.id }
+    tenantStore['daily-journals'] = record
+    workspaceStore.tenants[request.auth.tenantId] = tenantStore
+    try {
+      await commitWorkspaceStore()
+    } catch (error) {
+      if (tenantStore['daily-journals'] === record) {
+        if (latestRecord) tenantStore['daily-journals'] = latestRecord
+        else delete tenantStore['daily-journals']
+      }
+      console.error('[journal-draft-save] Failed to persist draft', { message: error?.message })
+      response.status(500).json({ error: { code: 'JOURNAL_WRITE_FAILED', message: '업무일지 자동 저장에 실패했습니다.' } })
+      return
+    }
+    response.json({ journal: next, updatedAt: now, draftRevision: requestedDraftRevision, stale: false, version: workspaceRecordVersion(record) })
+  })
+
+  app.post('/api/daily-journals/draft', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    if (!request.auth.tenantId) {
+      response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 업무일지 초안을 만들 수 있습니다.' } })
+      return
+    }
+
+    const sources = journalDraftEvidence(workspaceStore, request.auth, accounts)
+    if (sources.length === 0) {
+      response.json({
+        draft: '',
+        sources: [],
+        sourceCount: 0,
+        mode: 'grounded-empty',
+        message: '오늘 완료 보고하거나 결재한 업무가 없어 초안을 만들지 않았습니다.',
+        usageAccounting: 'not-applicable',
+      })
+      return
+    }
+
+    const fallback = fallbackJournalDraft(sources)
+    if (!client) {
+      response.json({
+        draft: fallback,
+        sources: sources.map(({ id, title, kind, at }) => ({ id, title, kind, at })),
+        sourceCount: sources.length,
+        mode: 'grounded-fallback',
+        message: 'AI 연결이 없어 오늘 기록을 근거로 로컬 초안을 만들었습니다.',
+        usageAccounting: 'not-applicable',
+      })
+      return
+    }
+
+    const startedAt = new Date()
+    const usageActor = { id: 'server:journal-draft', role: 'system', trusted: true, tenantId: request.auth.tenantId }
+    let reservation = null
+    let providerSucceeded = false
+    try {
+      const system = buildSystemPrompt({
+        purpose: '로그인한 직원의 오늘 일일업무일지 초안',
+        rules: ['제공된 기록에 있는 사실만 사용', '한 줄에 업무 하나', '평가나 추측 금지', '한국어 간결체'],
+        employee: { id: request.auth.id, name: request.auth.name },
+        date: seoulCalendarDate(startedAt),
+        sources,
+      })
+      const messages = [{ role: 'user', content: '오늘 한 일 입력란에 붙여 넣을 초안을 기록별 한 줄로 작성해 주세요.' }]
+      const tokenCount = typeof client.messages.countTokens === 'function'
+        ? await client.messages.countTokens({ model, system, messages })
+        : { input_tokens: Math.ceil(JSON.stringify({ system, messages }).length / 4) }
+      const reservationId = `journal-draft-res:${request.auth.tenantId}:${request.auth.id}:${randomBytes(12).toString('hex')}`
+      reservation = (await billingService.reserveUsage(usageActor, {
+        id: reservationId,
+        tenantId: request.auth.tenantId,
+        userId: request.auth.id,
+        feature: 'journal-draft',
+        model,
+        estimatedInputTokens: Number(tokenCount.input_tokens || 0),
+        estimatedOutputTokens: 800,
+        occurredAt: startedAt.toISOString(),
+      })).reservation
+
+      const result = await client.messages.create({ model, max_tokens: 800, system, messages })
+      const draft = normalizeJournalDraftText(extractText(result))
+      if (!draft) throw new Error('Claude returned no journal draft')
+      providerSucceeded = true
+      let usageAccounting = 'recorded'
+      const usageEvent = {
+        id: `anthropic:${result.id || randomBytes(12).toString('hex')}`,
+        reservationId: reservation.id,
+        tenantId: request.auth.tenantId,
+        userId: request.auth.id,
+        feature: 'journal-draft',
+        model: reservation.model,
+        inputTokens: Number(result.usage?.input_tokens || 0),
+        outputTokens: Number(result.usage?.output_tokens || 0),
+        occurredAt: startedAt.toISOString(),
+        durationMs: Date.now() - startedAt.getTime(),
+        metadata: { providerResponseModel: result.model || model, sourceCount: sources.length },
+      }
+      try {
+        await billingService.recordUsageEvent(usageActor, usageEvent)
+      } catch (ledgerError) {
+        usageAccounting = 'reconciliation-pending'
+        try {
+          await billingService.recordReconciliationPending(usageActor, {
+            ...usageEvent,
+            usageEventId: usageEvent.id,
+            id: `reconciliation:${usageEvent.id}`,
+            lastError: ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
+          })
+        } catch (reconciliationError) {
+          usageAccounting = 'reconciliation-unavailable'
+          console.error('Journal draft usage reconciliation persistence failed after provider success', reconciliationError)
+        }
+      }
+      response.json({
+        draft,
+        sources: sources.map(({ id, title, kind, at }) => ({ id, title, kind, at })),
+        sourceCount: sources.length,
+        mode: 'claude',
+        model: result.model || model,
+        usageAccounting,
+      })
+    } catch (error) {
+      if (!providerSucceeded && reservation) {
+        try { await billingService.releaseUsageReservation(usageActor, { tenantId: request.auth.tenantId, reservationId: reservation.id }) }
+        catch { /* the pending reservation expires automatically */ }
+      }
+      if (error instanceof BillingServiceError) {
+        response.status(error.status).json({ error: { code: error.code, message: error.message, details: error.details } })
+        return
+      }
+      console.error('[journal-draft] AI draft failed; returning a grounded fallback', { message: error?.message })
+      response.json({
+        draft: fallback,
+        sources: sources.map(({ id, title, kind, at }) => ({ id, title, kind, at })),
+        sourceCount: sources.length,
+        mode: 'grounded-fallback',
+        message: 'AI 응답을 받지 못해 오늘 기록만으로 초안을 만들었습니다.',
+        usageAccounting: 'not-recorded',
+      })
+    }
   })
 
   app.post('/api/daily-journals/:id/review', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
@@ -3391,7 +3891,7 @@ export function createApp(options = {}) {
       response.status(500).json({ error: { code: 'JOURNAL_REVIEW_WRITE_FAILED', message: '업무일지 결재 결과를 저장하지 못했습니다.' } })
       return
     }
-    response.json({ journal: next, review, updatedAt: now })
+    response.json({ journal: next, review, updatedAt: now, version: workspaceRecordVersion(record) })
   })
 
   app.post('/api/work-items/:id/transition', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
@@ -3483,7 +3983,7 @@ export function createApp(options = {}) {
       response.status(500).json({ error: { code: 'WORK_TRANSITION_WRITE_FAILED', message: '업무 상태를 저장하지 못했습니다.' } })
       return
     }
-    response.json({ item: next, updatedAt: now })
+    response.json({ item: next, updatedAt: now, version: workspaceRecordVersion(record) })
   })
 
   app.post('/api/work-rules', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
@@ -3539,7 +4039,12 @@ export function createApp(options = {}) {
     try {
       await commitWorkspaceStore()
       const materialized = await materializeDueWorkRules(request.auth.tenantId, request.auth.id)
-      response.status(201).json({ rule: materialized.rules.find((item) => item.id === rule.id) ?? rule, created: materialized.created })
+      response.status(201).json({
+        rule: materialized.rules.find((item) => item.id === rule.id) ?? rule,
+        created: materialized.created,
+        version: workspaceRecordVersion(tenantStore['work-rules']),
+        workItemsVersion: workspaceRecordVersion(tenantStore['work-items']),
+      })
     } catch (error) {
       if (previousRecord) tenantStore['work-rules'] = previousRecord
       else delete tenantStore['work-rules']
@@ -3569,7 +4074,12 @@ export function createApp(options = {}) {
     try {
       await commitWorkspaceStore()
       const materialized = request.body.active ? await materializeDueWorkRules(request.auth.tenantId, request.auth.id) : { created: [], rules: nextData }
-      response.json({ rule: materialized.rules.find((rule) => rule.id === request.params.id), created: materialized.created })
+      response.json({
+        rule: materialized.rules.find((rule) => rule.id === request.params.id),
+        created: materialized.created,
+        version: workspaceRecordVersion(tenantStore['work-rules']),
+        workItemsVersion: workspaceRecordVersion(tenantStore['work-items']),
+      })
     } catch (error) {
       tenantStore['work-rules'] = previousRecord
       response.status(500).json({ error: { code: 'WORK_RULE_WRITE_FAILED', message: '반복 업무 상태를 저장하지 못했습니다.' } })
@@ -3582,7 +4092,13 @@ export function createApp(options = {}) {
       return
     }
     try {
-      response.json(await materializeDueWorkRules(request.auth.tenantId, request.auth.id))
+      const materialized = await materializeDueWorkRules(request.auth.tenantId, request.auth.id)
+      const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
+      response.json({
+        ...materialized,
+        version: workspaceRecordVersion(tenantStore['work-rules']),
+        workItemsVersion: workspaceRecordVersion(tenantStore['work-items']),
+      })
     } catch (error) {
       response.status(500).json({ error: { code: 'WORK_RULE_MATERIALIZE_FAILED', message: '도래한 반복 업무를 생성하지 못했습니다.' } })
     }
@@ -3612,16 +4128,22 @@ export function createApp(options = {}) {
     }
     const record = workspaceStore.tenants[request.auth.tenantId]?.[key]
     let data = record?.data ?? null
+    if (Array.isArray(record?.data) && key === 'daily-journals') {
+      data = record.data.map((journal) => backfillLegacyJournalOwner(journal, request.auth.tenantId, accounts))
+    }
+    if (Array.isArray(record?.data) && key === 'leave-requests') {
+      data = record.data.map((leave) => backfillLegacyLeaveRequester(leave, request.auth.tenantId, accounts))
+    }
     if (key === 'messenger-conversations' && Array.isArray(record?.data)) {
       data = record.data.filter((conversation) => !isDeveloperSupportConversation(conversation)
         || conversation.supportRequesterId === request.auth.id)
     }
     if (request.auth.role === 'tenant-member' && Array.isArray(record?.data)) {
       if (key === 'work-items') data = record.data.filter((item) => isMemberWorkItem(item, request.auth))
-      if (key === 'leave-requests') data = record.data.filter((leave) => leave?.requesterId === request.auth.id)
-      if (key === 'daily-journals') data = record.data.filter((journal) => isMemberJournal(journal, request.auth))
-      if (key === 'calendar-events') data = record.data.filter((event) => isCalendarEventVisibleToMember(event, request.auth))
-      if (key === 'messenger-conversations') data = record.data.filter((conversation) => isConversationVisibleToMember(conversation, request.auth))
+      if (key === 'leave-requests') data = data.filter((leave) => leave?.requesterId === request.auth.id)
+      if (key === 'daily-journals') data = data.filter((journal) => journal?.authorId === request.auth.id)
+      if (key === 'calendar-events') data = record.data.filter((event) => isCalendarEventVisibleToMember(event, request.auth, accounts))
+      if (key === 'messenger-conversations') data = record.data.filter((conversation) => isConversationVisibleToMember(conversation, request.auth, accounts))
     }
     if (request.auth.role === 'tenant-member' && key === 'leave-management') {
       const management = normalizeLeaveManagement(record?.data)
@@ -3715,7 +4237,7 @@ export function createApp(options = {}) {
         return
       }
       const previousData = Array.isArray(tenantStore[key]?.data) ? tenantStore[key].data : []
-      nextData = normalizeAdminJournals(previousData, nextData, request.auth)
+      nextData = normalizeAdminJournals(previousData, nextData, request.auth, accounts)
       if (!nextData) {
         response.status(403).json({ error: { code: 'JOURNAL_ADMIN_WRITE_FORBIDDEN', message: '관리자는 본인 초안만 작성할 수 있으며 직원 일지의 본문·상태·결재 이력은 전용 결재 기능으로만 처리할 수 있습니다.' } })
         return
@@ -3755,7 +4277,7 @@ export function createApp(options = {}) {
     }
     if (request.auth.role === 'tenant-member' && key === 'daily-journals') {
       const previousData = Array.isArray(tenantStore[key]?.data) ? tenantStore[key].data : []
-      nextData = mergeMemberJournals(previousData, nextData, request.auth)
+      nextData = mergeMemberJournals(previousData, nextData, request.auth, accounts)
       if (!nextData) {
         response.status(403).json({ error: { code: 'JOURNAL_WRITE_FORBIDDEN', message: '본인 업무일지의 초안 작성과 결재 요청만 할 수 있습니다.' } })
         return
@@ -3763,7 +4285,7 @@ export function createApp(options = {}) {
     }
     if (request.auth.role === 'tenant-member' && key === 'calendar-events') {
       const previousData = Array.isArray(tenantStore[key]?.data) ? tenantStore[key].data : []
-      nextData = mergeMemberCalendarEvents(previousData, nextData, request.auth)
+      nextData = mergeMemberCalendarEvents(previousData, nextData, request.auth, accounts)
       if (!nextData) {
         response.status(403).json({ error: { code: 'CALENDAR_WRITE_FORBIDDEN', message: '본인이 만든 일정만 등록·수정·삭제할 수 있습니다.' } })
         return
@@ -3771,7 +4293,7 @@ export function createApp(options = {}) {
     }
     if (request.auth.role === 'tenant-member' && key === 'messenger-conversations') {
       const previousData = Array.isArray(tenantStore[key]?.data) ? tenantStore[key].data : []
-      nextData = mergeMemberConversations(previousData, nextData, request.auth)
+      nextData = mergeMemberConversations(previousData, nextData, request.auth, accounts)
       if (!nextData) {
         response.status(403).json({ error: { code: 'MESSENGER_WRITE_FORBIDDEN', message: '참여 중인 대화에 본인 메시지만 추가할 수 있습니다.' } })
         return
@@ -3787,6 +4309,11 @@ export function createApp(options = {}) {
     try {
       await commitWorkspaceStore()
     } catch (error) {
+      // The in-memory snapshot is shared with the active adapter. A failed
+      // adapter commit must not leave an uncommitted value visible to later
+      // requests in this process (or to the Sites worker CAS serializer).
+      if (currentRecord) tenantStore[key] = currentRecord
+      else delete tenantStore[key]
       console.error('[workspace-store] Failed to persist data', { message: error?.message })
       response.status(500).json({ error: { code: 'STORE_WRITE_FAILED', message: '공유 데이터를 저장하지 못했습니다.' } })
       return

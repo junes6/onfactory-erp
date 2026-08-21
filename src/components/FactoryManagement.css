@@ -61,6 +61,9 @@
 .factory-page__head h1 { margin: var(--space-0); font-size: var(--font-22); line-height: 1.12; letter-spacing: -.045em; }
 .factory-page__head p { max-width: 760px; margin: var(--space-12) var(--space-0) var(--space-0); color: var(--factory-muted); font-size: var(--font-15); line-height: 1.7; }
 
+.factory-page__actions { min-width: min(350px, 100%); display: flex; flex-direction: column; gap: var(--space-8); }
+.factory-page__action-buttons { display: flex; justify-content: flex-end; gap: var(--space-8); }
+.factory-page__action-buttons .factory-button { min-height: 36px; padding-inline: var(--space-12); font-size: var(--font-13); }
 .factory-selector { min-width: min(350px, 100%); display: flex; flex-direction: column; gap: var(--space-8); }
 .factory-selector > span { color: var(--factory-muted); font-size: var(--font-13); font-weight: var(--weight-medium); }
 .factory-selector select {
@@ -375,8 +378,10 @@
 .factory-location-card__head strong, .factory-location-card__head span { display: block; }
 .factory-location-card__head strong { overflow: hidden; font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
 .factory-location-card__head div span { margin-top: var(--space-0); color: var(--factory-muted); font-size: var(--font-13); }
-.factory-location-card__head > button { width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center; border: var(--hairline) solid var(--factory-line); border-radius: var(--radius-8); color: var(--factory-muted); background: var(--color-surface); cursor: pointer; }
-.factory-location-card__head > button:hover { color: var(--factory-forest); background: var(--factory-soft); }
+.factory-location-card__actions { display: flex; gap: var(--space-4); }
+.factory-location-card__actions button { width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center; border: var(--hairline) solid var(--factory-line); border-radius: var(--radius-8); color: var(--factory-muted); background: var(--color-surface); cursor: pointer; }
+.factory-location-card__actions button:hover { color: var(--factory-forest); background: var(--factory-soft); }
+.factory-location-card__actions button.is-danger:hover { color: var(--color-danger); background: var(--color-danger-soft); }
 .factory-location-card__item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); margin-top: var(--space-8); font-size: var(--font-13); }
 .factory-location-card__quantity { display: flex; align-items: baseline; gap: var(--space-4); margin-top: var(--space-8); }
 .factory-location-card__quantity strong { font-size: var(--font-15); }
@@ -411,6 +416,7 @@
 .factory-button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-8); padding: var(--space-0) var(--space-16); border-radius: var(--radius-8); font-size: var(--font-15); font-weight: var(--weight-medium); cursor: pointer; }
 .factory-button--ghost { border: var(--hairline) solid var(--factory-line); color: var(--color-blue-deep); background: var(--color-surface); }
 .factory-button--primary { border: var(--hairline) solid var(--factory-forest-dark); color: var(--color-surface); background: var(--factory-forest-dark); }
+.factory-button--danger { border: var(--hairline) solid var(--color-danger-soft); color: var(--color-danger); background: var(--color-danger-soft); }
 
 html[data-theme='dark'] .factory-page {
   --factory-ink: var(--color-blue-soft);
@@ -486,7 +492,9 @@ html[data-theme='dark'] .factory-file-card__pdf { background: var(--color-blue-d
   .factory-page__head { align-items: flex-start; flex-direction: column; margin-bottom: var(--space-16); }
   .factory-page__head h1 { font-size: var(--font-22); }
   .factory-page__head p { font-size: var(--font-15); }
-  .factory-selector { width: 100%; min-width: 0; }
+  .factory-page__actions, .factory-selector { width: 100%; min-width: 0; }
+  .factory-page__action-buttons { justify-content: stretch; }
+  .factory-page__action-buttons .factory-button { flex: 1; }
   .factory-identity { align-items: flex-start; flex-wrap: wrap; }
   .factory-identity > div span { white-space: normal; }
   .factory-identity__live { margin-left: var(--space-32); }

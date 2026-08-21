@@ -7,21 +7,18 @@
 }
 
 .tenant-point-card {
-  display: grid;
-  grid-template-columns: auto minmax(180px,1fr) minmax(160px,.7fr) auto;
-  align-items: center;
-  gap: var(--space-16);
-  padding: var(--card-inset);
-  border: var(--hairline) solid var(--line);
+  display: block;
+  padding: var(--space-0);
+  border: var(--dashboard-stroke) solid var(--color-card-line);
   border-radius: var(--radius-8);
   background: var(--surface);
 }
-.tenant-point-card__icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--forest); background: var(--forest-soft); }
 .tenant-point-card h2 { margin: var(--space-0); font-size: var(--font-15); }
 .tenant-point-card p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.tenant-point-card__body { display: grid; grid-template-columns: minmax(180px,1fr) minmax(160px,.7fr); align-items: center; gap: var(--space-16); padding: var(--card-inset); }
 .tenant-point-card__meter { display: grid; gap: var(--space-4); }
 .tenant-point-card__meter progress { width: 100%; height: 8px; }
-.tenant-point-card > button { min-height: 40px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); cursor: pointer; }
+.tenant-point-card > .dashboard-section-header > button { min-height: 36px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); cursor: pointer; }
 
 .billing-head {
   display: flex;
@@ -322,8 +319,7 @@ html[data-theme='dark'] .billing-root { color: var(--ink); background: var(--can
 }
 
 @media (max-width: 760px) {
-  .tenant-point-card { grid-template-columns: auto minmax(0,1fr) auto; }
-  .tenant-point-card__meter { grid-column: 1 / -1; }
+  .tenant-point-card__body { grid-template-columns: minmax(0,1fr); }
 }
 
 @media (max-width: 820px) {

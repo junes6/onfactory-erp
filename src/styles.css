@@ -1018,6 +1018,28 @@ html[data-theme='dark'] {
 .workflow-card-actions > div { display: flex; gap: var(--space-8); }
 .workflow-modal .form-field em { color: var(--danger); font-style: normal; }
 .workflow-modal .form-grid > .full { grid-column: 1 / -1; }
+.task-modal .form-field em { color: var(--danger); font-style: normal; }
+.task-required-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: var(--space-12); }
+.task-required-fields .full { grid-column: 1 / -1; }
+.task-optional-fields { margin-top: var(--space-4); border-top: var(--hairline) solid var(--line); }
+.task-optional-fields > summary { min-height: 46px; display: flex; align-items: center; gap: var(--space-8); color: var(--ink); font-size: var(--font-15); font-weight: var(--weight-medium); cursor: pointer; list-style: none; }
+.task-optional-fields > summary::-webkit-details-marker { display: none; }
+.task-optional-fields > summary svg { transition: transform .16s ease; }
+.task-optional-fields[open] > summary svg { transform: rotate(180deg); }
+.task-optional-fields > summary span { color: var(--muted); font-size: var(--font-13); font-weight: var(--weight-regular); }
+.task-optional-fields-body { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: var(--space-12); padding: var(--space-12) var(--space-0); border-top: var(--hairline) solid var(--line); }
+.task-optional-fields:not([open]) > .task-optional-fields-body { display: none; }
+.task-optional-fields-body .full,
+.task-attachment-picker,
+.task-pending-files { grid-column: 1 / -1; }
+.task-attachment-picker { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.task-attachment-picker strong,
+.task-attachment-picker small { display: block; }
+.task-attachment-picker strong { font-size: var(--font-15); }
+.task-attachment-picker small { margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); }
+.task-pending-files { display: flex; flex-wrap: wrap; gap: var(--space-8); }
+.task-pending-files > span { min-width: 0; display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); font-size: var(--font-13); }
+.task-pending-files > span > button { width: 24px; height: 24px; display: grid; place-items: center; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
 .workflow-feedback, .workflow-submission-preview { margin-bottom: var(--space-16); padding: var(--space-12) var(--space-16); border-radius: var(--radius-8); background: var(--color-blue-soft); }
 .workflow-feedback.danger { background: var(--danger-soft); }
 .workflow-feedback p, .workflow-feedback small, .workflow-submission-preview p { display: block; margin: var(--space-4) var(--space-0) var(--space-0); line-height: 1.5; }
@@ -1047,6 +1069,7 @@ html[data-theme='dark'] {
 .recurring-rule-grid article > div > strong { margin-top: var(--space-8); font-size: var(--font-15); }
 .recurring-rule-grid article > div > p { margin-top: var(--space-4); line-height: 1.5; }
 .recurring-rule-grid dl { display: grid; grid-template-columns: repeat(3,1fr); gap: var(--space-8); margin: var(--space-0); }
+.recurring-rule-actions { display: flex; align-items: center; gap: var(--space-8); }
 .rule-state { display: inline-flex; padding: var(--space-4) var(--space-8); border-radius: var(--radius-8); font-size: var(--font-13); font-weight: var(--weight-medium); }
 .rule-state.active { color: var(--forest); background: var(--forest-soft); }
 .rule-state.paused { color: var(--muted); background: var(--canvas); }
@@ -2206,22 +2229,29 @@ html[data-theme='dark'] .work-now-stepper i { background: var(--surface); }
 .workflow-action-revision span,
 .workflow-action-revision strong { display: block; font-size: var(--font-13); }
 .workflow-action-revision span { color: var(--danger); font-weight: var(--weight-medium); }
-.workflow-detail-primary-action { width: 100%; min-height: 46px; justify-content: center; margin-top: var(--space-12); }
 .workflow-detail-criteria { margin-top: var(--space-12); padding: var(--space-12) var(--space-0); border-block: var(--hairline) solid var(--line); }
 .workflow-detail-criteria p { margin: var(--space-4) var(--space-0) var(--space-0); font-size: var(--font-15); line-height: 1.55; }
+.workflow-detail-attachments { padding: var(--space-12) var(--space-0); border-bottom: var(--hairline) solid var(--line); }
+.workflow-detail-attachments > span { color: var(--muted); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.workflow-detail-attachments > div { display: flex; flex-wrap: wrap; gap: var(--space-4); }
 .workflow-detail-meta { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: var(--space-8); margin: var(--space-12) var(--space-0) var(--space-0); padding-top: var(--space-12); border-top: var(--hairline) solid var(--line); }
 .workflow-detail-meta > div { min-width: 0; }
 .workflow-detail-meta dt { color: var(--muted); font-size: var(--font-13); }
 .workflow-detail-meta dd { min-width: 0; display: flex; align-items: center; gap: var(--space-4); overflow: hidden; margin: var(--space-0); font-size: var(--font-13); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
 .workflow-detail-stepper { min-width: 0; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); margin: var(--space-0); padding: var(--space-12) var(--space-0); border-top: var(--hairline) solid var(--line); list-style: none; }
-.workflow-detail-stepper li { position: relative; min-width: 0; display: flex; align-items: center; justify-content: center; gap: var(--space-4); color: var(--subtle); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.workflow-detail-stepper li { position: relative; min-width: 0; display: flex; align-items: center; justify-content: flex-start; flex-direction: column; gap: var(--space-4); color: var(--subtle); font-size: var(--font-13); font-weight: var(--weight-medium); text-align: center; }
 .workflow-detail-stepper li:not(:last-child)::after { position: absolute; z-index: 0; top: 10px; left: calc(50% + 13px); right: calc(-50% + 13px); height: 1px; background: var(--line); content: ''; }
 .workflow-detail-stepper i { position: relative; z-index: 1; width: 20px; height: 20px; display: grid; place-items: center; flex: 0 0 auto; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-8); background: var(--surface); font-style: normal; font-size: var(--font-13); }
-.workflow-detail-stepper li > span { position: relative; z-index: 1; overflow: hidden; padding-inline: var(--space-4); background: var(--surface); text-overflow: ellipsis; white-space: nowrap; }
+.workflow-detail-stepper li > span { position: relative; z-index: 1; width: 100%; overflow: visible; padding-inline: var(--space-4); background: var(--surface); line-height: 1.25; text-overflow: clip; white-space: normal; }
 .workflow-detail-stepper :is(.done,.current) { color: var(--forest); }
 .workflow-detail-stepper :is(.done,.current) i { color: var(--surface); border-color: var(--forest); background: var(--forest); }
 .workflow-detail-stepper .done::after { background: var(--forest); }
-.workflow-detail-history { padding: var(--space-12) var(--space-0); }
+.workflow-detail-history { padding: var(--space-12) var(--space-0); border-bottom: var(--hairline) solid var(--line); }
+.workflow-detail-history > summary { display: flex; align-items: center; gap: var(--space-8); color: var(--ink); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; list-style: none; }
+.workflow-detail-history > summary::-webkit-details-marker { display: none; }
+.workflow-detail-history > summary::before { width: 7px; height: 7px; border-right: var(--hairline) solid currentColor; border-bottom: var(--hairline) solid currentColor; transform: rotate(-45deg); content: ''; }
+.workflow-detail-history[open] > summary::before { transform: rotate(45deg); }
+.workflow-detail-history > summary small { min-width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--muted); background: var(--canvas); font-size: var(--font-11); }
 .workflow-detail-history > p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); }
 .workflow-detail-records { display: grid; gap: var(--space-8); padding-top: var(--space-8); }
 .workflow-detail-records .workflow-record { min-width: 0; margin: var(--space-0); }
@@ -2230,6 +2260,13 @@ html[data-theme='dark'] .work-now-stepper i { background: var(--surface); }
 .workflow-review-decision button { min-height: 42px; display: flex; align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-8); color: var(--muted); background: transparent; font-weight: var(--weight-medium); cursor: pointer; }
 .workflow-review-decision button[aria-checked='true'] { color: var(--forest); background: var(--surface); }
 .workflow-page .recurring-work-panel { margin-top: var(--space-16); }
+
+.workflow-sheet-backdrop { align-items: end; justify-content: center; padding: var(--space-16); }
+.workflow-completion-sheet { width: min(720px,100%); max-height: calc(100svh - var(--space-32)); }
+.workflow-completion-sheet > header { min-height: 72px; }
+.workflow-completion-sheet .workflow-upload-compact { margin-top: var(--space-4); }
+.workflow-upload h3 small { margin-left: var(--space-4); color: var(--muted); font-size: var(--font-11); font-weight: var(--weight-regular); }
+.workflow-submit-guide { display: flex; align-items: center; gap: var(--space-8); margin: var(--space-12) var(--space-0) var(--space-0); padding: var(--space-12); border-radius: var(--radius-8); color: var(--forest); background: var(--forest-soft); font-size: var(--font-13); font-weight: var(--weight-medium); }
 
 html[data-theme='dark'] .workflow-simple-tabs,
 html[data-theme='dark'] .workflow-review-decision { background: var(--canvas); }
@@ -2285,9 +2322,17 @@ html[data-theme='dark'] .workflow-detail-stepper :is(i,li > span) { background: 
   .workflow-row-list time strong { text-align: right; }
   .workflow-row-action { min-width: 56px; min-height: 44px; padding-inline: var(--space-4); }
   .workflow-detail-pane { padding: var(--space-12); }
-  .workflow-detail-primary-action { min-height: 44px; }
   .workflow-detail-stepper li { align-items: center; flex-direction: column; gap: var(--space-0); text-align: center; }
   .workflow-detail-stepper li > span { width: 100%; padding-inline: var(--space-0); }
+  .task-required-fields,
+  .task-optional-fields-body { grid-template-columns: 1fr; }
+  .task-required-fields .full,
+  .task-optional-fields-body .full,
+  .task-attachment-picker,
+  .task-pending-files { grid-column: auto; }
+  .task-attachment-picker { align-items: flex-start; flex-direction: column; }
+  .workflow-sheet-backdrop { padding: var(--space-8); }
+  .workflow-completion-sheet { max-height: calc(100svh - var(--space-16)); }
 }
 
 @media (max-width: 420px) {
@@ -2350,6 +2395,46 @@ html[data-theme='dark'] .workflow-detail-stepper :is(i,li > span) { background: 
   top: var(--space-0);
   background: var(--surface);
 }
+
+/* v3 dashboard cards: every block has the same visible boundary and header. */
+.ai-home-page .dashboard-widget-grid { gap: var(--dashboard-spacing); }
+.ai-home-page :is(.dashboard-section-card,.ai-chat),
+.ai-home-page > .tenant-point-card {
+  overflow: hidden;
+  padding: var(--space-0);
+  border: var(--dashboard-stroke) solid var(--color-card-line);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+  box-shadow: var(--shadow-none);
+}
+.ai-home-page > .tenant-point-card { margin-top: var(--dashboard-spacing); }
+.dashboard-section-header {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  padding: var(--space-12) var(--card-inset);
+  border-bottom: var(--dashboard-stroke) solid var(--color-card-line);
+  background: var(--surface);
+}
+.dashboard-section-title { min-width: 0; display: flex; align-items: center; gap: var(--space-8); }
+.dashboard-section-title h2,
+.dashboard-section-title strong { margin: var(--space-0); font-size: var(--font-15); font-weight: var(--weight-medium); letter-spacing: 0; }
+.dashboard-section-icon,
+.dashboard-section-title > .claude-mark { width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--forest); background: var(--forest-soft); }
+.dashboard-section-body { padding: var(--card-inset); }
+.ai-home-page .home-calendar-card { padding: var(--space-0); }
+.ai-home-page .home-calendar-month { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.ai-home-page .mini-weekdays { margin-top: var(--space-12); }
+.ai-home-page .my-work-card { padding: var(--space-0); }
+.ai-home-page .my-work-card .work-mini-list { margin: var(--space-0); overflow: visible; }
+.ai-home-page .priority-alert-bar { display: block; padding: var(--space-0); }
+.ai-home-page .priority-alert-content { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: var(--space-12); padding: var(--card-inset); }
+.ai-home-page .dashboard-quick-links > .dashboard-section-body { padding: var(--card-inset); }
+.ai-home-page .dashboard-quick-links > header { align-items: center; }
+.ai-home-page .ai-chat-head { min-height: 56px; padding: var(--space-12) var(--card-inset); border-bottom: var(--dashboard-stroke) solid var(--color-card-line); }
+.ai-home-page .ai-chat-identity div > span { display: none; }
 
 /* These summaries already live in a card. Rows and hairlines replace a third
    nested surface while preserving their semantic grouping. */

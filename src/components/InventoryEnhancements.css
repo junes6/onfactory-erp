@@ -13,6 +13,7 @@
 .movement-delete { min-height: 34px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid color-mix(in srgb, var(--color-blue), transparent 65%); border-radius: var(--radius-8); color: var(--color-blue); background: var(--surface); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
 .movement-delete:hover { background: var(--color-blue-soft); }
 .inventory-movement-modal .form-field > small { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); }
+.warehouse-modal .modal-footer-spacer { flex: 1; }
 .form-grid.three { grid-template-columns: .8fr .8fr 1.4fr; }
 
 html[data-theme='dark'] .inventory-movement-modal { color: var(--ink); background: var(--surface); }

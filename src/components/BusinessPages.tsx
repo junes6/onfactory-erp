@@ -614,6 +614,20 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, c
       : `${validated.shortName} 표시 필수항목 검증을 통과했습니다.`)
   }
 
+  const deleteProduct = async (product: ManagedProduct) => {
+    if (!window.confirm(`‘${product.shortName}’ 제품을 삭제할까요? 기존 출고·재고 이력의 제품명 기록은 유지됩니다.`)) return false
+    const result = await commitProductChange((current) => current.filter((item) => item.id !== product.id))
+    if (!result.ok) {
+      const message = result.message ?? '제품을 삭제하지 못했습니다.'
+      onToast(message)
+      return false
+    }
+    setSelectedProductId(null)
+    setEditor(null)
+    onToast(`${product.shortName} 제품을 삭제했습니다.`)
+    return true
+  }
+
   const attentionCount = products.filter((product) => product.status !== '정상').length
   const labelReviewCount = products.filter((product) => product.labelStatus !== '승인').length
   const linkedChannelCount = products.reduce((sum, product) => sum + product.channels, 0)
@@ -753,6 +767,7 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, c
           onTabChange={setDetailTab}
           onClose={() => setSelectedProductId(null)}
           onEdit={() => openEditor(selectedProduct.id)}
+          onDelete={() => void deleteProduct(selectedProduct)}
           onValidate={() => void validateProduct(selectedProduct.id)}
           canViewCommercial={canManage}
         />
@@ -985,6 +1000,7 @@ function ProductDetailDialog({
   onTabChange,
   onClose,
   onEdit,
+  onDelete,
   onValidate,
   canViewCommercial,
 }: {
@@ -996,6 +1012,7 @@ function ProductDetailDialog({
   onTabChange: (tab: ProductDetailTab) => void
   onClose: () => void
   onEdit: () => void
+  onDelete: () => void
   onValidate: () => void
   canViewCommercial: boolean
 }) {
@@ -1232,6 +1249,9 @@ function ProductDetailDialog({
         <footer className="product-detail-actions">
           <span>표시 검증 · {validation?.checkedAt ? formatDateTime(validation.checkedAt) : '실행 전'}</span>
           {canViewCommercial ? <div>
+            <button className="danger-text-button" type="button" onClick={onDelete}>
+              <Trash2 size={16} aria-hidden="true" /> 제품 삭제
+            </button>
             <button className="secondary-button" type="button" onClick={onValidate}>
               <RefreshCw size={16} aria-hidden="true" /> 표시 다시 검증
             </button>

@@ -9,6 +9,7 @@ type UploadAttachmentOptions = {
   category: string
   summary?: string
   tags?: string[]
+  allowedUserIds?: string[]
 }
 
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
@@ -46,6 +47,7 @@ export async function uploadDocumentAttachment(file: File, options: UploadAttach
     visibility: 'restricted',
     summary: options.summary ?? '',
     tags: (options.tags ?? []).join(','),
+    ...(options.allowedUserIds?.length ? { allowedUserIds: [...new Set(options.allowedUserIds)].join(',') } : {}),
   })
   const response = await fetch(`/api/documents?${params}`, {
     method: 'POST',

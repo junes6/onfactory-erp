@@ -28,6 +28,8 @@ type HydrationWaiter = {
 type WorkspaceWriteOptions = {
   /** Use after a dedicated API already committed the same value. */
   persist?: boolean
+  /** Workspace hash returned by that dedicated API commit. */
+  serverVersion?: string
 }
 
 export type WorkspaceWriteResult = {
@@ -257,7 +259,12 @@ export function useWorkspaceState<T>(
     committedIdentityRef.current = updateIdentity
     setScopedValue({ identity: updateIdentity, value: nextValue })
     writeCache(cacheKey, nextValue)
-    if (writeOptions.persist === false) return { ok: true, persisted: false }
+    if (writeOptions.persist === false) {
+      if (typeof writeOptions.serverVersion === 'string' && writeOptions.serverVersion) {
+        serverVersionRef.current = writeOptions.serverVersion
+      }
+      return { ok: true, persisted: false }
+    }
     const version = ++writeVersionRef.current
     return writeValue(nextValue, { previousValue: currentValue, version })
   }, [cacheKey, enabled, identity, key, writeValue])

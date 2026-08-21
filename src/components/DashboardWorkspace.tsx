@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   ArrowDown, ArrowUp, Check, ExternalLink, Globe2, LayoutDashboard,
-  Link2, Plus, Settings2, Trash2, X,
+  Link2, Pencil, Plus, Settings2, Trash2, X,
 } from 'lucide-react'
+import { quickLinksStorageKey, readQuickLinks, writeQuickLinks, type QuickLink } from '../utils/quickLinksStorage'
 import './DashboardWorkspace.css'
 
 export type DashboardWidgetId = 'summary' | 'ai' | 'schedule' | 'work' | 'links' | 'alert'
@@ -149,30 +150,18 @@ export function DashboardLayoutModal({ open, preferences, onChange, onClose }: {
   </div>
 }
 
-type QuickLink = { id: string; name: string; url: string; color: 'green' | 'blue' | 'amber' | 'violet' }
-const defaultQuickLinks: QuickLink[] = [
-  { id: 'naver', name: '네이버', url: 'https://www.naver.com', color: 'green' },
-  { id: 'g2b', name: '나라장터', url: 'https://www.g2b.go.kr', color: 'blue' },
-]
-
-function readQuickLinks(storageKey: string) {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? 'null')
-    if (!Array.isArray(parsed)) return defaultQuickLinks
-    return parsed.filter((item): item is QuickLink => Boolean(item && typeof item.name === 'string' && typeof item.url === 'string'))
-  } catch { return defaultQuickLinks }
-}
-
 export function QuickLinksWidget({ scope, onToast }: { scope: string; onToast: (message: string) => void }) {
-  const storageKey = `onfactory-dashboard-links:${scope}`
-  const [links, setLinks] = useState<QuickLink[]>(() => readQuickLinks(storageKey))
+  const storageKey = quickLinksStorageKey(scope)
+  const [links, setLinks] = useState<QuickLink[]>(() => readQuickLinks(window.localStorage, storageKey))
   const [adding, setAdding] = useState(false)
   const [managing, setManaging] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const editingLink = links.find((link) => link.id === editingId) ?? null
 
-  useEffect(() => setLinks(readQuickLinks(storageKey)), [storageKey])
+  useEffect(() => setLinks(readQuickLinks(window.localStorage, storageKey)), [storageKey])
   useEffect(() => {
-    try { window.localStorage.setItem(storageKey, JSON.stringify(links)) } catch { /* personal preference storage is optional */ }
+    try { writeQuickLinks(window.localStorage, storageKey, links) } catch { /* personal preference storage is optional */ }
   }, [links, storageKey])
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -184,30 +173,34 @@ export function QuickLinksWidget({ scope, onToast }: { scope: string; onToast: (
       const url = new URL(rawUrl)
       if (!['http:', 'https:'].includes(url.protocol)) throw new Error('invalid protocol')
       if (!name) { setError('바로가기 이름을 입력해 주세요.'); return }
-      setLinks((current) => [...current, { id: `LINK-${Date.now()}`, name, url: url.toString(), color: String(form.get('color') ?? 'green') as QuickLink['color'] }])
+      const nextLink = { name, url: url.toString(), color: String(form.get('color') ?? 'green') as QuickLink['color'] }
+      setLinks((current) => editingId
+        ? current.map((link) => link.id === editingId ? { ...link, ...nextLink } : link)
+        : [...current, { id: `LINK-${Date.now()}`, ...nextLink }])
       setAdding(false)
+      setEditingId(null)
       setError('')
-      onToast(`${name} 바로가기를 추가했습니다.`)
+      onToast(`${name} 바로가기를 ${editingId ? '수정' : '추가'}했습니다.`)
     } catch { setError('https:// 로 시작하는 올바른 주소를 입력해 주세요.') }
   }
 
-  return <section className="dashboard-quick-links" aria-labelledby="quick-links-title">
-    <header><div><span>QUICK LINKS</span><h2 id="quick-links-title">업무 바로가기</h2></div><div><button type="button" onClick={() => { setManaging((value) => !value); setAdding(false) }}><Settings2 size={16} /> {managing ? '완료' : '관리'}</button><button type="button" onClick={() => { setAdding(true); setManaging(false) }}><Plus size={17} /> 추가</button></div></header>
-    <div className="dashboard-link-grid">
+  return <section className="dashboard-quick-links dashboard-section-card" aria-labelledby="quick-links-title">
+    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><Globe2 size={18} /></span><h2 id="quick-links-title">업무 바로가기</h2></div><div><button type="button" onClick={() => { setManaging((value) => !value); setAdding(false); setEditingId(null) }}><Settings2 size={16} /> {managing ? '완료' : '관리'}</button><button type="button" onClick={() => { setAdding(true); setManaging(false); setEditingId(null) }}><Plus size={17} /> 추가</button></div></header>
+    <div className="dashboard-section-body"><div className="dashboard-link-grid">
       {links.map((link) => <div className="dashboard-link-item" key={link.id}>
         <a href={link.url} target="_blank" rel="noreferrer noopener" aria-label={`${link.name} 새 창에서 열기`}><span className={link.color}>{link.name.slice(0, 1)}</span><strong>{link.name}</strong><ExternalLink size={15} /></a>
-        {managing && <button type="button" aria-label={`${link.name} 삭제`} onClick={() => setLinks((current) => current.filter((item) => item.id !== link.id))}><Trash2 size={16} /></button>}
+        {managing && <div className="dashboard-link-manage-actions"><button type="button" aria-label={`${link.name} 수정`} onClick={() => { setEditingId(link.id); setAdding(true); setManaging(false); setError('') }}><Pencil size={16} /></button><button type="button" aria-label={`${link.name} 삭제`} onClick={() => setLinks((current) => current.filter((item) => item.id !== link.id))}><Trash2 size={16} /></button></div>}
       </div>)}
       {links.length === 0 && <button className="dashboard-link-empty" type="button" onClick={() => setAdding(true)}><Globe2 size={22} /><span>첫 바로가기 추가</span></button>}
     </div>
     {adding && <form className="dashboard-link-form" onSubmit={submit}>
-      <div><Link2 size={18} /><strong>새 바로가기</strong><button type="button" aria-label="추가 취소" onClick={() => { setAdding(false); setError('') }}><X size={17} /></button></div>
-      <label><span>이름</span><input name="name" autoFocus placeholder="예: 식품안전나라" required /></label>
-      <label><span>웹 주소</span><input name="url" type="url" placeholder="https://www.example.com" required /></label>
-      <label><span>아이콘 색상</span><select name="color" defaultValue="green"><option value="green">초록</option><option value="blue">파랑</option><option value="amber">주황</option><option value="violet">보라</option></select></label>
+      <div><Link2 size={18} /><strong>{editingLink ? '바로가기 수정' : '새 바로가기'}</strong><button type="button" aria-label="편집 취소" onClick={() => { setAdding(false); setEditingId(null); setError('') }}><X size={17} /></button></div>
+      <label><span>이름</span><input name="name" key={`name-${editingLink?.id ?? 'new'}`} defaultValue={editingLink?.name ?? ''} autoFocus placeholder="예: 식품안전나라" required /></label>
+      <label><span>웹 주소</span><input name="url" key={`url-${editingLink?.id ?? 'new'}`} defaultValue={editingLink?.url ?? ''} type="url" placeholder="https://www.example.com" required /></label>
+      <label><span>아이콘 색상</span><select name="color" key={`color-${editingLink?.id ?? 'new'}`} defaultValue={editingLink?.color ?? 'green'}><option value="green">초록</option><option value="blue">파랑</option><option value="amber">주황</option><option value="violet">보라</option></select></label>
       {error && <p role="alert">{error}</p>}
-      <button className="button primary" type="submit"><Plus size={17} /> 바로가기 저장</button>
-    </form>}
+      <button className="button primary" type="submit">{editingLink ? <Pencil size={17} /> : <Plus size={17} />} 바로가기 저장</button>
+    </form>}</div>
   </section>
 }
 

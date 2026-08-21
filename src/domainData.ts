@@ -60,6 +60,7 @@ export type WorkItem = {
   priority: '긴급' | '높음' | '보통'
   status: '업무요청' | '수행중' | '결재대기' | '결재완료'
   category: string
+  attachments?: WorkEvidence[]
   completion?: WorkCompletion
   completionHistory?: WorkCompletion[]
   review?: WorkReview

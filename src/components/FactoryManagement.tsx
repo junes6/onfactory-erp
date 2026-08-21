@@ -891,9 +891,9 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
     setEditMode(false)
   }
 
-  const registerFirstFactory = async () => {
-    if (!canManage || availableFactories.length > 0) return
-    const next = createCustomerFactory(companyName)
+  const registerFactory = async () => {
+    if (!canManage) return
+    const next = createCustomerFactory(companyName, `FAC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`)
     const result = await setLayouts((current) => ({ ...current, [next.id]: [] }))
     if (!result.ok) {
       onToast(result.message ?? '공장을 등록하지 못했습니다.')
@@ -901,6 +901,32 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
     }
     setSelectedFactoryId(next.id)
     onToast(`${next.name}을 등록했습니다. 배치 블록과 운영 위치를 추가해 주세요.`)
+  }
+
+  const deleteFactory = async () => {
+    if (!canManage || !availableFactories.some((item) => item.id === factory.id)) return
+    if (drawing) {
+      onToast('공장 도면을 먼저 제거한 뒤 공장을 삭제해 주세요.')
+      return
+    }
+    if (!window.confirm(`${factory.name}과 연결된 블록·위치 정보를 삭제할까요?`)) return
+    const previousBlocks = factoryBlocks
+    const previousLocations = factoryLocations
+    const layoutResult = await setLayouts((current) => {
+      const next = { ...current }
+      delete next[factory.id]
+      return next
+    })
+    if (!layoutResult.ok) { onToast(layoutResult.message ?? '공장을 삭제하지 못했습니다.'); return }
+    const locationResult = await setLocations((current) => current.filter((location) => location.factoryId !== factory.id))
+    if (!locationResult.ok) {
+      await setLayouts((current) => ({ ...current, [factory.id]: previousBlocks }))
+      onToast(locationResult.message ?? '공장 위치 정리에 실패해 공장 정보를 복구했습니다.')
+      return
+    }
+    setSelectedFactoryId('')
+    setSelectedBlockId(null)
+    onToast(`${factory.name}과 연결된 블록 ${previousBlocks.length}개, 위치 ${previousLocations.length}개를 삭제했습니다.`)
   }
 
   const setDrawingReference = async (drawingId: string, factoryId: string, attached: boolean) => {
@@ -1063,10 +1089,20 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
     const result = await setLocations((current) => editing
       ? current.map((item) => item.id === location.id ? location : item)
       : [...current, location])
-    if (!result.ok) return
+    if (!result.ok) {
+      onToast(result.message ?? `위치를 ${editing ? '수정' : '등록'}하지 못했습니다.`)
+      return
+    }
     setSelectedZoneId(location.zoneId)
     setModalState(null)
     onToast(`${location.name} 위치를 ${editing ? '수정' : '등록'}했습니다.`)
+  }
+
+  const deleteLocation = async (location: FactoryLocation) => {
+    if (!canManage || !window.confirm(`${location.name} 위치를 삭제할까요?`)) return
+    const result = await setLocations((current) => current.filter((item) => item.id !== location.id))
+    if (!result.ok) { onToast(result.message ?? '위치를 삭제하지 못했습니다.'); return }
+    onToast(`${location.name} 위치를 삭제했습니다.`)
   }
 
   const selectBlock = (block: LayoutBlock) => {
@@ -1141,8 +1177,8 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
       </header>
       <section className="factory-overview factory-empty-state" aria-label="공장 등록 안내">
         <FactoryIcon size={32} aria-hidden="true" />
-        <div><h2>등록된 공장이 없습니다</h2><p>{canManage ? '첫 공장을 등록한 뒤 도면 또는 블록 편집기로 실제 공간을 구성하세요.' : '회사 관리자가 공장을 등록하면 이곳에서 운영 위치를 확인할 수 있습니다.'}</p></div>
-        {canManage && <button className="factory-button factory-button--primary" type="button" onClick={() => void registerFirstFactory()}><Plus size={17} /> 첫 공장 등록</button>}
+        <div><h2>아직 등록된 항목이 없습니다</h2><p>{canManage ? '첫 공장을 등록한 뒤 도면 또는 블록 편집기로 실제 공간을 구성하세요.' : '회사 관리자가 공장을 등록하면 이곳에서 운영 위치를 확인할 수 있습니다.'}</p></div>
+        {canManage && <button className="factory-button factory-button--primary" type="button" onClick={() => void registerFactory()}><Plus size={17} /> 첫 공장 등록</button>}
       </section>
     </div>
   }
@@ -1155,12 +1191,15 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
           <h1>공장관리</h1>
           <p>공장 배치도 위에서 재고, 생산, 포장과 출하 흐름을 확인하고 실제 위치를 관리합니다.</p>
         </div>
-        <label className="factory-selector">
-          <span>관리 공장</span>
-          <select value={factory.id} onChange={selectFactory} aria-label="관리할 공장 선택">
-            {availableFactories.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
-          </select>
-        </label>
+        <div className="factory-page__actions">
+          <label className="factory-selector">
+            <span>관리 공장</span>
+            <select value={factory.id} onChange={selectFactory} aria-label="관리할 공장 선택">
+              {availableFactories.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+            </select>
+          </label>
+          {canManage && <div className="factory-page__action-buttons"><button className="factory-button factory-button--ghost" type="button" onClick={() => void registerFactory()}><Plus size={16} /> 공장 추가</button><button className="factory-button factory-button--danger" type="button" onClick={() => void deleteFactory()}><Trash2 size={16} /> 공장 삭제</button></div>}
+        </div>
       </header>
 
       <section className={`factory-overview${overviewExpanded ? ' is-expanded' : ''}`} aria-label="선택 공장 운영 요약">
@@ -1263,7 +1302,7 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
                     <div className="factory-location-card__head">
                       <span className={`factory-location-card__kind factory-location-card__kind--${location.kind === '재고' ? 'stock' : 'work'}`}>{location.kind === '재고' ? <Boxes size={16} /> : <FactoryIcon size={16} />}</span>
                       <div><strong>{location.name}</strong><span>{location.code} · {location.kind} 위치</span></div>
-                       {canManage && <button type="button" aria-label={`${location.name} 수정`} onClick={() => setModalState({ mode: 'edit', location })}><Edit3 size={16} /></button>}
+                      {canManage && <div className="factory-location-card__actions"><button type="button" aria-label={`${location.name} 수정`} onClick={() => setModalState({ mode: 'edit', location })}><Edit3 size={16} /></button><button type="button" className="is-danger" aria-label={`${location.name} 삭제`} onClick={() => void deleteLocation(location)}><Trash2 size={16} /></button></div>}
                     </div>
                     <div className="factory-location-card__item"><span>{location.item}</span><FactoryStatusBadge state={location.status} /></div>
                     <div className="factory-location-card__quantity"><strong>{location.current.toLocaleString()} {location.unit}</strong><span>/ {location.capacity.toLocaleString()} {location.unit}</span></div>

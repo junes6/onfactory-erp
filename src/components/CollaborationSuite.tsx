@@ -28,12 +28,19 @@ import {
   UserPlus,
   UserRound,
   Users,
+  WandSparkles,
   X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, ReactNode } from 'react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { formatDateLabel, formatDateTime, formatShortDateTime, formatYearMonthLabel, seoulDateInputValue } from '../utils/dateTime'
+import {
+  canApplyGeneratedJournalDraft,
+  canApplyJournalAutosaveToEditor,
+  canFlushJournalDraftOnExit,
+  nextJournalRevisionAfterConflict,
+} from '../utils/journalAutosaveRevision'
 import {
   deleteDocumentAttachment,
   deleteDocumentAttachments,
@@ -1223,6 +1230,7 @@ type Journal = {
   status: JournalStatus
   updatedAt: string
   submittedAt?: string
+  draftRevision?: number
   feedback: string
   attachments: JournalAttachment[]
   reviews?: JournalReview[]
@@ -1273,8 +1281,24 @@ function formatJournalTimestamp(value: string) {
   return formatDateTime(value)
 }
 
-function formatJournalGroupDate(value: string) {
-  return formatDateLabel(value)
+function normalizeJournalBullets(value: string) {
+  return value
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => {
+      const content = line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trimEnd()
+      return content.trim() ? `• ${content.trimStart()}` : ''
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .slice(0, 10_000)
+}
+
+function journalSummaryLine(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
+    .find(Boolean) || '아직 작성된 업무 내용이 없습니다.'
 }
 
 function JournalReviewDialog({
@@ -1343,7 +1367,7 @@ function JournalReviewDialog({
 
 export function DailyJournalPage({ onToast, currentUserId, currentUserName, currentUserTeam, canManage, workspaceScope }: PageProps) {
   const [journals, setJournals] = useWorkspaceState<Journal[]>('daily-journals', [], { scope: workspaceScope, seedWhenEmpty: false })
-  const isJournalOwner = (journal: Pick<Journal, 'authorId' | 'author'>) => journal.authorId === currentUserId || (!journal.authorId && journal.author === currentUserName)
+  const isJournalOwner = (journal: Pick<Journal, 'authorId'>) => journal.authorId === currentUserId
   const initialJournal = journals.find(isJournalOwner) ?? (canManage ? journals[0] : undefined) ?? newJournalDraft(currentUserId, currentUserName, currentUserTeam)
   const [selectedId, setSelectedId] = useState(initialJournal.id)
   const [editor, setEditor] = useState<Journal>(() => cloneJournal(initialJournal))
@@ -1357,14 +1381,27 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
   const [reviewSubmitting, setReviewSubmitting] = useState(false)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState('')
+  const [aiDraftBusy, setAiDraftBusy] = useState(false)
+  const [autoSaveMessage, setAutoSaveMessage] = useState('30초마다 변경사항을 자동 임시저장합니다.')
+  const [journalManualSaving, setJournalManualSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const titleInputRef = useRef<HTMLInputElement>(null)
   const editorDirtyRef = useRef(false)
+  const editorStateRef = useRef(editor)
+  const journalRevisionRef = useRef(0)
+  const journalSavingRef = useRef(false)
+  const journalManualSavingRef = useRef(false)
+  const autoSaveActionRef = useRef<(() => Promise<boolean>) | null>(null)
+  const autoSaveRetryTimerRef = useRef<number | null>(null)
+  const flushJournalDraftRef = useRef<(() => void) | null>(null)
+  const journalModeRef = useRef({ viewMode, journalEditorMode })
   const [journalDirty, setJournalDirty] = useState(false)
   const uploadedAttachmentIdsRef = useRef(new Set<string>())
   const removedAttachmentIdsRef = useRef(new Set<string>())
   const accessibleJournals = journals.filter((journal) => canManage || isJournalOwner(journal))
+  editorStateRef.current = editor
+  journalModeRef.current = { viewMode, journalEditorMode }
   const markJournalDirty = (dirty: boolean) => {
+    if (dirty) journalRevisionRef.current = Math.max(journalRevisionRef.current, editorStateRef.current.draftRevision ?? 0) + 1
     editorDirtyRef.current = dirty
     setJournalDirty(dirty)
   }
@@ -1393,30 +1430,17 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
     const matchesQuery = !normalized || (journal.title + ' ' + journal.date + ' ' + journal.author + ' ' + journal.department + ' ' + journal.completed).toLowerCase().includes(normalized)
     return matchesFilter && matchesQuery
   })
-  const journalGroups = Array.from(filteredJournals.reduce((groups, journal) => {
-    const group = groups.get(journal.date) ?? []
-    group.push(journal)
-    groups.set(journal.date, group)
-    return groups
-  }, new Map<string, Journal[]>()).entries())
-    .sort(([left], [right]) => right.localeCompare(left))
+  const sortedJournals = [...filteredJournals].sort((left, right) => {
+    const byDate = right.date.localeCompare(left.date)
+    return byDate || right.updatedAt.localeCompare(left.updatedAt)
+  })
   const canModifyJournal = isJournalOwner(editor) && (editor.status === '임시저장' || editor.status === '반려')
   const canEdit = journalEditorMode === 'edit' && canModifyJournal
 
   const updateEditor = <Key extends keyof Journal>(key: Key, value: Journal[Key]) => {
-    if (!canEdit) return
+    if (!canEdit || journalManualSavingRef.current) return
     markJournalDirty(true)
     setEditor((current) => ({ ...current, [key]: value }))
-  }
-
-  const updateJournalDate = (date: string) => {
-    if (!canEdit) return
-    markJournalDirty(true)
-    setEditor((current) => ({
-      ...current,
-      date,
-      title: /^\d{4}-\d{2}-\d{2}_.+_업무일지$/.test(current.title) ? `${date}_${current.author}_업무일지` : current.title,
-    }))
   }
 
   const cleanupUnsavedUploads = async () => {
@@ -1455,6 +1479,7 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
   }
 
   const createJournal = async () => {
+    if (journalSavingRef.current) return
     if (journalDirty && !window.confirm('저장하지 않은 업무일지 변경사항이 있습니다. 변경사항을 버리고 새 일지를 작성할까요?')) return
     if (attachmentBusy || !(await cleanupUnsavedUploads())) return
     const next = newJournalDraft(currentUserId, currentUserName, currentUserTeam)
@@ -1470,6 +1495,7 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
   }
 
   const returnToJournalList = async () => {
+    if (journalSavingRef.current) return
     if (journalDirty && !window.confirm('저장하지 않은 업무일지 변경사항이 있습니다. 변경사항을 버리고 목록으로 돌아갈까요?')) return
     if (attachmentBusy || !(await cleanupUnsavedUploads())) return
     const stored = accessibleJournals.find((journal) => journal.id === selectedId)
@@ -1481,12 +1507,15 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
     setViewMode('list')
   }
 
-  const persistJournal = async (status: JournalStatus, message: string) => {
+  const persistJournal = async (status: JournalStatus, message: string, silent = false) => {
     if (!canEdit) {
       onToast('본인의 임시저장 또는 반려 일지만 수정할 수 있습니다.')
       return false
     }
-    if (journalSaving || attachmentBusy) return false
+    if (journalSavingRef.current || attachmentBusy) return false
+    journalSavingRef.current = true
+    journalManualSavingRef.current = true
+    setJournalManualSaving(true)
     setJournalSaving(true)
     setSaveError('')
     const now = new Date().toISOString()
@@ -1508,6 +1537,9 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
       const errorMessage = (result.message ?? '업무일지를 저장하지 못했습니다. 다시 시도해 주세요.') + (newlyUploadedIds.length ? cleanupMessage : '')
       setSaveError(errorMessage)
       onToast(errorMessage)
+      journalSavingRef.current = false
+      journalManualSavingRef.current = false
+      setJournalManualSaving(false)
       setJournalSaving(false)
       return false
     }
@@ -1516,30 +1548,251 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
     const cleanup = await deleteDocumentAttachments(removedDocumentIds, workspaceScope)
     markJournalDirty(false)
     setEditor(cloneJournal(saved))
+    journalSavingRef.current = false
+    journalManualSavingRef.current = false
+    setJournalManualSaving(false)
     setJournalSaving(false)
     if (cleanup.failed.length) {
       const warning = `${message} 다만 제거한 첨부 ${cleanup.failed.length}개의 원본 정리에 실패했습니다.`
       setSaveError(warning)
       onToast(warning)
-    } else {
+    } else if (!silent) {
       onToast(message)
     }
     return true
   }
+
+  const deleteJournalDraft = async () => {
+    if (journalSavingRef.current) return false
+    if (!isJournalOwner(editor) || editor.status !== '임시저장') {
+      onToast('본인의 임시저장 일지만 삭제할 수 있습니다.')
+      return false
+    }
+    if (!window.confirm(`‘${editor.title}’ 초안을 삭제할까요? 결재요청한 일지는 삭제할 수 없습니다.`)) return false
+    if (attachmentBusy || !(await cleanupUnsavedUploads())) return false
+    const stored = journals.find((journal) => journal.id === editor.id)
+    if (stored) {
+      const result = await setJournals((current) => current.filter((journal) => journal.id !== editor.id))
+      if (!result.ok) {
+        const message = result.message ?? '업무일지 초안을 삭제하지 못했습니다.'
+        setSaveError(message)
+        onToast(message)
+        return false
+      }
+      const storedAttachmentIds = stored.attachments.filter(isStoredDocumentAttachment).map((attachment) => attachment.id)
+      const cleanup = await deleteDocumentAttachments(storedAttachmentIds, workspaceScope)
+      if (cleanup.failed.length) onToast(`초안은 삭제했지만 첨부 ${cleanup.failed.length}개의 원본 정리가 필요합니다.`)
+      else onToast('업무일지 초안을 삭제했습니다.')
+    } else {
+      onToast('작성 중이던 새 초안을 닫았습니다.')
+    }
+    uploadedAttachmentIdsRef.current.clear()
+    removedAttachmentIdsRef.current.clear()
+    markJournalDirty(false)
+    const remaining = journals.filter((journal) => journal.id !== editor.id && (canManage || isJournalOwner(journal)))
+    const next = remaining[0] ?? newJournalDraft(currentUserId, currentUserName, currentUserTeam)
+    setSelectedId(next.id)
+    setEditor(cloneJournal(next))
+    setSaveError('')
+    setJournalEditorMode('view')
+    setViewMode('list')
+    return true
+  }
+
+  const draftPayload = () => {
+    const current = editorStateRef.current
+    return {
+    ...current,
+    status: '임시저장' as const,
+    updatedAt: new Date().toISOString(),
+    draftRevision: Math.max(journalRevisionRef.current, current.draftRevision ?? 0),
+    }
+  }
+
+  const persistAutoDraft = async () => {
+    if (!canEdit || journalSavingRef.current || attachmentBusy) return false
+    const requestedRevision = journalRevisionRef.current
+    const requestedJournalId = editor.id
+    const requestedDraft = draftPayload()
+    let retryAfterConflict = false
+    journalSavingRef.current = true
+    setJournalSaving(true)
+    setAutoSaveMessage('변경사항을 자동 저장하는 중…')
+    const removedDocumentIds = [...removedAttachmentIdsRef.current]
+    try {
+      const response = await fetch(`/api/daily-journals/${encodeURIComponent(requestedJournalId)}/draft`, {
+        method: 'PUT',
+        headers: {
+          'content-type': 'application/json',
+          ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}),
+        },
+        body: JSON.stringify({ journal: requestedDraft }),
+      })
+      const body = await response.json().catch(() => null) as {
+        journal?: Journal
+        version?: string
+        draftRevision?: number
+        stale?: boolean
+        error?: { message?: string }
+      } | null
+      if (!response.ok || !body?.journal) throw new Error(body?.error?.message || '업무일지 자동 저장에 실패했습니다.')
+      const saved = cloneJournal(body.journal)
+      await setJournals((current) => current.some((journal) => journal.id === saved.id)
+        ? current.map((journal) => journal.id === saved.id ? saved : journal)
+        : [saved, ...current], { persist: false, serverVersion: body.version })
+      const responseRevision = body.draftRevision ?? saved.draftRevision ?? requestedRevision
+      if (body.stale) {
+        journalRevisionRef.current = nextJournalRevisionAfterConflict({
+          requestedRevision,
+          responseRevision,
+          currentRevision: journalRevisionRef.current,
+        })
+        retryAfterConflict = true
+        setAutoSaveMessage('다른 탭의 저장을 감지했습니다. 현재 입력은 유지하고 잠시 후 다시 저장합니다.')
+        return true
+      }
+      const canApplyToEditor = canApplyJournalAutosaveToEditor({
+        requestedRevision,
+        responseRevision,
+        currentRevision: journalRevisionRef.current,
+        requestedJournalId,
+        currentJournalId: editorStateRef.current.id,
+        dirty: editorDirtyRef.current,
+        stale: body.stale,
+      })
+      if (!canApplyToEditor) {
+        setAutoSaveMessage('이전 변경은 저장됐고, 새 변경사항은 다음 자동 저장을 기다립니다.')
+        return true
+      }
+      uploadedAttachmentIdsRef.current.clear()
+      removedAttachmentIdsRef.current.clear()
+      markJournalDirty(false)
+      setEditor(saved)
+      setAutoSaveMessage(`${formatShortDateTime(saved.updatedAt)} 자동 저장됨`)
+      const cleanup = await deleteDocumentAttachments(removedDocumentIds, workspaceScope)
+      if (cleanup.failed.length) setSaveError(`자동 저장은 완료했지만 제거한 첨부 ${cleanup.failed.length}개의 원본 정리가 필요합니다.`)
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '업무일지 자동 저장에 실패했습니다.'
+      setSaveError(message)
+      setAutoSaveMessage('자동 저장에 실패했습니다. 변경사항은 화면에 남아 있습니다.')
+      return false
+    } finally {
+      journalSavingRef.current = false
+      setJournalSaving(false)
+      if (retryAfterConflict) {
+        if (autoSaveRetryTimerRef.current !== null) window.clearTimeout(autoSaveRetryTimerRef.current)
+        autoSaveRetryTimerRef.current = window.setTimeout(() => {
+          autoSaveRetryTimerRef.current = null
+          if (!editorDirtyRef.current || journalSavingRef.current) return
+          void autoSaveActionRef.current?.()
+        }, 1_000)
+      }
+    }
+  }
+
+  autoSaveActionRef.current = persistAutoDraft
+  flushJournalDraftRef.current = () => {
+    if (!canFlushJournalDraftOnExit({
+      dirty: editorDirtyRef.current,
+      editable: canEdit,
+      attachmentBusy,
+      manualSaving: journalManualSavingRef.current,
+    })) return
+    const latestDraft = draftPayload()
+    void fetch(`/api/daily-journals/${encodeURIComponent(latestDraft.id)}/draft`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}),
+      },
+      body: JSON.stringify({ journal: latestDraft }),
+      keepalive: true,
+    }).catch(() => { /* the 30-second saver retries while the page remains open */ })
+  }
+
+  useEffect(() => {
+    if (viewMode !== 'editor' || journalEditorMode !== 'edit' || !canModifyJournal) return
+    const timer = window.setInterval(() => {
+      if (!editorDirtyRef.current || journalSavingRef.current) return
+      void autoSaveActionRef.current?.()
+    }, 30_000)
+    return () => window.clearInterval(timer)
+  }, [canModifyJournal, editor.id, journalEditorMode, viewMode])
+
+  useEffect(() => {
+    const flush = () => flushJournalDraftRef.current?.()
+    window.addEventListener('pagehide', flush)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      if (autoSaveRetryTimerRef.current !== null) window.clearTimeout(autoSaveRetryTimerRef.current)
+      flush()
+    }
+  }, [])
 
   const saveDraft = () => {
     void persistJournal('임시저장', '업무일지를 임시저장했습니다.')
   }
 
   const requestApproval = async () => {
-    if (!editor.completed.trim() || !editor.nextPlan.trim()) {
-      onToast('오늘 한 일과 다음 업무 계획을 입력해 주세요.')
+    if (!journalSummaryLine(editor.completed).trim() || !editor.completed.replace(/[•\s]/g, '').trim()) {
+      onToast('오늘 한 일을 한 줄 이상 입력해 주세요.')
       return
     }
     const saved = await persistJournal('결재요청', editor.approver + '님에게 결재를 요청했습니다.')
     if (saved) {
       setJournalEditorMode('view')
       setViewMode('list')
+    }
+  }
+
+  const generateTodayDraft = async () => {
+    if (!canEdit || aiDraftBusy || journalManualSavingRef.current) return
+    if (editor.completed.replace(/[•\s]/g, '').trim() && !window.confirm('작성 중인 오늘 한 일을 오늘 기록 기반 초안으로 바꿀까요?')) return
+    const requestedRevision = journalRevisionRef.current
+    const requestedJournalId = editor.id
+    setAiDraftBusy(true)
+    setSaveError('')
+    try {
+      const response = await fetch('/api/daily-journals/draft', {
+        method: 'POST',
+        headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined,
+      })
+      const body = await response.json().catch(() => null) as {
+        draft?: string
+        sourceCount?: number
+        mode?: 'claude' | 'grounded-fallback' | 'grounded-empty'
+        message?: string
+        error?: { message?: string }
+      } | null
+      if (!response.ok) throw new Error(body?.error?.message || '오늘 기록 초안을 만들지 못했습니다.')
+      if (!body?.draft || !body.sourceCount) {
+        onToast(body?.message || '오늘 완료 보고하거나 결재한 업무가 없어 초안을 만들지 않았습니다.')
+        return
+      }
+      const modes = journalModeRef.current
+      if (!canApplyGeneratedJournalDraft({
+        requestedRevision,
+        currentRevision: journalRevisionRef.current,
+        requestedJournalId,
+        currentJournalId: editorStateRef.current.id,
+        currentStatus: editorStateRef.current.status,
+        viewMode: modes.viewMode,
+        editorMode: modes.journalEditorMode,
+        manualSaving: journalManualSavingRef.current,
+      })) {
+        onToast('AI 초안을 만드는 동안 입력이 변경되어 현재 내용을 유지했습니다. 필요하면 다시 초안을 만들어 주세요.')
+        return
+      }
+      updateEditor('completed', normalizeJournalBullets(body.draft))
+      const sourceLabel = `${body.sourceCount}건의 오늘 기록`
+      onToast(body.mode === 'claude' ? `${sourceLabel}으로 AI 초안을 만들었습니다.` : `${sourceLabel}으로 근거 기반 초안을 만들었습니다.`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '오늘 기록 초안을 만들지 못했습니다.'
+      setSaveError(message)
+      onToast(message)
+    } finally {
+      setAiDraftBusy(false)
     }
   }
 
@@ -1564,9 +1817,9 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
         onToast(body?.error?.message ?? '업무일지 결재를 처리하지 못했습니다.')
         return
       }
-      const body = await response.json() as { journal: Journal }
+      const body = await response.json() as { journal: Journal; version?: string }
       const next = cloneJournal(body.journal)
-      await setJournals((current) => current.map((journal) => journal.id === next.id ? next : journal), { persist: false })
+      await setJournals((current) => current.map((journal) => journal.id === next.id ? next : journal), { persist: false, serverVersion: body.version })
       markJournalDirty(false)
       setEditor(next)
       setReviewDecision(null)
@@ -1581,7 +1834,7 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
   }
 
   const attachFiles = async (event: ChangeEvent<HTMLInputElement>) => {
-    if (!canEdit || attachmentBusy) return
+    if (!canEdit || attachmentBusy || journalManualSavingRef.current) return
     const files = Array.from(event.target.files ?? [])
     event.target.value = ''
     if (files.length === 0) return
@@ -1614,7 +1867,7 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
   }
 
   const removeAttachment = async (attachment: JournalAttachment) => {
-    if (!canEdit || attachmentBusy) return
+    if (!canEdit || attachmentBusy || journalManualSavingRef.current) return
     if (isStoredDocumentAttachment(attachment) && uploadedAttachmentIdsRef.current.has(attachment.id)) {
       setAttachmentBusy(true)
       try {
@@ -1650,6 +1903,13 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
   }
 
   const statusCount = (status: JournalStatus) => accessibleJournals.filter((journal) => journal.status === status).length
+  const journalWeekStart = (() => {
+    const date = new Date(`${scheduleToday}T00:00:00+09:00`)
+    const day = date.getDay()
+    date.setDate(date.getDate() - (day === 0 ? 6 : day - 1))
+    return seoulDateInputValue(date)
+  })()
+  const weeklyApprovalCount = accessibleJournals.filter((journal) => journal.status === '승인' && journal.date >= journalWeekStart && journal.date <= scheduleToday).length
   const reviewHistory: JournalReview[] = editor.reviews?.length
     ? editor.reviews
     : editor.feedback && (editor.status === '승인' || editor.status === '반려')
@@ -1662,66 +1922,56 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
         kicker="DAILY WORK JOURNAL"
         title="일일업무일지"
         description={canManage ? '직원 일지를 검토·결재하고 나의 업무 기록도 함께 관리합니다.' : '나의 업무 결과와 이슈를 기록하고 관리자에게 결재를 요청합니다.'}
-        actions={<button className="collab-button primary" type="button" onClick={() => void createJournal()} disabled={attachmentBusy}><Plus size={18} /> 새 일지</button>}
+        actions={(
+          <div className="journal-header-actions">
+            <div className="journal-summary-chips" aria-label="업무일지 현황">
+              {([
+                ['임시저장', '임시저장', statusCount('임시저장'), 'amber'],
+                ['결재요청', '결재 대기', statusCount('결재요청'), 'blue'],
+                ['승인', '이번 주 승인', weeklyApprovalCount, 'green'],
+                ['반려', '보완 필요', statusCount('반려'), 'red'],
+              ] as Array<[JournalStatus, string, number, string]>).map(([status, label, count, tone]) => (
+                <button key={status} className={`journal-summary-chip ${tone}`} type="button" disabled={journalSaving} onClick={() => { setFilter(status); setViewMode('list') }}>
+                  <span>{label}</span><strong>{count}</strong>
+                </button>
+              ))}
+            </div>
+            <button className="collab-button primary" type="button" onClick={() => void createJournal()} disabled={attachmentBusy || journalSaving}><Plus size={18} /> 새 일지</button>
+          </div>
+        )}
       />
-
-      <section className="journal-summary" aria-label="업무일지 현황">
-        <div><span className="journal-summary-icon amber"><Save size={20} /></span><span>임시저장<strong>{statusCount('임시저장')}건</strong></span></div>
-        <div><span className="journal-summary-icon blue"><Clock3 size={20} /></span><span>결재 대기<strong>{statusCount('결재요청')}건</strong></span></div>
-        <div><span className="journal-summary-icon green"><CheckCircle2 size={20} /></span><span>이번 주 승인<strong>{statusCount('승인')}건</strong></span></div>
-        <div><span className="journal-summary-icon red"><AlertCircle size={20} /></span><span>보완 필요<strong>{statusCount('반려')}건</strong></span></div>
-      </section>
 
       <div className={'journal-workspace ' + (viewMode === 'list' ? 'list-only' : 'editor-only')}>
         {viewMode === 'list' && <aside className="collab-panel journal-list-panel" aria-label="직원별 업무일지 제출 목록">
           <div className="journal-list-tools">
-            <div className="journal-list-heading"><div><span className="collab-kicker">SUBMISSIONS</span><h2>직원별 업무일지</h2><p>작성자와 제출일, 결재 상태를 먼저 확인하고 필요한 일지를 선택하세요.</p></div><strong>{filteredJournals.length}건</strong></div>
-            <label className="collab-search">
-              <Search size={18} />
-              <span className="sr-only">업무일지 검색</span>
-              <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="날짜 또는 업무 검색" />
-            </label>
-            <div className="journal-filter" role="group" aria-label="업무일지 상태">
-              {(['전체', '임시저장', '결재요청', '승인', '반려'] as JournalFilter[]).map((item) => (
-                <button type="button" className={filter === item ? 'active' : ''} aria-pressed={filter === item} onClick={() => setFilter(item)} key={item}>{item}</button>
-              ))}
+            <div className="journal-list-heading"><div><span className="collab-kicker">SUBMISSIONS</span><h2>직원별 업무일지</h2></div><strong>{filteredJournals.length}건</strong></div>
+            <div className="journal-list-controls">
+              <label className="collab-search">
+                <Search size={18} />
+                <span className="sr-only">업무일지 검색</span>
+                <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="작성자·날짜·업무 검색" />
+              </label>
+              <div className="journal-filter" role="group" aria-label="업무일지 상태">
+                {(['전체', '임시저장', '결재요청', '승인', '반려'] as JournalFilter[]).map((item) => (
+                  <button type="button" className={filter === item ? 'active' : ''} aria-pressed={filter === item} onClick={() => setFilter(item)} key={item}>{item}</button>
+                ))}
+              </div>
             </div>
           </div>
           <div className="journal-list">
-            {journalGroups.map(([date, dateJournals]) => (
-              <section className="journal-date-group" aria-labelledby={`journal-date-${date}`} key={date}>
-                <header className="journal-date-group-header">
-                  <h3 id={`journal-date-${date}`}>{formatJournalGroupDate(date)}</h3>
-                  <span>{dateJournals.length}건</span>
-                </header>
-                <div className="journal-date-group-list">
-                  {dateJournals.map((journal) => (
-                    <article className={'journal-list-item' + (journal.id === selectedId ? ' active' : '')} key={journal.id}>
-                      <Avatar name={journal.author} compact />
-                      <div className="journal-list-person">
-                        <strong>{journal.author}</strong>
-                        <span>{journal.department}</span>
-                      </div>
-                      <div className="journal-list-copy">
-                        <strong>{journal.title}</strong>
-                        <small>{journal.completed.trim() || '아직 작성된 업무 내용이 없습니다.'}</small>
-                      </div>
-                      <StatusChip tone={journalTone(journal.status)}>{journal.status}</StatusChip>
-                      <time dateTime={journal.status === '임시저장' ? journal.updatedAt : (journal.submittedAt ?? journal.updatedAt)}>
-                        {journal.status === '임시저장' ? '저장' : '제출'} {formatJournalTimestamp(journal.status === '임시저장' ? journal.updatedAt : (journal.submittedAt ?? journal.updatedAt))}
-                      </time>
-                      <button
-                        className="journal-view-button"
-                        type="button"
-                        aria-label={`${journal.author}님의 ${journal.title} 조회`}
-                        onClick={() => chooseJournal(journal)}
-                      >
-                        조회 <ChevronRight size={16} />
-                      </button>
-                    </article>
-                  ))}
-                </div>
-              </section>
+            {sortedJournals.map((journal) => (
+              <button
+                className={'journal-list-card' + (journal.id === selectedId ? ' active' : '')}
+                type="button"
+                aria-label={`${journal.author}님의 ${journal.date} ${journal.status} 업무일지, ${journalSummaryLine(journal.completed)} 상세 보기 (${journal.id})`}
+                onClick={() => chooseJournal(journal)}
+                key={journal.id}
+              >
+                <span className="journal-card-person"><strong>{journal.author}</strong><time dateTime={journal.date}>{formatDateLabel(journal.date)}</time></span>
+                <span className="journal-card-summary">{journalSummaryLine(journal.completed)}</span>
+                <StatusChip tone={journalTone(journal.status)}>{journal.status}</StatusChip>
+                <ChevronRight size={17} aria-hidden="true" />
+              </button>
             ))}
             {filteredJournals.length === 0 && <div className="collab-empty compact"><BookOpenCheck size={28} /><strong>해당 일지가 없습니다</strong><span>검색어나 상태 필터를 변경해 보세요.</span></div>}
           </div>
@@ -1735,15 +1985,14 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
               <p>{editor.author} · {editor.department} · 결재자 {editor.approver}</p>
             </div>
             <div className="journal-editor-header-actions">
-              {canEdit && <button className="collab-icon-button" type="button" aria-label="제목 편집" onClick={() => titleInputRef.current?.focus()}><Edit3 size={19} /></button>}
               {canModifyJournal && !canEdit && <button className="collab-button secondary compact" type="button" onClick={() => setJournalEditorMode('edit')}><Edit3 size={17} /> 수정하기</button>}
-              <button className="collab-button secondary compact" type="button" onClick={() => void returnToJournalList()} disabled={attachmentBusy}><ArrowLeft size={17} /> 목록으로</button>
+              <button className="collab-button secondary compact" type="button" onClick={() => void returnToJournalList()} disabled={attachmentBusy || journalSaving}><ArrowLeft size={17} /> 목록으로</button>
             </div>
           </header>
 
           {saveError && <div className="journal-save-error" role="alert"><AlertCircle size={19} /><span>{saveError}</span></div>}
 
-          {editor.status === '반려' && (
+          {(editor.status === '반려' || (editor.status === '임시저장' && editor.feedback && reviewHistory.at(-1)?.decision === '반려')) && (
             <div className="journal-feedback red">
               <AlertCircle size={21} />
               <div><strong>결재자가 보완을 요청했습니다</strong><p>{editor.feedback}</p></div>
@@ -1785,24 +2034,43 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
           )}
 
           <div className="journal-editor-body">
-            <div className="journal-title-fields">
-              <label className="collab-field"><span>업무일</span><input type="date" value={editor.date} disabled={!canEdit} onChange={(event) => updateJournalDate(event.target.value)} /></label>
-              <label className="collab-field"><span>일지 제목</span><input ref={titleInputRef} value={editor.title} disabled={!canEdit} onChange={(event) => updateEditor('title', event.target.value)} /></label>
-              <label className="collab-field"><span>결재자</span><select value={editor.approver} disabled={!canEdit} onChange={(event) => updateEditor('approver', event.target.value)}><option>{editor.approver}</option>{editor.approver !== '소속 관리자' && <option>소속 관리자</option>}<option>공장장</option><option>품질 책임자</option></select></label>
-            </div>
-            <label className="collab-field journal-textarea"><span>오늘 한 일 <em>필수</em></span><textarea rows={7} value={editor.completed} disabled={!canEdit} onChange={(event) => updateEditor('completed', event.target.value)} placeholder="완료한 업무를 결과 중심으로 작성하세요." /></label>
-            <div className="journal-two-columns">
-              <label className="collab-field journal-textarea"><span>이슈 · 지원 요청</span><textarea rows={5} value={editor.issue} disabled={!canEdit} onChange={(event) => updateEditor('issue', event.target.value)} placeholder="협의나 지원이 필요한 내용을 작성하세요." /></label>
-              <label className="collab-field journal-textarea"><span>다음 업무 계획 <em>필수</em></span><textarea rows={5} value={editor.nextPlan} disabled={!canEdit} onChange={(event) => updateEditor('nextPlan', event.target.value)} placeholder="내일 또는 다음 근무일의 계획을 작성하세요." /></label>
-            </div>
+            <section className="journal-entry-section" aria-labelledby="journal-completed-title">
+              <div className="journal-entry-section-head">
+                <div><strong id="journal-completed-title">1. 오늘 한 일 <em>필수</em></strong><span>한 줄마다 자동으로 불릿이 붙습니다.</span></div>
+                {canEdit && <button className="collab-button secondary compact" type="button" onClick={() => void generateTodayDraft()} disabled={aiDraftBusy || journalSaving}><WandSparkles size={17} /> {aiDraftBusy ? '초안 만드는 중…' : '오늘 기록으로 초안 만들기'}</button>}
+              </div>
+              {canEdit ? (
+                <textarea
+                  className="journal-entry-textarea"
+                  aria-labelledby="journal-completed-title"
+                  rows={8}
+                  value={editor.completed}
+                  disabled={journalManualSaving}
+                  onChange={(event) => updateEditor('completed', normalizeJournalBullets(event.target.value))}
+                  placeholder={'• 완료한 업무를 결과 중심으로 작성하세요.\n• 줄을 바꾸면 다음 항목으로 정리됩니다.'}
+                />
+              ) : (
+                <div className="journal-entry-readonly">
+                  {editor.completed.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean).map((line, index) => <p key={`${line}-${index}`}><span>•</span>{line}</p>)}
+                  {!editor.completed.trim() && <span>기록된 업무가 없습니다.</span>}
+                </div>
+              )}
+            </section>
 
-            <section className="journal-attachments" aria-labelledby="journal-attachment-title">
+            <section className="journal-entry-section" aria-labelledby="journal-issue-title">
+              <div className="journal-entry-section-head"><div><strong id="journal-issue-title">2. 특이사항·막힌 것 <em>선택</em></strong><span>도움이나 공유가 필요한 내용만 적으세요.</span></div></div>
+              {canEdit
+                ? <textarea className="journal-entry-textarea compact" aria-labelledby="journal-issue-title" rows={4} value={editor.issue} disabled={journalManualSaving} onChange={(event) => updateEditor('issue', event.target.value)} placeholder="없으면 비워 두어도 됩니다." />
+                : <div className="journal-entry-readonly"><p>{editor.issue.trim() || '등록된 특이사항이 없습니다.'}</p></div>}
+            </section>
+
+            <section className="journal-attachments journal-entry-section" aria-labelledby="journal-attachment-title">
               <div className="journal-attachment-head">
-                <div><h3 id="journal-attachment-title">첨부파일</h3><p>관련 보고서, 사진 또는 작업 결과를 첨부합니다.</p></div>
+                <div><h3 id="journal-attachment-title">3. 사진·파일 <em>선택</em></h3><p>관련 사진, 보고서 또는 작업 결과를 첨부합니다.</p></div>
                 {canEdit && (
                   <>
-                    <input ref={fileInputRef} className="sr-only" type="file" multiple onChange={attachFiles} />
-                    <button className="collab-button secondary" type="button" onClick={() => fileInputRef.current?.click()} disabled={attachmentBusy}><Upload size={17} /> {attachmentBusy ? '처리 중…' : '파일 첨부'}</button>
+                    <input ref={fileInputRef} className="sr-only" type="file" aria-labelledby="journal-attachment-title" multiple disabled={journalManualSaving} onChange={attachFiles} />
+                    <button className="collab-button secondary" type="button" onClick={() => fileInputRef.current?.click()} disabled={attachmentBusy || journalManualSaving}><Upload size={17} /> {attachmentBusy ? '처리 중…' : '파일 첨부'}</button>
                   </>
                 )}
               </div>
@@ -1813,7 +2081,7 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
                     <div><strong>{attachment.name}</strong><small>{attachment.size} · {isStoredDocumentAttachment(attachment) ? '원본 저장됨' : '이전 파일 정보'}</small></div>
                     <div className="journal-attachment-actions">
                       {isStoredDocumentAttachment(attachment) && <button type="button" aria-label={attachment.name + ' 다운로드'} disabled={Boolean(downloadingAttachmentId)} onClick={() => void downloadAttachment(attachment)}><Download size={18} /></button>}
-                      {canEdit && <button type="button" aria-label={attachment.name + ' 삭제'} disabled={attachmentBusy} onClick={() => void removeAttachment(attachment)}><X size={18} /></button>}
+                      {canEdit && <button type="button" aria-label={attachment.name + ' 삭제'} disabled={attachmentBusy || journalManualSaving} onClick={() => void removeAttachment(attachment)}><X size={18} /></button>}
                     </div>
                   </div>
                 ))}
@@ -1825,8 +2093,9 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
           <footer className="journal-editor-footer">
             {canEdit ? (
               <>
-                <span>{editor.status === '반려' ? '결재 코멘트를 반영한 뒤 다시 결재를 요청하세요.' : '임시저장 후에도 자유롭게 수정할 수 있습니다.'}</span>
+                <span>{autoSaveMessage}</span>
                 <div>
+                  {editor.status === '임시저장' && <button className="collab-button danger" type="button" onClick={() => void deleteJournalDraft()} disabled={journalSaving || attachmentBusy}><Trash2 size={18} /> 초안 삭제</button>}
                   <button className="collab-button secondary" type="button" onClick={saveDraft} disabled={journalSaving || attachmentBusy}><Save size={18} /> {journalSaving ? '저장 중…' : '임시저장'}</button>
                   <button className="collab-button primary" type="button" onClick={() => void requestApproval()} disabled={journalSaving || attachmentBusy}><Send size={18} /> {journalSaving ? '저장 중…' : editor.status === '반려' ? '보완 후 재결재 요청' : '결재요청'}</button>
                 </div>

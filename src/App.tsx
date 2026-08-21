@@ -4,7 +4,7 @@ import {
   CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCheck, Clock3,
   Database, Factory, FileClock, FileText, Gauge, Headphones, Home, Layers3, ListChecks, LockKeyhole, Menu,
   NotebookPen, Package, Paperclip, PauseCircle, PlayCircle, Plus, Repeat2, Search, Settings2, ShieldCheck, ShoppingCart,
-  Sparkles, Store, Upload, Users, Warehouse, X, GripVertical, EyeOff, RotateCcw,
+  Sparkles, Store, Trash2, Upload, Users, Warehouse, X, GripVertical, EyeOff, RotateCcw,
 } from 'lucide-react'
 import AIChat from './components/AIChat'
 import { ChatBubbleIcon, NotificationBellIcon, OnFactoryMark } from './components/AppIcons'
@@ -26,7 +26,7 @@ import PlatformConsole, { type PlatformSection } from './components/PlatformCons
 import { StatusBadge } from './components/StatusBadge'
 import { WorkspaceNavigationEditButton, WorkspaceNavigationEditor, usePersonalNavigation } from './components/WorkspaceNavigation'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
-import { deleteDocumentAttachment, deleteDocumentAttachments } from './utils/documentAttachments'
+import { deleteDocumentAttachment, deleteDocumentAttachments, uploadDocumentAttachments } from './utils/documentAttachments'
 import { formatDateLabel, formatDateTime, formatMonthLabel, formatWorkDue, formatWorkRuleRun, seoulDateInputValue, seoulDateTimeInputValue, seoulLocalToUtcIso, toIsoUtc } from './utils/dateTime'
 import {
   type Tenant, type WorkEvidence, type WorkItem, type WorkRule,
@@ -198,12 +198,14 @@ function SharedCalendarPreview({ onOpen, events }: { onOpen: () => void; events:
     .filter((event) => event.date.slice(0, 10) === todayKey)
     .sort((a, b) => a.start.localeCompare(b.start))
   const monthLabel = formatMonthLabel(todayDate)
-  return <section className="home-calendar-card" aria-labelledby="home-calendar-title">
-    <header><div><span className="eyebrow">SHARED SCHEDULE</span><h2 id="home-calendar-title">{monthLabel} 일정</h2></div><button className="text-button" type="button" onClick={onOpen}>전체 보기 <ArrowRight size={16} /></button></header>
-    <div className="mini-weekdays" aria-hidden="true">{['월', '화', '수', '목', '금', '토', '일'].map((day) => <span key={day}>{day}</span>)}</div>
-    <div className="mini-calendar-days">{days.map((item) => <button type="button" className={item.today ? 'today' : ''} key={item.key} onClick={onOpen}><span>{item.day}</span>{item.event && <i className={item.event} />}</button>)}</div>
-    {todayEvents.length > 0 ? <div className="today-agenda">{todayEvents.slice(0, 2).map((event) => <article key={event.id}><time>{event.start}</time><span className={`agenda-color ${event.scope === 'department' ? 'quality' : event.scope}`} /><div><strong>{event.title}</strong><p>{event.department} · {event.location || '장소 미정'}</p></div></article>)}</div> : <div className="empty-state"><CalendarDays size={25} /><h3>오늘 공유 일정이 없습니다</h3><p>일정을 등록하면 권한이 있는 직원에게 바로 공유됩니다.</p></div>}
-    <button className="button secondary full" type="button" onClick={onOpen}><CalendarDays size={17} /> 일정 등록</button>
+  return <section className="home-calendar-card dashboard-section-card" aria-labelledby="home-calendar-title">
+    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><CalendarDays size={18} /></span><h2 id="home-calendar-title">공유 일정</h2></div><button className="text-button" type="button" onClick={onOpen}>전체 보기 <ArrowRight size={16} /></button></header>
+    <div className="dashboard-section-body"><p className="home-calendar-month">{monthLabel}</p>
+      <div className="mini-weekdays" aria-hidden="true">{['월', '화', '수', '목', '금', '토', '일'].map((day) => <span key={day}>{day}</span>)}</div>
+      <div className="mini-calendar-days">{days.map((item) => <button type="button" className={item.today ? 'today' : ''} key={item.key} onClick={onOpen}><span>{item.day}</span>{item.event && <i className={item.event} />}</button>)}</div>
+      {todayEvents.length > 0 ? <div className="today-agenda">{todayEvents.slice(0, 2).map((event) => <article key={event.id}><time>{event.start}</time><span className={`agenda-color ${event.scope === 'department' ? 'quality' : event.scope}`} /><div><strong>{event.title}</strong><p>{event.department} · {event.location || '장소 미정'}</p></div></article>)}</div> : <div className="empty-state"><CalendarDays size={25} /><h3>오늘 공유 일정이 없습니다</h3><p>일정을 등록하면 권한이 있는 직원에게 바로 공유됩니다.</p></div>}
+      <button className="button secondary full" type="button" onClick={onOpen}><CalendarDays size={17} /> 일정 등록</button>
+    </div>
   </section>
 }
 
@@ -254,7 +256,7 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
     : channelAlerts[0]
       ? { title: `${channelAlerts[0].name} 연결 상태를 확인해 주세요`, detail: `현재 채널 상태가 ${channelAlerts[0].status}로 보고됐습니다.`, page: 'sales' as PageId }
       : urgentWork[0]
-        ? { title: urgentWork[0].title, detail: `${formatWorkDue(urgentWork[0].due)} 마감 · ${urgentWork[0].status}`, page: 'tasks' as PageId }
+        ? { title: urgentWork[0].title, detail: `${formatWorkDue(urgentWork[0].due)} 마감 · ${workStatusLabel(urgentWork[0].status)}`, page: 'tasks' as PageId }
         : operatingDataAvailable
           ? { title: '현재 긴급 점검 항목이 없습니다', detail: '등록된 제품·채널·업무에서 긴급 상태가 발견되지 않았습니다.', page: 'tasks' as PageId }
           : { title: '운영 데이터를 먼저 연결해 주세요', detail: '제품·창고·판매채널을 등록하면 AI 선제 알림이 시작됩니다.', page: 'products' as PageId }
@@ -343,22 +345,21 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
     } else if (preference.id === 'links') {
       content = <QuickLinksWidget scope={`${companyName}:${currentUserId}`} onToast={onToast} />
     } else if (preference.id === 'work') {
-      content = <section className="my-work-card">
-        <div className="section-title-row"><div><span className="eyebrow">MY WORK</span><h2>다음 업무</h2></div><button type="button" className="text-button" onClick={() => onNavigate('tasks')}>전체 보기 <ArrowRight size={16} /></button></div>
-        <div className="work-mini-list">
+      content = <section className="my-work-card dashboard-section-card">
+        <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><ListChecks size={18} /></span><h2>다음 업무</h2></div><button type="button" className="text-button" onClick={() => onNavigate('tasks')}>전체 보기 <ArrowRight size={16} /></button></header>
+        <div className="work-mini-list dashboard-section-body">
           {myWork.length === 0 && <div className="empty-state compact"><CheckCircle2 size={26} /><h3>지금 처리할 업무가 없습니다</h3><p>새 업무가 배정되면 여기에 표시됩니다.</p></div>}
           {myWork.slice(0, 2).map((item) => <article className="work-mini" key={item.id}>
-            <div className="work-mini-top"><StatusBadge className="status-pill" dot tone={item.priority === '긴급' ? 'danger' : item.priority === '높음' ? 'warning' : 'neutral'}>{item.priority}</StatusBadge><StatusBadge className="status-pill" dot tone={item.status === '결재대기' ? 'info' : 'neutral'}>{item.status}</StatusBadge></div>
+            <div className="work-mini-top"><StatusBadge className="status-pill" dot tone={item.priority === '긴급' ? 'danger' : item.priority === '높음' ? 'warning' : 'neutral'}>{item.priority}</StatusBadge><StatusBadge className="status-pill" dot tone={item.status === '결재대기' ? 'info' : 'neutral'}>{workStatusLabel(item.status)}</StatusBadge></div>
             <h3>{item.title}</h3><p>{item.owner} · {formatWorkDue(item.due)}</p>
-            <button type="button" disabled={item.status === '결재대기' && item.requesterId !== currentUserId} onClick={() => onAdvanceTask(item)}>{item.status === '업무요청' ? '업무 수락' : item.status === '수행중' ? '결재 요청' : item.requesterId === currentUserId ? '결재 승인' : '승인 대기'} <ArrowRight size={15} /></button>
+            <button type="button" disabled={item.status === '결재대기' && item.requesterId !== currentUserId} onClick={() => onAdvanceTask(item)}>{item.status === '업무요청' ? '시작하기' : item.status === '수행중' ? (item.review?.decision === 'changes-requested' ? '고쳐서 다시 내기' : '완료 보고하기') : item.requesterId === currentUserId ? '확인하기' : '기다리는 중'} <ArrowRight size={15} /></button>
           </article>)}
         </div>
       </section>
     } else {
-      content = <section className={'priority-alert-bar ' + (!operatingDataAvailable ? 'setup' : attentionCount === 0 || !canAssignTasks ? 'neutral' : '')}>
-        <span className="priority-alert-icon"><AlertTriangle size={20} /></span>
-        <div><strong>{dashboardAlert.title}</strong><p>{dashboardAlert.detail}</p></div>
-        <button className="small-button" type="button" onClick={() => onNavigate(dashboardAlert.page)}>{!operatingDataAvailable ? '초기 설정' : '상세 확인'} <ArrowRight size={15} /></button>
+      content = <section className={'priority-alert-bar dashboard-section-card ' + (!operatingDataAvailable ? 'setup' : attentionCount === 0 || !canAssignTasks ? 'neutral' : '')}>
+        <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><AlertTriangle size={18} /></span><h2>중요 알림</h2></div><button className="text-button" type="button" onClick={onOpenAlerts}>전체 보기 <ArrowRight size={15} /></button></header>
+        <div className="priority-alert-content"><span className="priority-alert-icon"><AlertTriangle size={20} /></span><div><strong>{dashboardAlert.title}</strong><p>{dashboardAlert.detail}</p></div><button className="small-button" type="button" onClick={() => onNavigate(dashboardAlert.page)}>{!operatingDataAvailable ? '초기 설정' : '상세 확인'} <ArrowRight size={15} /></button></div>
       </section>
     }
     const visibleIndex = visibleWidgets.findIndex((item) => item.id === preference.id)
@@ -459,6 +460,18 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
 
 type WorkTransitionAction = 'accept' | 'submit' | 'approve' | 'request-changes'
 type WorkAssignee = { id: string; name: string }
+const workStatusLabels: Record<WorkItem['status'], string> = {
+  '업무요청': '시작 전',
+  '수행중': '진행 중',
+  '결재대기': '확인 기다리는 중',
+  '결재완료': '완료',
+}
+const legacyCompletionCriteria = '담당자가 업무 내용을 확인하고 완료 결과를 남깁니다.'
+const workStatusLabel = (status: WorkItem['status']) => workStatusLabels[status]
+const explicitCompletionCriteria = (item: WorkItem) => {
+  const value = item.description?.trim() ?? ''
+  return value && value !== legacyCompletionCriteria ? value : ''
+}
 const workWeekdayNames = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일']
 
 function workRuleScheduleLabel(rule: WorkRule) {
@@ -549,13 +562,12 @@ function CompletionModal({ item, workspaceScope, onToast, onClose, onSubmit }: {
     } else if (file.id.startsWith('DOC-')) removedIdsRef.current.add(file.id)
     setEvidence((current) => current.filter((item) => item.id !== file.id))
   }
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) void discardAndClose() }}>
-    <section ref={dialogRef} className="modal-card workflow-modal" role="dialog" aria-modal="true" aria-labelledby="completion-modal-title">
-      <header><div><span className="eyebrow">SUBMIT RESULT</span><h2 id="completion-modal-title">완료내용 · 증빙 제출</h2><p>{item.title}</p></div><button type="button" className="icon-button" aria-label="닫기" disabled={busy || uploading} onClick={() => void discardAndClose()}><X size={21} /></button></header>
+  return <div className="modal-backdrop workflow-sheet-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) void discardAndClose() }}>
+    <section ref={dialogRef} className="modal-card workflow-modal workflow-completion-sheet" role="dialog" aria-modal="true" aria-labelledby="completion-modal-title">
+      <header><div><span className="eyebrow">COMPLETE WORK</span><h2 id="completion-modal-title">완료 보고하기</h2><p>{item.title}</p></div><button type="button" className="icon-button" aria-label="닫기" disabled={busy || uploading} onClick={() => void discardAndClose()}><X size={21} /></button></header>
       <form onSubmit={submit}>
-        {item.review?.decision === 'changes-requested' && <div className="workflow-feedback danger"><strong>수정 요청 내용</strong><p>{item.review.requestedChanges || item.review.comment}</p></div>}
-        <label className="form-field full"><span>완료 내용 <em>필수</em></span><textarea autoFocus data-autofocus rows={6} value={summary} onChange={(event) => setSummary(event.target.value)} placeholder="무엇을 어떻게 완료했고 결과가 무엇인지 작성하세요." required /></label>
-        <section className="workflow-upload" aria-labelledby="work-evidence-title"><div><h3 id="work-evidence-title">증빙자료</h3><p>선택한 파일은 고객사 자료 저장소에 실제 업로드되며 담당자와 결재자만 열람합니다.</p></div><input ref={inputRef} className="sr-only" type="file" multiple onChange={async (event) => {
+        <label className="form-field full"><span>무엇을 했나요? <em>필수</em></span><textarea autoFocus data-autofocus rows={3} value={summary} onChange={(event) => setSummary(event.target.value)} placeholder="완료한 내용과 결과를 짧게 적어 주세요." required /></label>
+        <section className="workflow-upload workflow-upload-compact" aria-labelledby="work-evidence-title"><div><h3 id="work-evidence-title">사진·파일 첨부 <small>선택</small></h3><p>필요한 경우에만 사진이나 증빙 파일을 추가하세요.</p></div><input ref={inputRef} className="sr-only" type="file" multiple onChange={async (event) => {
           const files = Array.from(event.target.files ?? []).slice(0, Math.max(0, 10 - evidence.length)); event.target.value = ''
           if (!workspaceScope || files.length === 0) return
           setUploading(true); setUploadError('')
@@ -572,10 +584,11 @@ function CompletionModal({ item, workspaceScope, onToast, onClose, onSubmit }: {
             } catch (error) { setUploadError(`${file.name}: ${error instanceof Error ? error.message : '업로드 실패'}`) }
           }
           setEvidence((current) => [...current, ...uploaded].slice(0, 10)); setUploading(false)
-        }} /><button className="button secondary" type="button" disabled={uploading || evidence.length >= 10} onClick={() => inputRef.current?.click()}><Upload size={17} /> {uploading ? '업로드 중…' : '파일 선택'}</button></section>
+        }} /><button className="button secondary" type="button" disabled={uploading || evidence.length >= 10} onClick={() => inputRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '파일 추가'}</button></section>
         {uploadError && <p className="workflow-upload-error" role="alert">{uploadError}</p>}
-        <div className="workflow-evidence-list">{evidence.map((file) => <div key={file.id}><FileText size={18} /><span><strong>{file.name}</strong><small>{file.size} · 원본 저장됨</small></span><button type="button" aria-label={`${file.name} 삭제`} disabled={busy || uploading} onClick={() => void removeEvidence(file)}><X size={16} /></button></div>)}{evidence.length === 0 && <p>첨부 없이 완료내용만 제출할 수도 있습니다.</p>}</div>
-        <footer><button type="button" className="button ghost" disabled={busy || uploading} onClick={() => void discardAndClose()}>취소</button><button type="submit" className="button primary" disabled={busy || uploading || summary.trim().length < 3}><ClipboardCheck size={18} /> 결재 요청</button></footer>
+        {evidence.length > 0 && <div className="workflow-evidence-list">{evidence.map((file) => <div key={file.id}><FileText size={18} /><span><strong>{file.name}</strong><small>{file.size} · 원본 저장됨</small></span><button type="button" aria-label={`${file.name} 삭제`} disabled={busy || uploading} onClick={() => void removeEvidence(file)}><X size={16} /></button></div>)}</div>}
+        <p className="workflow-submit-guide"><ShieldCheck size={17} /> 제출하면 {item.requestedBy}님에게 확인 요청이 갑니다.</p>
+        <footer><button type="button" className="button ghost" disabled={busy || uploading} onClick={() => void discardAndClose()}>취소</button><button type="submit" className="button primary" disabled={busy || uploading || summary.trim().length < 3}><Check size={18} /> 제출</button></footer>
       </form>
     </section>
   </div>
@@ -648,7 +661,7 @@ function WorkRuleModal({ assignees, onClose, onSubmit }: { assignees: WorkAssign
   </div>
 }
 
-function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, workspaceScope, focusId, onToast, onCreate, onTransition, onCreateRule, onToggleRule }: {
+function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, workspaceScope, focusId, onToast, onCreate, onTransition, onCreateRule, onToggleRule, onDeleteRule }: {
   items: WorkItem[]; rules: WorkRule[]; currentUserId: string; canAssignTasks: boolean; assignees: WorkAssignee[]
   workspaceScope?: string
   focusId?: string
@@ -657,6 +670,7 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, work
   onTransition: (id: string, action: WorkTransitionAction, input?: Record<string, unknown>) => Promise<boolean>
   onCreateRule: (input: Record<string, unknown>) => Promise<boolean>
   onToggleRule: (rule: WorkRule) => Promise<boolean>
+  onDeleteRule: (rule: WorkRule) => Promise<boolean>
 }) {
   const [tab, setTab] = useState<'mine' | 'requested' | 'done'>('mine')
   const [selectedWorkId, setSelectedWorkId] = useState<string | null>(null)
@@ -702,36 +716,28 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, work
   const selectedTimeline = [
     ...selectedCompletionHistory.map((completion) => ({ kind: 'completion' as const, at: completion.submittedAt, completion })),
     ...selectedReviewHistory.map((review) => ({ kind: 'review' as const, at: review.reviewedAt, review })),
-  ].sort((left, right) => left.at.localeCompare(right.at))
-  const selectedActionLabel = selectedReviewAction ? '지금 검토할 일' : selectedOwnerAction ? '지금 내가 할 일' : '현재 업무 상태'
+  ]
+    .filter((entry) => !(selectedChangeRequested && entry.kind === 'review' && entry.review.reviewedAt === selectedItem?.review?.reviewedAt))
+    .sort((left, right) => left.at.localeCompare(right.at))
   const selectedActionTitle = selectedReviewAction
-    ? '제출 결과를 검토해 결정하세요'
+    ? '완료 보고를 확인하고 승인하거나 보완을 요청해 주세요.'
     : selectedOwnerAction
       ? selectedItem?.status === '업무요청'
-        ? '업무를 수락하고 바로 시작하세요'
+        ? '목록의 시작하기를 눌러 바로 업무를 시작하세요.'
         : selectedItem?.status === '수행중'
-          ? selectedChangeRequested ? '수정 요청을 반영해 다시 제출하세요' : '완료 결과와 증빙을 제출하세요'
-          : selectedItem?.status === '결재대기' ? '요청자의 결재를 기다리고 있어요' : '승인까지 모두 완료됐어요'
-      : selectedItem?.status === '결재완료' ? '승인과 업무 처리가 완료됐어요' : '담당자의 진행 상태를 확인하세요'
-  const selectedActionDetail = selectedReviewAction
-    ? '완료 보고와 증빙을 확인한 뒤 승인하거나, 한 번에 이해되는 보완 내용을 남겨 주세요.'
-    : selectedOwnerAction && selectedItem?.status === '업무요청'
-      ? '수락하면 상태가 수행중으로 바뀌며 담당자에게 수행 책임이 확정됩니다.'
-      : selectedOwnerAction && selectedItem?.status === '수행중'
-        ? selectedChangeRequested ? '수정 요청 사유를 먼저 반영하고 새 완료 보고와 증빙을 올려 주세요.' : '완료 기준을 충족한 뒤 결과 요약과 필요한 증빙을 올려 주세요.'
-        : selectedOwnerAction && selectedItem?.status === '결재대기'
-          ? '제출은 완료됐습니다. 요청자가 승인하거나 수정 요청을 보내면 다음 행동이 열립니다.'
-          : '상태와 처리 이력은 모든 참여자에게 공유됩니다.'
+          ? selectedChangeRequested ? '최신 보완 요청을 반영한 뒤 다시 제출해 주세요.' : '업무를 마쳤다면 완료 보고를 제출해 주세요.'
+          : selectedItem?.status === '결재대기' ? '확인 결과가 올 때까지 기다리면 됩니다.' : '이 업무는 완료됐습니다.'
+      : selectedItem?.status === '결재완료' ? '이 업무는 완료됐습니다.' : '담당자의 처리를 기다리고 있습니다.'
   const rowActionLabel = (item: WorkItem) => {
-    if (item.requesterId === currentUserId && item.status === '결재대기') return '결재하기'
-    if (item.ownerId === currentUserId && item.status === '업무요청') return '시작'
-    return item.review?.decision === 'changes-requested' ? '보완 재제출' : '완료 제출'
+    if (item.requesterId === currentUserId && item.status === '결재대기') return '확인하기'
+    if (item.ownerId === currentUserId && item.status === '업무요청') return '시작하기'
+    return item.review?.decision === 'changes-requested' ? '고쳐서 다시 내기' : '완료 보고하기'
   }
   const rowSubline = (item: WorkItem) => item.review?.decision === 'changes-requested'
-    ? `“${item.review.requestedChanges || item.review.comment || '보완 내용을 확인해 주세요'}”`
+    ? '보완 요청됨 · 상세에서 확인'
     : item.ruleId ? '자동 반복업무' : `요청 · ${item.requestedBy}`
   const rowStatusTone = (item: WorkItem) => {
-    const dueAt = Date.parse(item.due)
+    const dueAt = Date.parse(toIsoUtc(item.due) ?? '')
     if (item.review?.decision === 'changes-requested' || (Number.isFinite(dueAt) && dueAt < Date.now() && item.status !== '결재완료')) return 'danger'
     return needsCurrentUserAction(item) ? 'warning' : 'success'
   }
@@ -745,7 +751,7 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, work
     <header><div><h2 id={`work-section-${sectionId}`}>{title}</h2><p>{description}</p></div><span>{sectionItems.length}</span></header>
     {sectionItems.length === 0
       ? <div className="workflow-list-empty"><CheckCircle2 size={18} /><span>{tab === 'done' ? '완료된 업무가 없습니다.' : '이 구역에서 확인할 업무가 없습니다.'}</span></div>
-      : <div className="workflow-row-list" role="listbox" aria-label={title}>{sectionItems.map((item) => <article className={item.id === selectedId ? 'is-selected' : ''} role="option" aria-selected={item.id === selectedId} tabIndex={0} key={item.id} onClick={() => setSelectedWorkId(item.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedWorkId(item.id) } }}>
+      : <div className="workflow-row-list" role="list" aria-label={title}>{sectionItems.map((item) => <article className={item.id === selectedId ? 'is-selected' : ''} role="listitem" aria-current={item.id === selectedId ? 'true' : undefined} tabIndex={0} key={item.id} onClick={() => setSelectedWorkId(item.id)} onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedWorkId(item.id) } }}>
         <span className={`workflow-status-dot ${rowStatusTone(item)}`} role="img" aria-label={rowStatusLabel(item)} />
         <span className="workflow-row-title"><strong>{item.title}</strong><small>{rowSubline(item)}</small></span>
         <time className={new Date(toIsoUtc(item.due) ?? Number.POSITIVE_INFINITY).getTime() < Date.now() && item.status !== '결재완료' ? 'is-overdue' : ''} dateTime={toIsoUtc(item.due) ?? item.due}><strong>{formatWorkDue(item.due)}</strong></time>
@@ -766,25 +772,25 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, work
         <aside className="workflow-detail-pane" aria-label="선택한 업무 상세" aria-live="polite">
           {!selectedItem && <div className="workflow-detail-empty"><ListChecks size={28} /><strong>업무를 선택해 주세요</strong><p>목록에서 업무를 선택하면 완료 기준과 현재 행동이 표시됩니다.</p></div>}
           {selectedItem && <>
-            <header className="workflow-detail-head"><h2>{selectedItem.title}</h2><div className="workflow-detail-status"><StatusBadge className="status-pill" dot tone={selectedItem.status === '결재완료' ? 'success' : selectedItem.status === '결재대기' ? 'info' : selectedItem.status === '수행중' ? 'warning' : 'neutral'}>{selectedItem.status}</StatusBadge><StatusBadge className="status-pill" dot tone={selectedItem.priority === '긴급' ? 'danger' : selectedItem.priority === '높음' ? 'warning' : 'neutral'}>{selectedItem.priority}</StatusBadge><span>{selectedItem.category}</span>{selectedItem.ruleId && <span><Repeat2 size={13} /> 반복</span>}</div></header>
-            <section className={`workflow-detail-action ${selectedReviewAction ? 'is-review' : selectedChangeRequested ? 'is-revision' : ''}`} aria-label={selectedActionLabel}>
-              <span>{selectedActionLabel}</span><strong>{selectedActionTitle}</strong><p>{selectedActionDetail}</p>
-              {selectedChangeRequested && <div className="workflow-action-revision"><span>수정 요청</span><strong>{selectedItem.review?.requestedChanges || selectedItem.review?.comment || '요청자가 보완 내용을 남기지 않았습니다.'}</strong></div>}
-              {needsCurrentUserAction(selectedItem) && <button className="button primary workflow-detail-primary-action" type="button" onClick={() => runRowAction(selectedItem)}>{selectedReviewAction ? <ShieldCheck size={18} /> : selectedItem.status === '업무요청' ? <PlayCircle size={18} /> : <Upload size={18} />}{selectedReviewAction ? '검토하기' : selectedItem.status === '업무요청' ? '업무 수락' : selectedChangeRequested ? '보완 재제출' : '완료·증빙 제출'}</button>}
+            <header className="workflow-detail-head"><h2>{selectedItem.title}</h2><div className="workflow-detail-status"><StatusBadge className="status-pill" dot tone={selectedItem.status === '결재완료' ? 'success' : selectedItem.status === '결재대기' ? 'info' : selectedItem.status === '수행중' ? 'warning' : 'neutral'}>{workStatusLabel(selectedItem.status)}</StatusBadge><StatusBadge className="status-pill" dot tone={selectedItem.priority === '긴급' ? 'danger' : selectedItem.priority === '높음' ? 'warning' : 'neutral'}>{selectedItem.priority}</StatusBadge><span>{selectedItem.category}</span>{selectedItem.ruleId && <span><Repeat2 size={13} /> 반복</span>}</div></header>
+            <section className={`workflow-detail-action ${selectedReviewAction ? 'is-review' : selectedChangeRequested ? 'is-revision' : ''}`} aria-label="지금 할 일">
+              <span>지금 할 일</span><strong>{selectedActionTitle}</strong>
+              {selectedChangeRequested && <div className="workflow-action-revision"><span>최신 보완 요청</span><strong>{selectedItem.review?.requestedChanges || selectedItem.review?.comment || '요청자가 보완 내용을 남기지 않았습니다.'}</strong></div>}
             </section>
-            <section className="workflow-detail-criteria" aria-label="업무 완료 기준"><span>완료 기준</span><p>{selectedItem.description || '요청자가 등록한 상세 기준이 없습니다. 수행 전에 완료 조건을 확인해 주세요.'}</p></section>
-            <section className="workflow-detail-history" aria-label="업무 이력"><span>업무 이력</span>{selectedTimeline.length > 0 ? <div className="workflow-detail-records">
+            {explicitCompletionCriteria(selectedItem) && <section className="workflow-detail-criteria" aria-label="업무 완료 기준"><span>완료 기준</span><p>{explicitCompletionCriteria(selectedItem)}</p></section>}
+            {selectedItem.attachments?.length ? <section className="workflow-detail-attachments" aria-label="업무 지시 첨부"><span>지시 첨부</span><div>{selectedItem.attachments.map((file) => <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('첨부 파일을 다운로드하지 못했습니다.') }}><Paperclip size={13} /> {file.name} · {file.size}</button>)}</div></section> : null}
+            <details className="workflow-detail-history" aria-label="업무 이력"><summary>이력 보기 <small>{selectedTimeline.length}</small></summary>{selectedTimeline.length > 0 ? <div className="workflow-detail-records">
               {selectedTimeline.map((entry, index) => entry.kind === 'completion'
                 ? <div className="workflow-record" key={`completion-${entry.at}-${index}`}><ClipboardCheck size={17} /><div><strong>결과 제출 <time dateTime={entry.completion.submittedAt}>{formatDateTime(entry.completion.submittedAt)}</time></strong><p>{entry.completion.summary}</p><div className="workflow-record-files">{entry.completion.evidence.length === 0 && <span>첨부 증빙 없음</span>}{entry.completion.evidence.map((file) => file.id.startsWith('DOC-') ? <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={12} /> {file.name} · {file.size}</button> : <span key={file.id}><Paperclip size={12} /> {file.name} · {file.size}</span>)}</div></div></div>
                 : <div className={`workflow-record ${entry.review.decision === 'approved' ? 'approved' : 'changes'}`} key={`review-${entry.at}-${index}`}><ShieldCheck size={17} /><div><strong>{entry.review.decision === 'approved' ? '승인 기록' : '수정 요청 기록'} <time dateTime={entry.review.reviewedAt}>{formatDateTime(entry.review.reviewedAt)}</time></strong><p>{entry.review.requestedChanges || entry.review.comment}</p></div></div>)}
-            </div> : <p>아직 제출되거나 검토된 이력이 없습니다.</p>}</section>
-            <ol className="workflow-detail-stepper" aria-label={`업무 단계. 현재 ${selectedItem.status}`}>{stages.map((status, index) => <li className={index < selectedStep ? 'done' : index === selectedStep ? 'current' : ''} aria-current={index === selectedStep ? 'step' : undefined} key={status}><i>{index < selectedStep ? <Check size={11} /> : index + 1}</i><span>{status}</span></li>)}</ol>
+            </div> : <p>아직 제출되거나 검토된 이력이 없습니다.</p>}</details>
+            <ol className="workflow-detail-stepper" aria-label={`업무 단계. 현재 ${workStatusLabel(selectedItem.status)}`}>{stages.map((status, index) => <li className={index < selectedStep ? 'done' : index === selectedStep ? 'current' : ''} aria-current={index === selectedStep ? 'step' : undefined} key={status}><i>{index < selectedStep ? <Check size={11} /> : index + 1}</i><span>{workStatusLabel(status)}</span></li>)}</ol>
             <dl className="workflow-detail-meta"><div><dt>마감</dt><dd><Clock3 size={15} /> {formatWorkDue(selectedItem.due)}</dd></div><div><dt>담당</dt><dd>{selectedItem.owner}</dd></div><div><dt>요청</dt><dd>{selectedItem.requestedBy}</dd></div></dl>
           </>}
         </aside>
       </div>
     </section>
-    {canAssignTasks && <section className="panel recurring-work-panel"><header><div><span className="eyebrow">RECURRING RULES</span><h2>반복 업무 규칙</h2><p>도래한 규칙은 공유 업무로 자동 생성됩니다.</p></div><button className="button secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Plus size={17} /> 규칙 추가</button></header><div className="recurring-rule-grid">{rules.map((rule) => <article key={rule.id}><div><span className={`rule-state ${rule.active ? 'active' : 'paused'}`}>{rule.active ? '활성' : '중지'}</span><strong>{rule.title}</strong><p>{rule.description}</p></div><dl><div><dt>주기</dt><dd>{workRuleScheduleLabel(rule)}</dd></div><div><dt>담당자</dt><dd>{rule.owner}</dd></div><div><dt>다음 실행</dt><dd>{formatWorkRuleRun(rule.nextRun, rule.dueTime)}</dd></div></dl><button className="button ghost" type="button" onClick={() => void onToggleRule(rule)}>{rule.active ? <PauseCircle size={17} /> : <PlayCircle size={17} />}{rule.active ? ' 일시 중지' : ' 다시 활성화'}</button></article>)}{rules.length === 0 && <div className="empty-state"><Repeat2 size={30} /><h3>반복 규칙이 없습니다</h3><p>매주·매월 반복되는 점검을 자동화해 보세요.</p></div>}</div></section>}
+    {canAssignTasks && <section className="panel recurring-work-panel"><header><div><span className="eyebrow">RECURRING RULES</span><h2>반복 업무 규칙</h2><p>도래한 규칙은 공유 업무로 자동 생성됩니다.</p></div><button className="button secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Plus size={17} /> 규칙 추가</button></header><div className="recurring-rule-grid">{rules.map((rule) => <article key={rule.id}><div><span className={`rule-state ${rule.active ? 'active' : 'paused'}`}>{rule.active ? '활성' : '중지'}</span><strong>{rule.title}</strong><p>{rule.description}</p></div><dl><div><dt>주기</dt><dd>{workRuleScheduleLabel(rule)}</dd></div><div><dt>담당자</dt><dd>{rule.owner}</dd></div><div><dt>다음 실행</dt><dd>{formatWorkRuleRun(rule.nextRun, rule.dueTime)}</dd></div></dl><div className="recurring-rule-actions"><button className="button ghost" type="button" onClick={() => void onToggleRule(rule)}>{rule.active ? <PauseCircle size={17} /> : <PlayCircle size={17} />}{rule.active ? ' 일시 중지' : ' 다시 활성화'}</button><button className="button danger" type="button" onClick={() => void onDeleteRule(rule)}><Trash2 size={17} /> 삭제</button></div></article>)}{rules.length === 0 && <div className="empty-state"><Repeat2 size={30} /><h3>반복 규칙이 없습니다</h3><p>매주·매월 반복되는 점검을 자동화해 보세요.</p></div>}</div></section>}
     {dialog?.type === 'completion' && <CompletionModal item={dialog.item} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(summary, evidence) => onTransition(dialog.item.id, 'submit', { completion: { summary, evidence } })} />}
     {dialog?.type === 'review' && <WorkReviewModal item={dialog.item} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(decision, comment, requestedChanges) => onTransition(dialog.item.id, decision, { review: { comment, requestedChanges } })} />}
     {dialog?.type === 'rule' && <WorkRuleModal assignees={assignees} onClose={() => setDialog(null)} onSubmit={onCreateRule} />}
@@ -861,15 +867,29 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
     const utilization = Math.min(100, Math.max(0, Number(form.get('utilization') || 0)))
     if (!name) return
     if (editing === 'new') {
-      const result = await setLocations((current) => [...current, { id: 'WH-' + Date.now().toString().slice(-5), name, type, temperature, condition: temperature + ' · 정상', items: '등록 재고 0개', utilization, alert: '이상 없음' }])
-      if (!result.ok) return
+      const result = await setLocations((current) => [...current, { id: `WH-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, name, type, temperature, condition: temperature + ' · 정상', items: '등록 재고 0개', utilization, alert: '이상 없음' }])
+      if (!result.ok) { onToast(result.message ?? '창고를 등록하지 못했습니다.'); return }
       onToast(name + '를 새 창고로 등록했습니다.')
     } else if (editing) {
       const result = await setLocations((current) => current.map((item) => item.id === editing.id ? { ...item, name, type, temperature, condition: temperature + ' · 정상', utilization } : item))
-      if (!result.ok) return
+      if (!result.ok) { onToast(result.message ?? '창고 정보를 변경하지 못했습니다.'); return }
       onToast(name + ' 창고 정보를 변경했습니다.')
     }
     setEditing(null)
+  }
+
+  const removeWarehouse = async () => {
+    if (!canManage || !editing || editing === 'new') return
+    if (movements.some((movement) => movement.warehouseId === editing.id)) {
+      onToast('입출고 이력이 연결된 창고는 삭제할 수 없습니다. 이력을 먼저 정리해 주세요.')
+      return
+    }
+    if (!window.confirm(`${editing.name} 창고를 삭제할까요?`)) return
+    const result = await setLocations((current) => current.filter((item) => item.id !== editing.id))
+    if (!result.ok) { onToast(result.message ?? '창고를 삭제하지 못했습니다.'); return }
+    const deletedName = editing.name
+    setEditing(null)
+    onToast(`${deletedName} 창고를 삭제했습니다.`)
   }
 
   const saveMovement = async (event: FormEvent<HTMLFormElement>) => {
@@ -943,7 +963,7 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
     <div className="content-page">
       <PageHeader eyebrow="INVENTORY & LOT" title="재고 · LOT" description="창고 환경과 유통기한, 출고 가능 수량을 제품 흐름에 맞춰 관리합니다." action={canManage ? <><button className="button ghost" type="button" onClick={() => setMovementOpen(true)}><Boxes size={18} /> 입출고 등록</button><button className="button primary" type="button" onClick={() => setEditing('new')}><Plus size={18} /> 창고 등록</button></> : <StatusBadge className="status-pill" tone="neutral">조회 전용</StatusBadge>} />
       <section className="warehouse-grid">
-        {locations.length === 0 && <div className="empty-state"><Warehouse size={30} /><h3>등록된 창고가 없습니다</h3><p>창고를 등록하면 보관 조건과 공간 사용률을 이곳에서 관리할 수 있습니다.</p>{canManage && <button className="button primary" type="button" onClick={() => setEditing('new')}><Plus size={17} /> 첫 창고 등록</button>}</div>}
+        {locations.length === 0 && <div className="empty-state"><Warehouse size={30} /><h3>아직 등록된 항목이 없습니다</h3><p>첫 창고를 등록하면 보관 조건과 공간 사용률을 이곳에서 관리할 수 있습니다.</p>{canManage && <button className="button primary" type="button" onClick={() => setEditing('new')}><Plus size={17} /> 첫 창고 등록</button>}</div>}
         {locations.map((location) => {
           const lots = lotsByWarehouse[location.id] ?? []
           const unresolvedCount = lots.filter((lot) => lot.quantity === null).length
@@ -1000,7 +1020,7 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
             <div className="form-grid"><label className="form-field"><span>보관 유형</span><select name="type" defaultValue={editing === 'new' ? '냉장' : editing.type}><option>실온</option><option>냉장</option><option>냉동</option><option>포장재</option></select></label><label className="form-field"><span>현재 온도</span><input name="temperature" defaultValue={editing === 'new' ? '3.0℃' : editing.temperature} /></label></div>
             <label className="form-field full"><span>현재 공간 사용률 (%)</span><input name="utilization" type="number" min="0" max="100" defaultValue={editing === 'new' ? 0 : editing.utilization} /></label>
             <div className="modal-note"><ShieldCheck size={18} /><p><strong>등록 후 로케이션을 세분화할 수 있습니다.</strong><span>공장관리 도면의 재고 위치에도 이 창고가 연결됩니다.</span></p></div>
-            <footer><button type="button" className="button ghost" onClick={() => setEditing(null)}>취소</button><button type="submit" className="button primary"><Check size={18} /> {editing === 'new' ? '창고 등록' : '변경 저장'}</button></footer>
+            <footer>{editing !== 'new' && <button type="button" className="danger-text-button" onClick={() => void removeWarehouse()}><Trash2 size={17} /> 창고 삭제</button>}<span className="modal-footer-spacer" /><button type="button" className="button ghost" onClick={() => setEditing(null)}>취소</button><button type="submit" className="button primary"><Check size={18} /> {editing === 'new' ? '창고 등록' : '변경 저장'}</button></footer>
           </form>
         </section>
       </div>}
@@ -1008,52 +1028,90 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
   )
 }
 
-function TaskModal({ initialText, requesterName, requesterId, assignees, onClose, onSave }: {
-  initialText: string; requesterName: string; requesterId: string; assignees: WorkAssignee[]; onClose: () => void; onSave: (item: WorkItem) => void
+function TaskModal({ initialText, requesterName, requesterId, assignees, workspaceScope, onClose, onSave }: {
+  initialText: string; requesterName: string; requesterId: string; assignees: WorkAssignee[]; workspaceScope?: string; onClose: () => void; onSave: (item: WorkItem) => Promise<boolean>
 }) {
   const [title, setTitle] = useState(initialText)
   const [description, setDescription] = useState('')
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
   const dialogRef = useDialogFocus()
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!title.trim()) return
+    if (!title.trim() || busy) return
     const form = new FormData(event.currentTarget)
     const ownerId = String(form.get('ownerId') || '')
     const owner = assignees.find((assignee) => assignee.id === ownerId)
     if (!owner) return
     const dueLocal = String(form.get('due') || '')
     const due = seoulLocalToUtcIso(dueLocal.slice(0, 10), dueLocal.slice(11, 16)) ?? dueLocal
-    onSave({
-      id: 'WK-' + new Date().getTime().toString().slice(-8),
-      title: title.trim(),
-      description: description.trim() || '담당자가 업무 내용을 확인하고 완료 결과를 남깁니다.',
-      owner: owner.name,
-      ownerId: owner.id,
-      requestedBy: requesterName,
-      requesterId,
-      due,
-      priority: String(form.get('priority') || '보통') as WorkItem['priority'],
-      status: '업무요청',
-      category: String(form.get('category') || '일반'),
-      createdAt: new Date().toISOString(),
-    })
+    setBusy(true)
+    setError('')
+    let uploadedIds: string[] = []
+    try {
+      const uploaded = pendingFiles.length > 0
+        ? await uploadDocumentAttachments(pendingFiles, {
+          workspaceScope,
+          category: '회의·업무일지',
+          summary: `${title.trim()} 업무 지시 첨부`,
+          tags: ['업무지시'],
+          allowedUserIds: [requesterId, owner.id],
+        })
+        : []
+      const attachments: WorkEvidence[] = uploaded.map((file, index) => ({ ...file, type: pendingFiles[index]?.type || 'application/octet-stream' }))
+      uploadedIds = attachments.map((file) => file.id)
+      const saved = await onSave({
+        id: 'WK-' + new Date().getTime().toString().slice(-8),
+        title: title.trim(),
+        description: description.trim(),
+        owner: owner.name,
+        ownerId: owner.id,
+        requestedBy: requesterName,
+        requesterId,
+        due,
+        priority: String(form.get('priority') || '보통') as WorkItem['priority'],
+        status: '업무요청',
+        category: '일반',
+        ...(attachments.length ? { attachments } : {}),
+        createdAt: new Date().toISOString(),
+      })
+      if (!saved && attachments.length) {
+        const cleanup = await deleteDocumentAttachments(uploadedIds, workspaceScope)
+        uploadedIds = cleanup.failed.map((failure) => failure.id)
+        if (cleanup.failed.length) throw new Error(`업무 저장에 실패했고 첨부 ${cleanup.failed.length}개를 정리하지 못했습니다.`)
+      }
+      if (!saved) setBusy(false)
+    } catch (uploadError) {
+      const cleanup = uploadedIds.length ? await deleteDocumentAttachments(uploadedIds, workspaceScope) : { failed: [] }
+      const message = uploadError instanceof Error ? uploadError.message : '업무 지시를 저장하지 못했습니다.'
+      setError(cleanup.failed.length ? `${message} 첨부 ${cleanup.failed.length}개도 정리하지 못했습니다.` : message)
+      setBusy(false)
+    }
   }
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
       <section ref={dialogRef} className="modal-card task-modal" role="dialog" aria-modal="true" aria-labelledby="task-modal-title">
-        <header><div><span className="eyebrow">NEW WORK COMMAND</span><h2 id="task-modal-title">새 업무 지시</h2><p>담당자, 마감, 완료 기준을 명확하게 입력하세요.</p></div><button type="button" className="icon-button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
+        <header><div><span className="eyebrow">NEW WORK</span><h2 id="task-modal-title">새 업무 지시</h2><p>무엇을, 누가, 언제까지 할지만 정하면 바로 지시할 수 있습니다.</p></div><button type="button" className="icon-button" aria-label="닫기" disabled={busy} onClick={onClose}><X size={21} /></button></header>
         <form onSubmit={submit}>
-          <label className="form-field full"><span>업무 제목</span><input autoFocus data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 신규 제품 표시사항 최종 검토" required /></label>
-          <label className="form-field full"><span>완료 기준 · 상세 내용</span><textarea rows={4} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="완료한 것으로 판단할 수 있는 기준을 구체적으로 입력하세요." /></label>
-          <div className="form-grid">
-            <label className="form-field"><span>담당자</span><select name="ownerId" defaultValue={assignees.find((item) => item.id === requesterId)?.id ?? assignees[0]?.id ?? ''} required><option value="" disabled>직원 선택</option>{assignees.map((assignee) => <option value={assignee.id} key={assignee.id}>{assignee.name}</option>)}</select></label>
-            <label className="form-field"><span>업무 구분</span><select name="category" defaultValue="제품"><option>제품</option><option>생산</option><option>재고</option><option>판매채널</option><option>일반</option></select></label>
-            <label className="form-field"><span>우선순위</span><select name="priority" defaultValue="높음"><option>긴급</option><option>높음</option><option>보통</option></select></label>
-            <label className="form-field"><span>마감</span><input name="due" type="datetime-local" defaultValue={`${seoulDateInputValue()}T18:00`} required /></label>
+          <div className="task-required-fields">
+            <label className="form-field full"><span>무엇을 <em>필수</em></span><input autoFocus data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 신규 제품 표시사항 최종 검토" required /></label>
+            <label className="form-field"><span>누가 <em>필수</em></span><select name="ownerId" defaultValue={assignees.find((item) => item.id === requesterId)?.id ?? assignees[0]?.id ?? ''} required><option value="" disabled>직원 선택</option>{assignees.map((assignee) => <option value={assignee.id} key={assignee.id}>{assignee.name}</option>)}</select></label>
+            <label className="form-field"><span>언제까지 <em>필수</em></span><input name="due" type="datetime-local" defaultValue={`${seoulDateInputValue()}T18:00`} required /></label>
           </div>
-          <div className="modal-note"><ShieldCheck size={18} /><p><strong>담당자가 ‘업무 수락’ 후 수행을 시작합니다.</strong><span>수행 결과는 결재 요청과 승인 단계를 거쳐 완료됩니다.</span></p></div>
+          <details className="task-optional-fields">
+            <summary><ChevronDown size={17} /> 선택 항목 <span>우선순위 · 완료 기준 · 첨부</span></summary>
+            <div className="task-optional-fields-body">
+              <label className="form-field"><span>우선순위</span><select name="priority" defaultValue="보통"><option>긴급</option><option>높음</option><option>보통</option></select></label>
+              <label className="form-field full"><span>완료 기준</span><textarea rows={3} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="필요할 때만 완료 조건을 적어 주세요." /></label>
+              <section className="task-attachment-picker" aria-labelledby="task-attachment-title"><div><strong id="task-attachment-title">사진·파일</strong><small>선택 · 파일당 10MB 이하</small></div><input ref={inputRef} className="sr-only" type="file" multiple onChange={(event) => { setPendingFiles(Array.from(event.target.files ?? []).slice(0, 10)); event.target.value = '' }} /><button className="button secondary" type="button" disabled={busy} onClick={() => inputRef.current?.click()}><Paperclip size={17} /> 파일 선택</button></section>
+              {pendingFiles.length > 0 && <div className="task-pending-files">{pendingFiles.map((file, index) => <span key={`${file.name}-${file.lastModified}`}><FileText size={15} /> {file.name}<button type="button" aria-label={`${file.name} 제외`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={14} /></button></span>)}</div>}
+            </div>
+          </details>
+          {error && <p className="workflow-upload-error" role="alert">{error}</p>}
           {assignees.length === 0 && <div className="modal-note"><AlertTriangle size={18} /><p><strong>배정 가능한 직원 정보를 불러오지 못했습니다.</strong><span>직원 계정이 승인됐는지 확인한 뒤 다시 열어 주세요.</span></p></div>}
-          <footer><button type="button" className="button ghost" onClick={onClose}>취소</button><button type="submit" className="button primary" disabled={assignees.length === 0}><Check size={18} /> 업무 요청 보내기</button></footer>
+          <footer><button type="button" className="button ghost" disabled={busy} onClick={onClose}>취소</button><button type="submit" className="button primary" disabled={busy || assignees.length === 0 || !title.trim()}><Check size={18} /> {busy ? '저장 중…' : '업무 지시하기'}</button></footer>
         </form>
       </section>
     </div>
@@ -1263,11 +1321,11 @@ export default function App() {
     const timer = window.setTimeout(() => {
       fetch('/api/work-rules/materialize', { method: 'POST', headers: { 'x-workspace-identity': workspaceScope } })
         .then(async (response) => {
-          const body = await response.json() as { created?: WorkItem[]; rules?: WorkRule[] }
+          const body = await response.json() as { created?: WorkItem[]; rules?: WorkRule[]; version?: string; workItemsVersion?: string }
           if (!response.ok) throw new Error('materialize')
           if (!active) return
-          if (body.rules) void setWorkRules(body.rules, { persist: false })
-          if (body.created?.length) void setWorkItems((current) => [...body.created!.filter((created) => !current.some((item) => item.id === created.id)), ...current], { persist: false })
+          if (body.rules) void setWorkRules(body.rules, { persist: false, serverVersion: body.version })
+          if (body.created?.length) void setWorkItems((current) => [...body.created!.filter((created) => !current.some((item) => item.id === created.id)), ...current], { persist: false, serverVersion: body.workItemsVersion })
         })
         .catch(() => { /* the next workspace read retries materialization */ })
     }, 800)
@@ -1367,7 +1425,7 @@ export default function App() {
   const channelAttention = dashboardSalesChannels.find((channel) => ['주의', '오류'].includes(channel.status) || channel.connectionStatus === 'setup-required')
   const workspaceHasOperatingData = workItems.length > 0 || dashboardProducts.length > 0 || dashboardSalesChannels.length > 0 || dashboardCalendarEvents.length > 0
   const primaryTenantNotice = nextWorkNotice
-    ? { title: nextWorkNotice.title, detail: `${formatWorkDue(nextWorkNotice.due)} · ${nextWorkNotice.status}`, page: 'tasks' as PageId }
+    ? { title: nextWorkNotice.title, detail: `${formatWorkDue(nextWorkNotice.due)} · ${workStatusLabel(nextWorkNotice.status)}`, page: 'tasks' as PageId }
     : workspaceHasOperatingData
       ? { title: '현재 확인할 미완료 업무가 없습니다', detail: '새 업무가 배정되면 알림과 업무 화면에 표시됩니다.', page: 'tasks' as PageId }
       : { title: '워크스페이스 초기 설정을 시작해 주세요', detail: '제품·창고·판매채널을 연결하면 AI 알림이 활성화됩니다.', page: 'products' as PageId }
@@ -1437,7 +1495,7 @@ export default function App() {
     const taskScope = account?.role === 'tenant-member'
       ? scopedWorkItems
       : tenantWorkItems
-    const tasks = taskScope.filter((work) => (work.title + ' ' + work.owner + ' ' + work.id).toLowerCase().includes(value)).slice(0, 3).map((work) => ({ id: work.id, title: work.title, meta: work.owner + ' · ' + work.status, page: 'tasks' as PageId, icon: ListChecks }))
+    const tasks = taskScope.filter((work) => (work.title + ' ' + work.owner + ' ' + work.id + ' ' + workStatusLabel(work.status)).toLowerCase().includes(value)).slice(0, 3).map((work) => ({ id: work.id, title: work.title, meta: work.owner + ' · ' + workStatusLabel(work.status), page: 'tasks' as PageId, icon: ListChecks }))
     return [...products, ...tasks]
   }, [account, dashboardProducts, mode, platformTenants, platformTickets, query, scopedWorkItems, tenantWorkItems])
 
@@ -1488,32 +1546,33 @@ export default function App() {
         method: 'POST', headers: { 'content-type': 'application/json', 'x-workspace-identity': workspaceScope },
         body: JSON.stringify({ action, ...input }),
       })
-      const body = await response.json() as { item?: WorkItem; error?: { message?: string } }
+      const body = await response.json() as { item?: WorkItem; version?: string; error?: { message?: string } }
       if (!response.ok || !body.item) { setToast(body.error?.message || '업무 상태를 변경하지 못했습니다.'); return false }
-      await setWorkItems((current) => current.map((item) => item.id === id ? body.item! : item), { persist: false })
-      setToast({ accept: '업무를 수락했습니다.', submit: '완료내용과 증빙을 결재 요청했습니다.', approve: '코멘트와 함께 결재 승인했습니다.', 'request-changes': '수정 요청 내용을 담당자에게 전달했습니다.' }[action])
+      await setWorkItems((current) => current.map((item) => item.id === id ? body.item! : item), { persist: false, serverVersion: body.version })
+      setToast({ accept: '업무를 시작했습니다.', submit: '완료 보고를 제출했습니다. 이제 확인 결과를 기다리면 됩니다.', approve: '확인을 마치고 업무를 완료했습니다.', 'request-changes': '보완 요청을 담당자에게 전달했습니다.' }[action])
       return true
     } catch { setToast('업무 처리 서버에 연결할 수 없습니다.'); return false }
   }
   const advanceTask = (item: WorkItem) => {
     if (item.status === '업무요청') void transitionTask(item.id, 'accept')
-    else { navigate('tasks'); setToast(item.status === '수행중' ? '완료내용과 증빙자료를 입력해 결재 요청해 주세요.' : '결재 코멘트를 확인하고 승인 또는 수정 요청을 선택해 주세요.') }
+    else { navigate('tasks'); setToast(item.status === '수행중' ? '업무 행의 ‘완료 보고하기’를 눌러 결과를 제출해 주세요.' : '업무 행의 ‘확인하기’를 눌러 완료 보고를 검토해 주세요.') }
   }
   const saveTask = async (item: WorkItem) => {
     const result = await setWorkItems((current) => [item, ...current])
-    if (!result.ok) return
+    if (!result.ok) return false
     setTaskDraft(null)
     setToast(item.owner + '님에게 업무를 지시했습니다.')
     navigate('tasks')
+    return true
   }
   const createWorkRule = async (input: Record<string, unknown>) => {
     if (!workspaceScope) return false
     try {
       const response = await fetch('/api/work-rules', { method: 'POST', headers: { 'content-type': 'application/json', 'x-workspace-identity': workspaceScope }, body: JSON.stringify(input) })
-      const body = await response.json() as { rule?: WorkRule; created?: WorkItem[]; error?: { message?: string } }
+      const body = await response.json() as { rule?: WorkRule; created?: WorkItem[]; version?: string; workItemsVersion?: string; error?: { message?: string } }
       if (!response.ok || !body.rule) { setToast(body.error?.message || '반복 업무 규칙을 만들지 못했습니다.'); return false }
-      await setWorkRules((current) => [body.rule!, ...current.filter((rule) => rule.id !== body.rule!.id)], { persist: false })
-      if (body.created?.length) await setWorkItems((current) => [...body.created!.filter((created) => !current.some((item) => item.id === created.id)), ...current], { persist: false })
+      await setWorkRules((current) => [body.rule!, ...current.filter((rule) => rule.id !== body.rule!.id)], { persist: false, serverVersion: body.version })
+      if (body.created?.length) await setWorkItems((current) => [...body.created!.filter((created) => !current.some((item) => item.id === created.id)), ...current], { persist: false, serverVersion: body.workItemsVersion })
       setToast(body.created?.length ? `규칙을 만들고 도래 업무 ${body.created.length}건을 생성했습니다.` : '반복 업무 규칙을 만들었습니다.')
       return true
     } catch { setToast('반복 업무 서버에 연결할 수 없습니다.'); return false }
@@ -1522,13 +1581,20 @@ export default function App() {
     if (!workspaceScope) return false
     try {
       const response = await fetch(`/api/work-rules/${encodeURIComponent(rule.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json', 'x-workspace-identity': workspaceScope }, body: JSON.stringify({ active: !rule.active }) })
-      const body = await response.json() as { rule?: WorkRule; created?: WorkItem[]; error?: { message?: string } }
+      const body = await response.json() as { rule?: WorkRule; created?: WorkItem[]; version?: string; workItemsVersion?: string; error?: { message?: string } }
       if (!response.ok || !body.rule) { setToast(body.error?.message || '반복 규칙 상태를 바꾸지 못했습니다.'); return false }
-      await setWorkRules((current) => current.map((item) => item.id === rule.id ? body.rule! : item), { persist: false })
-      if (body.created?.length) await setWorkItems((current) => [...body.created!.filter((created) => !current.some((item) => item.id === created.id)), ...current], { persist: false })
+      await setWorkRules((current) => current.map((item) => item.id === rule.id ? body.rule! : item), { persist: false, serverVersion: body.version })
+      if (body.created?.length) await setWorkItems((current) => [...body.created!.filter((created) => !current.some((item) => item.id === created.id)), ...current], { persist: false, serverVersion: body.workItemsVersion })
       setToast(body.rule.active ? '반복 업무를 다시 활성화했습니다.' : '반복 업무를 일시 중지했습니다.')
       return true
     } catch { setToast('반복 업무 서버에 연결할 수 없습니다.'); return false }
+  }
+  const deleteWorkRule = async (rule: WorkRule) => {
+    if (!window.confirm(`‘${rule.title}’ 반복 규칙을 삭제할까요? 이미 생성된 업무와 결재 기록은 유지됩니다.`)) return false
+    const result = await setWorkRules((current) => current.filter((item) => item.id !== rule.id))
+    if (!result.ok) { setToast(result.message || '반복 업무 규칙을 삭제하지 못했습니다.'); return false }
+    setToast('반복 업무 규칙을 삭제했습니다. 이미 생성된 업무는 그대로 유지됩니다.')
+    return true
   }
 
   const login = async (credentials: { workspace: 'tenant' | 'platform'; email: string; password: string; remember: boolean }) => {
@@ -1597,7 +1663,7 @@ export default function App() {
     }
     switch (page) {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
-      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onCreate={() => setTaskDraft('')} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} />
+      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onCreate={() => setTaskDraft('')} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'products': return <ProductManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
       case 'inventory': return <InventoryPage onToast={setToast} canManage={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} />
@@ -1677,7 +1743,7 @@ export default function App() {
       <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => setMessengerOpen(false)} onToast={setToast} onUnreadChange={setMessengerUnread} />
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? '온팩토리'} theme={theme} fontSize={fontSize} density={density} onThemeChange={setTheme} onFontSizeChange={setFontSize} onDensityChange={setDensity} onLogout={logout} />
       <WorkspaceNavigationEditor open={navEditorOpen} source={tenantNavSource} preferences={tenantNavPreferences} onChange={setTenantNavPreferences} onClose={() => setNavEditorOpen(false)} />
-      {taskDraft !== null && <TaskModal initialText={taskDraft} requesterName={account?.name ?? '사용자'} requesterId={account?.id ?? ''} assignees={workAssignees} onClose={() => setTaskDraft(null)} onSave={saveTask} />}
+      {taskDraft !== null && <TaskModal initialText={taskDraft} requesterName={account?.name ?? '사용자'} requesterId={account?.id ?? ''} assignees={workAssignees} workspaceScope={workspaceScope} onClose={() => setTaskDraft(null)} onSave={saveTask} />}
       {supportTenant && <SupportSessionModal tenant={supportTenant} tickets={platformTickets} onClose={() => setSupportTenant(null)} onCreate={createPlatformSupportSession} />}
       {toast && <div className="toast" role="status"><CheckCircle2 size={19} /><span>{toast}</span><button type="button" aria-label="알림 닫기" onClick={() => setToast('')}><X size={16} /></button></div>}
     </div>

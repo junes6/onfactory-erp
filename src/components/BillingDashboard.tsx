@@ -347,11 +347,9 @@ export function TenantPointGaugeCard({ tenantId, tenantName, workspaceScope, onO
   const gauge = payload?.gauge
   const configured = gauge?.pointLimit !== null && gauge?.pointLimit !== undefined
   const progress = Math.max(0, Math.min(100, gauge?.utilizationPercent ?? 0))
-  return <section className="tenant-point-card" aria-labelledby="tenant-point-card-title">
-    <span className="tenant-point-card__icon"><Gauge size={19} /></span>
-    <div><span className="billing-section-kicker">MONTHLY AI POINTS</span><h2 id="tenant-point-card-title">{tenantName} 포인트</h2><p>{failed ? '사용량을 불러오지 못했습니다.' : configured ? `${formatNumber(gauge?.pointsUsed ?? 0)} / ${formatNumber(gauge?.pointLimit ?? 0)} P` : '요금제와 한도가 아직 미확정입니다.'}</p></div>
-    <div className="tenant-point-card__meter"><strong>{configured ? `${formatNumber(gauge?.utilizationPercent ?? 0)}%` : '미확정'}</strong><progress max={100} value={progress} aria-label="이번 달 AI 포인트 사용률" /></div>
-    <button type="button" onClick={onOpen}>상세 보기</button>
+  return <section className="tenant-point-card dashboard-section-card" aria-labelledby="tenant-point-card-title">
+    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><Gauge size={18} /></span><h2 id="tenant-point-card-title">AI 포인트</h2></div><button type="button" onClick={onOpen}>상세 보기</button></header>
+    <div className="tenant-point-card__body"><div><p>{failed ? '사용량을 불러오지 못했습니다.' : configured ? `${tenantName} · ${formatNumber(gauge?.pointsUsed ?? 0)} / ${formatNumber(gauge?.pointLimit ?? 0)} P` : '요금제와 한도가 아직 미확정입니다.'}</p></div><div className="tenant-point-card__meter"><strong>{configured ? `${formatNumber(gauge?.utilizationPercent ?? 0)}%` : '미확정'}</strong><progress max={100} value={progress} aria-label="이번 달 AI 포인트 사용률" /></div></div>
   </section>
 }
 

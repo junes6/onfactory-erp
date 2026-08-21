@@ -11,6 +11,7 @@ const verboseTsx = process.argv.includes('--verbose-tsx')
 const allowedPalette = new Set([
   '#f4f4f2', '#ffffff', '#1c1c1b', '#16324f', '#2f6b8f', '#1d9e75', '#ef9f27', '#e24b4a',
   '#f2f2f0', '#d9d9d5', '#a7a7a1', '#6b6b67', '#3b3b39',
+  '#e2e2dd',
 ])
 const fontTokens = new Set(['var(--font-22)', 'var(--font-15)', 'var(--font-13)', 'var(--font-11)'])
 const weightTokens = new Set(['var(--weight-regular)', 'var(--weight-medium)'])
@@ -249,6 +250,7 @@ function validSpacing(value, property) {
   const tokens = splitTopLevel(importantFree(value))
   if (!tokens.length || tokens.length > 4) return false
   return tokens.every((token) => spaceTokens.has(token)
+    || (token === 'var(--dashboard-spacing)' && /^(?:gap|row-gap|column-gap|margin(?:-top)?)$/.test(property))
     || (token === 'var(--card-inset)' && /^padding/.test(property))
     || (/^margin/.test(property) && token === 'auto')
     || /^calc\(var\(--space-(?:4|8|12|16|24|32)\) \* -1\)$/.test(token))
@@ -297,6 +299,7 @@ function verifyTokenContract(source) {
     '--font-22: 22px', '--font-15: 15px', '--font-13: 13px', '--font-11: 11px',
     '--weight-regular: 400', '--weight-medium: 500', '--color-page: #F4F4F2', '--color-surface: #FFFFFF',
     '--card-inset: 20px', '--radius-12: 12px', '--radius-8: var(--radius-12)', '--hairline: .5px', '--shadow-none: none',
+    '--dashboard-spacing: 20px', '--dashboard-stroke: 1px', '--color-card-line: #E2E2DD',
     '--space-4: 4px', '--space-8: 8px', '--space-12: 12px', '--space-16: 16px', '--space-24: 24px', '--space-32: 32px',
   ]
   return required.filter((contract) => !source.includes(contract)).map((contract) => `src/tokens.css:1 필수 토큰 누락: ${contract}`)
