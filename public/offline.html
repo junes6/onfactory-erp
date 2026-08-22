@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#173f35" />
+    <title>온팩토리 — 연결 없음</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif; background: #f4f6f5; color: #1b2a26; }
+      main { width: min(420px, calc(100% - 32px)); padding: 32px 28px; border-radius: 16px; background: #fff; box-shadow: 0 12px 40px rgba(23, 63, 53, .12); text-align: center; }
+      .mark { width: 64px; height: 64px; margin: 0 auto 16px; border-radius: 18px; background: #173f35; display: grid; place-items: center; color: #fff; font-size: 28px; font-weight: 700; }
+      h1 { margin: 0 0 8px; font-size: 22px; }
+      p { margin: 0 0 20px; color: #5a6b66; font-size: 15px; line-height: 1.55; }
+      button { min-height: 46px; padding: 0 22px; border: 0; border-radius: 10px; background: #173f35; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
+      @media (prefers-color-scheme: dark) { body { background: #0f1a17; color: #e8efec; } main { background: #16241f; box-shadow: none; } p { color: #9fb3ac; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="mark">온</div>
+      <h1>연결 없음</h1>
+      <p>인터넷에 연결되어 있지 않아 온팩토리를 열 수 없습니다.<br />네트워크를 확인한 뒤 다시 시도해 주세요. 오프라인에서는 업무 데이터를 표시하지 않습니다.</p>
+      <button type="button" onclick="location.reload()">다시 시도</button>
+    </main>
+  </body>
+</html>

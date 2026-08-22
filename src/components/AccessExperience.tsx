@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import {
-  Accessibility, ArrowLeft, Check, ChevronRight, Eye, EyeOff, KeyRound, Laptop,
-  LockKeyhole, LogIn, Mail, Moon, Palette, ShieldCheck, Smartphone, Sun, Type, X,
-} from 'lucide-react'
+import { Accessibility, ArrowLeft, Check, ChevronRight, Download, Eye, EyeOff, KeyRound, Laptop, LockKeyhole, LogIn, Mail, Moon, Palette, ShieldCheck, Smartphone, Sun, Type, X } from 'lucide-react'
 import { OnFactoryMark } from './AppIcons'
 
 export type ThemeChoice = 'light' | 'dark' | 'system'
@@ -23,6 +20,35 @@ export const accentOptions: Array<{ id: AccentChoice; label: string }> = [
 type LoginPageProps = {
   onLogin: (credentials: { workspace: 'tenant' | 'platform'; email: string; password: string; remember: boolean }) => Promise<{ ok: boolean; message: string }>
   initialError?: string
+}
+
+type BeforeInstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> }
+const PWA_BANNER_KEY = 'onfactory-pwa-install-dismissed'
+const isStandaloneDisplay = () => typeof window !== 'undefined' && (window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true)
+
+function InstallBanner() {
+  const [dismissed, setDismissed] = useState(() => { try { return localStorage.getItem(PWA_BANNER_KEY) === '1' } catch { return true } })
+  const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null)
+  const [installed, setInstalled] = useState(isStandaloneDisplay)
+  useEffect(() => {
+    const onPrompt = (event: Event) => { event.preventDefault(); setInstallEvent(event as BeforeInstallPromptEvent) }
+    const onInstalled = () => setInstalled(true)
+    window.addEventListener('beforeinstallprompt', onPrompt)
+    window.addEventListener('appinstalled', onInstalled)
+    return () => { window.removeEventListener('beforeinstallprompt', onPrompt); window.removeEventListener('appinstalled', onInstalled) }
+  }, [])
+  const dismiss = () => { try { localStorage.setItem(PWA_BANNER_KEY, '1') } catch { /* 저장 불가 환경 */ } setDismissed(true) }
+  if (dismissed || installed) return null
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent)
+  return <div className="auth-install-banner" role="note" aria-label="앱 설치 안내">
+    <Smartphone size={18} />
+    <div>
+      <strong>온팩토리를 앱처럼 설치할 수 있어요</strong>
+      <span>{installEvent ? 'PC에서는 독립 창으로, 휴대폰에서는 홈 화면 아이콘으로 바로 엽니다.' : isIos ? 'Safari 공유 버튼 → “홈 화면에 추가”를 누르면 홈 화면에서 바로 엽니다.' : 'Chrome 주소창 오른쪽의 설치 아이콘(또는 메뉴 → 앱 설치)을 누르면 독립 창으로 엽니다.'}</span>
+    </div>
+    {installEvent && <button type="button" className="auth-install-action" onClick={() => { void installEvent.prompt().then(() => installEvent.userChoice).then((choice) => { if (choice.outcome === 'accepted') setInstalled(true) }).catch(() => {}) }}><Download size={16} /> 설치</button>}
+    <button type="button" className="auth-install-close" aria-label="설치 안내 닫기 (다시 표시되지 않음)" onClick={dismiss}><X size={16} /></button>
+  </div>
 }
 
 export function LoginPage({ onLogin, initialError = '' }: LoginPageProps) {
@@ -126,6 +152,7 @@ export function LoginPage({ onLogin, initialError = '' }: LoginPageProps) {
         <div className="auth-form-card">
           {view === 'login' && <>
             <header><span className="auth-mobile-brand"><OnFactoryMark size={38} /> 온팩토리</span><h2>다시 만나서 반갑습니다</h2><p>회사 계정으로 안전하게 로그인하세요.</p></header>
+            <InstallBanner />
             <form onSubmit={submitLogin}>
               <label className="form-field full"><span>회사 워크스페이스</span><select value={workspace} onChange={(event) => changeWorkspace(event.target.value as 'tenant' | 'platform')}><option value="tenant">고객사 ERP (회사 계정)</option><option value="platform">온팩토리 통합 관리자</option></select></label>
               <label className="form-field full"><span>이메일</span><div className="input-with-icon"><Mail size={18} /><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" required /></div></label>
