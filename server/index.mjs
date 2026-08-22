@@ -35,6 +35,11 @@ const app = createApp({
   seedDemoAccounts: runtimeStore.adapter.kind === 'json',
   skipStartupMigrations: runtimeStore.adapter.kind === 'postgres',
   billingService,
+  storeStatus: {
+    kind: runtimeStore.adapter.kind,
+    readOnly: Boolean(runtimeStore.adapter.readOnly),
+    fallbackReason: runtimeStore.adapter.fallbackReason ?? null,
+  },
 })
 
 function previousBillingMonth(now = new Date()) {

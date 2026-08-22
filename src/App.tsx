@@ -1334,6 +1334,8 @@ export default function App() {
   const [platformDirectory, setPlatformDirectory] = useState<PlatformDirectoryState>({ tenants: [], supportTickets: [] })
   const [platformRefreshToken, setPlatformRefreshToken] = useState(0)
   const [toast, setToast] = useState('')
+  // 저장소가 읽기 전용으로 기동됐는지(STORE_READ_ONLY) — 모든 화면 상단에 고정 배너로 알린다.
+  const [storeStatus, setStoreStatus] = useState<{ kind: string; readOnly: boolean; fallbackReason: string | null } | null>(null)
   const [theme, setTheme] = useState<ThemeChoice>(() => (window.localStorage.getItem('onfactory-theme') as ThemeChoice | null) ?? 'light')
   const [fontSize, setFontSize] = useState<FontChoice>(() => (window.localStorage.getItem('onfactory-font') as FontChoice | null) ?? 'standard')
   const [density, setDensity] = useState<DensityChoice>(() => (window.localStorage.getItem('onfactory-density') as DensityChoice | null) ?? 'comfortable')
@@ -1400,6 +1402,15 @@ export default function App() {
       window.removeEventListener('onfactory:workspace-error', handleWorkspaceError)
       window.removeEventListener('onfactory:auth-expired', handleAuthExpired)
     }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/health')
+      .then(async (response) => response.ok ? response.json() as Promise<{ store?: { kind: string; readOnly: boolean; fallbackReason: string | null } }> : null)
+      .then((body) => { if (active && body?.store) setStoreStatus(body.store) })
+      .catch(() => { /* health is informational */ })
+    return () => { active = false }
   }, [])
 
   useEffect(() => {
@@ -1807,8 +1818,9 @@ export default function App() {
   if (account?.requiresPasswordChange) return <PasswordChangePage name={account.name} email={account.email} onChange={changeInitialPassword} onLogout={logout} />
 
   return (
-    <div className={'app-shell ' + mode + ' density-' + density}>
+    <div className={'app-shell ' + mode + ' density-' + density + (storeStatus?.readOnly ? ' has-store-banner' : '')}>
       <a className="skip-link" href="#main-content">본문으로 바로가기</a>
+      {storeStatus?.readOnly && <div className="store-readonly-banner" role="alert"><AlertTriangle size={17} /><span><strong>읽기 전용 모드</strong> — 저장소가 읽기 전용(STORE_READ_ONLY)으로 기동되어 모든 변경이 저장되지 않습니다.{storeStatus.fallbackReason ? ` ${storeStatus.fallbackReason}` : ''}</span></div>}
       {isMobile && mobileNav && <button type="button" className="nav-scrim" aria-label="메뉴 닫기" onClick={() => setMobileNav(false)} />}
       <aside id="main-navigation" className={'sidebar ' + (mobileNav ? 'open' : '')} aria-label={mode === 'platform' ? '플랫폼 운영 메뉴' : `${tenantName} 업무 메뉴`} aria-hidden={isMobile && !mobileNav} inert={isMobile && !mobileNav ? true : undefined}>
         <div className="brand"><OnFactoryMark /><div><strong>온팩토리</strong><span>{mode === 'platform' ? 'PLATFORM OPS' : 'FOOD ERP'}</span></div><button type="button" className="sidebar-close" aria-label="메뉴 닫기" onClick={() => setMobileNav(false)}><X size={21} /></button></div>

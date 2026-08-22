@@ -1601,7 +1601,11 @@ export function createApp(options = {}) {
   app.use(express.json({ limit: '4mb' }))
 
   app.get('/api/health', (_request, response) => {
-    response.json({ claude: Boolean(client), model })
+    response.json({
+      claude: Boolean(client),
+      model,
+      ...(options.storeStatus ? { store: options.storeStatus } : {}),
+    })
   })
 
   const authenticatedAccount = (request) => {

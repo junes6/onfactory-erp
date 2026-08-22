@@ -2732,3 +2732,9 @@ html[data-easy-mode='on'] .global-search { display: none; }
 @media (max-width: 700px) {
   .easy-tiles { grid-template-columns: 1fr; }
 }
+
+
+/* P0: 읽기 전용 저장소 고정 배너 */
+.store-readonly-banner { position: fixed; z-index: 200; top: 0; right: 0; left: 0; display: flex; align-items: center; gap: var(--space-8); min-height: 32px; padding: var(--space-4) var(--space-16); color: var(--color-white); background: var(--color-danger); font-size: var(--font-13); }
+.store-readonly-banner strong { font-weight: var(--weight-medium); }
+.app-shell.has-store-banner { padding-top: var(--space-32); }
