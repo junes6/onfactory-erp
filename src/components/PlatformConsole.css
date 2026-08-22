@@ -283,3 +283,14 @@
 .pc-signal-text.danger { color: var(--color-danger); }
 .pc-signal-text.neutral { color: var(--pc-muted); }
 .pc-detail-head p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--pc-muted); font-size: var(--font-13); }
+
+/* 온보딩 필수 동의 3항 */
+.pc-consent { margin: var(--space-12) var(--space-0) var(--space-0); padding: var(--space-12) var(--space-16); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.pc-consent legend { padding: var(--space-0) var(--space-4); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.pc-consent legend small { margin-left: var(--space-8); color: var(--muted); font-weight: var(--weight-regular); }
+.pc-consent-item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-12); align-items: start; padding: var(--space-8) var(--space-0); cursor: pointer; }
+.pc-consent-item + .pc-consent-item { border-top: var(--hairline) solid var(--line); }
+.pc-consent-item input { width: 20px; height: 20px; margin-top: var(--space-4); accent-color: var(--color-primary); }
+.pc-consent-item strong { display: block; font-size: var(--font-15); }
+.pc-consent-item small { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); line-height: 1.5; }
+.pc-consent p { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); }
