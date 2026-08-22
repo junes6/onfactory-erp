@@ -10,7 +10,7 @@ import { PostgresStoreAdapter } from '../server/store/postgres-store.mjs'
 import { assertKnownWorkspaceKeys } from '../server/store/workspace-codec.mjs'
 import { prepareMigrationSnapshot, verifyNormalizedCounts } from './migrate-json-to-pg.mjs'
 
-const REQUIRED_DEMO_TENANTS = new Set(['TENANT-SUNSEA', 'TENANT-POHANG'])
+const REQUIRED_DEMO_TENANTS = new Set(['TENANT-SUNSEA', 'TENANT-POHANG', 'TENANT-3DMUSE'])
 const PLATFORM_COLLECTIONS = ['tenants', 'supportTickets', 'integrations', 'actions', 'auditEvents']
 
 function passwordHash(password, accountId) {

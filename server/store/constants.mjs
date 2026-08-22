@@ -19,6 +19,10 @@ export const WORKSPACE_TABLES = Object.freeze({
   'document-storage-settings': 'document_storage_settings',
   'performance-settings': 'performance_settings',
   'performance-reports': 'performance_report_snapshots',
+  // it_services 업종 모듈
+  'it-projects': 'it_projects',
+  'it-deliverables': 'it_deliverables',
+  'it-contracts': 'it_contracts',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

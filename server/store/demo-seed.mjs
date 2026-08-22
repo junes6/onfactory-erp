@@ -17,12 +17,15 @@ export const DEMO_ACCOUNT_DEFINITIONS = Object.freeze([
   { id: 'USR-SUNSEA-LEE', name: '이정민', email: 'jungmin.lee@sunsea.co.kr', role: 'tenant-member', tenantId: 'TENANT-SUNSEA', tenantName: '햇살바다', team: '품질관리', jobRole: '품질 담당', requested: '기존 구성원', approved: true, approvalStatus: 'approved' },
   { id: 'USR-SUNSEA-HAN', name: '한예린', email: 'yerin.han@sunsea.co.kr', role: 'tenant-member', tenantId: 'TENANT-SUNSEA', tenantName: '햇살바다', team: '구매팀', jobRole: '원부자재 구매', requested: '기존 구성원', approved: true, approvalStatus: 'approved' },
   { id: 'USR-SUNSEA-PENDING', name: '신규 직원', email: 'newstaff@sunsea.co.kr', role: 'tenant-member', tenantId: 'TENANT-SUNSEA', tenantName: '햇살바다', team: '생산 1팀', jobRole: '생산 작업자', requested: '오늘 09:24', approved: false, approvalStatus: 'pending' },
+  // it_services 업종 모듈 검증용 데모 테넌트의 관리자 (실운영 3D뮤즈 계정과는 별개 이메일)
+  { id: 'USR-3DMUSE-ADMIN', name: '김뮤즈', email: 'admin@3dmuse.demo', role: 'tenant-admin', tenantId: 'TENANT-3DMUSE', tenantName: '3D뮤즈', team: '경영지원', jobRole: '운영 관리자', requested: '초기 관리자', approved: true, approvalStatus: 'approved' },
 ])
 
 export const PLATFORM_TENANT_FIXTURES = Object.freeze([
   // 지표(멤버 수·활동·티켓·포인트·용량)는 시드에 넣지 않는다 — 전부 스토어 실집계로 계산된다.
   { id: 'TENANT-SUNSEA', name: '햇살바다', industry: '수산가공 · HMR · 온라인 유통', industryType: 'food_manufacturing', contract: '운영중', plan: 'Enterprise', adminEmail: 'admin@sunsea.co.kr', adminAccount: { id: 'USR-SUNSEA-ADMIN', name: '김서원', email: 'admin@sunsea.co.kr', team: '경영지원', jobRole: '운영 관리자' }, createdAt: '2026-08-01T00:00:00.000Z' },
   { id: 'TENANT-POHANG', name: '포항시수산가공협동조합', industry: '수산가공 · 조합 공동판매', industryType: 'food_manufacturing', contract: '온보딩', plan: 'Growth', adminEmail: 'admin@pohangcoop.co.kr', adminAccount: { id: 'USR-POHANG-ADMIN', name: '박해진', email: 'admin@pohangcoop.co.kr', team: '조합 운영', jobRole: '운영 관리자' }, createdAt: '2026-08-01T00:00:00.000Z' },
+  { id: 'TENANT-3DMUSE', name: '3D뮤즈', industry: '3D 콘텐츠 · IT 서비스', industryType: 'it_services', contract: '온보딩', plan: 'Growth', adminEmail: 'admin@3dmuse.demo', adminAccount: { id: 'USR-3DMUSE-ADMIN', name: '김뮤즈', email: 'admin@3dmuse.demo', team: '경영지원', jobRole: '운영 관리자' }, createdAt: '2026-08-21T00:00:00.000Z' },
 ])
 
 export const PLATFORM_INTEGRATION_FIXTURES = Object.freeze([

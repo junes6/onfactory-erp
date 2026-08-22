@@ -126,6 +126,7 @@ type PlatformTenant = Tenant & {
 
 type OnboardingInput = {
   companyName: string
+  industryType: 'food_manufacturing' | 'it_services'
   industry: string
   plan: string
   adminName: string
@@ -159,6 +160,7 @@ type PlatformContextValue = PlatformState & {
   error: string
   refresh: (silent?: boolean) => Promise<void>
   createTenant: (input: OnboardingInput) => Promise<{ tenant: PlatformTenant; onboarding: { temporaryPassword: string; expiresAt: string } }>
+  updateTenantIndustry: (tenantId: string, industryType: Tenant['industryType']) => Promise<void>
   createTicket: (input: { tenantId: string; title: string; priority: string; owner: string; description: string }, evidence?: File) => Promise<SupportTicket>
   updateTicket: (id: string, input: { status?: string; priority?: string; owner?: string }) => Promise<SupportTicket>
   createAction: (input: { tenantId: string; kind: PlatformAction['kind']; target: string; message: string; reference?: string }) => Promise<PlatformAction>
@@ -327,7 +329,7 @@ function PlatformDialog({
     if (!companyName || !adminEmail) return
     setBusy(true); setError('')
     try {
-      const result = await createTenant({ companyName, industry: String(form.get('industry') ?? '').trim(), plan: String(form.get('plan') ?? 'Growth'), adminName: String(form.get('adminName') ?? '').trim(), adminEmail, targetDate: String(form.get('targetDate') ?? '') })
+      const result = await createTenant({ companyName, industryType: String(form.get('industryType') ?? 'food_manufacturing') === 'it_services' ? 'it_services' : 'food_manufacturing', industry: String(form.get('industry') ?? '').trim(), plan: String(form.get('plan') ?? 'Growth'), adminName: String(form.get('adminName') ?? '').trim(), adminEmail, targetDate: String(form.get('targetDate') ?? '') })
       setProvisioned(result)
       onScope(result.tenant.id)
       onSectionChange('tenants')
@@ -394,7 +396,7 @@ function PlatformDialog({
     <section ref={dialogRef} className={`pc-modal${dialog.kind === 'audit-record' ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby="pc-modal-title" tabIndex={-1}>
       <header className="pc-modal-head"><div><span className="pc-modal-kicker">{header[0]}</span><h2 id="pc-modal-title">{header[1]}</h2><p>{header[2]}</p></div><button type="button" className="pc-modal-close" aria-label="닫기" onClick={onClose}><X size={19} /></button></header>
       {dialog.kind === 'onboarding' && (provisioned ? <div className="pc-modal-body"><div className="pc-safe-note"><ShieldCheck size={18} /><span><strong>{provisioned.tenant.name}</strong> 테넌트와 관리자 계정이 생성되었습니다.</span></div><div className="pc-detail-grid"><DetailStat label="테넌트 ID" value={provisioned.tenant.id} /><DetailStat label="관리자 이메일" value={provisioned.tenant.adminEmail ?? '—'} /><DetailStat label="초기 비밀번호" value={<span className="pc-code">{provisioned.onboarding.temporaryPassword}</span>} /><DetailStat label="만료 시각" value={formatDateTime(provisioned.onboarding.expiresAt)} /></div><div className="pc-form-note"><AlertTriangle size={17} /><span>초기 비밀번호는 다시 표시되지 않습니다. 관리자에게 안전하게 전달하고 첫 로그인에서 새 비밀번호로 변경하게 하세요.</span></div><div className="pc-modal-actions"><Button primary onClick={onClose}>확인</Button></div></div> : <form className="pc-modal-body" onSubmit={submitOnboarding}>
-        <div className="pc-form-grid"><label className="pc-field"><span>고객사명</span><input name="companyName" data-autofocus required minLength={2} maxLength={80} placeholder="예: 동해식품" /></label><label className="pc-field"><span>업종</span><input name="industry" required maxLength={120} placeholder="예: 수산가공 · 온라인 유통" /></label><label className="pc-field"><span>요금제</span><select name="plan"><option>Growth</option><option>Enterprise</option><option>Starter</option></select></label><label className="pc-field"><span>목표 오픈일</span><input name="targetDate" type="date" required /></label><label className="pc-field"><span>최초 관리자 이름</span><input name="adminName" required minLength={2} maxLength={40} placeholder="예: 홍길동" /></label><label className="pc-field"><span>최초 관리자 이메일</span><input name="adminEmail" type="email" required placeholder="admin@company.co.kr" /></label></div>
+        <div className="pc-form-grid"><label className="pc-field"><span>고객사명</span><input name="companyName" data-autofocus required minLength={2} maxLength={80} placeholder="예: 동해식품" /></label><label className="pc-field"><span>업종 구분</span><select name="industryType" defaultValue="food_manufacturing"><option value="food_manufacturing">식품제조 (제품·재고·공장·판매·식품안전)</option><option value="it_services">IT 서비스 (프로젝트·산출물·계약)</option></select></label><label className="pc-field"><span>업종 설명</span><input name="industry" required maxLength={120} placeholder="예: 수산가공 · 온라인 유통" /></label><label className="pc-field"><span>요금제</span><select name="plan"><option>Growth</option><option>Enterprise</option><option>Starter</option></select></label><label className="pc-field"><span>목표 오픈일</span><input name="targetDate" type="date" required /></label><label className="pc-field"><span>최초 관리자 이름</span><input name="adminName" required minLength={2} maxLength={40} placeholder="예: 홍길동" /></label><label className="pc-field"><span>최초 관리자 이메일</span><input name="adminEmail" type="email" required placeholder="admin@company.co.kr" /></label></div>
         <div className="pc-form-note"><ShieldCheck size={17} /><span>고객사별 격리 저장소와 승인된 최초 관리자 계정을 생성합니다. 초기 비밀번호는 72시간 후 만료됩니다.</span></div>
         {error && <div className="pc-form-note"><AlertTriangle size={17} /><span>{error}</span></div>}
         <div className="pc-modal-actions"><Button onClick={onClose} disabled={busy}>취소</Button><button type="submit" className="pc-button primary" disabled={busy}><Plus size={15} /> {busy ? '생성 중…' : '고객사 · 관리자 생성'}</button></div>
@@ -497,6 +499,18 @@ function TenantBoard({ tenants, selectedTenantId, onSelectTenant, onEnterTenant 
   )
 }
 
+function TenantIndustryControl({ tenant }: { tenant: Tenant }) {
+  const { updateTenantIndustry } = usePlatformData()
+  const [saving, setSaving] = useState(false)
+  return (
+    <div className="pc-detail-section">
+      <strong>업종 모듈</strong>
+      <label className="pc-field"><span className="sr-only">업종 구분</span><select className="pc-select" value={tenant.industryType} disabled={saving} onChange={async (event) => { setSaving(true); try { await updateTenantIndustry(tenant.id, event.target.value as Tenant['industryType']) } finally { setSaving(false) } }}><option value="food_manufacturing">식품제조 모듈</option><option value="it_services">IT 서비스 모듈</option></select></label>
+      <p>변경 즉시 해당 고객사의 메뉴·AI 안내가 업종 모듈에 맞게 바뀝니다.</p>
+    </div>
+  )
+}
+
 function TenantDetail({ tenant, onSectionChange, onRequestSupport, onScope, onEnterTenant }: { tenant?: Tenant; onSectionChange: PlatformConsoleProps['onSectionChange']; onRequestSupport: PlatformConsoleProps['onRequestSupport']; onScope: (scope: TenantScope) => void; onEnterTenant: PlatformConsoleProps['onEnterTenant'] }) {
   if (!tenant) return <aside className="pc-detail"><EmptyState label="고객사를 선택해 주세요." /></aside>
   const signal = tenantSignal(tenant)
@@ -517,6 +531,7 @@ function TenantDetail({ tenant, onSectionChange, onRequestSupport, onScope, onEn
             <DetailStat label="미처리 티켓" value={`${tenant.metrics.openTickets}건`} />
             <DetailStat label="마지막 활동" value={relativeActivity(tenant.metrics.lastActivityAt)} />
           </div>
+          <TenantIndustryControl tenant={tenant} />
           <div className="pc-detail-section">
             <strong>사용량 (실시간 집계)</strong>
             <p>이번 달 포인트 {pointsLabel(tenant.metrics.pointsUsed)}<br />저장 용량 {formatBytes(tenant.metrics.storageBytes)}</p>
@@ -861,6 +876,11 @@ export function PlatformConsole(props: PlatformConsoleProps) {
     return result
   }, [props.onDataChanged, refresh])
 
+  const updateTenantIndustry = useCallback(async (tenantId: string, industryType: Tenant['industryType']) => {
+    await platformJson(`/api/platform/tenants/${encodeURIComponent(tenantId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ industryType }) })
+    await refresh(true)
+  }, [refresh])
+
   const createTicket = useCallback(async (input: { tenantId: string; title: string; priority: string; owner: string; description: string }, evidence?: File) => {
     const params = new URLSearchParams(input)
     let init: RequestInit
@@ -1019,6 +1039,7 @@ export function PlatformConsole(props: PlatformConsoleProps) {
     error: loadError,
     refresh,
     createTenant,
+    updateTenantIndustry,
     createTicket,
     updateTicket,
     createAction,
@@ -1028,7 +1049,7 @@ export function PlatformConsole(props: PlatformConsoleProps) {
     uploadSupportAttachments,
     deleteSupportAttachment,
     downloadSupportAttachment,
-  }), [createAction, createTenant, createTicket, deleteSupportAttachment, downloadEvidence, downloadSupportAttachment, loadError, loading, loadSupportConversation, platformState, refresh, replySupportConversation, updateTicket, uploadSupportAttachments])
+  }), [createAction, createTenant, createTicket, deleteSupportAttachment, downloadEvidence, downloadSupportAttachment, loadError, loading, loadSupportConversation, platformState, refresh, replySupportConversation, updateTenantIndustry, updateTicket, uploadSupportAttachments])
 
   return (
     <PlatformDataContext.Provider value={contextValue}><div className="pc-root">

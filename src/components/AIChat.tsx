@@ -36,6 +36,8 @@ type AIChatProps = {
   operatingDataAvailable?: boolean
   context?: unknown
   workspaceScope?: string
+  /** 업종 모듈 — 추천 질문과 첫 안내 문구가 분기된다 */
+  industryType?: string
 }
 
 const MAX_CHAT_FILES = 5
@@ -75,15 +77,32 @@ const onboardingSuggestions = [
   '창고와 재고 위치 등록 체크리스트를 만들어줘',
   '신규 직원에게 배정할 초기 업무를 제안해줘',
 ]
+const itSuggestions = [
+  '이번 주 마감 임박 프로젝트 정리해줘',
+  '진행 중인 프로젝트별 담당자와 상태를 요약해줘',
+  '갱신 준비가 필요한 계약을 알려줘',
+  '오늘 제가 먼저 처리할 일을 정리해줘',
+]
+const itOnboardingSuggestions = [
+  '첫 프로젝트 등록에 필요한 정보를 정리해줘',
+  '산출물 버전 관리 규칙을 제안해줘',
+  '거래처 계약 등록 체크리스트를 만들어줘',
+  '신규 직원에게 배정할 초기 업무를 제안해줘',
+]
 
-export default function AIChat({ compact = false, companyName, onCreateTask, canCreateTask = true, canViewCommercial = true, operatingDataAvailable = false, context, workspaceScope }: AIChatProps) {
+export default function AIChat({ compact = false, companyName, onCreateTask, canCreateTask = true, canViewCommercial = true, operatingDataAvailable = false, context, workspaceScope, industryType = 'food_manufacturing' }: AIChatProps) {
+  const isItServices = industryType === 'it_services'
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
       role: 'assistant',
-      content: operatingDataAvailable
-        ? companyName + (canViewCommercial ? '의 제품, 주문, 재고와 업무 현황을 연결했습니다.' : '의 제품, 재고, 일정과 내 업무를 연결했습니다.') + ' 무엇을 확인할까요?'
-        : `${companyName}의 초기 설정을 도와드릴게요. 제품·창고·판매채널 중 무엇부터 연결할까요?`,
+      content: isItServices
+        ? (operatingDataAvailable
+          ? `${companyName}의 프로젝트, 산출물, 계약과 업무 현황을 연결했습니다. 무엇을 확인할까요?`
+          : `${companyName}의 초기 설정을 도와드릴게요. 프로젝트·거래처 계약 중 무엇부터 등록할까요?`)
+        : operatingDataAvailable
+          ? companyName + (canViewCommercial ? '의 제품, 주문, 재고와 업무 현황을 연결했습니다.' : '의 제품, 재고, 일정과 내 업무를 연결했습니다.') + ' 무엇을 확인할까요?'
+          : `${companyName}의 초기 설정을 도와드릴게요. 제품·창고·판매채널 중 무엇부터 연결할까요?`,
       mode: 'demo',
       createdAt: new Date().toISOString(),
     },
@@ -298,7 +317,9 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
 
       {!compact && messages.length < 3 && (
         <div className="chat-suggestions">
-          {(operatingDataAvailable ? (canViewCommercial ? suggestions : employeeSuggestions) : onboardingSuggestions).map((suggestion) => <button type="button" key={suggestion} onClick={() => send(suggestion)}>{suggestion}</button>)}
+          {(isItServices
+            ? (operatingDataAvailable ? itSuggestions : itOnboardingSuggestions)
+            : operatingDataAvailable ? (canViewCommercial ? suggestions : employeeSuggestions) : onboardingSuggestions).map((suggestion) => <button type="button" key={suggestion} onClick={() => send(suggestion)}>{suggestion}</button>)}
         </div>
       )}
 

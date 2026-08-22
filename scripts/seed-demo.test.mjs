@@ -20,13 +20,14 @@ test('demo seed separates both tenants, marks is_demo, and persists credentials 
     })
     assert.ok(snapshot.tenants['TENANT-SUNSEA'])
     assert.ok(snapshot.tenants['TENANT-POHANG'])
+    assert.ok(snapshot.tenants['TENANT-3DMUSE'], 'it_services 데모 테넌트도 시드된다')
     assert.equal(snapshot.tenantMetadata['TENANT-SUNSEA'].isDemo, true)
     assert.equal(snapshot.tenantMetadata['TENANT-POHANG'].isDemo, true)
     assert.equal(snapshot.accounts.length, DEMO_ACCOUNT_DEFINITIONS.length)
 
     const tenants = await pool.query('SELECT id, is_demo FROM core_tenants ORDER BY id')
     assert.deepEqual(tenants.rows.map((row) => [row.id, row.is_demo]), [
-      ['TENANT-POHANG', true], ['TENANT-SUNSEA', true],
+      ['TENANT-3DMUSE', true], ['TENANT-POHANG', true], ['TENANT-SUNSEA', true],
     ])
     const account = await pool.query("SELECT payload FROM core_accounts WHERE id = 'USR-SUNSEA-ADMIN'")
     assert.equal(account.rows[0].payload.password, undefined)

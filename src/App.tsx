@@ -5,6 +5,7 @@ import {
   Database, Factory, FileClock, FileText, Headphones, Home, Layers3, ListChecks, LockKeyhole, Menu,
   NotebookPen, Package, Paperclip, PauseCircle, PlayCircle, Plus, Repeat2, Search, Settings2, ShieldCheck, ShoppingCart,
   Sparkles, Store, Trash2, Upload, Users, Warehouse, X, GripVertical, EyeOff, RotateCcw,
+  Briefcase, FileStack, FileSignature,
 } from 'lucide-react'
 import AIChat from './components/AIChat'
 import { ChatBubbleIcon, NotificationBellIcon, OnFactoryMark } from './components/AppIcons'
@@ -22,6 +23,8 @@ import { FactoryManagement } from './components/FactoryManagement'
 import './components/InventoryEnhancements.css'
 import { PeopleOperationsPage } from './components/PeopleOperations'
 import { PerformanceReports } from './components/PerformanceReports'
+import { ItServicesPage, type ItServicesView } from './components/ItServices'
+import { brandLabelForIndustry, routesForIndustry } from './modules/registry'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
 import { WorkspaceNavigationEditButton, WorkspaceNavigationEditor, usePersonalNavigation } from './components/WorkspaceNavigation'
@@ -33,7 +36,7 @@ import {
   type Tenant, type WorkEvidence, type WorkItem, type WorkRule,
 } from './domainData'
 
-type TenantPage = 'ai' | 'schedule' | 'tasks' | 'journal' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'performance' | 'documents' | 'compliance'
+type TenantPage = 'ai' | 'schedule' | 'tasks' | 'journal' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'performance' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
 type PageId = TenantPage | PlatformSection | 'billing'
 type AppMode = 'tenant' | 'platform'
 type NavItem = { id: PageId; label: string; icon: typeof Sparkles; badge?: number }
@@ -44,7 +47,7 @@ type PlatformTicketSummary = { id: string; tenantId: string; tenant: string; tit
 type PlatformDirectoryState = { tenants: Tenant[]; supportTickets: PlatformTicketSummary[] }
 type SupportSessionRequest = { tenantId: string; ticketId: string; scope: string; duration: string; reason: string }
 
-const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'products', 'inventory', 'factory', 'people', 'performance', 'documents', 'compliance'])
+const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'products', 'inventory', 'factory', 'people', 'performance', 'documents', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
 const AUTH_SYNC_KEY = 'onfactory-auth-sync'
 const emptyWorkItems: WorkItem[] = []
 const emptyWorkRules: WorkRule[] = []
@@ -125,6 +128,7 @@ const pageTitles: Record<PageId, string> = {
   products: '제품관리', inventory: '재고 · LOT', factory: '공장관리',
   sales: '판매채널', people: '인사 · 조직', documents: '기업 자료실', compliance: '식품안전 · 인증',
   performance: '직원 성과',
+  'it-projects': '프로젝트', 'it-deliverables': '산출물', 'it-contracts': '계약 · 거래처',
   billing: '비용 · 포인트',
   platform: '플랫폼 운영 개요', tenants: '고객사 관리', support: 'CS 지원센터',
   integrations: '연동 상태', audit: '지원 세션 · 감사로그',
@@ -226,7 +230,7 @@ type DashboardDropTarget = {
   edge: 'before' | 'after'
 }
 
-function AIHome({ workItems, products, salesChannels, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, easyMode = false, onAdvanceTask, onCreateTask, onNavigate, onOpenAlerts, onToast }: {
+function AIHome({ workItems, products, salesChannels, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, easyMode = false, industryType, onAdvanceTask, onCreateTask, onNavigate, onOpenAlerts, onToast }: {
   workItems: WorkItem[]
   products: DashboardProduct[]
   salesChannels: DashboardSalesChannel[]
@@ -237,6 +241,7 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
   canAssignTasks: boolean
   workspaceScope?: string
   easyMode?: boolean
+  industryType?: string
   onAdvanceTask: (item: WorkItem) => void
   onCreateTask: (text?: string) => void
   onNavigate: (page: PageId) => void
@@ -343,7 +348,7 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
     if (!preference.visible || preference.id === 'summary') return null
     let content: ReactNode
     if (preference.id === 'ai') {
-      content = <AIChat companyName={companyName} canCreateTask={canAssignTasks} canViewCommercial={canAssignTasks} operatingDataAvailable={operatingDataAvailable} workspaceScope={workspaceScope} onCreateTask={(text) => onCreateTask(text)} context={aiContext} />
+      content = <AIChat companyName={companyName} canCreateTask={canAssignTasks} canViewCommercial={canAssignTasks} operatingDataAvailable={operatingDataAvailable} workspaceScope={workspaceScope} industryType={industryType} onCreateTask={(text) => onCreateTask(text)} context={aiContext} />
     } else if (preference.id === 'schedule') {
       content = <SharedCalendarPreview events={calendarEvents} onOpen={() => onNavigate('schedule')} />
     } else if (preference.id === 'links') {
@@ -1586,8 +1591,14 @@ export default function App() {
     { id: 'performance', label: '직원 성과', icon: BarChart3 },
     { id: 'documents', label: '기업 자료실', icon: FileText },
     { id: 'compliance', label: '식품안전 · 인증', icon: ShieldCheck },
+    { id: 'it-projects', label: '프로젝트', icon: Briefcase },
+    { id: 'it-deliverables', label: '산출물', icon: FileStack },
+    { id: 'it-contracts', label: '계약 · 거래처', icon: FileSignature },
   ]
-  const tenantNav = account?.role === 'tenant-member' ? tenantNavAll.filter((item) => tenantMemberPages.has(item.id)) : tenantNavAll
+  // 메뉴 = 공통 코어 + 업종 모듈(레지스트리). 식품제조 메뉴는 IT 테넌트에 보이지 않는다.
+  const industryRoutes = new Set<string>(routesForIndustry(account?.industryType))
+  const tenantNavByIndustry = tenantNavAll.filter((item) => industryRoutes.has(item.id))
+  const tenantNav = account?.role === 'tenant-member' ? tenantNavByIndustry.filter((item) => tenantMemberPages.has(item.id)) : tenantNavByIndustry
   const tenantNavSource = tenantNav.map(({ id, label }) => ({ id, label }))
   const [tenantNavPreferences, setTenantNavPreferences] = usePersonalNavigation(tenantNavSource, `${account?.tenantId ?? 'tenant'}:${account?.id ?? 'anonymous'}`)
   const personalizedTenantNav = tenantNavPreferences.flatMap((preference) => {
@@ -1639,6 +1650,11 @@ export default function App() {
   const navigate = (nextPage: PageId) => {
     if (mode === 'tenant' && account?.role === 'tenant-member' && !tenantMemberPages.has(nextPage)) {
       setToast('현재 직무 권한에서는 이 메뉴에 접근할 수 없습니다.')
+      setMobileNav(false)
+      return
+    }
+    if (mode === 'tenant' && nextPage !== 'billing' && !industryRoutes.has(nextPage) && !['platform', 'tenants', 'support', 'integrations', 'audit'].includes(nextPage)) {
+      setToast('이 회사의 업종 모듈에 없는 메뉴입니다.')
       setMobileNav(false)
       return
     }
@@ -1824,7 +1840,7 @@ export default function App() {
       return <PlatformConsole section={page as PlatformSection} focusId={platformFocusId} refreshToken={platformRefreshToken} onSectionChange={(section) => navigate(section)} onReturnTenant={requestTenantSupportAccess} onRequestSupport={setSupportTenant} onEnterTenant={(tenantId) => void enterTenant(tenantId)} onDataChanged={() => setPlatformRefreshToken((current) => current + 1)} onToast={setToast} />
     }
     if (account?.role === 'tenant-member' && !tenantMemberPages.has(page)) {
-      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyMode === 'easy'} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
+      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyMode === 'easy'} industryType={account?.industryType ?? 'food_manufacturing'} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
     switch (page) {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
@@ -1838,7 +1854,10 @@ export default function App() {
       case 'performance': return <PerformanceReports workspaceScope={workspaceScope ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} onToast={setToast} />
       case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} companyName={tenantName} onToast={setToast} />
-      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyMode === 'easy'} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
+      case 'it-projects':
+      case 'it-deliverables':
+      case 'it-contracts': return <ItServicesPage view={page as ItServicesView} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} onToast={setToast} />
+      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyMode === 'easy'} industryType={account?.industryType ?? 'food_manufacturing'} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
   }
 
@@ -1853,7 +1872,7 @@ export default function App() {
       {storeStatus?.readOnly && <div className="store-readonly-banner" role="alert"><AlertTriangle size={17} /><span><strong>읽기 전용 모드</strong> — 저장소가 읽기 전용(STORE_READ_ONLY)으로 기동되어 모든 변경이 저장되지 않습니다.{storeStatus.fallbackReason ? ` ${storeStatus.fallbackReason}` : ''}</span></div>}
       {isMobile && mobileNav && <button type="button" className="nav-scrim" aria-label="메뉴 닫기" onClick={() => setMobileNav(false)} />}
       <aside id="main-navigation" className={'sidebar ' + (mobileNav ? 'open' : '')} aria-label={mode === 'platform' ? '플랫폼 운영 메뉴' : `${tenantName} 업무 메뉴`} aria-hidden={isMobile && !mobileNav} inert={isMobile && !mobileNav ? true : undefined}>
-        <div className="brand"><OnFactoryMark /><div><strong>온팩토리</strong><span>{mode === 'platform' ? 'PLATFORM OPS' : 'FOOD ERP'}</span></div><button type="button" className="sidebar-close" aria-label="메뉴 닫기" onClick={() => setMobileNav(false)}><X size={21} /></button></div>
+        <div className="brand"><OnFactoryMark /><div><strong>온팩토리</strong><span>{mode === 'platform' ? 'PLATFORM OPS' : brandLabelForIndustry(account?.industryType)}</span></div><button type="button" className="sidebar-close" aria-label="메뉴 닫기" onClick={() => setMobileNav(false)}><X size={21} /></button></div>
         {mode === 'tenant' ? (
           <button type="button" className="company-switcher" aria-label={`현재 고객사 ${tenantName}`} onClick={() => setToast(`현재 고객사는 ${tenantName}입니다.`)}><span className="company-logo">{tenantName.slice(0, 1)}</span><span><small>현재 고객사</small><strong>{tenantName}</strong></span><ChevronDown size={17} /></button>
         ) : (

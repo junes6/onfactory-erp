@@ -58,14 +58,15 @@ const WORKSPACE_STORE_KEYS = new Set([
   'calendar-events', 'daily-journals', 'leave-requests', 'account-requests',
   'factory-locations', 'factory-layouts', 'leave-management', 'work-rules', 'product-catalog', 'inventory-movements', 'calendar-departments',
   'sales-shipments', 'compliance-records', 'document-storage-settings', 'performance-settings', 'performance-reports',
+  'it-projects', 'it-deliverables', 'it-contracts',
 ])
 const TENANT_MEMBER_READ_KEYS = new Set([
   'work-items', 'inventory-locations', 'messenger-conversations', 'calendar-events', 'daily-journals',
   'leave-requests', 'leave-management', 'factory-locations', 'factory-layouts', 'work-rules', 'product-catalog', 'inventory-movements', 'calendar-departments',
-  'compliance-records',
+  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts',
 ])
 const TENANT_MEMBER_WRITE_KEYS = new Set([
-  'work-items', 'messenger-conversations', 'calendar-events', 'daily-journals',
+  'work-items', 'messenger-conversations', 'calendar-events', 'daily-journals', 'it-projects', 'it-deliverables',
 ])
 const WORK_ITEM_BASE_FIELDS = [
   'id', 'title', 'description', 'owner', 'requestedBy', 'due', 'priority', 'status', 'category',
@@ -1321,11 +1322,22 @@ function ensurePlatformStore(store, { seedFixtures = true } = {}) {
   })
   for (const [key, fixtures] of seedFixtures ? [['tenants', PLATFORM_TENANT_FIXTURES], ['supportTickets', PLATFORM_TICKET_FIXTURES], ['integrations', PLATFORM_INTEGRATION_FIXTURES], ['auditEvents', PLATFORM_AUDIT_FIXTURES]] : []) {
     const ids = new Set(store.platform[key].map((item) => item?.id))
+    // 실운영 스토어에 같은 이름의 고객사가 이미 있으면(예: 운영자가 직접 만든 3D뮤즈) 데모 시드를 넣지 않는다.
+    const names = key === 'tenants' ? new Set(store.platform[key].map((item) => String(item?.name ?? '').trim().toLowerCase())) : null
     for (const fixture of fixtures) {
       if (ids.has(fixture.id)) continue
+      if (names && names.has(String(fixture.name ?? '').trim().toLowerCase())) continue
       store.platform[key].push(structuredClone(fixture))
       changed = true
     }
+  }
+  // 업종 구분 정규화: industryType이 없는 고객사는 같은 이름의 시드 업종을 따르고, 없으면 식품제조가 기본이다.
+  // 메모리에서만 채우고(변경 플래그 없음) 다음 쓰기 때 자연스럽게 저장된다 — 비동기 저장소(Postgres)는
+  // createApp 시점에 동기 커밋을 할 수 없기 때문이다.
+  const fixtureIndustryByName = new Map(PLATFORM_TENANT_FIXTURES.map((fixture) => [String(fixture.name).trim().toLowerCase(), fixture.industryType]))
+  for (const tenant of store.platform.tenants) {
+    if (!tenant || typeof tenant !== 'object' || ['food_manufacturing', 'it_services'].includes(tenant.industryType)) continue
+    tenant.industryType = fixtureIndustryByName.get(String(tenant.name ?? '').trim().toLowerCase()) ?? 'food_manufacturing'
   }
   return changed
 }
@@ -1513,7 +1525,12 @@ export function createApp(options = {}) {
     }
   }
   const sessions = options.sessions instanceof Map ? options.sessions : new Map()
+  // 데모 테넌트 시드가 "같은 이름의 실운영 고객사"에 밀려 들어가지 않은 경우, 그 테넌트의 데모 계정도 만들지 않는다.
+  const storeTenantIds = new Set(workspaceStore.platform.tenants.map((tenant) => tenant?.id))
+  const fixtureTenantIds = new Set(PLATFORM_TENANT_FIXTURES.map((fixture) => fixture.id))
+  const demoTenantSkipped = (tenantId) => options.seedPlatformFixtures !== false && fixtureTenantIds.has(tenantId) && !storeTenantIds.has(tenantId)
   const accounts = (options.seedDemoAccounts === false ? [] : DEMO_ACCOUNT_DEFINITIONS)
+    .filter((definition) => !definition.tenantId || !demoTenantSkipped(definition.tenantId))
     .map((definition) => ({ ...structuredClone(definition), ...seedCredential(definition.id) }))
   for (const persisted of Array.isArray(workspaceStore.accounts) ? workspaceStore.accounts : []) {
     if (!persisted?.id || !persisted?.email) continue
@@ -1627,8 +1644,9 @@ export function createApp(options = {}) {
   // x-workspace-identity(`${tenantId}:${operatorId}`) 검사가 그대로 동작하고,
   // 운영자 신원은 operatorMode 메타데이터로 보존되어 감사 기록에 쓰인다.
   // 일반 계정의 교차 테넌트 접근은 변함없이 차단된다 (tenantId는 세션 계정에서만 온다).
+  const tenantIndustryType = (tenantId) => workspaceStore.platform.tenants.find((item) => item?.id === tenantId)?.industryType ?? 'food_manufacturing'
   const effectiveAuth = (account, session) => {
-    const base = safeAccount(account)
+    const base = { ...safeAccount(account), industryType: account.tenantId ? tenantIndustryType(account.tenantId) : null }
     const enteredTenantId = session?.enteredTenantId
     if (account.role !== 'platform-operator' || !enteredTenantId) return base
     const tenant = workspaceStore.platform.tenants.find((item) => item?.id === enteredTenantId)
@@ -1638,6 +1656,7 @@ export function createApp(options = {}) {
       role: 'tenant-admin',
       tenantId: tenant.id,
       tenantName: tenant.name,
+      industryType: tenant.industryType ?? 'food_manufacturing',
       team: '온팩토리 운영',
       jobRole: '플랫폼 운영자',
       operatorMode: {
@@ -2112,6 +2131,28 @@ export function createApp(options = {}) {
     })
     try { await commitWorkspaceStore() } catch { /* 감사 기록은 다음 쓰기와 함께 저장된다 */ }
     response.json({ account: effectiveAuth(request.sessionAccount, session) })
+  })
+
+  app.patch('/api/platform/tenants/:id', requireAuth, requirePlatformOperator, async (request, response) => {
+    const tenant = platformTenant(String(request.params.id))
+    if (!tenant) {
+      response.status(404).json({ error: { code: 'PLATFORM_TENANT_NOT_FOUND', message: '고객사를 찾을 수 없습니다.' } })
+      return
+    }
+    const industryType = String(request.body?.industryType ?? tenant.industryType ?? 'food_manufacturing')
+    if (!TENANT_INDUSTRY_TYPES.has(industryType)) {
+      response.status(400).json({ error: { code: 'INVALID_INDUSTRY_TYPE', message: '업종 구분(industryType)을 확인해 주세요.' } })
+      return
+    }
+    const previous = tenant.industryType
+    tenant.industryType = industryType
+    appendPlatformAudit(workspaceStore.platform, { tenantId: tenant.id, event: '고객사 업종 변경', scope: `${previous ?? '미지정'} → ${industryType}`, actor: request.auth.name, reference: tenant.id })
+    try { await commitWorkspaceStore() } catch {
+      tenant.industryType = previous
+      response.status(500).json({ error: { code: 'PLATFORM_TENANT_WRITE_FAILED', message: '고객사 업종을 저장하지 못했습니다.' } })
+      return
+    }
+    response.json({ tenant: publicPlatformTenant(tenant) })
   })
 
   app.post('/api/platform/exit', requireSession, async (request, response) => {
@@ -2739,7 +2780,7 @@ export function createApp(options = {}) {
     const secure = request.secure || request.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''
     const persistence = request.body?.remember === false ? '' : `; Max-Age=${SESSION_MAX_AGE_SECONDS}`
     response.setHeader('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/${persistence}${secure}`)
-    response.json({ account: safeAccount(account) })
+    response.json({ account: effectiveAuth(account, null) })
   })
 
   app.get('/api/auth/session', requireSession, (request, response) => {
@@ -4404,7 +4445,7 @@ export function createApp(options = {}) {
       return
     }
     let nextData = request.body.data
-    if (['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations'].includes(key) && !await canReferenceDocuments(nextData, request.auth)) {
+    if (['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations', 'it-deliverables', 'it-contracts'].includes(key) && !await canReferenceDocuments(nextData, request.auth)) {
       response.status(400).json({ error: { code: 'INVALID_DOCUMENT_REFERENCE', message: '첨부파일을 찾을 수 없거나 현재 계정에 열람 권한이 없습니다. 파일을 다시 첨부해 주세요.' } })
       return
     }
