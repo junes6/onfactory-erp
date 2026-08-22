@@ -837,7 +837,9 @@ function ProductEditorDialog({
     const form = new FormData(event.currentTarget)
     const text = (name: string) => String(form.get(name) ?? '').trim()
     const number = (name: string) => Number(form.get(name))
-    const code = text('code').toUpperCase()
+    const name = text('name')
+    const rawCode = text('code').toUpperCase()
+    const code = rawCode || `PRD-${Date.now().toString().slice(-6)}`
     const stock = number('stock')
     const available = number('available')
     const safetyStock = number('safetyStock')
@@ -845,24 +847,16 @@ function ProductEditorDialog({
     const barcode = text('barcode')
     const nextErrors: Record<string, string> = {}
 
-    if (!code) nextErrors.code = '품목코드를 입력해 주세요.'
-    else if (existingProducts.some((item) => item.id !== product?.id && item.code.toUpperCase() === code)) nextErrors.code = '이미 사용 중인 품목코드입니다.'
-    if (!text('name')) nextErrors.name = '제품명을 입력해 주세요.'
-    if (!text('shortName')) nextErrors.shortName = '목록에 표시할 짧은 이름을 입력해 주세요.'
-    if (!text('category')) nextErrors.category = '제품 분류를 입력해 주세요.'
-    if (!text('specification')) nextErrors.specification = '규격을 입력해 주세요.'
+    // 등록 장벽 최소화: 필수는 제품명 하나. 나머지는 형식이 틀린 경우에만 막고,
+    // 표시 의무값 누락은 저장 후 ‘표시사항 검증’ 단계에서 잡는다.
+    if (!name) nextErrors.name = '제품명을 입력해 주세요.'
+    if (rawCode && existingProducts.some((item) => item.id !== product?.id && item.code.toUpperCase() === rawCode)) nextErrors.code = '이미 사용 중인 품목코드입니다.'
     if (!Number.isFinite(price) || price < 0) nextErrors.price = '판매가는 0원 이상이어야 합니다.'
     if (!Number.isInteger(stock) || stock < 0) nextErrors.stock = '실재고는 0 이상의 정수로 입력해 주세요.'
     if (!Number.isInteger(available) || available < 0) nextErrors.available = '가용재고는 0 이상의 정수로 입력해 주세요.'
     else if (available > stock) nextErrors.available = '가용재고는 실재고보다 많을 수 없습니다.'
     if (!Number.isInteger(safetyStock) || safetyStock < 0) nextErrors.safetyStock = '안전재고는 0 이상의 정수로 입력해 주세요.'
-    if (!text('storage')) nextErrors.storage = '보관방법을 입력해 주세요.'
-    if (!text('manufacturer')) nextErrors.manufacturer = '제조원을 입력해 주세요.'
-    if (!text('foodType')) nextErrors.foodType = '식품유형을 입력해 주세요.'
-    if (!/^\d{13}$/.test(barcode)) nextErrors.barcode = '바코드는 숫자 13자리로 입력해 주세요.'
-    if (!text('shelfLife')) nextErrors.shelfLife = '소비기한 표시 기준을 입력해 주세요.'
-    if (!text('origin')) nextErrors.origin = '원산지 표시를 입력해 주세요.'
-    if (!text('ingredients')) nextErrors.ingredients = '원재료명과 함량을 입력해 주세요.'
+    if (barcode && !/^\d{13}$/.test(barcode)) nextErrors.barcode = '바코드는 숫자 13자리로 입력해 주세요.'
 
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
@@ -877,9 +871,9 @@ function ProductEditorDialog({
       }),
       id,
       code,
-      name: text('name'),
-      shortName: text('shortName'),
-      category: text('category'),
+      name,
+      shortName: text('shortName') || name.slice(0, 20),
+      category: text('category') || '미분류',
       specification: text('specification'),
       price,
       stock,
@@ -918,7 +912,7 @@ function ProductEditorDialog({
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}>
       <section ref={dialogRef} className="modal-card product-editor-modal" role="dialog" aria-modal="true" aria-labelledby="product-editor-title">
         <header>
-          <div><span className="page-kicker">PRODUCT MASTER</span><h2 id="product-editor-title">{product ? '제품 정보 편집' : '신규 제품 등록'}</h2><p>기준정보와 식품 표시 필수값을 입력합니다. 저장 후 표시 검증을 실행해 주세요.</p></div>
+          <div><span className="page-kicker">PRODUCT MASTER</span><h2 id="product-editor-title">{product ? '제품 정보 편집' : '신규 제품 등록'}</h2><p>제품명만 입력하면 바로 등록됩니다. 나머지 항목은 나중에 채우고 표시 검증으로 확인하세요.</p></div>
           <button className="icon-button" type="button" aria-label="닫기" disabled={saving} onClick={onClose}><X size={21} /></button>
         </header>
         <form noValidate onSubmit={submit}>
@@ -951,26 +945,26 @@ function ProductEditorDialog({
             <section className="product-editor-section" aria-labelledby="product-basic-fields">
               <div><h3 id="product-basic-fields">기본정보</h3><p>제품을 식별하고 판매·재고에 공통으로 쓰는 값입니다.</p></div>
               <div className="product-editor-grid">
-                <label className="form-field"><span>품목코드 *</span><input name="code" defaultValue={product?.code ?? ''} aria-invalid={Boolean(errors.code)} placeholder="FG-NEW-001" />{error('code')}</label>
-                <label className="form-field"><span>제품 분류 *</span><input name="category" defaultValue={product?.category ?? ''} aria-invalid={Boolean(errors.category)} placeholder="예: 조미식품" />{error('category')}</label>
-                <label className="form-field full"><span>제품명 *</span><input name="name" defaultValue={product?.name ?? ''} aria-invalid={Boolean(errors.name)} placeholder="판매·표시에 사용할 정식 제품명" />{error('name')}</label>
-                <label className="form-field"><span>목록 표시명 *</span><input name="shortName" defaultValue={product?.shortName ?? ''} aria-invalid={Boolean(errors.shortName)} placeholder="짧은 제품명" />{error('shortName')}</label>
-                <label className="form-field"><span>규격 *</span><input name="specification" defaultValue={product?.specification ?? ''} aria-invalid={Boolean(errors.specification)} placeholder="예: 300g × 12병 / BOX" />{error('specification')}</label>
-                <label className="form-field"><span>판매가 *</span><input name="price" type="number" min="0" defaultValue={product?.price ?? 0} aria-invalid={Boolean(errors.price)} />{error('price')}</label>
+                <label className="form-field full"><span>제품명 <em className="field-required">필수</em></span><input name="name" autoFocus data-autofocus defaultValue={product?.name ?? ''} aria-invalid={Boolean(errors.name)} placeholder="판매·표시에 사용할 정식 제품명" />{error('name')}</label>
+                <label className="form-field"><span>품목코드 <small>비우면 자동 생성</small></span><input name="code" defaultValue={product?.code ?? ''} aria-invalid={Boolean(errors.code)} placeholder="예: FG-NEW-001" />{error('code')}</label>
+                <label className="form-field"><span>제품 분류</span><input name="category" defaultValue={product?.category ?? ''} placeholder="예: 조미식품" /></label>
+                <label className="form-field"><span>목록 표시명 <small>비우면 제품명 사용</small></span><input name="shortName" defaultValue={product?.shortName ?? ''} placeholder="짧은 제품명" /></label>
+                <label className="form-field"><span>규격</span><input name="specification" defaultValue={product?.specification ?? ''} placeholder="예: 300g × 12병 / BOX" /></label>
+                <label className="form-field"><span>판매가</span><input name="price" type="number" min="0" defaultValue={product?.price ?? 0} aria-invalid={Boolean(errors.price)} />{error('price')}</label>
                 <label className="form-field"><span>운영상태</span><select name="status" defaultValue={product?.status ?? '정상'}><option>정상</option><option>주의</option><option>품절</option></select></label>
-                <label className="form-field full"><span>보관방법 *</span><input name="storage" defaultValue={product?.storage ?? ''} aria-invalid={Boolean(errors.storage)} placeholder="예: 냉장 0~10℃" />{error('storage')}</label>
+                <label className="form-field full"><span>보관방법</span><input name="storage" defaultValue={product?.storage ?? ''} placeholder="예: 냉장 0~10℃" /></label>
               </div>
             </section>
             <section className="product-editor-section" aria-labelledby="product-label-fields">
-              <div><h3 id="product-label-fields">표시 · 제조정보</h3><p>필수 입력값과 품질 담당자의 확인 메모를 함께 관리합니다.</p></div>
+              <div><h3 id="product-label-fields">표시 · 제조정보 <small>선택</small></h3><p>지금 비워 두어도 등록되며, 판매 전 표시사항 검증에서 누락 항목을 알려드립니다.</p></div>
               <div className="product-editor-grid">
-                <label className="form-field"><span>제조원 *</span><input name="manufacturer" defaultValue={fact.manufacturer} aria-invalid={Boolean(errors.manufacturer)} />{error('manufacturer')}</label>
+                <label className="form-field"><span>제조원</span><input name="manufacturer" defaultValue={fact.manufacturer} /></label>
                 <label className="form-field"><span>제조형태</span><select name="manufacturingType" defaultValue={fact.manufacturingType}><option>자체생산</option><option>OEM</option><option>ODM</option></select></label>
-                <label className="form-field"><span>식품유형 *</span><input name="foodType" defaultValue={fact.foodType} aria-invalid={Boolean(errors.foodType)} />{error('foodType')}</label>
-                <label className="form-field"><span>바코드 13자리 *</span><input name="barcode" inputMode="numeric" maxLength={13} defaultValue={fact.barcode} aria-invalid={Boolean(errors.barcode)} />{error('barcode')}</label>
-                <label className="form-field full"><span>소비기한 표시 *</span><input name="shelfLife" defaultValue={fact.shelfLife} aria-invalid={Boolean(errors.shelfLife)} placeholder="예: 제조일로부터 12개월" />{error('shelfLife')}</label>
-                <label className="form-field full"><span>원산지 표시 *</span><textarea name="origin" rows={2} defaultValue={fact.origin} aria-invalid={Boolean(errors.origin)} />{error('origin')}</label>
-                <label className="form-field full"><span>원재료명·함량 *</span><textarea name="ingredients" rows={3} defaultValue={fact.ingredients} aria-invalid={Boolean(errors.ingredients)} />{error('ingredients')}</label>
+                <label className="form-field"><span>식품유형</span><input name="foodType" defaultValue={fact.foodType} /></label>
+                <label className="form-field"><span>바코드 13자리</span><input name="barcode" inputMode="numeric" maxLength={13} defaultValue={fact.barcode} aria-invalid={Boolean(errors.barcode)} />{error('barcode')}</label>
+                <label className="form-field full"><span>소비기한 표시</span><input name="shelfLife" defaultValue={fact.shelfLife} placeholder="예: 제조일로부터 12개월" /></label>
+                <label className="form-field full"><span>원산지 표시</span><textarea name="origin" rows={2} defaultValue={fact.origin} /></label>
+                <label className="form-field full"><span>원재료명·함량</span><textarea name="ingredients" rows={3} defaultValue={fact.ingredients} /></label>
                 <label className="form-field"><span>표시 검토 담당</span><input name="labelOwner" defaultValue={fact.labelOwner} /></label>
                 <label className="form-field"><span>표시 검토 메모</span><input name="labelIssue" defaultValue={fact.labelIssue} placeholder="이상 없으면 ‘수정 항목 없음’ 입력" /></label>
               </div>

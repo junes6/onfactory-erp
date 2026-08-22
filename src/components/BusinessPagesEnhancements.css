@@ -1,4 +1,4 @@
-.sea-product-card[role='button'] {
+﻿.sea-product-card[role='button'] {
   cursor: pointer;
   outline: none;
 }
@@ -221,7 +221,7 @@
   display: grid;
   place-items: center;
   border-radius: var(--radius-8);
-  color: var(--color-surface);
+  color: var(--color-white);
   font-size: var(--font-11);
   font-style: normal;
   font-weight: var(--weight-medium);
@@ -459,7 +459,7 @@
 
 .shipment-delete-button.confirming {
   width: 66px;
-  color: var(--color-surface);
+  color: var(--color-white);
   border-color: var(--color-danger);
   background: var(--color-danger);
 }

@@ -1,15 +1,15 @@
-.library-page { color: var(--ink); }
+﻿.library-page { color: var(--ink); }
 .library-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-16); margin-bottom: var(--space-16); }
 .library-page-head > div:first-child > span { color: var(--forest); font-size: var(--font-13); font-weight: var(--weight-medium); letter-spacing: .1em; }
 .library-page-head h1 { margin: var(--space-4) var(--space-0) var(--space-4); font-size: var(--font-22); letter-spacing: -.04em; }
 .library-page-head p { margin: var(--space-0); color: var(--muted); font-size: var(--font-15); }
 .library-page-head > div:last-child { display: flex; gap: var(--space-8); }
 .library-ai-search { display: grid; grid-template-columns: auto minmax(0,1fr); gap: var(--space-16); margin-bottom: var(--space-16); padding: var(--card-inset); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
-.library-ai-search > span { width: 43px; height: 43px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-surface); background: var(--forest); }
+.library-ai-search > span { width: 43px; height: 43px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-white); background: var(--forest); }
 .library-ai-search form label { display: block; margin-bottom: var(--space-4); color: var(--forest); font-size: var(--font-15); font-weight: var(--weight-medium); }
 .library-ai-search form > div { display: flex; gap: var(--space-8); }
 .library-ai-search input { min-width: 0; min-height: 44px; flex: 1; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--color-blue-soft); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); }
-.library-ai-search form button { min-height: 44px; padding: var(--space-0) var(--space-12); border: none; border-radius: var(--radius-8); color: var(--color-surface); background: var(--forest); font-weight: var(--weight-medium); cursor: pointer; }
+.library-ai-search form button { min-height: 44px; padding: var(--space-0) var(--space-12); border: none; border-radius: var(--radius-8); color: var(--color-white); background: var(--forest); font-weight: var(--weight-medium); cursor: pointer; }
 .library-ai-answer { position: relative; grid-column: 2; padding: var(--space-12) var(--space-32) var(--space-0) var(--space-0); border-top: var(--hairline) solid var(--line); background: transparent; }
 .library-ai-answer p { margin: var(--space-4) var(--space-0) var(--space-0); white-space: pre-wrap; line-height: 1.55; }
 .library-ai-answer > button { position: absolute; top: 8px; right: 8px; width: 30px; height: 30px; display: grid; place-items: center; border: none; border-radius: var(--radius-8); background: transparent; cursor: pointer; }
@@ -23,7 +23,7 @@
 .library-toolbar input { min-width: 0; flex: 1; border: none; outline: none; color: var(--ink); background: transparent; }
 .library-toolbar > div { display: flex; gap: var(--space-4); overflow-x: auto; }
 .library-toolbar > div button { min-height: 37px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); white-space: nowrap; cursor: pointer; }
-.library-toolbar > div button.active { border-color: var(--forest); color: var(--color-surface); background: var(--forest); }
+.library-toolbar > div button.active { border-color: var(--forest); color: var(--color-white); background: var(--forest); }
 .library-list { display: grid; gap: var(--space-16); }
 .library-list > article { display: grid; grid-template-columns: auto minmax(240px,1fr) minmax(270px,auto) auto auto; align-items: center; gap: var(--space-12); padding: var(--card-inset); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); box-shadow: var(--shadow-none); }
 .library-file-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-blue); background: var(--color-blue-soft); }

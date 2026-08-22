@@ -1,4 +1,4 @@
-.collab-page {
+﻿.collab-page {
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -65,7 +65,7 @@
 }
 
 .collab-button.full { width: 100%; }
-.collab-button.primary { border-color: var(--forest-dark); color: var(--color-surface); background: var(--forest-dark); }
+.collab-button.primary { border-color: var(--forest-dark); color: var(--color-white); background: var(--forest-dark); }
 .collab-button.primary:hover { background: var(--forest); }
 .collab-button.secondary:hover { border-color: var(--color-blue-soft); background: var(--color-blue-soft); }
 .collab-button.danger { border-color: var(--color-danger-soft); color: var(--color-danger); background: var(--color-danger-soft); }
@@ -434,7 +434,7 @@
   place-items: center;
   padding: var(--space-0) var(--space-4);
   border-radius: var(--radius-8);
-  color: var(--color-surface);
+  color: var(--color-white);
   background: var(--color-blue);
   font-size: var(--font-15);
   font-style: normal;
@@ -552,7 +552,7 @@
 .messenger-message.mine .messenger-bubble-row p {
   border-color: var(--forest);
   border-radius: var(--radius-8);
-  color: var(--color-surface);
+  color: var(--color-white);
   background: var(--forest);
 }
 
@@ -618,7 +618,7 @@
   cursor: pointer;
 }
 
-.messenger-composer > button.send { border-color: var(--forest-dark); color: var(--color-surface); background: var(--forest-dark); }
+.messenger-composer > button.send { border-color: var(--forest-dark); color: var(--color-white); background: var(--forest-dark); }
 .messenger-composer > label { min-width: 0; flex: 1; }
 .messenger-composer textarea {
   width: 100%;
@@ -749,7 +749,7 @@
 }
 
 .calendar-day-number span { width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-8); }
-.calendar-day.today .calendar-day-number span { color: var(--color-surface); background: var(--forest); }
+.calendar-day.today .calendar-day-number span { color: var(--color-white); background: var(--forest); }
 .calendar-day.outside .calendar-day-number { color: var(--color-gray-400); }
 .calendar-day-number em { color: var(--forest); font-size: var(--font-15); font-style: normal; }
 .calendar-day-events { display: grid; gap: var(--space-4); }
@@ -947,7 +947,7 @@
   cursor: pointer;
 }
 
-.journal-filter button.active { border-color: var(--forest); color: var(--color-surface); background: var(--forest); }
+.journal-filter button.active { border-color: var(--forest); color: var(--color-white); background: var(--forest); }
 .journal-list { max-height: 760px; overflow-y: auto; padding: var(--space-0) var(--card-inset) var(--card-inset); }
 
 .journal-date-group + .journal-date-group { margin-top: var(--space-16); }
@@ -1504,3 +1504,189 @@
   .journal-editor-body { padding-inline: var(--space-16); }
   .journal-editor-footer { padding-inline: var(--space-16); }
 }
+
+/* =====================================================================
+   v4 개편: 달력 공휴일·주말 표기
+   ===================================================================== */
+.calendar-weekdays span:first-child { color: var(--color-danger); }
+.calendar-weekdays span:last-child { color: var(--color-primary); }
+.calendar-weekdays span.is-sun { color: var(--color-danger); }
+.calendar-weekdays span.is-sat { color: var(--color-primary); }
+.calendar-day { position: relative; }
+.calendar-day.is-holiday-day { background: color-mix(in srgb, var(--color-danger-soft), var(--color-surface) 55%); }
+.calendar-day.is-saturday { background: color-mix(in srgb, var(--color-primary-soft), var(--color-surface) 62%); }
+.calendar-day.is-holiday-day .calendar-day-number { color: var(--color-danger); }
+.calendar-day.is-saturday .calendar-day-number { color: var(--color-primary); }
+.calendar-day.outside.is-holiday-day .calendar-day-number,
+.calendar-day.outside.is-saturday .calendar-day-number { color: var(--color-gray-400); }
+.calendar-day.selected { background: var(--color-blue-soft); }
+.calendar-day.today.is-holiday-day .calendar-day-number span { color: var(--color-white); background: var(--color-danger); }
+.calendar-holiday-name {
+  overflow: hidden;
+  display: block;
+  margin: var(--space-0) var(--space-4) var(--space-4);
+  padding: var(--space-0) var(--space-4);
+  border-radius: var(--radius-8);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  font-size: var(--font-11);
+  font-weight: var(--weight-medium);
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.calendar-day.outside .calendar-holiday-name { opacity: .55; }
+.schedule-day-holiday { display: inline-flex; margin-right: var(--space-8); padding: var(--space-0) var(--space-8); border-radius: var(--radius-8); color: var(--color-danger); background: var(--color-danger-soft); font-size: var(--font-13); font-style: normal; font-weight: var(--weight-medium); line-height: 22px; }
+
+/* 일정 색상: 범위별 컬러를 다변화 */
+.calendar-event.company { color: var(--color-primary); background: var(--color-primary-soft); }
+.calendar-event.department { color: var(--color-teal); background: var(--color-teal-soft); }
+.calendar-event.personal { color: var(--color-violet); background: var(--color-violet-soft); }
+
+/* =====================================================================
+   v4 개편: 일일업무일지 주간 보드 + 지난 일지 검색
+   ===================================================================== */
+.journal-browse-panel { overflow: hidden; padding: var(--space-0); }
+.journal-browse-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-12);
+  padding: var(--space-12) var(--space-16);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.journal-browse-tabs { display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-4); border-radius: var(--radius-8); background: var(--canvas); }
+.journal-browse-tabs button { min-height: 40px; display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-0) var(--space-12); border: none; border-radius: var(--radius-8); color: var(--muted); background: transparent; font-size: var(--font-15); font-weight: var(--weight-medium); cursor: pointer; }
+.journal-browse-tabs button[aria-selected='true'] { color: var(--color-primary); background: var(--surface); }
+.journal-week-nav { display: inline-flex; align-items: center; gap: var(--space-8); }
+.journal-week-nav > strong { min-width: 110px; font-size: var(--font-15); text-align: center; }
+.journal-week-nav > button { width: 38px; height: 38px; display: grid; place-items: center; border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); cursor: pointer; }
+.journal-week-nav > button:hover { color: var(--color-primary); border-color: var(--color-primary); }
+.journal-week-today { width: auto; min-height: 38px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--color-primary); border-radius: var(--radius-8); color: var(--color-primary); background: var(--color-primary-soft); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
+.journal-search-controls { display: flex; align-items: flex-end; flex-wrap: wrap; gap: var(--space-8); }
+.journal-search-controls .collab-search { min-width: 220px; }
+.journal-range-field span { display: block; margin-bottom: var(--space-4); color: var(--muted); font-size: var(--font-11); font-weight: var(--weight-medium); }
+.journal-range-field input, .journal-range-field select { min-height: 40px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); font-size: var(--font-13); }
+.journal-browse-toolbar .journal-filter { margin-left: auto; }
+
+.journal-week-board { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); align-items: stretch; }
+.journal-week-day { min-width: 0; min-height: 260px; display: flex; flex-direction: column; border-right: var(--hairline) solid var(--line); }
+.journal-week-day:last-child { border-right: none; }
+.journal-week-day > header { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); padding: var(--space-8); border-bottom: var(--hairline) solid var(--line); background: color-mix(in srgb, var(--canvas), var(--surface) 40%); }
+.journal-week-dayname { color: var(--muted); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.journal-week-day > header > strong { font-size: var(--font-15); }
+.journal-week-day > header > em { padding: var(--space-0) var(--space-8); border-radius: var(--radius-8); color: var(--color-white); background: var(--color-primary); font-size: var(--font-11); font-style: normal; font-weight: var(--weight-medium); line-height: 20px; }
+.journal-week-holiday { overflow: hidden; flex-basis: 100%; color: var(--color-danger); font-size: var(--font-11); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.journal-week-day.is-today { background: color-mix(in srgb, var(--color-primary-soft), var(--color-surface) 55%); }
+.journal-week-day.is-today > header { background: var(--color-primary-soft); }
+.journal-week-day.is-holiday-day > header .journal-week-dayname,
+.journal-week-day.is-holiday-day > header > strong { color: var(--color-danger); }
+.journal-week-day.is-saturday > header .journal-week-dayname,
+.journal-week-day.is-saturday > header > strong { color: var(--color-primary); }
+.journal-week-day.is-holiday-day { background: color-mix(in srgb, var(--color-danger-soft), var(--color-surface) 72%); }
+.journal-week-day.is-saturday { background: color-mix(in srgb, var(--color-primary-soft), var(--color-surface) 76%); }
+.journal-week-blocks { display: flex; flex: 1; flex-direction: column; gap: var(--space-8); padding: var(--space-8); }
+.journal-week-block { position: relative; min-width: 0; display: flex; flex-direction: column; gap: var(--space-4); overflow: hidden; padding: var(--space-8); padding-left: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); text-align: left; cursor: pointer; transition: border-color .15s ease, transform .12s ease; }
+.journal-week-block::before { position: absolute; top: 0; bottom: 0; left: 0; width: 3px; background: var(--color-gray-400); content: ''; }
+.journal-week-block:hover { border-color: var(--color-primary); transform: translateY(-1px); }
+.journal-week-block.tone-green::before { background: var(--color-success); }
+.journal-week-block.tone-blue::before { background: var(--color-primary); }
+.journal-week-block.tone-amber::before { background: var(--color-warning); }
+.journal-week-block.tone-red::before { background: var(--color-danger); }
+.journal-week-block-head { display: flex; align-items: center; gap: var(--space-4); }
+.journal-week-block-head i { width: 22px; height: 22px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-blue-deep); background: var(--color-blue-soft); font-size: var(--font-11); font-style: normal; font-weight: var(--weight-medium); }
+.journal-week-block-head strong { overflow: hidden; flex: 1; font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
+.journal-block-status { flex: 0 0 auto; padding: var(--space-0) var(--space-4); border-radius: var(--radius-8); font-size: var(--font-11); font-style: normal; font-weight: var(--weight-medium); line-height: 18px; }
+.journal-block-status.green { color: var(--color-success); background: var(--color-success-soft); }
+.journal-block-status.blue { color: var(--color-primary); background: var(--color-primary-soft); }
+.journal-block-status.amber { color: var(--color-warning); background: var(--color-warning-soft); }
+.journal-block-status.red { color: var(--color-danger); background: var(--color-danger-soft); }
+.journal-week-block-summary { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--ink); font-size: var(--font-13); line-height: 1.45; }
+.journal-week-block time { color: var(--subtle); font-size: var(--font-11); }
+.journal-week-empty { display: grid; flex: 1; place-items: center; padding: var(--space-8); color: var(--subtle); font-size: var(--font-13); }
+.journal-browse-panel .journal-list { max-height: none; padding: var(--space-12); }
+
+html[data-theme='dark'] .journal-week-block,
+html[data-theme='dark'] :is(.journal-week-nav > button,.journal-range-field input,.journal-range-field select) { color: var(--ink); background: var(--surface); }
+
+@media (max-width: 1180px) {
+  .journal-week-board { grid-template-columns: repeat(4,minmax(0,1fr)); }
+  .journal-week-day:nth-child(4n) { border-right: none; }
+  .journal-week-day { border-bottom: var(--hairline) solid var(--line); }
+}
+@media (max-width: 760px) {
+  .journal-week-board { grid-template-columns: 1fr; }
+  .journal-week-day { min-height: 0; border-right: none; }
+  .journal-week-blocks:empty { display: none; }
+  .journal-browse-toolbar .journal-filter { margin-left: var(--space-0); }
+  .journal-browse-tabs { width: 100%; }
+  .journal-browse-tabs button { min-height: 44px; flex: 1; justify-content: center; }
+}
+
+/* =====================================================================
+   v4 개편: 메신저 시안성 — 목록/대화/입력 3구역을 명확히 분리
+   ===================================================================== */
+.messenger-sidebar { border-right: var(--dashboard-stroke) solid var(--color-card-line); background: var(--surface); }
+.messenger-sidebar-tools { border-bottom: var(--hairline) solid var(--line); }
+.messenger-list-tabs { background: var(--canvas); }
+.messenger-list-tabs button[aria-selected="true"] { color: var(--color-primary); background: var(--surface); }
+.messenger-list-label { color: var(--muted); font-size: var(--font-13); }
+.messenger-conversation-row, .messenger-person-row { min-height: 66px; border-bottom: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.messenger-conversation-row:hover, .messenger-person-row:hover { background: var(--canvas); }
+.messenger-conversation-row.active { position: relative; background: var(--color-primary-soft); }
+.messenger-conversation-row.active::before { position: absolute; top: 10px; bottom: 10px; left: 0; width: 3px; border-radius: var(--radius-8); background: var(--color-primary); content: ''; }
+.messenger-conversation-row.active strong { color: var(--color-primary); }
+.messenger-conversation-row > em { background: var(--color-danger); font-size: var(--font-13); }
+.messenger-conversation-copy small { font-size: var(--font-13); }
+.messenger-conversation-copy time { font-size: var(--font-13); }
+.messenger-team-icon { color: var(--color-violet); background: var(--color-violet-soft); }
+
+.messenger-chat { background: var(--canvas); }
+.messenger-chat-header { border-bottom: var(--dashboard-stroke) solid var(--color-card-line); background: var(--surface); }
+.messenger-messages { background: var(--canvas); }
+.messenger-date-divider { color: var(--muted); font-size: var(--font-13); }
+.messenger-date-divider span { padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); line-height: 24px; }
+.messenger-date-divider::before, .messenger-date-divider::after { background: var(--line); }
+.messenger-bubble-row p { border-color: var(--line); background: var(--surface); }
+.messenger-message.mine .messenger-bubble-row p { border-color: var(--color-primary); background: var(--color-primary); }
+.messenger-message-meta small { color: var(--color-primary); }
+.messenger-bubble-row time { font-size: var(--font-13); }
+.messenger-composer { border-top: var(--dashboard-stroke) solid var(--color-card-line); }
+.messenger-composer > button { background: var(--surface); }
+.messenger-composer > button:hover:not(:disabled) { color: var(--color-primary); border-color: var(--color-primary); }
+.messenger-composer > button.send { border-color: var(--color-primary); background: var(--color-primary); }
+.messenger-composer > button.send:hover:not(:disabled) { color: var(--color-white); background: var(--color-blue-deep); }
+.messenger-composer textarea { border-color: var(--line); }
+.messenger-composer textarea:focus { border-color: var(--color-primary); outline: none; }
+
+html[data-theme='dark'] :is(.messenger-sidebar,.messenger-chat-header,.messenger-composer,.messenger-date-divider span,.messenger-bubble-row p,.messenger-composer > button) { background: var(--surface); }
+html[data-theme='dark'] .messenger-message.mine .messenger-bubble-row p { background: var(--color-primary); }
+html[data-theme='dark'] :is(.messenger-chat,.messenger-messages) { background: var(--canvas); }
+
+/* =====================================================================
+   v4 개편: 업무일지 블록 에디터
+   ===================================================================== */
+.journal-block-editor { display: flex; flex-direction: column; gap: var(--space-8); }
+.journal-block-item { display: flex; align-items: center; gap: var(--space-8); }
+.journal-block-index { width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-primary); background: var(--color-primary-soft); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.journal-block-item input {
+  min-width: 0;
+  min-height: 46px;
+  flex: 1;
+  padding: var(--space-0) var(--space-12);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  color: var(--ink);
+  background: var(--surface);
+  font-size: var(--font-15);
+}
+.journal-block-item input:focus { border-color: var(--color-primary); outline: none; background: var(--color-primary-soft); }
+.journal-block-item input:disabled { color: var(--muted); background: var(--canvas); }
+.journal-block-remove { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border: none; border-radius: var(--radius-8); color: var(--subtle); background: transparent; cursor: pointer; }
+.journal-block-remove:hover:not(:disabled) { color: var(--color-danger); background: var(--color-danger-soft); }
+.journal-block-remove:disabled { opacity: .3; cursor: default; }
+.journal-block-add { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-4); border: var(--hairline) dashed var(--line-strong); border-radius: var(--radius-8); color: var(--color-primary); background: transparent; font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
+.journal-block-add:hover:not(:disabled) { border-color: var(--color-primary); border-style: solid; background: var(--color-primary-soft); }
+.journal-entry-readonly p > span { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: var(--space-8); border-radius: var(--radius-8); color: var(--color-primary); background: var(--color-primary-soft); font-size: var(--font-11); font-weight: var(--weight-medium); }
+
+html[data-theme='dark'] .journal-block-item input { background: var(--surface); }

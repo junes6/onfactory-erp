@@ -1,4 +1,4 @@
-.pc-root {
+﻿.pc-root {
   --pc-bg: var(--canvas, var(--color-blue-soft));
   --pc-panel: var(--surface, var(--color-surface));
   --pc-panel-soft: var(--color-blue-soft);
@@ -31,7 +31,7 @@
 .pc-button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-8); padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--pc-line); border-radius: var(--radius-8); color: var(--pc-text); background: var(--pc-panel); font-size: var(--font-15); font-weight: var(--weight-medium); cursor: pointer; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
 .pc-button:hover { border-color: var(--color-gray-200); background: var(--pc-panel-soft); }
 .pc-button:active { transform: translateY(1px); }
-.pc-button.primary { border-color: var(--pc-accent); color: var(--color-surface); background: var(--pc-accent); }
+.pc-button.primary { border-color: var(--pc-accent); color: var(--color-white); background: var(--pc-accent); }
 .pc-button.primary:hover { background: var(--color-blue-deep); }
 .pc-button.ghost { min-height: 34px; padding: var(--space-0) var(--space-8); border-color: transparent; color: var(--pc-accent); background: transparent; }
 .pc-button.small { min-height: 34px; padding: var(--space-0) var(--space-8); }
@@ -71,7 +71,7 @@
 .pc-table tbody tr { transition: background .14s ease; }
 .pc-table tbody tr:hover, .pc-table tbody tr.selected { background: var(--pc-accent-soft); }
 .pc-cell-main { display: flex; align-items: center; gap: var(--space-8); min-width: 170px; }
-.pc-logo { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-surface); background: var(--pc-accent); font-size: var(--font-15); font-weight: var(--weight-medium); }
+.pc-logo { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-white); background: var(--pc-accent); font-size: var(--font-15); font-weight: var(--weight-medium); }
 .pc-logo.channel { color: var(--pc-accent); background: var(--pc-accent-soft); }
 .pc-cell-copy { min-width: 0; }
 .pc-cell-copy strong { display: block; overflow: hidden; font-size: var(--font-15); line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }

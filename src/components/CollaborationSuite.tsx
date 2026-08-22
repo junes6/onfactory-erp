@@ -35,6 +35,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, ReactNode } from 'react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { formatDateLabel, formatDateTime, formatShortDateTime, formatYearMonthLabel, seoulDateInputValue } from '../utils/dateTime'
+import { dayKind, holidayName, type DayKind } from '../utils/koreanHolidays'
 import {
   canApplyGeneratedJournalDraft,
   canApplyJournalAutosaveToEditor,
@@ -992,7 +993,7 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
       <div className="schedule-workspace">
         <section className="collab-panel calendar-panel" aria-label="월간 달력">
           <div className="calendar-weekdays" aria-hidden="true">
-            {['일', '월', '화', '수', '목', '금', '토'].map((day) => <span key={day}>{day}</span>)}
+            {['일', '월', '화', '수', '목', '금', '토'].map((day) => <span className={day === '일' ? 'is-sun' : day === '토' ? 'is-sat' : ''} key={day}>{day}</span>)}
           </div>
           <div className="calendar-grid" role="grid" aria-label={formatYearMonthLabel(viewMonth) + ' 일정'}>
             {cells.map((cell) => {
@@ -1001,9 +1002,11 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
               const outside = cell.getMonth() !== viewMonth.getMonth()
               const selected = key === selectedDate
               const today = key === scheduleToday
+              const kind: DayKind = dayKind(key)
+              const holiday = holidayName(key)
               return (
                 <div
-                  className={'calendar-day' + (outside ? ' outside' : '') + (selected ? ' selected' : '') + (today ? ' today' : '')}
+                  className={'calendar-day' + (outside ? ' outside' : '') + (selected ? ' selected' : '') + (today ? ' today' : '') + (kind === 'holiday' || kind === 'sunday' ? ' is-holiday-day' : kind === 'saturday' ? ' is-saturday' : '')}
                   role="gridcell"
                   aria-selected={selected}
                   key={key}
@@ -1011,12 +1014,13 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
                   <button
                     className="calendar-day-number"
                     type="button"
-                    aria-label={koreanDateLabel(key, true) + ', 일정 ' + cellEvents.length + '개'}
+                    aria-label={koreanDateLabel(key, true) + (holiday ? `, ${holiday}` : '') + ', 일정 ' + cellEvents.length + '개'}
                     onClick={() => setSelectedDate(key)}
                   >
                     <span>{cell.getDate()}</span>
                     {today && <em>오늘</em>}
                   </button>
+                  {holiday && <span className="calendar-holiday-name" title={holiday}>{holiday}</span>}
                   <div className="calendar-day-events">
                     {cellEvents.slice(0, 3).map((event) => (
                       <button className={'calendar-event ' + (event.source === 'leave' ? 'leave' : event.scope)} type="button" onClick={() => openEdit(event)} key={event.id}>
@@ -1036,7 +1040,7 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
             <div>
               <span>{selectedDate === scheduleToday ? 'TODAY' : 'SELECTED DAY'}</span>
               <h2 id="selected-day-title">{koreanDateLabel(selectedDate)}</h2>
-              <p>{selectedEvents.length}개의 일정</p>
+              <p>{holidayName(selectedDate) ? <em className="schedule-day-holiday">{holidayName(selectedDate)}</em> : null}{selectedEvents.length}개의 일정</p>
             </div>
             <button type="button" aria-label="선택한 날짜에 일정 추가" onClick={() => openCreate(selectedDate)}><Plus size={20} /></button>
           </div>
@@ -1301,6 +1305,24 @@ function journalSummaryLine(value: string) {
     .find(Boolean) || '아직 작성된 업무 내용이 없습니다.'
 }
 
+/** 저장된 불릿 텍스트를 블록 배열로 변환한다. 편집 중에는 블록 배열이 원본이고,
+ *  저장 시에만 '• ' 접두사를 붙여 직렬화하므로 IME(한글 조합) 입력이 끊기지 않는다. */
+function parseJournalBlocks(value: string): string[] {
+  return value
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, ''))
+    .filter((line) => line.trim() !== '')
+}
+
+function serializeJournalBlocks(blocks: string[]): string {
+  return blocks
+    .map((block) => block.replace(/\s+$/, ''))
+    .filter((block) => block.trim() !== '')
+    .map((block) => `• ${block}`)
+    .join('\n')
+}
+
 function JournalReviewDialog({
   decision,
   submitting,
@@ -1372,6 +1394,11 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
   const [selectedId, setSelectedId] = useState(initialJournal.id)
   const [editor, setEditor] = useState<Journal>(() => cloneJournal(initialJournal))
   const [viewMode, setViewMode] = useState<'list' | 'editor'>('list')
+  const [browseMode, setBrowseMode] = useState<'week' | 'all'>('week')
+  const [weekAnchor, setWeekAnchor] = useState(scheduleToday)
+  const [rangeFrom, setRangeFrom] = useState('')
+  const [rangeTo, setRangeTo] = useState('')
+  const [authorFilter, setAuthorFilter] = useState('전체')
   const [journalEditorMode, setJournalEditorMode] = useState<'view' | 'edit'>('view')
   const [filter, setFilter] = useState<JournalFilter>('전체')
   const [query, setQuery] = useState('')
@@ -1384,6 +1411,9 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
   const [aiDraftBusy, setAiDraftBusy] = useState(false)
   const [autoSaveMessage, setAutoSaveMessage] = useState('30초마다 변경사항을 자동 임시저장합니다.')
   const [journalManualSaving, setJournalManualSaving] = useState(false)
+  const [completedBlocks, setCompletedBlocks] = useState<string[]>([''])
+  const [issueBlocks, setIssueBlocks] = useState<string[]>([])
+  const blocksSyncRef = useRef({ id: '', completed: '', issue: '' })
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editorDirtyRef = useRef(false)
   const editorStateRef = useRef(editor)
@@ -1424,16 +1454,42 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
     setEditor((current) => JSON.stringify(current) === JSON.stringify(selectedJournal) ? current : cloneJournal(selectedJournal))
   }, [accessibleJournals, selectedId])
 
-  const filteredJournals = accessibleJournals.filter((journal) => {
+  const browseFiltered = accessibleJournals.filter((journal) => {
     const matchesFilter = filter === '전체' || journal.status === filter
     const normalized = query.trim().toLowerCase()
     const matchesQuery = !normalized || (journal.title + ' ' + journal.date + ' ' + journal.author + ' ' + journal.department + ' ' + journal.completed).toLowerCase().includes(normalized)
-    return matchesFilter && matchesQuery
+    const matchesAuthor = authorFilter === '전체' || journal.author === authorFilter
+    return matchesFilter && matchesQuery && matchesAuthor
   })
+  const filteredJournals = browseFiltered.filter((journal) => (!rangeFrom || journal.date >= rangeFrom) && (!rangeTo || journal.date <= rangeTo))
   const sortedJournals = [...filteredJournals].sort((left, right) => {
     const byDate = right.date.localeCompare(left.date)
     return byDate || right.updatedAt.localeCompare(left.updatedAt)
   })
+  const journalAuthors = Array.from(new Set(accessibleJournals.map((journal) => journal.author))).sort((left, right) => left.localeCompare(right, 'ko'))
+  const weekDays = (() => {
+    const start = new Date(`${weekAnchor}T00:00:00Z`)
+    const day = start.getUTCDay()
+    start.setUTCDate(start.getUTCDate() - (day === 0 ? 6 : day - 1))
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(start)
+      date.setUTCDate(date.getUTCDate() + index)
+      const key = date.toISOString().slice(0, 10)
+      return {
+        key,
+        kind: dayKind(key),
+        holiday: holidayName(key),
+        label: `${date.getUTCMonth() + 1}/${date.getUTCDate()}`,
+        weekdayName: ['일', '월', '화', '수', '목', '금', '토'][date.getUTCDay()],
+      }
+    })
+  })()
+  const weekLabel = `${weekDays[0].label} ~ ${weekDays[6].label}`
+  const moveWeek = (delta: number) => {
+    const date = new Date(`${weekAnchor}T00:00:00Z`)
+    date.setUTCDate(date.getUTCDate() + delta * 7)
+    setWeekAnchor(date.toISOString().slice(0, 10))
+  }
   const canModifyJournal = isJournalOwner(editor) && (editor.status === '임시저장' || editor.status === '반려')
   const canEdit = journalEditorMode === 'edit' && canModifyJournal
 
@@ -1442,6 +1498,82 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
     markJournalDirty(true)
     setEditor((current) => ({ ...current, [key]: value }))
   }
+
+  // 블록 배열은 편집 화면의 원본이다. 외부 변경(AI 초안·자동저장 반영·일지 전환)일 때만
+  // 저장된 텍스트에서 블록을 다시 만든다. 입력값 자체는 절대 변형하지 않는다(IME 보호).
+  useEffect(() => {
+    const sync = blocksSyncRef.current
+    if (sync.id !== editor.id || sync.completed !== editor.completed) {
+      sync.completed = editor.completed
+      const parsed = parseJournalBlocks(editor.completed)
+      setCompletedBlocks(parsed.length ? parsed : [''])
+    }
+    if (sync.id !== editor.id || sync.issue !== editor.issue) {
+      sync.issue = editor.issue
+      setIssueBlocks(parseJournalBlocks(editor.issue))
+    }
+    sync.id = editor.id
+  }, [editor.id, editor.completed, editor.issue])
+
+  const applyBlocks = (key: 'completed' | 'issue', next: string[]) => {
+    if (!canEdit || journalManualSavingRef.current) return
+    if (key === 'completed') setCompletedBlocks(next)
+    else setIssueBlocks(next)
+    const serialized = serializeJournalBlocks(next)
+    blocksSyncRef.current[key] = serialized
+    updateEditor(key, serialized)
+  }
+
+  const focusJournalBlock = (key: 'completed' | 'issue', index: number) => {
+    window.setTimeout(() => {
+      document.querySelector<HTMLInputElement>(`input[data-journal-block="${key}-${index}"]`)?.focus()
+    }, 0)
+  }
+
+  const renderBlockEditor = (key: 'completed' | 'issue', blocks: string[], placeholder: string, addLabel: string, minBlocks: number) => (
+    <div className="journal-block-editor">
+      {blocks.map((block, index) => (
+        <div className="journal-block-item" key={`${key}-${index}`}>
+          <span className="journal-block-index" aria-hidden="true">{index + 1}</span>
+          <input
+            value={block}
+            disabled={journalManualSaving}
+            placeholder={placeholder}
+            data-journal-block={`${key}-${index}`}
+            aria-label={`${index + 1}번 항목`}
+            onChange={(event) => { const next = [...blocks]; next[index] = event.target.value; applyBlocks(key, next) }}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                const next = [...blocks]
+                next.splice(index + 1, 0, '')
+                applyBlocks(key, next)
+                focusJournalBlock(key, index + 1)
+              } else if (event.key === 'Backspace' && block === '' && blocks.length > minBlocks) {
+                event.preventDefault()
+                applyBlocks(key, blocks.filter((_, itemIndex) => itemIndex !== index))
+                focusJournalBlock(key, Math.max(0, index - 1))
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="journal-block-remove"
+            aria-label={`${index + 1}번 항목 삭제`}
+            disabled={journalManualSaving || (blocks.length <= minBlocks && block === '')}
+            onClick={() => {
+              const next = blocks.filter((_, itemIndex) => itemIndex !== index)
+              applyBlocks(key, next.length >= minBlocks ? next : [''])
+            }}
+          ><X size={15} /></button>
+        </div>
+      ))}
+      <button className="journal-block-add" type="button" disabled={journalManualSaving} onClick={() => { applyBlocks(key, [...blocks, '']); focusJournalBlock(key, blocks.length) }}>
+        <Plus size={15} /> {addLabel}
+      </button>
+    </div>
+  )
 
   const cleanupUnsavedUploads = async () => {
     const ids = [...uploadedAttachmentIdsRef.current]
@@ -1942,40 +2074,85 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
       />
 
       <div className={'journal-workspace ' + (viewMode === 'list' ? 'list-only' : 'editor-only')}>
-        {viewMode === 'list' && <aside className="collab-panel journal-list-panel" aria-label="직원별 업무일지 제출 목록">
-          <div className="journal-list-tools">
-            <div className="journal-list-heading"><div><span className="collab-kicker">SUBMISSIONS</span><h2>직원별 업무일지</h2></div><strong>{filteredJournals.length}건</strong></div>
-            <div className="journal-list-controls">
-              <label className="collab-search">
-                <Search size={18} />
-                <span className="sr-only">업무일지 검색</span>
-                <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="작성자·날짜·업무 검색" />
-              </label>
-              <div className="journal-filter" role="group" aria-label="업무일지 상태">
-                {(['전체', '임시저장', '결재요청', '승인', '반려'] as JournalFilter[]).map((item) => (
-                  <button type="button" className={filter === item ? 'active' : ''} aria-pressed={filter === item} onClick={() => setFilter(item)} key={item}>{item}</button>
-                ))}
+        {viewMode === 'list' && <section className="collab-panel journal-browse-panel" aria-label="업무일지 조회">
+          <div className="journal-browse-toolbar">
+            <div className="journal-browse-tabs" role="tablist" aria-label="일지 보기 방식">
+              <button type="button" role="tab" aria-selected={browseMode === 'week'} onClick={() => setBrowseMode('week')}><CalendarDays size={17} /> 주간 보드</button>
+              <button type="button" role="tab" aria-selected={browseMode === 'all'} onClick={() => setBrowseMode('all')}><Search size={17} /> 지난 일지 검색</button>
+            </div>
+            {browseMode === 'week' ? (
+              <div className="journal-week-nav">
+                <button type="button" aria-label="이전 주" onClick={() => moveWeek(-1)}><ChevronLeft size={19} /></button>
+                <strong>{weekLabel}</strong>
+                <button type="button" aria-label="다음 주" onClick={() => moveWeek(1)}><ChevronRight size={19} /></button>
+                {weekAnchor !== scheduleToday && <button className="journal-week-today" type="button" onClick={() => setWeekAnchor(scheduleToday)}>이번 주</button>}
               </div>
+            ) : (
+              <div className="journal-search-controls">
+                <label className="collab-search">
+                  <Search size={18} />
+                  <span className="sr-only">업무일지 검색</span>
+                  <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="작성자·날짜·업무 검색" />
+                </label>
+                <label className="journal-range-field"><span>시작일</span><input type="date" value={rangeFrom} max={rangeTo || undefined} onChange={(event) => setRangeFrom(event.target.value)} /></label>
+                <label className="journal-range-field"><span>종료일</span><input type="date" value={rangeTo} min={rangeFrom || undefined} onChange={(event) => setRangeTo(event.target.value)} /></label>
+                {canManage && journalAuthors.length > 1 && <label className="journal-range-field"><span>작성자</span><select value={authorFilter} onChange={(event) => setAuthorFilter(event.target.value)}><option>전체</option>{journalAuthors.map((name) => <option key={name}>{name}</option>)}</select></label>}
+              </div>
+            )}
+            <div className="journal-filter" role="group" aria-label="업무일지 상태">
+              {(['전체', '임시저장', '결재요청', '승인', '반려'] as JournalFilter[]).map((item) => (
+                <button type="button" className={filter === item ? 'active' : ''} aria-pressed={filter === item} onClick={() => setFilter(item)} key={item}>{item}</button>
+              ))}
             </div>
           </div>
-          <div className="journal-list">
-            {sortedJournals.map((journal) => (
-              <button
-                className={'journal-list-card' + (journal.id === selectedId ? ' active' : '')}
-                type="button"
-                aria-label={`${journal.author}님의 ${journal.date} ${journal.status} 업무일지, ${journalSummaryLine(journal.completed)} 상세 보기 (${journal.id})`}
-                onClick={() => chooseJournal(journal)}
-                key={journal.id}
-              >
-                <span className="journal-card-person"><strong>{journal.author}</strong><time dateTime={journal.date}>{formatDateLabel(journal.date)}</time></span>
-                <span className="journal-card-summary">{journalSummaryLine(journal.completed)}</span>
-                <StatusChip tone={journalTone(journal.status)}>{journal.status}</StatusChip>
-                <ChevronRight size={17} aria-hidden="true" />
-              </button>
-            ))}
-            {filteredJournals.length === 0 && <div className="collab-empty compact"><BookOpenCheck size={28} /><strong>해당 일지가 없습니다</strong><span>검색어나 상태 필터를 변경해 보세요.</span></div>}
-          </div>
-        </aside>}
+
+          {browseMode === 'week' ? (
+            <div className="journal-week-board" role="grid" aria-label={`${weekLabel} 주간 업무일지 보드`}>
+              {weekDays.map((day) => {
+                const dayJournals = browseFiltered
+                  .filter((journal) => journal.date === day.key)
+                  .sort((left, right) => left.author.localeCompare(right.author, 'ko') || left.updatedAt.localeCompare(right.updatedAt))
+                const isToday = day.key === scheduleToday
+                return <div className={`journal-week-day${isToday ? ' is-today' : ''}${day.kind === 'holiday' || day.kind === 'sunday' ? ' is-holiday-day' : day.kind === 'saturday' ? ' is-saturday' : ''}`} role="gridcell" key={day.key}>
+                  <header>
+                    <span className="journal-week-dayname">{day.weekdayName}</span>
+                    <strong>{day.label}</strong>
+                    {isToday && <em>오늘</em>}
+                    {day.holiday && <small className="journal-week-holiday" title={day.holiday}>{day.holiday}</small>}
+                  </header>
+                  <div className="journal-week-blocks">
+                    {dayJournals.map((journal) => (
+                      <button className={`journal-week-block tone-${journalTone(journal.status)}`} type="button" key={journal.id} onClick={() => chooseJournal(journal)} aria-label={`${journal.author}님의 ${day.key} ${journal.status} 업무일지 열기`}>
+                        <span className="journal-week-block-head"><i aria-hidden="true">{journal.author.slice(0, 1)}</i><strong>{journal.author}</strong><em className={`journal-block-status ${journalTone(journal.status)}`}>{journal.status}</em></span>
+                        <span className="journal-week-block-summary">{journalSummaryLine(journal.completed)}</span>
+                        <time dateTime={journal.updatedAt}>{formatShortDateTime(journal.updatedAt)} 저장</time>
+                      </button>
+                    ))}
+                    {dayJournals.length === 0 && <span className="journal-week-empty">{day.kind === 'weekday' ? '일지 없음' : '휴무'}</span>}
+                  </div>
+                </div>
+              })}
+            </div>
+          ) : (
+            <div className="journal-list">
+              {sortedJournals.map((journal) => (
+                <button
+                  className={'journal-list-card' + (journal.id === selectedId ? ' active' : '')}
+                  type="button"
+                  aria-label={`${journal.author}님의 ${journal.date} ${journal.status} 업무일지, ${journalSummaryLine(journal.completed)} 상세 보기 (${journal.id})`}
+                  onClick={() => chooseJournal(journal)}
+                  key={journal.id}
+                >
+                  <span className="journal-card-person"><strong>{journal.author}</strong><time dateTime={journal.date}>{formatDateLabel(journal.date)}</time></span>
+                  <span className="journal-card-summary">{journalSummaryLine(journal.completed)}</span>
+                  <StatusChip tone={journalTone(journal.status)}>{journal.status}</StatusChip>
+                  <ChevronRight size={17} aria-hidden="true" />
+                </button>
+              ))}
+              {filteredJournals.length === 0 && <div className="collab-empty compact"><BookOpenCheck size={28} /><strong>해당 일지가 없습니다</strong><span>검색어, 기간 또는 상태 필터를 변경해 보세요.</span></div>}
+            </div>
+          )}
+        </section>}
 
         {viewMode === 'editor' && <section className="collab-panel journal-editor-panel" aria-labelledby="journal-editor-title">
           <header className="journal-editor-header">
@@ -2036,32 +2213,25 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
           <div className="journal-editor-body">
             <section className="journal-entry-section" aria-labelledby="journal-completed-title">
               <div className="journal-entry-section-head">
-                <div><strong id="journal-completed-title">1. 오늘 한 일 <em>필수</em></strong><span>한 줄마다 자동으로 불릿이 붙습니다.</span></div>
+                <div><strong id="journal-completed-title">1. 오늘 한 일 <em>필수</em></strong><span>한 일을 블록으로 쌓으세요. Enter로 다음 블록이 추가됩니다.</span></div>
                 {canEdit && <button className="collab-button secondary compact" type="button" onClick={() => void generateTodayDraft()} disabled={aiDraftBusy || journalSaving}><WandSparkles size={17} /> {aiDraftBusy ? '초안 만드는 중…' : '오늘 기록으로 초안 만들기'}</button>}
               </div>
-              {canEdit ? (
-                <textarea
-                  className="journal-entry-textarea"
-                  aria-labelledby="journal-completed-title"
-                  rows={8}
-                  value={editor.completed}
-                  disabled={journalManualSaving}
-                  onChange={(event) => updateEditor('completed', normalizeJournalBullets(event.target.value))}
-                  placeholder={'• 완료한 업무를 결과 중심으로 작성하세요.\n• 줄을 바꾸면 다음 항목으로 정리됩니다.'}
-                />
-              ) : (
+              {canEdit ? renderBlockEditor('completed', completedBlocks, '완료한 업무를 결과 중심으로 입력', '한 일 추가', 1) : (
                 <div className="journal-entry-readonly">
-                  {editor.completed.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean).map((line, index) => <p key={`${line}-${index}`}><span>•</span>{line}</p>)}
+                  {editor.completed.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean).map((line, index) => <p key={`${line}-${index}`}><span>{index + 1}</span>{line}</p>)}
                   {!editor.completed.trim() && <span>기록된 업무가 없습니다.</span>}
                 </div>
               )}
             </section>
 
             <section className="journal-entry-section" aria-labelledby="journal-issue-title">
-              <div className="journal-entry-section-head"><div><strong id="journal-issue-title">2. 특이사항·막힌 것 <em>선택</em></strong><span>도움이나 공유가 필요한 내용만 적으세요.</span></div></div>
+              <div className="journal-entry-section-head"><div><strong id="journal-issue-title">2. 특이사항·막힌 것 <em>선택</em></strong><span>도움이나 공유가 필요한 내용만 블록으로 추가하세요.</span></div></div>
               {canEdit
-                ? <textarea className="journal-entry-textarea compact" aria-labelledby="journal-issue-title" rows={4} value={editor.issue} disabled={journalManualSaving} onChange={(event) => updateEditor('issue', event.target.value)} placeholder="없으면 비워 두어도 됩니다." />
-                : <div className="journal-entry-readonly"><p>{editor.issue.trim() || '등록된 특이사항이 없습니다.'}</p></div>}
+                ? renderBlockEditor('issue', issueBlocks, '공유할 특이사항 또는 막힌 일', '특이사항 추가', 0)
+                : <div className="journal-entry-readonly">
+                  {editor.issue.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean).map((line, index) => <p key={`${line}-${index}`}><span>{index + 1}</span>{line}</p>)}
+                  {!editor.issue.trim() && <span>등록된 특이사항이 없습니다.</span>}
+                </div>}
             </section>
 
             <section className="journal-attachments journal-entry-section" aria-labelledby="journal-attachment-title">

@@ -175,6 +175,27 @@ export function PerformanceReports({ workspaceScope, canManage, onToast, onOpenT
     return (response?.reports ?? []).filter((report) => `${report.employeeName} ${report.team} ${report.jobRole}`.toLocaleLowerCase('ko-KR').includes(normalizedQuery))
   }, [query, response?.reports])
 
+  const summary = useMemo(() => {
+    const scored = reports.filter((report) => report.score !== null && Number.isFinite(report.score))
+    const averageScore = scored.length ? Math.round(scored.reduce((sum, report) => sum + (report.score ?? 0), 0) / scored.length) : null
+    const totalCompleted = reports.reduce((sum, report) => sum + (report.metrics.completedTasks ?? 0), 0)
+    const complianceReports = reports.filter((report) => report.metrics.dueCompliance !== null && Number.isFinite(report.metrics.dueCompliance))
+    const averageCompliance = complianceReports.length ? Math.round(complianceReports.reduce((sum, report) => sum + (report.metrics.dueCompliance ?? 0), 0) / complianceReports.length) : null
+    const top = [...scored].sort((left, right) => (right.score ?? 0) - (left.score ?? 0))[0] ?? null
+    return { averageScore, totalCompleted, averageCompliance, top, scoredCount: scored.length }
+  }, [reports])
+
+  // 기록 없는 직원은 카드를 만들지 않는다 — 이름만 한 줄로 모아 화면 소음을 없앤다.
+  const reportHasData = useCallback((report: EmployeePerformanceReport) => (
+    (report.score !== null && Number.isFinite(report.score))
+    || metricDefinitions.some((metric) => {
+      const raw = report.metrics[metric.key]
+      return raw !== null && Number.isFinite(raw)
+    })
+  ), [])
+  const activeReports = useMemo(() => reports.filter(reportHasData), [reportHasData, reports])
+  const idleReports = useMemo(() => reports.filter((report) => !reportHasData(report)), [reportHasData, reports])
+
   const generate = async () => {
     if (!canManage) return
     setSaving(true)
@@ -235,37 +256,59 @@ export function PerformanceReports({ workspaceScope, canManage, onToast, onOpenT
     {loading ? <div className="performance-empty"><RefreshCw className="spin" size={24} /><strong>성과 기록을 계산하고 있습니다</strong></div>
       : privateReport ? <div className="performance-empty performance-private"><LockKeyhole size={28} /><strong>내 성과 리포트는 현재 비공개입니다</strong><p>관리자가 직원 공개를 켜면 이곳에서 본인 리포트만 확인할 수 있습니다.</p></div>
       : error ? <div className="performance-empty"><strong>{error}</strong><button className="button secondary" type="button" onClick={() => void loadReports()}>다시 시도</button></div>
-        : reports.length === 0 ? <div className="performance-empty"><BarChart3 size={28} /><strong>이 기간에 산출할 기록이 없습니다</strong><p>업무 완료와 일지 제출 기록이 쌓이면 자동으로 생성됩니다.</p></div>
-          : <section className="performance-grid" aria-label={`${periodLabel} 직원별 성과 리포트`}>
-            {reports.map((report) => <article className="performance-card" key={report.id}>
+        : reports.length === 0 ? <div className="performance-empty"><BarChart3 size={28} /><strong>이 기간에 산출할 기록이 없습니다</strong><p>업무 완료와 일지 제출 기록이 쌓이면 자동으로 생성됩니다.{canManage ? ' 업무지시·결재와 일일업무일지를 사용하면 다음 조회부터 리포트가 채워집니다.' : ''}</p></div>
+          : <>
+          {activeReports.length > 0 && <section className="performance-summary-strip" aria-label={`${periodLabel} 성과 요약`}>
+            <article><span className="performance-summary-icon blue"><BarChart3 size={19} /></span><div><small>평균 가중 점수</small><strong>{summary.averageScore ?? 'N/A'}</strong><p>{summary.scoredCount}명 산출 기준</p></div></article>
+            <article><span className="performance-summary-icon green"><CheckCircle2 size={19} /></span><div><small>완료 업무 합계</small><strong>{summary.totalCompleted}건</strong><p>{periodLabel} 승인 완료</p></div></article>
+            <article><span className="performance-summary-icon teal"><CalendarRange size={19} /></span><div><small>평균 기한 준수율</small><strong>{summary.averageCompliance === null ? 'N/A' : `${summary.averageCompliance}%`}</strong><p>마감 내 완료 비율</p></div></article>
+            {canManage && <article><span className="performance-summary-icon violet"><UserRoundCheck size={19} /></span><div><small>기간 최고 점수</small><strong>{summary.top ? summary.top.employeeName : '—'}</strong><p>{summary.top ? `${scoreValue(summary.top.score)}점 · ${summary.top.team}` : '산출된 점수 없음'}</p></div></article>}
+          </section>}
+          {activeReports.length === 0 && <div className="performance-empty"><BarChart3 size={28} /><strong>{periodLabel}에는 아직 산출된 성과 기록이 없습니다</strong><p>업무를 완료하고 결재·업무일지가 쌓이면 직원별 리포트가 여기에 생깁니다.</p></div>}
+          <section className="performance-grid" aria-label={`${periodLabel} 직원별 성과 리포트`}>
+            {activeReports.map((report) => <article className="performance-card" key={report.id}>
               <header>
                 <div className="performance-person"><span aria-hidden="true">{report.employeeName.slice(0, 1)}</span><div><h2>{report.employeeName}</h2><p>{report.team} · {report.jobRole || '직무 미지정'}</p></div></div>
                 <div className={`performance-score ${scoreTone(report.score)}`}><small>가중 점수</small><strong>{scoreValue(report.score)}</strong></div>
               </header>
-              <dl className="performance-metrics">
-                {metricDefinitions.map((metric) => {
-                  const Icon = metric.icon
-                  return <div key={metric.key}><dt><Icon size={15} />{metric.label}</dt><dd>{metricValue(report.metrics, metric.key)}</dd></div>
-                })}
-              </dl>
-              <div className="performance-narrative">
-                <div className="performance-narrative-title"><Sparkles size={16} /><strong>{report.narrative.mode === 'ai' ? 'AI 정성 요약' : '지표 기반 요약'}</strong></div>
+              {(() => {
+                const filled = metricDefinitions.filter((metric) => {
+                  const raw = report.metrics[metric.key]
+                  return raw !== null && Number.isFinite(raw)
+                })
+                if (filled.length === 0) return <p className="performance-no-metrics">이 기간에는 집계된 업무·일지 기록이 없습니다.</p>
+                return <dl className="performance-metrics">
+                  {filled.map((metric) => {
+                    const Icon = metric.icon
+                    const raw = report.metrics[metric.key] as number
+                    const showBar = metric.unit === '%'
+                    return <div key={metric.key}><dt><Icon size={15} />{metric.label}</dt><dd>{metricValue(report.metrics, metric.key)}</dd>{showBar && <progress className={metric.inverse ? 'is-inverse' : ''} max={100} value={Math.max(0, Math.min(100, raw))} aria-hidden="true" />}</div>
+                  })}
+                </dl>
+              })()}
+              <p className="performance-lead"><Sparkles size={15} /> {report.narrative.strengths[0]}</p>
+              <details className="performance-narrative">
+                <summary>{report.narrative.mode === 'ai' ? 'AI 요약·제안 자세히 보기' : '요약·제안 자세히 보기'}</summary>
                 <ol>
-                  <li><span>{report.score === null ? '근거 상태' : '확인 사실'}</span>{report.narrative.strengths[0]}</li>
                   <li><span>{report.score === null ? '근거 상태' : '확인 사실'}</span>{report.narrative.strengths[1]}</li>
                   <li><span>{report.score === null ? '평가 안내' : '개선 제안'}</span>{report.narrative.improvement}</li>
                   <li><span>다음 제안</span>{report.narrative.suggestion}</li>
                 </ol>
                 {report.narrative.conflictNote && <p className="performance-conflict"><TrendingUp size={15} />{report.narrative.conflictNote}</p>}
-              </div>
+              </details>
               {report.narrative.evidence.length > 0 && <footer><span>평가 근거</span><div>{report.narrative.evidence.slice(0, 4).map((evidence) => evidence.kind === 'journal'
                 ? <span className="performance-evidence-label" key={evidence.id}>{evidence.title}</span>
                 : <button type="button" key={evidence.id} onClick={() => onOpenTask(evidence.id)}>{evidence.title}</button>)}</div></footer>}
             </article>)}
+          </section>
+          {idleReports.length > 0 && <section className="performance-idle-strip" aria-label="이번 기간 기록이 없는 직원">
+            <div><strong>기록 없는 직원</strong><span>{idleReports.length}명 · 업무·일지 기록이 쌓이면 카드가 생깁니다</span></div>
+            <div className="performance-idle-names">{idleReports.map((report) => <span key={report.id}><i aria-hidden="true">{report.employeeName.slice(0, 1)}</i>{report.employeeName}</span>)}</div>
           </section>}
+          </>}
 
     {canManage && settingsOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSettings() }}>
-      <section ref={settingsDialogRef} className="modal performance-settings" role="dialog" aria-modal="true" aria-labelledby="performance-settings-title" tabIndex={-1}>
+      <section ref={settingsDialogRef} className="modal-card performance-settings" role="dialog" aria-modal="true" aria-labelledby="performance-settings-title" tabIndex={-1}>
         <header><div><span className="eyebrow">SCORING POLICY</span><h2 id="performance-settings-title">성과 지표 설정</h2></div><button className="icon-button" type="button" aria-label="성과 설정 닫기" onClick={closeSettings}><X size={19} /></button></header>
         <p>각 지표의 가중치 합계는 100%여야 합니다. 변경 후 과거 월별 스냅샷은 바뀌지 않습니다.</p>
         <div className="performance-weight-list">

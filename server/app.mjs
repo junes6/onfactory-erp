@@ -450,7 +450,9 @@ function normalizeLeaveManagement(value) {
 function normalizeFactoryLayouts(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 50) return null
   const zoneIds = new Set(['raw', 'frozen', 'production', 'packing', 'shipping'])
-  const purposes = new Set(['원료·자재', '냉장·냉동', '생산', '포장', '출하', '통로', '기타'])
+  // '벽'과 '문'은 공간 블록이 아니라 구조물이다: 얇은 크기(1.5%)와 다른 블록과의 겹침을 허용한다.
+  const purposes = new Set(['원료·자재', '냉장·냉동', '생산', '포장', '출하', '통로', '벽', '문', '기타'])
+  const structurePurposes = new Set(['벽', '문'])
   const kinds = new Set(['재고', '생산'])
   // Existing layouts may still contain their pre-token hex value, while every
   // layout created or edited by the current client stores one of these design
@@ -461,6 +463,10 @@ function normalizeFactoryLayouts(value) {
     'var(--color-blue-soft)',
     'var(--color-warning-soft)',
     'var(--color-danger-soft)',
+    'var(--color-primary-soft)',
+    'var(--color-violet-soft)',
+    'var(--color-teal-soft)',
+    'var(--color-rose-soft)',
     'var(--color-gray-200)',
     'var(--color-gray-50)',
   ])
@@ -490,11 +496,12 @@ function normalizeFactoryLayouts(value) {
         unit: String(source.unit ?? '').trim().slice(0, 30),
         note: String(source.note ?? '').trim().slice(0, 1_000),
       }
+      const minSize = structurePurposes.has(block.purpose) ? 1.5 : 8
       if (!block.id || ids.has(block.id) || block.factoryId !== factoryId || !block.name || !zoneIds.has(block.zoneId)
         || !purposes.has(block.purpose) || !kinds.has(block.kind)
         || (!/^#[0-9a-f]{6}$/i.test(block.color) && !tokenColors.has(block.color))
         || !block.unit || ![block.x, block.y, block.width, block.height, block.current, block.capacity].every(Number.isFinite)
-        || block.x < 0 || block.y < 0 || block.width < 8 || block.height < 8
+        || block.x < 0 || block.y < 0 || block.width < minSize || block.height < minSize
         || block.x + block.width > 100 || block.y + block.height > 100
         || block.current < 0 || block.capacity <= 0) return null
       ids.add(block.id)
@@ -502,8 +509,10 @@ function normalizeFactoryLayouts(value) {
     }
     for (let leftIndex = 0; leftIndex < blocks.length; leftIndex += 1) {
       const left = blocks[leftIndex]
+      if (structurePurposes.has(left.purpose)) continue
       for (let rightIndex = leftIndex + 1; rightIndex < blocks.length; rightIndex += 1) {
         const right = blocks[rightIndex]
+        if (structurePurposes.has(right.purpose)) continue
         const overlaps = left.x < right.x + right.width && left.x + left.width > right.x
           && left.y < right.y + right.height && left.y + left.height > right.y
         if (overlaps) return null

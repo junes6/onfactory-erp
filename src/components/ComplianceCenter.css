@@ -1,4 +1,4 @@
-.compliance-page { color: var(--ink); }
+﻿.compliance-page { color: var(--ink); }
 .compliance-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-16); margin-bottom: var(--space-16); }
 .compliance-page-head > div > span { color: var(--forest); font-size: var(--font-13); font-weight: var(--weight-medium); letter-spacing: .1em; }
 .compliance-page-head h1 { margin: var(--space-4) var(--space-0) var(--space-4); font-size: var(--font-22); letter-spacing: -.04em; }
@@ -20,7 +20,7 @@
 .compliance-toolbar input { min-width: 0; flex: 1; border: none; outline: none; color: var(--ink); background: transparent; }
 .compliance-toolbar > div { display: flex; gap: var(--space-4); overflow-x: auto; }
 .compliance-toolbar > div button { min-height: 38px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); white-space: nowrap; cursor: pointer; }
-.compliance-toolbar > div button.active { border-color: var(--forest); color: var(--color-surface); background: var(--forest); }
+.compliance-toolbar > div button.active { border-color: var(--forest); color: var(--color-white); background: var(--forest); }
 .compliance-list { display: grid; gap: var(--space-16); }
 .compliance-list > article { min-width: 0; display: grid; grid-template-columns: auto minmax(240px,1fr) minmax(300px,auto) auto auto; align-items: center; gap: var(--space-12); padding: var(--card-inset); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); box-shadow: var(--shadow-none); }
 .compliance-record-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--forest); background: var(--forest-soft); }
@@ -191,7 +191,7 @@ html[data-theme='dark'] :is(.compliance-page,.compliance-modal) :is(input,select
   font-weight: var(--weight-medium);
   cursor: pointer;
 }
-.compliance-toolbar > button.active { color: var(--color-surface); border-color: var(--forest); background: var(--forest); }
+.compliance-toolbar > button.active { color: var(--color-white); border-color: var(--forest); background: var(--forest); }
 
 .compliance-list { display: grid; gap: var(--space-0); }
 .compliance-list > article {
@@ -307,8 +307,8 @@ html[data-theme='dark'] :is(.compliance-page,.compliance-modal) :is(input,select
 
 html[data-theme='dark'] .compliance-category-grid > button.active,
 html[data-theme='dark'] .compliance-category-grid > button:hover,
-html[data-theme='dark'] .compliance-list > article.selected { background: var(--color-blue-deep); }
-html[data-theme='dark'] .compliance-detail-note { background: var(--color-blue-deep); }
+html[data-theme='dark'] .compliance-list > article.selected { background: var(--color-gray-50); }
+html[data-theme='dark'] .compliance-detail-note { background: var(--color-gray-50); }
 html[data-theme='dark'] .compliance-detail-note p { color: var(--muted); }
 
 @media (max-width: 1080px) {
@@ -337,3 +337,71 @@ html[data-theme='dark'] .compliance-detail-note p { color: var(--muted); }
   .compliance-detail-files > p { grid-column: 1; }
   .compliance-detail > footer { align-items: flex-start; flex-direction: column; }
 }
+
+/* =====================================================================
+   v4 개편: 식품안전·인증 — 요약 → 조치 필요 → 목록/상세 단일 흐름
+   ===================================================================== */
+.compliance-summary-strip { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)) auto; gap: var(--space-12); margin-bottom: var(--space-16); }
+.compliance-summary-strip article { display: flex; align-items: center; gap: var(--space-12); padding: var(--space-12) var(--space-16); border: var(--dashboard-stroke) solid var(--color-card-line); border-radius: var(--radius-8); background: var(--color-surface); }
+.compliance-summary-strip article.is-warning { border-color: var(--color-warning); background: var(--color-warning-soft); }
+.compliance-summary-strip article > span { width: 38px; height: 38px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); }
+.compliance-summary-strip .tone-blue { color: var(--color-primary); background: var(--color-primary-soft); }
+.compliance-summary-strip .tone-green { color: var(--color-success); background: var(--color-success-soft); }
+.compliance-summary-strip .tone-warn { color: var(--color-warning); background: var(--color-warning-soft); }
+.compliance-summary-strip small { display: block; color: var(--color-gray-600); font-size: var(--font-11); font-weight: var(--weight-medium); }
+.compliance-summary-strip strong { display: block; margin-top: var(--space-4); font-size: var(--font-22); letter-spacing: -.02em; }
+
+.compliance-action-strip { margin-bottom: var(--space-16); padding: var(--space-12) var(--space-16); border: var(--hairline) solid var(--color-warning); border-radius: var(--radius-8); background: var(--color-warning-soft); }
+.compliance-action-head { display: flex; align-items: center; gap: var(--space-8); color: var(--color-warning); }
+.compliance-action-head strong { color: var(--color-ink); font-size: var(--font-15); }
+.compliance-action-head span { color: var(--color-gray-600); font-size: var(--font-13); }
+.compliance-action-list { display: flex; flex-wrap: wrap; gap: var(--space-8); margin-top: var(--space-12); }
+.compliance-action-list button { display: inline-flex; align-items: center; gap: var(--space-8); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--color-card-line); border-radius: var(--radius-8); color: var(--color-ink); background: var(--color-surface); font-size: var(--font-13); cursor: pointer; transition: border-color .15s ease; }
+.compliance-action-list button:hover { border-color: var(--color-primary); }
+.compliance-action-list button strong { font-size: var(--font-13); }
+.compliance-action-list button small { color: var(--color-gray-600); font-size: var(--font-11); }
+
+.compliance-category-chips { display: flex; flex-wrap: wrap; gap: var(--space-4); padding: var(--space-0) var(--space-12) var(--space-12); }
+.compliance-category-chips button { display: inline-flex; align-items: center; gap: var(--space-4); min-height: 36px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--color-gray-200); border-radius: var(--radius-8); color: var(--color-gray-600); background: var(--color-surface); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
+.compliance-category-chips button em { padding: var(--space-0) var(--space-4); border-radius: var(--radius-8); background: var(--color-gray-50); font-size: var(--font-11); font-style: normal; }
+.compliance-category-chips button.active { color: var(--color-primary); border-color: var(--color-primary); background: var(--color-primary-soft); }
+.compliance-category-chips button.active em { color: var(--color-white); background: var(--color-primary); }
+
+html[data-theme='dark'] :is(.compliance-summary-strip article,.compliance-action-list button,.compliance-category-chips button) { background: var(--color-surface); }
+
+@media (max-width: 900px) {
+  .compliance-summary-strip { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .compliance-summary-strip .compliance-ai-button { grid-column: 1 / -1; }
+}
+
+/* v5: 목록 행 상태 엣지 + 지금 할 일 안내 */
+.compliance-list article { position: relative; overflow: hidden; }
+.compliance-list article::before { position: absolute; top: 0; bottom: 0; left: 0; width: 4px; background: var(--color-gray-200); content: ''; }
+.compliance-list article.status-success::before { background: var(--color-success); }
+.compliance-list article.status-warning::before { background: var(--color-warning); }
+.compliance-list article.status-danger::before { background: var(--color-danger); }
+.compliance-list article .compliance-record-main strong { font-size: var(--font-15); }
+.compliance-next-step { display: flex; align-items: flex-start; gap: var(--space-8); padding: var(--space-12); border: var(--hairline) solid var(--color-gray-200); border-radius: var(--radius-8); background: var(--color-gray-50); }
+.compliance-next-step.tone-danger { border-color: var(--color-danger-soft); background: var(--color-danger-soft); }
+.compliance-next-step.tone-danger svg { color: var(--color-danger); }
+.compliance-next-step.tone-warning { border-color: var(--color-warning-soft); background: var(--color-warning-soft); }
+.compliance-next-step.tone-warning svg { color: var(--color-warning); }
+.compliance-next-step.tone-success { border-color: var(--color-success-soft); background: var(--color-success-soft); }
+.compliance-next-step.tone-success svg { color: var(--color-success); }
+.compliance-next-step svg { flex: 0 0 auto; margin-top: var(--space-4); }
+.compliance-next-step strong { display: block; font-size: var(--font-13); }
+.compliance-next-step p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--color-ink); font-size: var(--font-13); line-height: 1.55; }
+
+/* v5.1: 요약을 한 줄 바로 압축 */
+.compliance-topline { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-12); margin-bottom: var(--space-16); padding: var(--space-8) var(--space-16); border: var(--dashboard-stroke) solid var(--color-card-line); border-radius: var(--radius-8); background: var(--color-surface); }
+.compliance-topline > span { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--color-gray-600); font-size: var(--font-13); }
+.compliance-topline > span strong { color: var(--color-ink); font-size: var(--font-15); }
+.compliance-topline > span.is-good { color: var(--color-success); }
+.compliance-topline > span.is-good strong { color: var(--color-success); }
+.compliance-topline > span.is-warn { color: var(--color-warning); }
+.compliance-topline > span.is-warn strong { color: var(--color-warning); }
+.compliance-topline > i { width: 1px; height: 18px; background: var(--color-card-line); }
+.compliance-topline > button { display: inline-flex; align-items: center; gap: var(--space-4); min-height: 38px; margin-left: auto; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--color-primary); border-radius: var(--radius-8); color: var(--color-primary); background: var(--color-primary-soft); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
+.compliance-topline > button:disabled { opacity: .6; cursor: default; }
+
+

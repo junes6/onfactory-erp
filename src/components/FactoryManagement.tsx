@@ -2,8 +2,10 @@ import {
   AlertTriangle,
   Archive,
   Boxes,
+  BrickWall,
   CheckCircle2,
   ChevronDown,
+  DoorOpen,
   Download,
   Edit3,
   Factory as FactoryIcon,
@@ -117,7 +119,7 @@ type CompanyDocumentMeta = {
   uploadedAt?: string
 }
 
-type LayoutPurpose = '원료·자재' | '냉장·냉동' | '생산' | '포장' | '출하' | '통로' | '기타'
+type LayoutPurpose = '원료·자재' | '냉장·냉동' | '생산' | '포장' | '출하' | '통로' | '벽' | '문' | '기타'
 
 type LayoutBlock = {
   id: string
@@ -141,12 +143,16 @@ type LayoutBlock = {
 type FactoryLayouts = Record<string, LayoutBlock[]>
 
 const layoutColorOptions = [
-  { value: 'var(--color-success-soft)', label: '안전 · 원료' },
-  { value: 'var(--color-blue-soft)', label: '정보 · 냉장냉동' },
-  { value: 'var(--color-warning-soft)', label: '주의 · 생산' },
-  { value: 'var(--color-danger-soft)', label: '위험 · 점검' },
-  { value: 'var(--color-gray-200)', label: '중립 · 설비' },
-  { value: 'var(--color-gray-50)', label: '중립 · 통로' },
+  { value: 'var(--color-success-soft)', label: '초록 · 원료/안전' },
+  { value: 'var(--color-blue-soft)', label: '하늘 · 냉장냉동' },
+  { value: 'var(--color-warning-soft)', label: '주황 · 생산/주의' },
+  { value: 'var(--color-danger-soft)', label: '빨강 · 위험/점검' },
+  { value: 'var(--color-primary-soft)', label: '파랑 · 강조' },
+  { value: 'var(--color-violet-soft)', label: '보라 · 특수구역' },
+  { value: 'var(--color-teal-soft)', label: '청록 · 위생구역' },
+  { value: 'var(--color-rose-soft)', label: '분홍 · 검사/QC' },
+  { value: 'var(--color-gray-200)', label: '회색 · 설비' },
+  { value: 'var(--color-gray-50)', label: '연회색 · 통로' },
 ] as const
 
 const layoutColorValues = new Set<string>(layoutColorOptions.map((option) => option.value))
@@ -210,7 +216,7 @@ function isLayoutBlock(value: unknown): value is LayoutBlock {
   const item = value as Partial<LayoutBlock>
   return typeof item.id === 'string' && typeof item.factoryId === 'string' && typeof item.name === 'string'
     && ['raw', 'frozen', 'production', 'packing', 'shipping'].includes(item.zoneId ?? '')
-    && ['원료·자재', '냉장·냉동', '생산', '포장', '출하', '통로', '기타'].includes(item.purpose ?? '')
+    && ['원료·자재', '냉장·냉동', '생산', '포장', '출하', '통로', '벽', '문', '기타'].includes(item.purpose ?? '')
     && ['재고', '생산'].includes(item.kind ?? '') && typeof item.color === 'string'
     && ['x', 'y', 'width', 'height', 'current', 'capacity'].every((key) => typeof item[key as keyof LayoutBlock] === 'number')
     && typeof item.item === 'string' && typeof item.unit === 'string' && typeof item.note === 'string'
@@ -263,7 +269,17 @@ function ZoneIcon({ kind, size = 20 }: { kind: ZoneKind; size?: number }) {
 }
 
 const MIN_BLOCK_SIZE = 8
+const MIN_STRUCTURE_SIZE = 1.5
 const BLOCK_GAP = .6
+
+/** 벽·문은 공간 블록이 아니라 구조물로 취급한다 — 얇게 그릴 수 있고 다른 블록과 겹쳐도 된다. */
+function isStructureBlock(block: Pick<LayoutBlock, 'purpose'>) {
+  return block.purpose === '벽' || block.purpose === '문'
+}
+
+function blockMinSize(block: Pick<LayoutBlock, 'purpose'>) {
+  return isStructureBlock(block) ? MIN_STRUCTURE_SIZE : MIN_BLOCK_SIZE
+}
 
 function blocksOverlap(left: LayoutBlock, right: LayoutBlock, gap = BLOCK_GAP) {
   return left.x < right.x + right.width + gap
@@ -274,8 +290,9 @@ function blocksOverlap(left: LayoutBlock, right: LayoutBlock, gap = BLOCK_GAP) {
 
 function normalizeBlockGeometry(block: LayoutBlock): LayoutBlock {
   const round = (value: number) => Math.round(value * 10) / 10
-  const width = round(Math.min(100, Math.max(MIN_BLOCK_SIZE, block.width)))
-  const height = round(Math.min(100, Math.max(MIN_BLOCK_SIZE, block.height)))
+  const minSize = blockMinSize(block)
+  const width = round(Math.min(100, Math.max(minSize, block.width)))
+  const height = round(Math.min(100, Math.max(minSize, block.height)))
   return {
     ...block,
     width,
@@ -407,18 +424,19 @@ function LayoutEditor({ factory, blocks, selectedId, editable, drawing, showBack
     const dx = ((event.clientX - gesture.startX) / (bounds.width * zoom)) * 100
     const dy = ((event.clientY - gesture.startY) / (bounds.height * zoom)) * 100
     const original = gesture.original
+    const minSize = blockMinSize(original)
     let x = original.x
     let y = original.y
     let width = original.width
     let height = original.height
-    if (gesture.corner.includes('e')) width = clamp(original.width + dx, MIN_BLOCK_SIZE, 100 - original.x)
-    if (gesture.corner.includes('s')) height = clamp(original.height + dy, MIN_BLOCK_SIZE, 100 - original.y)
+    if (gesture.corner.includes('e')) width = clamp(original.width + dx, minSize, 100 - original.x)
+    if (gesture.corner.includes('s')) height = clamp(original.height + dy, minSize, 100 - original.y)
     if (gesture.corner.includes('w')) {
-      x = clamp(original.x + dx, 0, original.x + original.width - MIN_BLOCK_SIZE)
+      x = clamp(original.x + dx, 0, original.x + original.width - minSize)
       width = original.width + original.x - x
     }
     if (gesture.corner.includes('n')) {
-      y = clamp(original.y + dy, 0, original.y + original.height - MIN_BLOCK_SIZE)
+      y = clamp(original.y + dy, 0, original.y + original.height - minSize)
       height = original.height + original.y - y
     }
     onChange(block.id, { x, y, width, height }, false)
@@ -465,8 +483,8 @@ function LayoutEditor({ factory, blocks, selectedId, editable, drawing, showBack
     const vertical = event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0
     if (event.altKey) {
       onChange(block.id, {
-        width: clamp(block.width + horizontal, 8, 100 - block.x),
-        height: clamp(block.height + vertical, 8, 100 - block.y),
+        width: clamp(block.width + horizontal, blockMinSize(block), 100 - block.x),
+        height: clamp(block.height + vertical, blockMinSize(block), 100 - block.y),
       })
       return
     }
@@ -514,12 +532,15 @@ function LayoutEditor({ factory, blocks, selectedId, editable, drawing, showBack
       {blocks.length === 0 && <div className="factory-layout-empty"><MapIcon size={34} /><strong>아직 배치 블록이 없습니다</strong><span>‘블록 추가’로 공장 공간을 직접 구성하세요.</span></div>}
       {blocks.map((block) => {
       const percent = Math.min(100, Math.round((block.current / Math.max(block.capacity, 1)) * 100))
+      const structure = isStructureBlock(block)
       return <button
         type="button"
-        className={`factory-layout-block${selectedId === block.id ? ' is-selected' : ''}`}
-        style={{ left: `${block.x}%`, top: `${block.y}%`, width: `${block.width}%`, height: `${block.height}%`, backgroundColor: layoutTokenColor(block) }}
+        className={`factory-layout-block${structure ? ` factory-structure factory-structure--${block.purpose === '벽' ? 'wall' : 'door'}` : ''}${selectedId === block.id ? ' is-selected' : ''}`}
+        style={{ left: `${block.x}%`, top: `${block.y}%`, width: `${block.width}%`, height: `${block.height}%`, ...(structure ? {} : { backgroundColor: layoutTokenColor(block) }) }}
         aria-pressed={selectedId === block.id}
-        aria-label={`${block.name}, ${block.purpose}, ${block.item || '품목 미등록'}, 위치 ${Math.round(block.x)} ${Math.round(block.y)}, 크기 ${Math.round(block.width)} ${Math.round(block.height)}`}
+        aria-label={structure
+          ? `${block.purpose}, 위치 ${Math.round(block.x)} ${Math.round(block.y)}, 크기 ${Math.round(block.width)} ${Math.round(block.height)}`
+          : `${block.name}, ${block.purpose}, ${block.item || '품목 미등록'}, 위치 ${Math.round(block.x)} ${Math.round(block.y)}, 크기 ${Math.round(block.width)} ${Math.round(block.height)}`}
         onClick={() => onSelect(block)}
         onPointerDown={(event) => onPointerDown(event, block)}
         onPointerMove={(event) => onPointerMove(event, block)}
@@ -528,10 +549,14 @@ function LayoutEditor({ factory, blocks, selectedId, editable, drawing, showBack
         onKeyDown={(event) => onKeyDown(event, block)}
         key={block.id}
       >
-        <span className="factory-layout-block__head"><ZoneIcon kind={block.zoneId} /><span><strong>{block.name}</strong><small>{block.purpose} · {block.kind}</small></span>{editable && <Move size={16} />}</span>
-        <span className="factory-layout-block__item">{block.item || '품목·설비 미등록'}</span>
-        <span className="factory-layout-block__quantity"><strong>{block.current.toLocaleString()} {block.unit}</strong><small>/ {block.capacity.toLocaleString()} {block.unit}</small></span>
-        <span className="factory-layout-block__meter"><i style={{ width: `${percent}%` }} /></span>
+        {structure ? (
+          block.purpose === '문' && <span className="factory-structure__label"><DoorOpen size={12} /> 문</span>
+        ) : <>
+          <span className="factory-layout-block__head"><ZoneIcon kind={block.zoneId} /><span><strong>{block.name}</strong><small>{block.purpose} · {block.kind}</small></span>{editable && <Move size={16} />}</span>
+          <span className="factory-layout-block__item">{block.item || '품목·설비 미등록'}</span>
+          <span className="factory-layout-block__quantity"><strong>{block.current.toLocaleString()} {block.unit}</strong><small>/ {block.capacity.toLocaleString()} {block.unit}</small></span>
+          <span className="factory-layout-block__meter"><i style={{ width: `${percent}%` }} /></span>
+        </>}
         {editable && selectedId === block.id && (['nw', 'ne', 'sw', 'se'] as ResizeCorner[]).map((corner) => <span
           className={`factory-resize-handle factory-resize-handle--${corner}`}
           aria-hidden="true"
@@ -570,25 +595,41 @@ function LayoutInspector({ block, canManage, onChange, onDelete }: {
     <div className="factory-layout-form">
       {field('블록 이름', <input value={block.name} disabled={!canManage} onChange={(event) => onChange({ name: event.target.value })} />)}
       <div className="factory-layout-form__row">
-        {field('공간 용도', <select value={block.purpose} disabled={!canManage} onChange={(event) => onChange({ purpose: event.target.value as LayoutPurpose })}><option>원료·자재</option><option>냉장·냉동</option><option>생산</option><option>포장</option><option>출하</option><option>통로</option><option>기타</option></select>)}
-        {field('위치 유형', <select value={block.kind} disabled={!canManage} onChange={(event) => onChange({ kind: event.target.value as LocationKind })}><option>재고</option><option>생산</option></select>)}
+        {field('공간 용도', <select value={block.purpose} disabled={!canManage} onChange={(event) => onChange({ purpose: event.target.value as LayoutPurpose })}><option>원료·자재</option><option>냉장·냉동</option><option>생산</option><option>포장</option><option>출하</option><option>통로</option><option>벽</option><option>문</option><option>기타</option></select>)}
+        {!isStructureBlock(block) && field('위치 유형', <select value={block.kind} disabled={!canManage} onChange={(event) => onChange({ kind: event.target.value as LocationKind })}><option>재고</option><option>생산</option></select>)}
       </div>
-      <div className="factory-layout-form__row">
+      {!isStructureBlock(block) && <div className="factory-layout-form__row">
         {field('연결 구역', <select value={block.zoneId} disabled={!canManage} onChange={(event) => onChange({ zoneId: event.target.value as ZoneKind })}><option value="raw">원료</option><option value="frozen">냉장·냉동</option><option value="production">생산</option><option value="packing">포장</option><option value="shipping">출하</option></select>)}
-        {field('블록 색상', <select value={layoutColorOptions.some((option) => option.value === block.color) ? block.color : 'var(--color-gray-200)'} disabled={!canManage} onChange={(event) => onChange({ color: event.target.value })}>{layoutColorOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>)}
-      </div>
+      </div>}
+      {!isStructureBlock(block) && <div className="factory-layout-field">
+        <span>블록 색상 <small>구역 성격에 맞게 구분하세요</small></span>
+        <div className="factory-color-swatches" role="group" aria-label="블록 색상 선택">
+          {layoutColorOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`factory-color-swatch${block.color === option.value ? ' is-selected' : ''}`}
+              title={option.label}
+              aria-label={option.label}
+              aria-pressed={block.color === option.value}
+              disabled={!canManage}
+              onClick={() => onChange({ color: option.value })}
+            ><i style={{ backgroundColor: option.value }} /></button>
+          ))}
+        </div>
+      </div>}
       <div className="factory-layout-size-grid" aria-label="블록 위치와 크기">
         {field('X', <input type="number" min="0" max={100 - block.width} step="1" value={Math.round(block.x)} disabled={!canManage} onChange={(event) => onChange({ x: Math.min(100 - block.width, Math.max(0, number(event.target.value, block.x))) })} />)}
         {field('Y', <input type="number" min="0" max={100 - block.height} step="1" value={Math.round(block.y)} disabled={!canManage} onChange={(event) => onChange({ y: Math.min(100 - block.height, Math.max(0, number(event.target.value, block.y))) })} />)}
-        {field('너비 %', <input type="number" min="8" max={100 - block.x} step="1" value={Math.round(block.width)} disabled={!canManage} onChange={(event) => onChange({ width: Math.min(100 - block.x, Math.max(8, number(event.target.value, block.width))) })} />)}
-        {field('높이 %', <input type="number" min="8" max={100 - block.y} step="1" value={Math.round(block.height)} disabled={!canManage} onChange={(event) => onChange({ height: Math.min(100 - block.y, Math.max(8, number(event.target.value, block.height))) })} />)}
+        {field('너비 %', <input type="number" min={blockMinSize(block)} max={100 - block.x} step="1" value={Math.round(block.width)} disabled={!canManage} onChange={(event) => onChange({ width: Math.min(100 - block.x, Math.max(blockMinSize(block), number(event.target.value, block.width))) })} />)}
+        {field('높이 %', <input type="number" min={blockMinSize(block)} max={100 - block.y} step="1" value={Math.round(block.height)} disabled={!canManage} onChange={(event) => onChange({ height: Math.min(100 - block.y, Math.max(blockMinSize(block), number(event.target.value, block.height))) })} />)}
       </div>
-      {field(block.kind === '생산' ? '생산 품목·설비' : '보관 품목', <input value={block.item} disabled={!canManage} placeholder="품목 또는 설비명" onChange={(event) => onChange({ item: event.target.value })} />)}
-      <div className="factory-layout-form__row three">
+      {!isStructureBlock(block) && field(block.kind === '생산' ? '생산 품목·설비' : '보관 품목', <input value={block.item} disabled={!canManage} placeholder="품목 또는 설비명" onChange={(event) => onChange({ item: event.target.value })} />)}
+      {!isStructureBlock(block) && <div className="factory-layout-form__row three">
         {field('현재량', <input type="number" min="0" value={block.current} disabled={!canManage} onChange={(event) => onChange({ current: Math.max(0, number(event.target.value, block.current)) })} />)}
         {field('수용량', <input type="number" min="1" value={block.capacity} disabled={!canManage} onChange={(event) => onChange({ capacity: Math.max(1, number(event.target.value, block.capacity)) })} />)}
         {field('단위', <select value={block.unit} disabled={!canManage} onChange={(event) => onChange({ unit: event.target.value })}><option>kg</option><option>ea</option><option>BOX</option><option>PLT</option><option>라인</option></select>)}
-      </div>
+      </div>}
       {field('운영 메모', <textarea rows={3} value={block.note} disabled={!canManage} onChange={(event) => onChange({ note: event.target.value })} />)}
     </div>
     {canManage && <button className={`factory-layout-delete${confirmDelete ? ' is-confirming' : ''}`} type="button" onClick={() => { if (confirmDelete) onDelete(); else setConfirmDelete(true) }} onBlur={() => setConfirmDelete(false)}><Trash2 size={16} />{confirmDelete ? '한 번 더 눌러 삭제' : '블록 삭제'}</button>}
@@ -1114,7 +1155,9 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
     const currentBlock = factoryBlocks.find((block) => block.id === id)
     if (!currentBlock) return
     const candidate = normalizeBlockGeometry({ ...currentBlock, ...patch })
-    const hasCollision = factoryBlocks.some((block) => block.id !== id && blocksOverlap(candidate, block))
+    // 벽·문은 공간을 두르는 구조물이므로 블록과 자유롭게 겹칠 수 있다.
+    const hasCollision = !isStructureBlock(candidate)
+      && factoryBlocks.some((block) => block.id !== id && !isStructureBlock(block) && blocksOverlap(candidate, block))
     if (hasCollision) {
       if (persist && Object.keys(patch).length > 0) onToast('다른 블록과 겹칠 수 없습니다. 빈 공간으로 이동하거나 크기를 줄여 주세요.')
       return
@@ -1127,9 +1170,13 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
     })
   }
 
-  const addBlock = async () => {
+  const addBlock = async (structure?: '벽' | '문') => {
     if (!canManage) return
-    const freePosition = findFreeBlockPosition(factoryBlocks, 24, 22)
+    const spaceBlocks = factoryBlocks.filter((block) => !isStructureBlock(block))
+    const size = structure === '벽' ? { width: 36, height: 2 } : structure === '문' ? { width: 7, height: 2 } : { width: 24, height: 22 }
+    const freePosition = structure
+      ? { x: 6, y: 4 }
+      : findFreeBlockPosition(spaceBlocks, size.width, size.height)
     if (!freePosition) {
       onToast('새 블록을 놓을 빈 공간이 없습니다. 기존 블록을 이동하거나 크기를 줄여 주세요.')
       return
@@ -1138,13 +1185,13 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
       id: `BLOCK-${Date.now()}`,
       factoryId: factory.id,
       zoneId: 'production',
-      name: '새 공간 블록',
-      purpose: '기타',
+      name: structure ?? '새 공간 블록',
+      purpose: structure ?? '기타',
       kind: '생산',
       x: freePosition.x,
       y: freePosition.y,
-      width: 24,
-      height: 22,
+      width: size.width,
+      height: size.height,
       color: 'var(--color-gray-200)',
       item: '',
       current: 0,
@@ -1156,7 +1203,11 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
     if (!result.ok) { if (result.message) onToast(result.message); return }
     selectBlock(next)
     setEditMode(true)
-    onToast('새 배치 블록을 추가했습니다. 위치와 크기를 조정해 주세요.')
+    onToast(structure === '벽'
+      ? '벽을 추가했습니다. 드래그로 위치를 잡고 모서리로 길이를 조정하세요.'
+      : structure === '문'
+        ? '문을 추가했습니다. 벽 위로 끌어다 놓으면 출입구가 표시됩니다.'
+        : '새 배치 블록을 추가했습니다. 위치와 크기를 조정해 주세요.')
   }
 
   const deleteSelectedBlock = async () => {
@@ -1264,7 +1315,9 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
           <div className="factory-layout-actions" role="group" aria-label="배치 편집 도구">
             {drawing?.kind === 'image' && <button type="button" className={showBackground ? 'is-active' : ''} aria-pressed={showBackground} onClick={() => setShowBackground((value) => !value)}><FileImage size={16} />배경 도면</button>}
             {canManage && <button type="button" className={editMode ? 'is-active' : ''} aria-pressed={editMode} onClick={() => setEditMode((value) => !value)}><MousePointer2 size={16} />{editMode ? '편집 종료' : '배치 편집'}</button>}
-            {canManage && <button type="button" className="is-primary" onClick={addBlock}><Plus size={16} />블록 추가</button>}
+            {canManage && <button type="button" onClick={() => void addBlock('벽')}><BrickWall size={16} />벽 추가</button>}
+            {canManage && <button type="button" onClick={() => void addBlock('문')}><DoorOpen size={16} />문 추가</button>}
+            {canManage && <button type="button" className="is-primary" onClick={() => void addBlock()}><Plus size={16} />블록 추가</button>}
           </div>
         </div>
 
@@ -1275,6 +1328,7 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
             </div>
             <div className="factory-legend" aria-label="배치도 범례">
               <strong><Palette size={14} /> 블록 색은 우측 속성에서 변경</strong>
+              <span><BrickWall size={14} /> 벽·문 추가로 공간 구획 표시</span>
               <span><Move size={14} /> 블록·배경 드래그 이동</span>
               <span><Layers3 size={14} /> 모서리·Alt+방향키 크기 조정</span>
               <span><ZoomIn size={14} /> 휠·+/− 확대/축소</span>

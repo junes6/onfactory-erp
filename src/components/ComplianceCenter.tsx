@@ -39,6 +39,21 @@ function complianceStatusTone(status: ComplianceStatus): StatusBadgeTone {
   return 'neutral'
 }
 
+/** 내부 상태값을 누구나 이해할 수 있는 표현으로 바꾼다. */
+function complianceStatusLabel(status: ComplianceStatus) {
+  if (status === '유효') return '정상'
+  if (status === '갱신예정') return '갱신 준비'
+  if (status === '보완필요') return '증빙 필요'
+  return '만료됨'
+}
+
+function complianceNextStep(status: ComplianceStatus) {
+  if (status === '보완필요') return '인증서·성적서 파일을 첨부하면 정상으로 바뀝니다. 아래 수정 버튼을 눌러 증빙자료를 올려 주세요.'
+  if (status === '갱신예정') return '다음 검토일이 90일 이내로 다가왔습니다. 발급 기관에 갱신 신청을 미리 준비하세요.'
+  if (status === '만료') return '유효기간이 지났습니다. 재발급 받은 뒤 새 인증서와 검토일을 등록해 주세요.'
+  return '지금 필요한 조치가 없습니다. 다음 검토일까지 그대로 두면 됩니다.'
+}
+
 const complianceCategories: ComplianceCategoryMeta[] = [
   { id: 'HACCP', label: 'HACCP', icon: ShieldCheck, tone: 'forest' },
   { id: '자가품질검사', label: '자가품질', icon: Microscope, tone: 'blue' },
@@ -296,33 +311,50 @@ export function ComplianceCenter({ workspaceScope, canManage, companyName, onToa
   }
   return <div className="compliance-page">
     <header className="compliance-page-head"><div><span>FOOD SAFETY & CERTIFICATION</span><h1>식품안전 · 인증</h1><p>인증·검사·교육·검교정 일정과 증빙을 항목별로 빠르게 확인합니다.</p></div>{canManage && <button className="button primary" type="button" onClick={() => setEditing('new')}><Plus size={18} /> 새 항목 등록</button>}</header>
-    <section className="compliance-overview" aria-label="인증 현황">
-      <div className="compliance-overview-stat"><ShieldCheck size={18} /><span>전체</span><strong>{records.length}</strong></div>
-      <div className="compliance-overview-stat"><CheckCircle2 size={18} /><span>유효</span><strong>{records.filter((item) => item.status === '유효').length}</strong></div>
-      <div className="compliance-overview-stat warning"><CalendarClock size={18} /><span>조치 필요</span><strong>{needsAction.length}</strong></div>
-      <button className="compliance-ai-button" type="button" onClick={runAiReview} disabled={aiBusy}><Bot size={18} /><span><strong>{aiBusy ? '분석 중…' : 'AI 우선 조치'}</strong><small>일정·증빙 검토</small></span></button>
+
+    <section className="compliance-topline" aria-label="인증 현황 요약">
+      <span><ShieldCheck size={16} /> 전체 <strong>{records.length}</strong></span>
+      <i aria-hidden="true" />
+      <span className="is-good"><CheckCircle2 size={16} /> 정상 <strong>{records.filter((item) => item.status === '유효').length}</strong></span>
+      <i aria-hidden="true" />
+      <span className={needsAction.length ? 'is-warn' : ''}><CalendarClock size={16} /> 조치 필요 <strong>{needsAction.length}</strong></span>
+      <button type="button" onClick={runAiReview} disabled={aiBusy}><Bot size={16} /> {aiBusy ? '분석 중…' : 'AI 우선 조치'}</button>
     </section>
+
+    {needsAction.length > 0 && <section className="compliance-action-strip" aria-label="지금 조치가 필요한 항목">
+      <div className="compliance-action-head"><AlertTriangle size={17} /><strong>지금 조치가 필요한 항목</strong><span>{needsAction.length}건</span></div>
+      <div className="compliance-action-list">
+        {needsAction.slice(0, 4).map((record) => <button type="button" key={record.id} onClick={() => { setCategory('전체'); setSelectedRecordId(record.id) }}>
+          <StatusBadge className="compliance-status" tone={complianceStatusTone(record.status)}>{complianceStatusLabel(record.status)}</StatusBadge>
+          <strong>{record.name}</strong>
+          <small>{record.status === '만료' ? '유효기간 지남' : record.status === '보완필요' ? '증빙자료 첨부 필요' : `다음 검토일 ${record.expiresAt}`}</small>
+          <ChevronRight size={15} />
+        </button>)}
+      </div>
+    </section>}
+
     {aiResult && <section className="compliance-ai-result"><div><Bot size={21} /><strong>AI 검토 결과</strong></div><p>{aiResult}</p><button type="button" aria-label="AI 검토 결과 닫기" onClick={() => setAiResult('')}><X size={17} /></button></section>}
-    <section className="compliance-category-grid" aria-label="관리 분야">
-      {complianceCategories.map((item) => {
-        const Icon = item.icon
-        const count = records.filter((record) => categoryMeta(record.category).id === item.id).length
-        return <button type="button" className={`${item.tone}${category === item.id ? ' active' : ''}`} aria-pressed={category === item.id} onClick={() => selectCategory(item.id)} key={item.id}><span><Icon size={18} /></span><div><strong>{item.label}</strong><small>{count}건</small></div><ChevronRight size={15} /></button>
-      })}
-    </section>
+
     <section className="compliance-workspace">
       <div className="compliance-list-panel">
-        <div className="compliance-toolbar"><label><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="인증·검사·담당자 검색" /></label><button type="button" className={category === '전체' ? 'active' : ''} onClick={() => selectCategory('전체')}>전체 {records.length}</button></div>
+        <div className="compliance-toolbar"><label><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="인증·검사·담당자 검색" /></label></div>
+        <div className="compliance-category-chips" role="group" aria-label="관리 분야 필터">
+          <button type="button" className={category === '전체' ? 'active' : ''} aria-pressed={category === '전체'} onClick={() => selectCategory('전체')}>전체 <em>{records.length}</em></button>
+          {complianceCategories.map((item) => {
+            const count = records.filter((record) => categoryMeta(record.category).id === item.id).length
+            return <button type="button" className={category === item.id ? 'active' : ''} aria-pressed={category === item.id} onClick={() => selectCategory(item.id)} key={item.id}>{item.label} <em>{count}</em></button>
+          })}
+        </div>
         <div className="compliance-list" aria-label="인증·검토 항목">
           {visible.map((record) => {
             const meta = categoryMeta(record.category)
             const Icon = meta.icon
             const selected = selectedRecord?.id === record.id
-            return <article className={selected ? 'selected' : ''} key={record.id}>
+            return <article className={`status-${complianceStatusTone(record.status)}${selected ? ' selected' : ''}`} key={record.id}>
               <button className="compliance-record-select" type="button" aria-pressed={selected} onClick={() => setSelectedRecordId(record.id)}>
                 <span className={`compliance-record-icon ${meta.tone}`}><Icon size={19} /></span>
-                <span className="compliance-record-main"><small>{record.category}</small><strong>{record.name}</strong><em>{record.owner} · {record.expiresAt}</em></span>
-                <StatusBadge className="compliance-status" tone={complianceStatusTone(record.status)} icon={record.status === '갱신예정' || record.status === '보완필요' ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}>{record.status}</StatusBadge>
+                <span className="compliance-record-main"><small>{record.category}</small><strong>{record.name}</strong><em>{record.owner} · 다음 검토 {record.expiresAt}</em></span>
+                <StatusBadge className="compliance-status" tone={complianceStatusTone(record.status)} icon={record.status === '갱신예정' || record.status === '보완필요' ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}>{complianceStatusLabel(record.status)}</StatusBadge>
                 <ChevronRight className="compliance-row-chevron" size={17} />
               </button>
               {canManage && <div className="compliance-row-actions"><button type="button" aria-label={`${record.name} 수정`} onClick={() => setEditing(record)}><Pencil size={15} /></button><button className="danger" type="button" aria-label={`${record.name} 삭제`} onClick={() => void remove(record)}><Trash2 size={15} /></button></div>}
@@ -336,7 +368,8 @@ export function ComplianceCenter({ workspaceScope, canManage, companyName, onToa
           const meta = categoryMeta(selectedRecord.category)
           const Icon = meta.icon
           return <>
-            <header><span className={`compliance-record-icon ${meta.tone}`}><Icon size={21} /></span><div><small>{selectedRecord.category}</small><h2>{selectedRecord.name}</h2></div><StatusBadge className="compliance-status" tone={complianceStatusTone(selectedRecord.status)}>{selectedRecord.status}</StatusBadge></header>
+            <header><span className={`compliance-record-icon ${meta.tone}`}><Icon size={21} /></span><div><small>{selectedRecord.category}</small><h2>{selectedRecord.name}</h2></div><StatusBadge className="compliance-status" tone={complianceStatusTone(selectedRecord.status)}>{complianceStatusLabel(selectedRecord.status)}</StatusBadge></header>
+            <div className={`compliance-next-step tone-${complianceStatusTone(selectedRecord.status)}`}><ClipboardCheck size={17} /><div><strong>지금 할 일</strong><p>{complianceNextStep(selectedRecord.status)}</p></div></div>
             <dl className="compliance-detail-meta"><div><dt>발급·검토 기관</dt><dd>{selectedRecord.authority}</dd></div><div><dt>관리번호</dt><dd>{selectedRecord.certificateNo}</dd></div><div><dt>담당자</dt><dd>{selectedRecord.owner}</dd></div><div><dt>다음 검토일</dt><dd>{selectedRecord.expiresAt}</dd></div></dl>
             <section><div className="compliance-detail-section-title"><ClipboardCheck size={16} /><strong>필수 확인 항목</strong><span>{selectedRecord.checklist.length}</span></div><ul className="compliance-checklist">{selectedRecord.checklist.map((item) => <li key={item}><CheckCircle2 size={15} />{item}</li>)}{selectedRecord.checklist.length === 0 && <li className="empty">등록된 확인 항목이 없습니다.</li>}</ul></section>
             <section><div className="compliance-detail-section-title"><FileText size={16} /><strong>증빙자료</strong><span>{selectedRecord.attachments.length}</span></div><div className="compliance-detail-files">{selectedRecord.attachments.map((attachment) => <button type="button" disabled={!isStoredDocumentAttachment(attachment) || Boolean(downloadingId)} onClick={() => void downloadAttachment(attachment)} key={attachment.id}><FileText size={15} /><span><strong>{attachment.name}</strong><small>{attachment.size}{!isStoredDocumentAttachment(attachment) ? ' · 원본 없음' : ''}</small></span>{isStoredDocumentAttachment(attachment) && <Download size={15} />}</button>)}{selectedRecord.attachments.length === 0 && <p>등록된 증빙자료가 없습니다.</p>}</div></section>

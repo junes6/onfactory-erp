@@ -131,10 +131,20 @@ test('two tabs sending the same revision keep the losing tab dirty and retry abo
 
 test('manual journal writes lock all editable inputs until the request settles', () => {
   assert.match(collaborationSource, /journalManualSavingRef\.current = true/)
-  assert.match(collaborationSource, /disabled=\{journalManualSaving\}[\s\S]*?onChange=\{\(event\) => updateEditor\('completed'/)
-  assert.match(collaborationSource, /value=\{editor\.issue\} disabled=\{journalManualSaving\}/)
-  assert.match(collaborationSource, /type="file" multiple disabled=\{journalManualSaving\}/)
+  assert.match(collaborationSource, /const applyBlocks = \(key: 'completed' \| 'issue'/)
+  assert.match(collaborationSource, /applyBlocks = [\s\S]*?journalManualSavingRef\.current\) return/)
+  assert.match(collaborationSource, /disabled=\{journalManualSaving\}[\s\S]*?data-journal-block=/)
+  assert.match(collaborationSource, /type="file"[^>]*multiple disabled=\{journalManualSaving\}/)
   assert.match(collaborationSource, /journalManualSavingRef\.current = false/)
+})
+
+test('journal block inputs never transform the typed value (IME-safe)', () => {
+  // 한글 조합이 끊기던 원인: onChange에서 입력값을 normalize해 다시 쓰던 것.
+  // 블록 입력은 값을 그대로 저장하고 직렬화 시에만 불릿을 붙인다.
+  assert.doesNotMatch(collaborationSource, /onChange=\{\(event\) => updateEditor\('completed', normalizeJournalBullets/)
+  assert.match(collaborationSource, /next\[index\] = event\.target\.value; applyBlocks\(key, next\)/)
+  assert.match(collaborationSource, /function serializeJournalBlocks/)
+  assert.match(collaborationSource, /event\.nativeEvent\.isComposing/)
 })
 
 test('an AI draft cannot replace input changed while generation is pending', () => {

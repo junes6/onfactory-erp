@@ -1,13 +1,24 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import {
-  ArrowLeft, Check, ChevronRight, Eye, EyeOff, KeyRound, Laptop,
-  LockKeyhole, LogIn, Mail, Moon, ShieldCheck, Smartphone, Sun, Type, X,
+  Accessibility, ArrowLeft, Check, ChevronRight, Eye, EyeOff, KeyRound, Laptop,
+  LockKeyhole, LogIn, Mail, Moon, Palette, ShieldCheck, Smartphone, Sun, Type, X,
 } from 'lucide-react'
 import { OnFactoryMark } from './AppIcons'
 
 export type ThemeChoice = 'light' | 'dark' | 'system'
 export type FontChoice = 'standard' | 'large' | 'extra'
 export type DensityChoice = 'comfortable' | 'compact'
+export type AccentChoice = 'blue' | 'green' | 'violet' | 'teal' | 'rose' | 'navy'
+export type EasyModeChoice = 'standard' | 'easy'
+
+export const accentOptions: Array<{ id: AccentChoice; label: string }> = [
+  { id: 'blue', label: '파랑' },
+  { id: 'green', label: '초록' },
+  { id: 'violet', label: '보라' },
+  { id: 'teal', label: '청록' },
+  { id: 'rose', label: '자주' },
+  { id: 'navy', label: '남색' },
+]
 
 type LoginPageProps = {
   onLogin: (credentials: { workspace: 'tenant' | 'platform'; email: string; password: string; remember: boolean }) => Promise<{ ok: boolean; message: string }>
@@ -229,13 +240,17 @@ type SettingsDrawerProps = {
   theme: ThemeChoice
   fontSize: FontChoice
   density: DensityChoice
+  accent: AccentChoice
+  easyMode: EasyModeChoice
   onThemeChange: (value: ThemeChoice) => void
   onFontSizeChange: (value: FontChoice) => void
   onDensityChange: (value: DensityChoice) => void
+  onAccentChange: (value: AccentChoice) => void
+  onEasyModeChange: (value: EasyModeChoice) => void
   onLogout: () => void
 }
 
-export function SettingsDrawer({ open, onClose, profileName, profileRole, companyName, theme, fontSize, density, onThemeChange, onFontSizeChange, onDensityChange, onLogout }: SettingsDrawerProps) {
+export function SettingsDrawer({ open, onClose, profileName, profileRole, companyName, theme, fontSize, density, accent, easyMode, onThemeChange, onFontSizeChange, onDensityChange, onAccentChange, onEasyModeChange, onLogout }: SettingsDrawerProps) {
   const drawerRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
@@ -275,6 +290,24 @@ export function SettingsDrawer({ open, onClose, profileName, profileRole, compan
         <div className="font-preview"><span>가</span><span>가</span><span>가</span></div>
         <div className="setting-segmented" role="group" aria-label="글자 크기">
           {([['standard', '기본'], ['large', '크게'], ['extra', '아주 크게']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={fontSize === value} onClick={() => onFontSizeChange(value)}>{label}</button>)}
+        </div>
+      </section>
+      <section className="setting-section">
+        <div className="setting-section-title"><Palette size={19} /><div><h3>포인트 컬러</h3><p>버튼과 강조 표시에 쓰는 색을 고르세요.</p></div></div>
+        <div className="setting-accent-grid" role="group" aria-label="포인트 컬러 선택">
+          {accentOptions.map((option) => (
+            <button key={option.id} type="button" className={`setting-accent-swatch accent-${option.id}${accent === option.id ? ' selected' : ''}`} aria-pressed={accent === option.id} onClick={() => onAccentChange(option.id)}>
+              <i aria-hidden="true">{accent === option.id && <Check size={15} />}</i>
+              <span>{option.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+      <section className="setting-section">
+        <div className="setting-section-title"><Accessibility size={19} /><div><h3>쉬운 화면</h3><p>글자와 버튼을 크게, 영문 표기를 줄여 누구나 보기 쉽게 바꿉니다.</p></div></div>
+        <div className="setting-segmented" role="group" aria-label="쉬운 화면 모드">
+          <button type="button" aria-pressed={easyMode === 'standard'} onClick={() => onEasyModeChange('standard')}>기본 화면</button>
+          <button type="button" aria-pressed={easyMode === 'easy'} onClick={() => onEasyModeChange('easy')}>쉬운 화면</button>
         </div>
       </section>
       <section className="setting-section">

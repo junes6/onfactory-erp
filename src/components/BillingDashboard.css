@@ -1,4 +1,4 @@
-.billing-root {
+﻿.billing-root {
   min-width: 0;
   padding: var(--space-0);
   color: var(--ink);
@@ -107,7 +107,7 @@
 .billing-head__controls button:hover,
 .billing-notice button:hover { border-color: var(--forest); background: var(--forest-soft); }
 .billing-head__controls button.billing-primary,
-.billing-config-form > button { border-color: var(--forest-dark); color: var(--color-surface); background: var(--forest-dark); }
+.billing-config-form > button { border-color: var(--forest-dark); color: var(--color-white); background: var(--forest-dark); }
 .billing-head__controls button:disabled,
 .billing-config-form > button:disabled { opacity: .5; cursor: not-allowed; }
 

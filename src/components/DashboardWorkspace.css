@@ -1,4 +1,4 @@
-.dashboard-layout-trigger { white-space: nowrap; }
+﻿.dashboard-layout-trigger { white-space: nowrap; }
 .dashboard-widget-grid { display: grid; grid-template-columns: repeat(12,minmax(0,1fr)); align-items: start; gap: var(--dashboard-spacing); }
 .dashboard-widget { min-width: 0; }
 .dashboard-widget-half { grid-column: span 4; }
@@ -48,7 +48,7 @@
 .dashboard-link-item a > span.violet { color: var(--color-blue); background: var(--color-blue-soft); }
 .dashboard-link-item a strong { overflow: hidden; font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
 .dashboard-link-manage-actions { position: absolute; z-index: 1; top: calc(var(--space-4) * -1); right: calc(var(--space-4) * -1); display: flex; gap: var(--space-4); }
-.dashboard-link-manage-actions button { width: 30px; height: 30px; display: grid; place-items: center; border: none; border-radius: var(--radius-8); color: var(--color-surface); background: var(--color-blue); box-shadow: var(--shadow-none); cursor: pointer; }
+.dashboard-link-manage-actions button { width: 30px; height: 30px; display: grid; place-items: center; border: none; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-blue); box-shadow: var(--shadow-none); cursor: pointer; }
 .dashboard-link-manage-actions button:last-child { background: var(--color-danger); }
 .dashboard-link-empty { place-items: center; grid-template-columns: auto 1fr; color: var(--muted); border-style: dashed; cursor: pointer; }
 .dashboard-link-form { display: grid; grid-template-columns: 1fr 1.4fr 110px auto; align-items: end; gap: var(--space-8); margin-top: var(--space-12); padding-top: var(--space-12); border-top: var(--hairline) solid var(--line); }

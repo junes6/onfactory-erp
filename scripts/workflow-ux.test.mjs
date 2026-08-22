@@ -15,22 +15,23 @@ test('업무 내부 상태는 쉬운 표시 문구로 변환한다', () => {
     ['결재대기', '확인 기다리는 중'],
     ['결재완료', '완료'],
   ]) assert.match(appSource, new RegExp(`'${internal}': '${display}'`))
-  assert.doesNotMatch(workPageSource, />\{selectedItem\.status\}</)
+  assert.doesNotMatch(workPageSource, />\{drawerItem\.status\}</)
 })
 
-test('업무 행은 상태별 행동 버튼 하나만 제공하고 상세에는 중복 버튼이 없다', () => {
-  for (const label of ['시작하기', '완료 보고하기', '고쳐서 다시 내기', '확인하기']) assert.match(workPageSource, new RegExp(`'${label}'`))
-  assert.doesNotMatch(workPageSource, /workflow-detail-primary-action/)
-  assert.match(workPageSource, /event\.stopPropagation\(\); setSelectedWorkId\(item\.id\); runRowAction\(item\)/)
-  assert.match(stylesSource, /\.workflow-row-list > article \{[\s\S]*?height: 64px;/)
+test('보드는 4단계 칼럼과 카드별 기본 행동 버튼 하나를 제공한다', () => {
+  for (const label of ['요청됨', '진행 중', '결재 대기', '완료']) assert.match(workPageSource, new RegExp(`label: '${label}'`))
+  for (const label of ['업무 시작', '완료 보고', '보완 후 재제출', '검토하기']) assert.match(workPageSource, new RegExp(`'${label}'`))
+  assert.match(workPageSource, /event\.stopPropagation\(\); action\.run\(\)/)
+  assert.match(stylesSource, /\.workflow-board \{ display: grid; grid-template-columns: repeat\(4,minmax\(0,1fr\)\)/)
+  assert.match(stylesSource, /\.workflow-card-action \{/)
 })
 
-test('업무 행의 키보드 상세 열기는 자식 행동 버튼의 Enter·Space를 가로채지 않는다', () => {
-  assert.match(workPageSource, /onKeyDown=\{\(event\) => \{ if \(event\.target !== event\.currentTarget\) return; if \(event\.key === 'Enter' \|\| event\.key === ' '\)/)
+test('업무 카드의 키보드 상세 열기는 자식 행동 버튼의 Enter·Space를 가로채지 않는다', () => {
+  assert.match(workPageSource, /onKeyDown=\{\(event\) => \{ if \(event\.target === event\.currentTarget && \(event\.key === 'Enter' \|\| event\.key === ' '\)\)/)
 })
 
 test('시작부터 완료 제출까지 3클릭 흐름을 유지한다', () => {
-  assert.match(workPageSource, /status === '업무요청'\) \{ void onTransition\(item\.id, 'accept'\)/)
+  assert.match(workPageSource, /item\.status === '업무요청'\) return \{ label: '업무 시작', run: \(\) => void onTransition\(item\.id, 'accept'\) \}/)
   assert.match(workPageSource, /setDialog\(\{ type: 'completion', item \}\)/)
   assert.match(completionSource, /<h2 id="completion-modal-title">완료 보고하기<\/h2>/)
   assert.match(completionSource, /무엇을 했나요\? <em>필수<\/em>/)
@@ -39,11 +40,11 @@ test('시작부터 완료 제출까지 3클릭 흐름을 유지한다', () => {
   assert.match(completionSource, /> 제출<\/button>/)
 })
 
-test('최신 보완 사유와 완료 기준은 상세에서만 조건부 표시한다', () => {
-  assert.equal((workPageSource.match(/selectedItem\.review\?\.requestedChanges/g) ?? []).length, 1)
-  assert.match(workPageSource, /explicitCompletionCriteria\(selectedItem\) && <section/)
+test('최신 보완 사유와 완료 기준은 상세 드로어에서만 조건부 표시한다', () => {
+  assert.equal((workPageSource.match(/drawerItem\.review\?\.requestedChanges/g) ?? []).length, 1)
+  assert.match(workPageSource, /explicitCompletionCriteria\(drawerItem\) && <section/)
   assert.doesNotMatch(completionSource, /수정 요청 내용/)
-  assert.match(workPageSource, /<details className="workflow-detail-history"/)
+  assert.match(workPageSource, /aria-label="진행 이력"/)
 })
 
 test('새 업무 지시는 필수 3칸과 접힌 선택 항목으로 구성한다', () => {

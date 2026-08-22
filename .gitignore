@@ -14,3 +14,6 @@ vite.config.d.ts
 .dev.vars*
 .sites-build/
 supabase/.temp/
+
+# Claude Code local launch config (machine-specific paths)
+.claude/

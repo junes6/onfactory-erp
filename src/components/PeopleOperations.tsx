@@ -175,7 +175,6 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
   const [editingLeaveId, setEditingLeaveId] = useState<string | null>(null)
   const [modal, setModal] = useState<PeopleModal | null>(null)
   const [selectedProfile, setSelectedProfile] = useState<MemberProfile | null>(null)
-  const [scheduleSnapshot, setScheduleSnapshot] = useState<{ checkedAt: string; activeAccounts: number; approvedLeaves: number } | null>(null)
   const [confirmAccrual, setConfirmAccrual] = useState(false)
   const modalRef = useRef<HTMLElement>(null)
   const modalTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -295,6 +294,26 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
     ?? { accountId: currentUserId, name: currentUserName, team: currentUserTeam, total: 0, used: 0, updatedAt: '미등록' }
   const myRemaining = Math.max(0, myBalance.total - myBalance.used)
   const myLedger = leaveManagement.ledger.filter((entry) => entry.name === '전 구성원' || (entry.accountId ? entry.accountId === currentUserId : entry.name === currentUserName))
+  const todayKey = seoulDateInputValue()
+  const leaveRangeOf = (leave: LeaveRequest): [string, string] => {
+    const start = leave.startDate ?? (/^\d{4}-\d{2}-\d{2}/.test(leave.period) ? leave.period.slice(0, 10) : '')
+    const end = leave.endDate ?? (leave.period.includes('~') ? leave.period.slice(-10).trim() : start)
+    return [start, end || start]
+  }
+  const approvedLeaveToday = (accountId: string | undefined, name: string) => leaves.find((leave) => {
+    if (leave.status !== '승인') return false
+    if (accountId && leave.requesterId ? leave.requesterId !== accountId : leave.name !== name) return false
+    const [start, end] = leaveRangeOf(leave)
+    return Boolean(start) && start <= todayKey && todayKey <= end
+  })
+  const upcomingLeaves = useMemo(() => visibleLeaves
+    .filter((leave) => {
+      if (leave.status !== '승인') return false
+      const [, end] = leaveRangeOf(leave)
+      return end >= todayKey
+    })
+    .sort((left, right) => leaveRangeOf(left)[0].localeCompare(leaveRangeOf(right)[0]))
+    .slice(0, 12), [visibleLeaves, todayKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const peopleRows = useMemo<MemberProfile[]>(() => {
     const members = directoryMembers.map((member) => ({
       accountId: member.id,
@@ -303,26 +322,16 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       role: member.role,
       team: member.team,
       work: '현재 배정 업무 없음',
-      attendance: member.id === currentUserId ? '현재 로그인' : '근무 상태 미연동',
+      attendance: approvedLeaveToday(member.id, member.name) ? '휴가중' : member.id === currentUserId ? '현재 로그인' : '근무 상태 미연동',
       permission: member.role,
     }))
     if (members.some((person) => person.accountId === currentUserId || person.name === currentUserName)) return members
-    const current: MemberProfile = { accountId: currentUserId, name: currentUserName, role: canManage ? '운영 관리자' : '일반 사용자', team: currentUserTeam, work: '현재 배정 업무 없음', attendance: '현재 로그인', permission: canManage ? '관리 권한' : '일반 사용자' }
+    const current: MemberProfile = { accountId: currentUserId, name: currentUserName, role: canManage ? '운영 관리자' : '일반 사용자', team: currentUserTeam, work: '현재 배정 업무 없음', attendance: approvedLeaveToday(currentUserId, currentUserName) ? '휴가중' : '현재 로그인', permission: canManage ? '관리 권한' : '일반 사용자' }
     return [current, ...members]
-  }, [canManage, currentUserId, currentUserName, currentUserTeam, directoryMembers, managedAccounts])
+  }, [canManage, currentUserId, currentUserName, currentUserTeam, directoryMembers, managedAccounts, leaves]) // eslint-disable-line react-hooks/exhaustive-deps
   const selectedProfileAccountId = selectedProfile?.accountId
   const selectedProfileBalance = selectedProfile ? leaveManagement.balances.find((balance) => selectedProfileAccountId && balance.accountId ? balance.accountId === selectedProfileAccountId : balance.name === selectedProfile.name) : undefined
   const selectedProfileLeaves = selectedProfile ? leaves.filter((leave) => selectedProfileAccountId && leave.requesterId ? leave.requesterId === selectedProfileAccountId : leave.name === selectedProfile.name) : []
-
-  const refreshScheduleSnapshot = () => {
-    const next = {
-      checkedAt: new Date().toISOString(),
-      activeAccounts: peopleRows.filter((person) => person.attendance !== '휴가').length,
-      approvedLeaves: leaves.filter((leave) => leave.status === '승인').length,
-    }
-    setScheduleSnapshot(next)
-    onToast('승인 휴가와 활성 계정으로 근무표 화면을 다시 계산했습니다. 외부 근태 단말·공유 일정 연동은 별도 설정이 필요합니다.')
-  }
 
   const setPolicyMode = async (mode: LeaveAccrualMode) => {
     if (!canManage) return
@@ -542,10 +551,6 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       return
     }
     if (!approverId) { onToast('휴가 결재자를 선택해 주세요.'); return }
-    if ((leaveType === '연차' || leaveType === '반차') && requestedDays > myRemaining) {
-      onToast(`남은 휴가 ${myRemaining.toFixed(1)}일보다 많이 신청할 수 없습니다.`)
-      return
-    }
     setIsSubmittingLeave(true)
     try {
       const response = await fetch(editingLeaveId ? `/api/leave-requests/${encodeURIComponent(editingLeaveId)}` : '/api/leave-requests', {
@@ -636,20 +641,31 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
     </div>
 
     {canManage && tab === 'members' && <section className="people-content-card" role="tabpanel">
-      <header><div><h2>구성원 현황</h2><p>근무 상태와 현재 업무, 권한을 함께 확인합니다.</p></div><button className="button ghost" type="button" onClick={refreshScheduleSnapshot}><Clock3 size={17} /> 근무표 동기화</button></header>
-      {scheduleSnapshot && <div className="people-sync-status" role="status"><span><RefreshCw size={18} /></span><div><strong>로컬 근무표 재계산 완료</strong><p>{formatDateTime(scheduleSnapshot.checkedAt)} · 근무 계정 {scheduleSnapshot.activeAccounts}명 · 승인 휴가 {scheduleSnapshot.approvedLeaves}건 반영</p></div><em>외부 근태·공유 일정 API 미연결</em></div>}
+      <header><div><h2>구성원 현황</h2><p>근무 상태와 현재 업무, 권한을 함께 확인합니다. 승인된 휴가는 자동으로 근무 상태에 반영됩니다.</p></div></header>
       <div className="people-directory-list">{peopleRows.length === 0 && <div className="people-empty-state"><Users size={22} /><strong>등록된 구성원 프로필이 없습니다.</strong><span>구성원 초대에서 실제 로그인 계정을 먼저 생성하세요.</span></div>}{peopleRows.map((person) => <article key={person.accountId ?? person.name}>
         <span className="person-avatar large">{person.name.slice(0, 1)}</span>
         <div className="people-directory-name"><strong>{person.name}</strong><span>{person.role} · {person.team}</span></div>
         <div><small>현재 업무</small><strong>{person.work}</strong></div>
         <div><small>접근 권한</small><strong>{person.permission}</strong></div>
-        <StateBadge tone={person.attendance === '근무중' ? 'good' : 'neutral'}>{person.attendance}</StateBadge>
+        <StateBadge tone={person.attendance === '휴가중' ? 'warning' : person.attendance === '근무중' || person.attendance === '현재 로그인' ? 'good' : 'neutral'}>{person.attendance}</StateBadge>
         <button className="small-button" type="button" onClick={(event) => openModal('profile', event.currentTarget, person)}>프로필</button>
       </article>)}</div>
     </section>}
 
     {tab === 'leave' && <section className="people-content-card" role="tabpanel">
-      <header><div><h2>{canManage ? '휴가 신청 · 결재' : '내 휴가 신청'}</h2><p>{canManage ? '승인되면 공유 일정과 근무표에 자동 반영됩니다.' : '내 신청 내역만 표시되며, 승인 상태가 변경되면 즉시 확인할 수 있습니다.'}</p></div><button className="button primary" type="button" onClick={(event) => openModal('leave', event.currentTarget)}><Plus size={17} /> 휴가 신청</button></header>
+      <header><div><h2>{canManage ? '휴가 신청 · 결재' : '내 휴가 신청'}</h2><p>{canManage ? '승인되면 공유 일정과 근무 상태에 자동 반영됩니다.' : '내 신청 내역만 표시되며, 승인 상태가 변경되면 즉시 확인할 수 있습니다.'}</p></div><button className="button primary" type="button" onClick={(event) => openModal('leave', event.currentTarget)}><Plus size={17} /> 휴가 신청</button></header>
+      {upcomingLeaves.length > 0 && <div className="leave-upcoming-strip" aria-label="오늘과 예정된 승인 휴가">
+        <div className="leave-upcoming-head"><CalendarDays size={17} /><strong>{canManage ? '오늘·예정 휴가' : '내 예정 휴가'}</strong><span>{upcomingLeaves.length}건</span></div>
+        <div className="leave-upcoming-list">{upcomingLeaves.map((leave) => {
+          const [start, end] = leaveRangeOf(leave)
+          const onLeaveNow = start <= todayKey && todayKey <= end
+          return <article className={onLeaveNow ? 'is-active' : ''} key={leave.id}>
+            <span className="person-avatar">{leave.name.slice(0, 1)}</span>
+            <div><strong>{leave.name}</strong><small>{leave.type} · {leave.period} · {leave.days}일</small></div>
+            <em>{onLeaveNow ? '휴가중' : `${Math.max(0, Math.ceil((new Date(`${start}T00:00:00Z`).getTime() - new Date(`${todayKey}T00:00:00Z`).getTime()) / 86_400_000))}일 후`}</em>
+          </article>
+        })}</div>
+      </div>}
       <div className="approval-list">{visibleLeaves.length === 0 && <div className="people-empty-state"><CalendarDays size={22} /><strong>아직 휴가 신청 내역이 없습니다.</strong><span>휴가 신청 버튼을 눌러 첫 신청을 등록하세요.</span></div>}{visibleLeaves.map((request) => <article key={request.id}>
         <div className="approval-avatar">{request.name.slice(0, 1)}</div>
         <div className="approval-main"><div><strong>{request.name}</strong><span>{request.team} · {request.id}</span></div><h3>{request.type} · {request.period}</h3><p>{request.reason} · {request.days}일 · 결재자 {request.approverName ?? '소속 관리자'}{request.status === '승인' && request.calendarVisibility === 'company' ? ' · 전사 일정 공유' : ''}</p></div>
@@ -697,6 +713,7 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
           <div className="form-grid"><label className="form-field"><span>휴가 유형</span><select name="type" value={leaveType} data-autofocus onChange={(event) => { const next = event.target.value; setLeaveType(next); if (next === '반차') setLeaveEndDate(leaveStartDate) }}><option>연차</option><option>반차</option><option>공가</option><option>병가</option><option>경조휴가</option><option>기타</option></select></label><label className="form-field"><span>결재자</span><select name="approverId" required value={leaveApproverId} onChange={(event) => setLeaveApproverId(event.target.value)}><option value="" disabled>{leaveApprovers.length ? '결재자 선택' : '결재자 불러오는 중…'}</option>{leaveApprovers.map((approver) => <option value={approver.id} key={approver.id}>{approver.name} · {approver.team}</option>)}</select></label></div>
           <div className="form-grid"><label className="form-field"><span>시작일</span><input type="date" value={leaveStartDate} required onChange={(event) => { const next = event.target.value; setLeaveStartDate(next); if (leaveType === '반차' || leaveEndDate < next) setLeaveEndDate(next) }} /></label><label className="form-field"><span>종료일</span><input type="date" value={leaveType === '반차' ? leaveStartDate : leaveEndDate} min={leaveStartDate} disabled={leaveType === '반차'} required onChange={(event) => setLeaveEndDate(event.target.value)} /></label></div>
           <div className={`leave-duration-preview${calculateLeaveDays(leaveStartDate, leaveEndDate, leaveType) <= 0 ? ' invalid' : ''}`} role="status"><CalendarDays size={19} /><div><strong>사용 일수 {calculateLeaveDays(leaveStartDate, leaveEndDate, leaveType).toFixed(1)}일</strong><span>{leaveType === '반차' ? '반차는 선택한 날짜의 0.5일로 계산됩니다.' : '시작일과 종료일 사이의 주말을 제외해 자동 계산합니다.'}</span></div><em>잔여 {myRemaining.toFixed(1)}일</em></div>
+          {(leaveType === '연차' || leaveType === '반차') && calculateLeaveDays(leaveStartDate, leaveEndDate, leaveType) > myRemaining && <div className="leave-balance-warning" role="status"><AlertTriangle size={17} /><span>남은 휴가보다 많은 일수입니다. 신청은 가능하지만, 승인 전에 관리자가 휴가를 부여해야 결재가 완료됩니다.</span></div>}
           <label className="form-field full"><span>사유</span><textarea name="reason" rows={3} defaultValue={editingLeaveId ? leaves.find((leave) => leave.id === editingLeaveId)?.reason : ''} placeholder="결재자가 확인할 수 있도록 간단히 입력하세요." required /></label>
           <footer><button type="button" className="button ghost" onClick={closeModal}>취소</button><button type="submit" className="button primary" disabled={isSubmittingLeave || leaveApprovers.length === 0 || calculateLeaveDays(leaveStartDate, leaveEndDate, leaveType) <= 0}><CheckCircle2 size={18} /> {isSubmittingLeave ? '저장 중…' : editingLeaveId ? '수정 저장' : '결재 요청'}</button></footer>
         </form> : modal === 'adjust' ? <form onSubmit={submitAdjustment}>

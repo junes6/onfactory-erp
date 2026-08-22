@@ -1,7 +1,7 @@
-.nav-caption-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); padding: var(--space-0) var(--space-8) var(--space-8) var(--space-12); }
+﻿.nav-caption-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); padding: var(--space-0) var(--space-8) var(--space-8) var(--space-12); }
 .nav-caption-row .nav-caption { padding: var(--space-0); }
 .workspace-nav-edit-button { min-height: 28px !important; width: auto !important; display: inline-flex !important; flex: 0 0 auto; gap: var(--space-4) !important; padding: var(--space-0) var(--space-8) !important; border: var(--hairline) solid var(--color-overlay-subtle) !important; border-radius: var(--radius-8) !important; color: var(--color-blue-deep) !important; background: var(--color-overlay-subtle) !important; font-size: var(--font-13) !important; }
-.workspace-nav-edit-button:hover { color: var(--color-surface) !important; background: var(--color-overlay-subtle) !important; }
+.workspace-nav-edit-button:hover { color: var(--color-white) !important; background: var(--color-overlay-subtle) !important; }
 .workspace-nav-edit-button span { flex: initial !important; }
 .workspace-nav-backdrop { position: fixed; z-index: 190; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: var(--space-16); background: var(--color-overlay); backdrop-filter: blur(5px); }
 .workspace-nav-editor { width: min(680px,100%); max-height: calc(100vh - 40px); overflow: hidden; display: flex; flex-direction: column; border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); box-shadow: var(--shadow-none); }

@@ -1,24 +1,39 @@
 :root {
   /* Core palette: no component may introduce colors outside these tokens. */
-  --color-page: #F4F4F2;
+  /* 대비 강화 팔레트: 배경은 쿨그레이, 전경은 확실히 어둡게 — 흐릿한 회색 대비 금지. */
+  --color-page: #F3F5F9;
   --color-surface: #FFFFFF;
-  --color-ink: #1C1C1B;
+  /* 색 배경 위 글자처럼 테마와 무관하게 항상 흰색이어야 하는 곳 전용. */
+  --color-white: #FFFFFF;
+  --color-ink: #1A1D23;
   --color-blue-deep: #16324F;
   --color-blue: #2F6B8F;
   --color-success: #1D9E75;
   --color-warning: #EF9F27;
   --color-danger: #E24B4A;
-  --color-gray-50: #F2F2F0;
-  --color-gray-200: #D9D9D5;
-  --color-gray-400: #A7A7A1;
-  --color-gray-600: #6B6B67;
-  --color-gray-800: #3B3B39;
-  --color-card-line: #E2E2DD;
+  /* Extended accent palette: One UI 컨셉의 다색 구분용. 화면 요소는 반드시
+     이 토큰으로만 색을 얻는다 (verify-design-tokens allowedPalette와 동기화). */
+  --color-primary: #2563EB;
+  /* 포인트 컬러 스와치에서 항상 기본 파랑을 보여주기 위한 고정 참조값. */
+  --color-primary-base: #2563EB;
+  --color-violet: #7C4DFF;
+  --color-teal: #0E8C8C;
+  --color-rose: #C9366C;
+  --color-gray-50: #F0F2F6;
+  --color-gray-200: #D9DCE3;
+  --color-gray-400: #989DA8;
+  --color-gray-600: #545862;
+  --color-gray-800: #343841;
+  --color-card-line: #DEE1E8;
 
   --color-blue-soft: color-mix(in srgb, var(--color-blue) 12%, var(--color-surface));
   --color-success-soft: color-mix(in srgb, var(--color-success) 12%, var(--color-surface));
   --color-warning-soft: color-mix(in srgb, var(--color-warning) 14%, var(--color-surface));
   --color-danger-soft: color-mix(in srgb, var(--color-danger) 12%, var(--color-surface));
+  --color-primary-soft: color-mix(in srgb, var(--color-primary) 11%, var(--color-surface));
+  --color-violet-soft: color-mix(in srgb, var(--color-violet) 11%, var(--color-surface));
+  --color-teal-soft: color-mix(in srgb, var(--color-teal) 11%, var(--color-surface));
+  --color-rose-soft: color-mix(in srgb, var(--color-rose) 11%, var(--color-surface));
   --color-overlay: color-mix(in srgb, var(--color-ink) 58%, transparent);
   --color-overlay-subtle: color-mix(in srgb, var(--color-ink) 8%, transparent);
 
@@ -56,9 +71,11 @@
   --ink: var(--color-ink);
   --muted: var(--color-gray-600);
   --subtle: var(--color-gray-400);
-  --forest: var(--color-blue);
+  /* 레거시 액센트 별칭을 포인트 컬러로 연결해, 설정에서 고른 색이
+     화면 전체(아이콘·텍스트 버튼·강조 배경)에 일관되게 적용되도록 한다. */
+  --forest: var(--color-primary);
   --forest-dark: var(--color-blue-deep);
-  --forest-soft: var(--color-blue-soft);
+  --forest-soft: var(--color-primary-soft);
   --lime: var(--color-success);
   --line: var(--color-gray-200);
   --surface: var(--color-surface);
@@ -90,16 +107,55 @@ html {
 }
 
 html[data-theme='dark'] {
-  --color-blue-soft: color-mix(in srgb, var(--color-blue) 24%, var(--color-blue-deep));
-  --color-success-soft: color-mix(in srgb, var(--color-success) 20%, var(--color-blue-deep));
-  --color-warning-soft: color-mix(in srgb, var(--color-warning) 20%, var(--color-blue-deep));
-  --color-danger-soft: color-mix(in srgb, var(--color-danger) 20%, var(--color-blue-deep));
-  --color-overlay: color-mix(in srgb, var(--color-ink) 72%, transparent);
-  --color-overlay-subtle: color-mix(in srgb, var(--color-surface) 10%, transparent);
+  /* 다크 모드는 코어 중립 토큰 자체를 뒤집는다. 컴포넌트별 땜질 대신
+     토큰만 바꾸면 전 화면이 일관되게 다크로 전환된다. */
+  --color-page: #0F141B;
+  --color-surface: #1A2029;
+  --color-ink: #E9ECF2;
+  --color-gray-50: #222935;
+  --color-gray-200: #333C4A;
+  --color-gray-400: #7E8898;
+  --color-gray-600: #A9B2C0;
+  --color-gray-800: #CFD6E0;
+  --color-card-line: #2A323E;
+  --color-blue-soft: color-mix(in srgb, var(--color-blue) 26%, var(--color-gray-50));
+  --color-success-soft: color-mix(in srgb, var(--color-success) 24%, var(--color-gray-50));
+  --color-warning-soft: color-mix(in srgb, var(--color-warning) 24%, var(--color-gray-50));
+  --color-danger-soft: color-mix(in srgb, var(--color-danger) 24%, var(--color-gray-50));
+  --color-primary-soft: color-mix(in srgb, var(--color-primary) 26%, var(--color-gray-50));
+  --color-violet-soft: color-mix(in srgb, var(--color-violet) 26%, var(--color-gray-50));
+  --color-teal-soft: color-mix(in srgb, var(--color-teal) 26%, var(--color-gray-50));
+  --color-rose-soft: color-mix(in srgb, var(--color-rose) 26%, var(--color-gray-50));
+  --color-overlay: color-mix(in srgb, var(--color-page) 74%, transparent);
+  --color-overlay-subtle: color-mix(in srgb, var(--color-ink) 10%, transparent);
 }
+
+/* 다크 모드에서 남색 액센트는 배경과 겹쳐 보이지 않으므로 밝은 강청색으로 대체한다. */
+html[data-theme='dark'][data-accent='navy'] { --color-primary: var(--color-blue); }
 
 strong,
 b,
 th {
   font-weight: var(--weight-medium);
+}
+
+/* =====================================================================
+   v5: 개인 포인트 컬러 테마 — 설정에서 선택, --color-primary만 바꾸면
+   soft 변형과 모든 강조 요소가 함께 따라온다.
+   ===================================================================== */
+html[data-accent='green'] { --color-primary: var(--color-success); }
+html[data-accent='violet'] { --color-primary: var(--color-violet); }
+html[data-accent='teal'] { --color-primary: var(--color-teal); }
+html[data-accent='rose'] { --color-primary: var(--color-rose); }
+html[data-accent='navy'] { --color-primary: var(--color-blue-deep); }
+
+/* =====================================================================
+   v5: 쉬운 화면 모드 — 모든 타입 토큰을 한 단계 키워 나이가 많은 사용자도
+   읽기 쉽게 한다. 세부 규칙은 styles.css의 data-easy-mode 블록 참조.
+   ===================================================================== */
+html[data-easy-mode='on'] {
+  --font-22: 27px;
+  --font-15: 18px;
+  --font-13: 16px;
+  --font-11: 14px;
 }
