@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS proposals (
   id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE, space_id TEXT REFERENCES spaces(id),
   kind TEXT NOT NULL, payload JSONB NOT NULL DEFAULT '{}'::JSONB, confidence DOUBLE PRECISION,
   status TEXT NOT NULL DEFAULT 'draft', decision_diff JSONB,
+  position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ, created_by TEXT,
   PRIMARY KEY (org_id, id)
 );
@@ -84,6 +85,7 @@ CREATE TABLE IF NOT EXISTS playbooks (
 CREATE TABLE IF NOT EXISTS automation_policies (
   id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE, space_id TEXT REFERENCES spaces(id),
   enabled BOOLEAN NOT NULL DEFAULT TRUE, payload JSONB NOT NULL DEFAULT '{}'::JSONB,
+  position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ, created_by TEXT,
   PRIMARY KEY (org_id, id)
 );

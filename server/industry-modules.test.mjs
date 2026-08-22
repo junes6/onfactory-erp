@@ -68,7 +68,7 @@ test('session carries industryType and IT workspace keys are writable while food
     // 운영자가 테넌트를 만들 때 업종을 지정한다
     const created = await fetch(`${origin}/api/platform/tenants`, {
       method: 'POST', headers: { 'content-type': 'application/json', cookie: operator.cookie },
-      body: JSON.stringify({ companyName: '코드웍스', industry: 'SI · 유지보수', industryType: 'it_services', plan: 'Growth', adminName: '이개발', adminEmail: 'admin@codeworks.test', targetDate: '2026-10-01' }),
+      body: JSON.stringify({ companyName: '코드웍스', industry: 'SI · 유지보수', industryType: 'it_services', plan: 'Growth', adminName: '이개발', adminEmail: 'admin@codeworks.test', targetDate: '2026-10-01', consents: { dataAccess: true, privacyOutsourcing: true, aiProcessing: true } }),
     })
     const createdText = await created.text()
     assert.equal(created.status, 201, createdText)

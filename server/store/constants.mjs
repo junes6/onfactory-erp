@@ -23,6 +23,9 @@ export const WORKSPACE_TABLES = Object.freeze({
   'it-projects': 'it_projects',
   'it-deliverables': 'it_deliverables',
   'it-contracts': 'it_contracts',
+  // 승인 큐: 기존 코어 테이블을 채운다
+  'ai-proposals': 'proposals',
+  'automation-policies': 'automation_policies',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

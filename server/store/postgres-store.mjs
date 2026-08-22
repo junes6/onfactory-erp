@@ -359,6 +359,27 @@ async function upsertWorkspaceRows(client, snapshot, change, options) {
       `, [tenantId, row.entityId, json(prepared.payload), row.position, columns.storageKey, columns.contentType,
         columns.sizeBytes, columns.checksum, columns.aiPolicy, columns.versionGroupId, columns.versionNo,
         columns.summary, isoOrNull(row.sourceUpdatedAt), actor])
+    } else if (table === 'proposals') {
+      const payload = prepared.payload ?? {}
+      await client.query(`
+        INSERT INTO proposals (org_id, id, kind, payload, confidence, status, decision_diff, position, source_updated_at, updated_by, created_by, deleted_at)
+        VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7::jsonb, $8, $9, $10, $10, NULL)
+        ON CONFLICT (org_id, id) DO UPDATE SET
+          kind = EXCLUDED.kind, payload = EXCLUDED.payload, confidence = EXCLUDED.confidence, status = EXCLUDED.status,
+          decision_diff = EXCLUDED.decision_diff, position = EXCLUDED.position, source_updated_at = EXCLUDED.source_updated_at,
+          updated_by = EXCLUDED.updated_by, updated_at = NOW(), deleted_at = NULL
+      `, [tenantId, row.entityId, String(payload.kind ?? 'unknown'), json(payload),
+        Number.isFinite(Number(payload.confidence)) ? Number(payload.confidence) : null, String(payload.status ?? 'pending'),
+        payload.decisionDiff ? json(payload.decisionDiff) : null, row.position, isoOrNull(row.sourceUpdatedAt), actor])
+    } else if (table === 'automation_policies') {
+      const payload = prepared.payload ?? {}
+      await client.query(`
+        INSERT INTO automation_policies (org_id, id, enabled, payload, position, source_updated_at, updated_by, created_by, deleted_at)
+        VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $7, NULL)
+        ON CONFLICT (org_id, id) DO UPDATE SET
+          enabled = EXCLUDED.enabled, payload = EXCLUDED.payload, position = EXCLUDED.position,
+          source_updated_at = EXCLUDED.source_updated_at, updated_by = EXCLUDED.updated_by, updated_at = NOW(), deleted_at = NULL
+      `, [tenantId, row.entityId, payload.autoApprove === true, json(payload), row.position, isoOrNull(row.sourceUpdatedAt), actor])
     } else {
       await client.query(`
         INSERT INTO ${table} (org_id, id, payload, position, source_updated_at, updated_by, created_by, deleted_at)

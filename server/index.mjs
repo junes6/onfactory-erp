@@ -90,6 +90,16 @@ async function runBillingMaintenance() {
 }
 
 void runBillingMaintenance().catch((error) => console.warn('[billing] maintenance deferred', { message: error?.message }))
+
+// 생존 센티널: 부팅 10초 후 1회, 이후 24시간마다. (데이터 변경 시 즉시 평가는 app.mjs 훅이 담당)
+const sentinelBootTimer = setTimeout(() => {
+  try { const results = app.locals.runSentinelForAllTenants?.() ?? []; console.log(`[sentinel] boot evaluation: ${results.length} tenants`) } catch (error) { console.warn('[sentinel] boot evaluation failed', { message: error?.message }) }
+}, 10_000)
+sentinelBootTimer.unref?.()
+const sentinelDailyTimer = setInterval(() => {
+  try { app.locals.runSentinelForAllTenants?.() } catch (error) { console.warn('[sentinel] daily evaluation failed', { message: error?.message }) }
+}, 24 * 60 * 60 * 1_000)
+sentinelDailyTimer.unref?.()
 const billingMaintenanceTimer = setInterval(() => {
   void runBillingMaintenance().catch((error) => console.warn('[billing] maintenance failed', { message: error?.message }))
 }, 60 * 60 * 1_000)

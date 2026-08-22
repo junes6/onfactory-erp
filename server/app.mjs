@@ -22,6 +22,11 @@ import { BillingServiceError, createBillingService, createMemoryBillingRepositor
 import { attachBlocksToLatestUserMessage, ChatAttachmentError, normalizeChatAttachmentRequest, resolveChatAttachments } from './chat-attachments.mjs'
 import { registerPerformanceRoutes } from './performance-routes.mjs'
 import {
+  APPROVAL_WINDOW_DAYS, AUTOMATION_POLICIES_KEY, PROPOSALS_KEY, approvalStatistics, diffProposalPayload,
+  evaluateSentinel, proposeDocumentClassification, proposeTaskFromMessage,
+} from './proposal-engine.mjs'
+import { CONSENT_TERMS_VERSION, buildConsentRecord, consentIsCurrent, publicConsentTerms } from './policies/consent-terms.mjs'
+import {
   deletePlatformEvidence,
   deleteTenantDocument,
   documentStorageKey,
@@ -58,8 +63,12 @@ const WORKSPACE_STORE_KEYS = new Set([
   'calendar-events', 'daily-journals', 'leave-requests', 'account-requests',
   'factory-locations', 'factory-layouts', 'leave-management', 'work-rules', 'product-catalog', 'inventory-movements', 'calendar-departments',
   'sales-shipments', 'compliance-records', 'document-storage-settings', 'performance-settings', 'performance-reports',
-  'it-projects', 'it-deliverables', 'it-contracts',
+  'it-projects', 'it-deliverables', 'it-contracts', 'ai-proposals', 'automation-policies',
 ])
+// 승인 큐·자동화 정책은 전용 라우트로만 바뀐다 (결정 diff가 원료이므로 generic PUT 금지).
+const PROPOSAL_ONLY_KEYS = new Set(['ai-proposals', 'automation-policies'])
+// 이 키가 바뀌면 생존 센티널을 즉시 재평가한다.
+const SENTINEL_TRIGGER_KEYS = new Set(['compliance-records', 'product-catalog', 'work-items', 'inventory-movements'])
 const TENANT_MEMBER_READ_KEYS = new Set([
   'work-items', 'inventory-locations', 'messenger-conversations', 'calendar-events', 'daily-journals',
   'leave-requests', 'leave-management', 'factory-locations', 'factory-layouts', 'work-rules', 'product-catalog', 'inventory-movements', 'calendar-departments',
@@ -1938,6 +1947,7 @@ export function createApp(options = {}) {
       const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? [...documentRecord(request.auth.tenantId).data] : []
       documents.unshift(document)
       await persistDocumentList(request.auth.tenantId, documents, request.auth.id)
+      try { enqueueProposal(request.auth.tenantId, proposeDocumentClassification(document)) } catch { /* 제안 실패가 업로드를 막지 않는다 */ }
       const { tenantId: _tenantId, ...safeDocument } = document
       response.status(201).json({ document: safeDocument })
     } catch (error) {
@@ -2096,12 +2106,211 @@ export function createApp(options = {}) {
     auditEvents: workspaceStore.platform.auditEvents,
   })
 
+  // ------------------------------------------------------------------
+  // 승인 큐: AI 제안은 저장만 되고, 사람이 결정해야 실행된다.
+  // ------------------------------------------------------------------
+  const proposalsOf = (tenantId) => {
+    const record = workspaceStore.tenants[tenantId]?.[PROPOSALS_KEY]
+    return Array.isArray(record?.data) ? record.data : []
+  }
+  const writeProposals = (tenantId, proposals, actorId) => {
+    const tenantStore = workspaceStore.tenants[tenantId] ??= {}
+    const now = new Date().toISOString()
+    tenantStore[PROPOSALS_KEY] = { data: proposals.slice(0, 2_000), updatedAt: now, updatedBy: actorId }
+    tenantStore[AUTOMATION_POLICIES_KEY] = { data: approvalStatistics(proposals), updatedAt: now, updatedBy: actorId }
+  }
+  const enqueueProposal = (tenantId, proposal) => {
+    if (!proposal || !tenantId) return false
+    const existing = proposalsOf(tenantId)
+    if (existing.some((item) => item?.sourceKey === proposal.sourceKey && item.status === 'pending')) return false
+    writeProposals(tenantId, [proposal, ...existing], proposal.createdBy)
+    scheduleAuditCommit()
+    return true
+  }
+  const runSentinel = (tenantId, now = new Date()) => {
+    const tenantStore = workspaceStore.tenants[tenantId]
+    if (!tenantStore) return { created: 0, expired: 0 }
+    const result = evaluateSentinel({ tenantStore, existing: proposalsOf(tenantId), industryType: tenantIndustryType(tenantId), accounts, tenantId, now })
+    if (result.created || result.expired) {
+      writeProposals(tenantId, result.proposals, 'sentinel')
+      scheduleAuditCommit()
+    }
+    return { created: result.created, expired: result.expired }
+  }
+  const sentinelTimers = new Map()
+  const scheduleSentinel = (tenantId) => {
+    if (!tenantId) return
+    if (sentinelTimers.has(tenantId)) clearTimeout(sentinelTimers.get(tenantId))
+    const timer = setTimeout(() => { sentinelTimers.delete(tenantId); try { runSentinel(tenantId) } catch { /* 다음 평가에서 재시도 */ } }, 1_500)
+    timer.unref?.()
+    sentinelTimers.set(tenantId, timer)
+  }
+  // 일 1회 배치 (index.mjs가 호출) + 부팅 직후 1회
+  app.locals.runSentinelForAllTenants = (now = new Date()) => Object.keys(workspaceStore.tenants).map((tenantId) => ({ tenantId, ...runSentinel(tenantId, now) }))
+  app.locals.runSentinelForTenant = runSentinel
+  app.locals.enqueueProposal = enqueueProposal
+
+  const proposalGuards = [requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity]
+  app.get('/api/proposals', ...proposalGuards, (request, response) => {
+    const proposals = [...proposalsOf(request.auth.tenantId)].sort((left, right) => {
+      const pending = Number(right.status === 'pending') - Number(left.status === 'pending')
+      return pending || String(right.createdAt).localeCompare(String(left.createdAt))
+    })
+    response.json({
+      proposals,
+      stats: approvalStatistics(proposals),
+      pendingCount: proposals.filter((item) => item.status === 'pending').length,
+      windowDays: APPROVAL_WINDOW_DAYS,
+    })
+  })
+
+  app.post('/api/proposals/evaluate', ...proposalGuards, (request, response) => {
+    const result = runSentinel(request.auth.tenantId)
+    response.json({ ...result, pendingCount: proposalsOf(request.auth.tenantId).filter((item) => item.status === 'pending').length })
+  })
+
+  app.post('/api/proposals/:id/decide', ...proposalGuards, async (request, response) => {
+    const tenantId = request.auth.tenantId
+    const decision = String(request.body?.decision ?? '')
+    if (!['approve', 'edit', 'reject'].includes(decision)) {
+      response.status(400).json({ error: { code: 'INVALID_DECISION', message: '결정은 approve, edit, reject 중 하나여야 합니다.' } })
+      return
+    }
+    const proposals = proposalsOf(tenantId)
+    const index = proposals.findIndex((item) => item?.id === request.params.id)
+    if (index < 0) {
+      response.status(404).json({ error: { code: 'PROPOSAL_NOT_FOUND', message: '제안을 찾을 수 없습니다.' } })
+      return
+    }
+    const proposal = proposals[index]
+    if (proposal.status !== 'pending') {
+      response.status(409).json({ error: { code: 'PROPOSAL_ALREADY_DECIDED', message: '이미 처리된 제안입니다.' } })
+      return
+    }
+    const now = new Date().toISOString()
+    const comment = String(request.body?.comment ?? '').trim().slice(0, 500)
+    const tenantStore = workspaceStore.tenants[tenantId] ??= {}
+    const previousProposalsRecord = tenantStore[PROPOSALS_KEY]
+    const previousPoliciesRecord = tenantStore[AUTOMATION_POLICIES_KEY]
+    let previousEffectRecord = null
+    let effectKey = null
+    let resultRef = null
+    let decisionDiff = null
+    let finalPayload = proposal.payload
+
+    if (decision !== 'reject') {
+      const edits = decision === 'edit' && request.body?.payload && typeof request.body.payload === 'object' ? request.body.payload : {}
+      finalPayload = { ...proposal.payload, ...edits }
+      decisionDiff = decision === 'edit' ? diffProposalPayload(proposal.payload, finalPayload) : null
+      if (proposal.kind === 'document-classification') {
+        effectKey = 'company-documents'
+        const documents = Array.isArray(tenantStore['company-documents']?.data) ? [...tenantStore['company-documents'].data] : []
+        const documentIndex = documents.findIndex((document) => document?.id === finalPayload.documentId)
+        if (documentIndex < 0) {
+          response.status(409).json({ error: { code: 'PROPOSAL_TARGET_MISSING', message: '대상 문서가 더 이상 존재하지 않습니다.' } })
+          return
+        }
+        previousEffectRecord = tenantStore['company-documents']
+        const category = String(finalPayload.category ?? '').trim().slice(0, 60) || documents[documentIndex].category
+        const tags = Array.isArray(finalPayload.tags) ? finalPayload.tags.map(String).map((tag) => tag.trim()).filter(Boolean).slice(0, 20) : documents[documentIndex].tags
+        documents[documentIndex] = { ...documents[documentIndex], category, tags }
+        tenantStore['company-documents'] = { data: documents, updatedAt: now, updatedBy: request.auth.id }
+        resultRef = { type: 'document', id: finalPayload.documentId }
+      } else {
+        effectKey = 'work-items'
+        const owner = finalPayload.ownerId
+          ? accounts.find((account) => account.id === finalPayload.ownerId && account.tenantId === tenantId)
+          : uniqueTenantAccountByName(accounts, tenantId, String(finalPayload.owner ?? '')) ?? null
+        const ownerAccount = owner ?? { id: request.auth.id, name: request.auth.name }
+        const dueIso = Number.isFinite(Date.parse(finalPayload.due)) ? new Date(Date.parse(finalPayload.due)).toISOString() : new Date(Date.now() + 2 * 24 * 60 * 60 * 1_000).toISOString()
+        const workItem = {
+          id: `WK-${Date.now().toString().slice(-8)}`,
+          title: String(finalPayload.title ?? proposal.summary).trim().slice(0, 120) || '승인된 제안 업무',
+          description: String(finalPayload.description ?? proposal.evidence ?? '').trim().slice(0, 2_000),
+          owner: ownerAccount.name,
+          ownerId: ownerAccount.id,
+          requestedBy: request.auth.name,
+          requesterId: request.auth.id,
+          due: dueIso,
+          priority: WORK_ITEM_PRIORITIES.has(finalPayload.priority) ? finalPayload.priority : '보통',
+          status: '업무요청',
+          category: String(finalPayload.category ?? '일반').slice(0, 20),
+          createdAt: now,
+        }
+        const normalized = normalizeAdminWorkItems([workItem], tenantId, operatorAwareAccounts(request.auth))
+        if (!normalized) {
+          response.status(400).json({ error: { code: 'INVALID_PROPOSAL_TASK', message: '담당자 또는 업무 정보를 확인해 주세요.' } })
+          return
+        }
+        previousEffectRecord = tenantStore['work-items']
+        const current = Array.isArray(tenantStore['work-items']?.data) ? tenantStore['work-items'].data : []
+        tenantStore['work-items'] = { data: [normalized[0], ...current].slice(0, 1_000), updatedAt: now, updatedBy: request.auth.id }
+        resultRef = { type: 'work-item', id: normalized[0].id }
+      }
+    }
+
+    const decided = {
+      ...proposal,
+      status: decision === 'approve' ? 'approved' : decision === 'edit' ? 'edited' : 'rejected',
+      payload: finalPayload,
+      decidedAt: now,
+      decidedBy: request.auth.id,
+      decidedByName: request.auth.name,
+      decisionDiff,
+      comment,
+      resultRef,
+    }
+    const nextProposals = proposals.map((item, itemIndex) => itemIndex === index ? decided : item)
+    writeProposals(tenantId, nextProposals, request.auth.id)
+    try {
+      await commitWorkspaceStore()
+    } catch (error) {
+      if (previousProposalsRecord) tenantStore[PROPOSALS_KEY] = previousProposalsRecord; else delete tenantStore[PROPOSALS_KEY]
+      if (previousPoliciesRecord) tenantStore[AUTOMATION_POLICIES_KEY] = previousPoliciesRecord; else delete tenantStore[AUTOMATION_POLICIES_KEY]
+      if (effectKey) { if (previousEffectRecord) tenantStore[effectKey] = previousEffectRecord; else delete tenantStore[effectKey] }
+      console.error('[proposals] decide persist failed', { message: error?.message })
+      response.status(500).json({ error: { code: 'PROPOSAL_WRITE_FAILED', message: '제안 결정을 저장하지 못했습니다.' } })
+      return
+    }
+    scheduleSentinel(tenantId)
+    response.json({ proposal: decided, resultRef, stats: approvalStatistics(nextProposals), pendingCount: nextProposals.filter((item) => item.status === 'pending').length })
+  })
+
+  // ------------------------------------------------------------------
+  // 가입 동의(약관) — 버전 관리, 재동의
+  // ------------------------------------------------------------------
+  app.get('/api/consent-terms', (_request, response) => { response.json(publicConsentTerms()) })
+  app.get('/api/tenant/consent', requireAuth, requireTenantAdmin, (request, response) => {
+    const tenant = platformTenant(request.auth.tenantId)
+    const consent = tenant?.consent ?? null
+    response.json({ consent, currentVersion: CONSENT_TERMS_VERSION, needsReconsent: !consentIsCurrent(consent), terms: publicConsentTerms() })
+  })
+  app.post('/api/tenant/consent', requireAuth, requireTenantAdmin, async (request, response) => {
+    const tenant = platformTenant(request.auth.tenantId)
+    if (!tenant) { response.status(404).json({ error: { code: 'PLATFORM_TENANT_NOT_FOUND', message: '고객사 정보를 찾을 수 없습니다.' } }); return }
+    const consent = buildConsentRecord(request.body?.consents, request.auth)
+    if (!consent) { response.status(400).json({ error: { code: 'CONSENT_REQUIRED', message: '3개 항목 모두 동의해야 합니다.' } }); return }
+    const previous = tenant.consent
+    tenant.consent = consent
+    appendPlatformAudit(workspaceStore.platform, { tenantId: tenant.id, event: '고객사 약관 동의', scope: `버전 ${consent.version}`, actor: request.auth.name, reference: tenant.id })
+    try { await commitWorkspaceStore() } catch {
+      tenant.consent = previous
+      response.status(500).json({ error: { code: 'CONSENT_WRITE_FAILED', message: '동의 내역을 저장하지 못했습니다.' } })
+      return
+    }
+    response.json({ consent, currentVersion: CONSENT_TERMS_VERSION, needsReconsent: false })
+  })
+
   app.get('/api/platform/state', requireAuth, requirePlatformOperator, async (_request, response) => {
     response.json(publicPlatformState(await tenantPointsThisMonth()))
   })
 
   // 운영자 모드 진입: 세션에 진입 테넌트를 기록하고 관리자 권한의 유효 신원을 돌려준다.
-  app.post('/api/platform/tenants/:id/enter', requireAuth, requirePlatformOperator, async (request, response) => {
+  app.post('/api/platform/tenants/:id/enter', requireSession, async (request, response) => {
+    if (request.sessionAccount.role !== 'platform-operator') {
+      response.status(403).json({ error: { code: 'PLATFORM_OPERATOR_REQUIRED', message: '온팩토리 플랫폼 운영자 권한이 필요합니다.' } })
+      return
+    }
     const tenant = platformTenant(String(request.params.id))
     if (!tenant) {
       response.status(404).json({ error: { code: 'PLATFORM_TENANT_NOT_FOUND', message: '접속할 고객사를 찾을 수 없습니다.' } })
@@ -2112,6 +2321,17 @@ export function createApp(options = {}) {
     if (!session || !token) {
       response.status(401).json({ error: { code: 'AUTH_REQUIRED', message: '로그인이 필요합니다.' } })
       return
+    }
+    // 다른 테넌트에 진입 중이면 먼저 "나가기"를 기록하고 새 테넌트로 전환한다 (감사 기록 각각 유지).
+    if (session.enteredTenantId && session.enteredTenantId !== tenant.id) {
+      const previousTenant = platformTenant(session.enteredTenantId)
+      appendPlatformAudit(workspaceStore.platform, {
+        tenantId: session.enteredTenantId,
+        event: '운영자 테넌트 나가기',
+        scope: `${previousTenant?.name ?? session.enteredTenantId} 워크스페이스 운영자 모드 종료 (${tenant.name}(으)로 전환)`,
+        actor: `운영자 ${request.sessionAccount.name}`,
+        reference: request.sessionAccount.id,
+      })
     }
     session.enteredTenantId = tenant.id
     session.enteredAt = new Date().toISOString()
@@ -2126,8 +2346,8 @@ export function createApp(options = {}) {
       tenantId: tenant.id,
       event: '운영자 테넌트 접속',
       scope: `${tenant.name} 워크스페이스에 관리자 권한으로 진입`,
-      actor: `운영자 ${request.auth.name}`,
-      reference: request.auth.id,
+      actor: `운영자 ${request.sessionAccount.name}`,
+      reference: request.sessionAccount.id,
     })
     try { await commitWorkspaceStore() } catch { /* 감사 기록은 다음 쓰기와 함께 저장된다 */ }
     response.json({ account: effectiveAuth(request.sessionAccount, session) })
@@ -2493,6 +2713,11 @@ export function createApp(options = {}) {
       response.status(400).json({ error: { code: 'INVALID_INDUSTRY_TYPE', message: '업종 구분(industryType)을 확인해 주세요.' } })
       return
     }
+    const consent = buildConsentRecord(request.body?.consents, request.auth)
+    if (!consent || String(request.body?.consentVersion ?? CONSENT_TERMS_VERSION) !== CONSENT_TERMS_VERSION) {
+      response.status(400).json({ error: { code: 'CONSENT_REQUIRED', message: '운영사 데이터 접근·개인정보 처리위탁·AI 처리 3항에 모두 동의해야 고객사를 생성할 수 있습니다.' } })
+      return
+    }
     if (companyName.length < 2 || companyName.length > 80 || !industry || industry.length > 120 || !plan || plan.length > 80
       || adminName.length < 2 || adminName.length > 40 || !/^\S+@\S+\.\S+$/.test(adminEmail) || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
       response.status(400).json({ error: { code: 'INVALID_PLATFORM_TENANT', message: '고객사명, 업종, 요금제, 목표일과 최초 관리자 정보를 확인해 주세요.' } })
@@ -2512,7 +2737,7 @@ export function createApp(options = {}) {
     const account = { id: adminId, name: adminName, email: adminEmail, role: 'tenant-admin', tenantId, tenantName: companyName, team: '경영지원', jobRole: '운영 관리자', requested: new Date().toISOString(), approved: true, approvalStatus: 'approved', password: Buffer.alloc(32) }
     const onboarding = provisionAccountCredential(workspaceStore, account, { ttlHours: 72 })
     const createdAt = new Date().toISOString()
-    const tenant = { id: tenantId, name: companyName, industry, industryType, contract: '온보딩', plan, adminEmail, targetDate, createdAt, adminAccount: { id: adminId, name: adminName, email: adminEmail, team: account.team, jobRole: account.jobRole } }
+    const tenant = { id: tenantId, name: companyName, industry, industryType, contract: '온보딩', plan, adminEmail, targetDate, createdAt, consent, adminAccount: { id: adminId, name: adminName, email: adminEmail, team: account.team, jobRole: account.jobRole } }
     const integrationTemplates = [['COUPANG', '쿠팡', 'C', '판매채널'], ['NAVER', '네이버 스마트스토어', 'N', '판매채널'], ['GMARKET', 'G마켓', 'G', '판매채널'], ['DELIVERY', '택배 연동', 'T', '물류'], ['CLAUDE', 'Claude AI', 'AI', 'AI']]
     const integrations = integrationTemplates.map(([suffix, name, short, kind]) => ({ id: `${tenantId}-${suffix}`, tenantId, name, short, kind, status: '설정중', lastSync: '—', result: '고객사 설정 대기', successRate: '—' }))
     const previousTenants = workspaceStore.platform.tenants
@@ -3238,6 +3463,13 @@ export function createApp(options = {}) {
       response.status(500).json({ error: { code: 'MESSENGER_WRITE_FAILED', message: '메시지를 저장하지 못했습니다.' } })
       return
     }
+    try {
+      const recipientIds = (Array.isArray(conversation.participantIds) ? conversation.participantIds : []).filter((id) => id !== request.auth.id)
+      const recipients = conversation.type === 'direct'
+        ? recipientIds.map((id) => accounts.find((account) => account.id === id && account.tenantId === request.auth.tenantId)).filter(Boolean).map((account) => ({ id: account.id, name: account.name }))
+        : []
+      enqueueProposal(request.auth.tenantId, proposeTaskFromMessage({ message, conversation, recipients }))
+    } catch { /* 제안 실패가 메시지 전송을 막지 않는다 */ }
     response.status(201).json({ conversation, message })
   })
 
@@ -4236,6 +4468,7 @@ export function createApp(options = {}) {
       response.status(500).json({ error: { code: 'WORK_TRANSITION_WRITE_FAILED', message: '업무 상태를 저장하지 못했습니다.' } })
       return
     }
+    scheduleSentinel(request.auth.tenantId)
     response.json({ item: next, updatedAt: now, version: workspaceRecordVersion(record) })
   })
 
@@ -4425,6 +4658,10 @@ export function createApp(options = {}) {
       response.status(403).json({ error: { code: 'STORE_WRITE_FORBIDDEN', message: '현재 직무 권한으로 이 데이터를 변경할 수 없습니다.' } })
       return
     }
+    if (PROPOSAL_ONLY_KEYS.has(key)) {
+      response.status(403).json({ error: { code: 'PROPOSAL_ROUTE_REQUIRED', message: 'AI 제안과 자동화 정책은 승인 큐에서만 변경할 수 있습니다.' } })
+      return
+    }
     if (!Object.prototype.hasOwnProperty.call(request.body ?? {}, 'data')) {
       response.status(400).json({ error: { code: 'STORE_DATA_REQUIRED', message: '저장할 data가 필요합니다.' } })
       return
@@ -4573,6 +4810,7 @@ export function createApp(options = {}) {
     }
     const version = workspaceRecordVersion(record)
     response.set('ETag', `"${version}"`)
+    if (SENTINEL_TRIGGER_KEYS.has(key)) scheduleSentinel(request.auth.tenantId)
     response.json({ updatedAt: record.updatedAt, version })
   })
 

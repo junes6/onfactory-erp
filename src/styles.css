@@ -2748,3 +2748,17 @@ html[data-easy-mode='on'] .global-search { display: none; }
 .operator-mode-banner > button:hover { color: var(--color-violet); background: var(--color-white); }
 .app-shell.has-operator-banner { padding-top: var(--space-32); }
 .app-shell.has-operator-banner .sidebar { top: var(--space-32); height: calc(100vh - var(--space-32)); }
+
+/* 로그인 화면 1회성 PWA 설치 안내 */
+.auth-install-banner { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-12); margin: var(--space-0) var(--space-0) var(--space-16); padding: var(--space-12) var(--space-16); border: var(--hairline) solid var(--color-primary-soft); border-radius: var(--radius-8); color: var(--color-primary); background: var(--color-primary-soft); }
+.auth-install-banner strong { display: block; font-size: var(--font-13); }
+.auth-install-banner span { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); line-height: 1.5; }
+.auth-install-action { display: inline-flex; align-items: center; gap: var(--space-4); min-height: 36px; padding: var(--space-0) var(--space-12); border: none; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-primary); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
+.auth-install-close { display: grid; place-items: center; width: 32px; height: 32px; border: none; border-radius: var(--radius-8); color: var(--muted); background: transparent; cursor: pointer; }
+.auth-install-close:hover { background: var(--surface); }
+
+/* 테넌트 관리자 재동의 알림 */
+.consent-reminder { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12); margin: var(--space-0) var(--space-0) var(--space-16); padding: var(--space-12) var(--space-16); border: var(--hairline) solid var(--color-warning-soft); border-radius: var(--radius-8); color: var(--color-warning); background: var(--color-warning-soft); font-size: var(--font-13); }
+.consent-reminder span { flex: 1 1 240px; color: var(--text); }
+.consent-reminder button { min-height: 36px; padding: var(--space-0) var(--space-12); border: none; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-warning); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
+.home-header-chips button.is-attention { border-color: var(--color-warning); color: var(--color-warning); }

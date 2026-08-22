@@ -24,6 +24,7 @@ import './components/InventoryEnhancements.css'
 import { PeopleOperationsPage } from './components/PeopleOperations'
 import { PerformanceReports } from './components/PerformanceReports'
 import { ItServicesPage, type ItServicesView } from './components/ItServices'
+import { ApprovalQueue } from './components/ApprovalQueue'
 import { brandLabelForIndustry, routesForIndustry } from './modules/registry'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
@@ -36,7 +37,7 @@ import {
   type Tenant, type WorkEvidence, type WorkItem, type WorkRule,
 } from './domainData'
 
-type TenantPage = 'ai' | 'schedule' | 'tasks' | 'journal' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'performance' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
+type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'performance' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
 type PageId = TenantPage | PlatformSection | 'billing'
 type AppMode = 'tenant' | 'platform'
 type NavItem = { id: PageId; label: string; icon: typeof Sparkles; badge?: number }
@@ -127,7 +128,7 @@ const pageTitles: Record<PageId, string> = {
   ai: 'AI 업무허브', schedule: '일정관리', tasks: '업무지시 · 결재', journal: '일일업무일지',
   products: '제품관리', inventory: '재고 · LOT', factory: '공장관리',
   sales: '판매채널', people: '인사 · 조직', documents: '기업 자료실', compliance: '식품안전 · 인증',
-  performance: '직원 성과',
+  performance: '직원 성과', approvals: '승인 큐',
   'it-projects': '프로젝트', 'it-deliverables': '산출물', 'it-contracts': '계약 · 거래처',
   billing: '비용 · 포인트',
   platform: '플랫폼 운영 개요', tenants: '고객사 관리', support: 'CS 지원센터',
@@ -230,7 +231,8 @@ type DashboardDropTarget = {
   edge: 'before' | 'after'
 }
 
-function AIHome({ workItems, products, salesChannels, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, easyMode = false, industryType, onAdvanceTask, onCreateTask, onNavigate, onOpenAlerts, onToast }: {
+function AIHome({ workItems, products, salesChannels, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, easyMode = false, industryType, pendingProposals = 0, onAdvanceTask, onCreateTask, onNavigate, onOpenAlerts, onToast }: {
+  pendingProposals?: number
   workItems: WorkItem[]
   products: DashboardProduct[]
   salesChannels: DashboardSalesChannel[]
@@ -486,6 +488,7 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
             : <button className={todayEvents.length === 0 ? 'is-neutral' : ''} type="button" aria-label={`오늘 일정 ${todayEvents.length}건`} onClick={() => onNavigate('schedule')}><CalendarDays size={15} /><span>오늘 일정</span><strong>{todayEvents.length}</strong></button>}
           <button className={myWork.length === 0 ? 'is-neutral' : ''} type="button" aria-label={`확인할 업무 ${myWork.length}건`} onClick={() => onNavigate('tasks')}><ListChecks size={15} /><span>확인 업무</span><strong>{myWork.length}</strong></button>
           <button className={attentionCount === 0 ? 'is-neutral' : ''} type="button" aria-label={`AI 알림 ${attentionCount}건`} onClick={onOpenAlerts}><Sparkles size={15} /><span>AI 알림</span><strong>{attentionCount}</strong></button>
+          {canAssignTasks && <button className={pendingProposals === 0 ? 'is-neutral' : 'is-attention'} type="button" aria-label={`승인 대기 ${pendingProposals}건`} onClick={() => onNavigate('approvals')}><ClipboardCheck size={15} /><span>승인 대기</span><strong>{pendingProposals}</strong></button>}
         </div>{layoutOpen ? <button className="button primary" type="button" onClick={finishLayoutEdit}><Check size={18} /> 편집 완료</button> : <DashboardLayoutButton onClick={() => setLayoutOpen(true)} />}{canAssignTasks ? <button className="button primary" type="button" onClick={() => onCreateTask()}><Plus size={18} /> 새 업무 지시</button> : <StatusBadge className="status-pill" tone="neutral">직원용 업무 화면</StatusBadge>}</>}
       />
       {layoutOpen && <section className="dashboard-layout-workbench" aria-labelledby="dashboard-layout-workbench-title">
@@ -1295,6 +1298,26 @@ export default function App() {
   // Match that boundary in the optimistic cache so switching accounts in the
   // same browser can never reuse another employee's filtered response.
   const workspaceScope = account?.tenantId && account.id ? `${account.tenantId}:${account.id}` : undefined
+  const [pendingProposals, setPendingProposals] = useState(0)
+  const [consentReminder, setConsentReminder] = useState<{ needsReconsent: boolean; version: string } | null>(null)
+  const [peopleInitialTab, setPeopleInitialTab] = useState<'members' | 'accounts'>('members')
+  const isTenantAdmin = account?.role === 'tenant-admin' && Boolean(account.tenantId)
+  useEffect(() => {
+    if (!isTenantAdmin || !workspaceScope) { setPendingProposals(0); setConsentReminder(null); return }
+    let active = true
+    const headers = { 'x-workspace-identity': workspaceScope }
+    const loadPending = () => fetch('/api/proposals', { headers })
+      .then(async (response) => response.ok ? response.json() as Promise<{ pendingCount?: number }> : { pendingCount: 0 })
+      .then((body) => { if (active) setPendingProposals(Number(body.pendingCount ?? 0)) })
+      .catch(() => {})
+    void loadPending()
+    fetch('/api/tenant/consent', { headers })
+      .then(async (response) => response.ok ? response.json() as Promise<{ needsReconsent?: boolean; currentVersion?: string }> : null)
+      .then((body) => { if (active && body) setConsentReminder({ needsReconsent: Boolean(body.needsReconsent), version: String(body.currentVersion ?? '') }) })
+      .catch(() => {})
+    const timer = window.setInterval(() => { void loadPending() }, 60_000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [isTenantAdmin, workspaceScope])
   const currentSessionIdentity = account ? sessionIdentity(account) : null
   const [mode, setMode] = useState<AppMode>('tenant')
   const [page, setPage] = useState<PageId>('ai')
@@ -1582,6 +1605,7 @@ export default function App() {
     { id: 'ai', label: 'AI 업무허브', icon: Sparkles },
     { id: 'schedule', label: '일정관리', icon: CalendarDays },
     { id: 'tasks', label: '업무지시 · 결재', icon: ListChecks, badge: scopedWorkItems.filter((x) => x.status !== '결재완료').length },
+    { id: 'approvals', label: '승인 큐', icon: ClipboardCheck, badge: pendingProposals },
     { id: 'journal', label: '일일업무일지', icon: NotebookPen },
     { id: 'products', label: '제품관리', icon: Package },
     { id: 'inventory', label: '재고 · LOT', icon: Boxes },
@@ -1850,14 +1874,15 @@ export default function App() {
       case 'inventory': return <InventoryPage onToast={setToast} canManage={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} />
       case 'factory': return <FactoryManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
       case 'sales': return <SalesChannels onToast={setToast} workspaceScope={workspaceScope} companyName={tenantName} canManage={account?.role === 'tenant-admin'} />
-      case 'people': return <PeopleOperationsPage onToast={setToast} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
+      case 'people': return <PeopleOperationsPage initialTab={peopleInitialTab} onConsentChanged={() => setConsentReminder((current) => current ? { ...current, needsReconsent: false } : current)} onToast={setToast} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
       case 'performance': return <PerformanceReports workspaceScope={workspaceScope ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} />
+      case 'approvals': return <ApprovalQueue workspaceScope={workspaceScope} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onPendingChange={setPendingProposals} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} onToast={setToast} />
       case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} companyName={tenantName} onToast={setToast} />
       case 'it-projects':
       case 'it-deliverables':
       case 'it-contracts': return <ItServicesPage view={page as ItServicesView} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} onToast={setToast} />
-      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyMode === 'easy'} industryType={account?.industryType ?? 'food_manufacturing'} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
+      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyMode === 'easy'} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
   }
 
@@ -1922,7 +1947,7 @@ export default function App() {
             </div>
           </div>
         </header>
-        <main id="main-content" className="main-content" tabIndex={-1}>{renderPage()}</main>
+        <main id="main-content" className="main-content" tabIndex={-1}>{mode === 'tenant' && consentReminder?.needsReconsent && page !== 'people' && <div className="consent-reminder" role="status"><ShieldCheck size={17} /><span><strong>약관 동의가 필요합니다.</strong> 운영사 데이터 접근·개인정보 처리위탁·AI 처리 3항(버전 {consentReminder.version})에 대한 동의 기록이 없거나 약관이 갱신되었습니다.</span><button type="button" onClick={() => { setPeopleInitialTab('accounts'); navigate('people') }}>동의 화면으로</button></div>}{renderPage()}</main>
       </div>
 
       <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => setMessengerOpen(false)} onToast={setToast} onUnreadChange={setMessengerUnread} />
