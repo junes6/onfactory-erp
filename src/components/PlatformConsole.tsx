@@ -157,7 +157,7 @@ type PlatformState = {
 type PlatformContextValue = PlatformState & {
   loading: boolean
   error: string
-  refresh: () => Promise<void>
+  refresh: (silent?: boolean) => Promise<void>
   createTenant: (input: OnboardingInput) => Promise<{ tenant: PlatformTenant; onboarding: { temporaryPassword: string; expiresAt: string } }>
   createTicket: (input: { tenantId: string; title: string; priority: string; owner: string; description: string }, evidence?: File) => Promise<SupportTicket>
   updateTicket: (id: string, input: { status?: string; priority?: string; owner?: string }) => Promise<SupportTicket>
@@ -422,50 +422,108 @@ function TenantIdentity({ tenant }: { tenant: Tenant }) {
   )
 }
 
-function Health({ tenant }: { tenant: Tenant }) {
-  return (
-    <div className="pc-health">
-      <div className="pc-health-track"><div className={`pc-health-fill${tenant.service === '주의' ? ' warning' : ''}`} style={{ width: `${tenant.health}%` }} /></div>
-      <strong>{tenant.health}</strong>
-    </div>
-  )
+function industryLabel(tenant: Pick<Tenant, 'industryType' | 'industry'>) {
+  if (tenant.industryType === 'it_services') return 'IT 서비스'
+  if (tenant.industryType === 'food_manufacturing') return '식품제조'
+  return tenant.industry
+}
+
+function formatBytes(bytes: number) {
+  if (!bytes) return '0 MB'
+  const mb = bytes / (1024 * 1024)
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
+  return mb < 10 ? `${mb.toFixed(1)} MB` : `${Math.round(mb)} MB`
+}
+
+function relativeActivity(at: string | null) {
+  if (!at) return '아직 데이터 없음'
+  const diff = Date.now() - Date.parse(at)
+  if (!Number.isFinite(diff)) return '아직 데이터 없음'
+  const minutes = Math.floor(diff / 60_000)
+  if (minutes < 1) return '방금 전'
+  if (minutes < 60) return `${minutes}분 전`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}시간 전`
+  return `${Math.floor(hours / 24)}일 전`
+}
+
+/** 이상 신호: 미처리 티켓(빨강) > 24시간 무활동(주황) > 활동 없음(회색) > 정상(초록) */
+function tenantSignal(tenant: Tenant): { tone: Tone; label: string } {
+  const metrics = tenant.metrics
+  if (metrics.openTickets > 0) return { tone: 'danger', label: `미처리 티켓 ${metrics.openTickets}건` }
+  if (!metrics.lastActivityAt) return { tone: 'neutral', label: '아직 활동 데이터 없음' }
+  if (Date.now() - Date.parse(metrics.lastActivityAt) > 24 * 60 * 60 * 1_000) return { tone: 'warning', label: '24시간 무활동' }
+  return { tone: 'success', label: '정상 활동 중' }
+}
+
+function pointsLabel(points: number | null) {
+  return points === null ? '아직 데이터 없음' : `${Math.round(points).toLocaleString('ko-KR')} P`
 }
 
 function DetailStat({ label, value }: { label: string; value: ReactNode }) {
   return <div className="pc-detail-stat"><span>{label}</span><strong>{value}</strong></div>
 }
 
+function TenantCard({ tenant, selected, onSelect, onEnter }: { tenant: Tenant; selected: boolean; onSelect: () => void; onEnter: () => void }) {
+  const signal = tenantSignal(tenant)
+  const metrics = tenant.metrics
+  return (
+    <article className={`pc-tenant-card${selected ? ' selected' : ''}`}>
+      <button type="button" className="pc-tenant-card-main" aria-pressed={selected} onClick={onSelect}>
+        <div className="pc-tenant-card-head">
+          <span className="pc-logo">{tenant.name.replace(/\s+/g, '').slice(0, 2)}</span>
+          <div className="pc-tenant-card-title"><strong>{tenant.name}</strong><span><Badge tone="info">{industryLabel(tenant)}</Badge><Badge tone={toneForService(tenant.contract)}>{tenant.contract}</Badge></span></div>
+          <i className={`pc-signal-dot ${signal.tone}`} role="img" aria-label={signal.label} title={signal.label} />
+        </div>
+        <dl className="pc-tenant-metrics">
+          <div><dt>멤버</dt><dd>{metrics.members}명</dd></div>
+          <div><dt>오늘 활동</dt><dd>{metrics.todayActivity}건</dd></div>
+          <div><dt>미처리 티켓</dt><dd className={metrics.openTickets ? 'is-warn' : ''}>{metrics.openTickets}건</dd></div>
+          <div><dt>마지막 활동</dt><dd>{relativeActivity(metrics.lastActivityAt)}</dd></div>
+          <div><dt>이번 달 포인트</dt><dd>{pointsLabel(metrics.pointsUsed)}</dd></div>
+        </dl>
+      </button>
+      <div className="pc-tenant-card-actions"><span className={`pc-signal-text ${signal.tone}`}>{signal.label}</span><Button primary small onClick={onEnter}><ArrowRight size={14} /> 접속</Button></div>
+    </article>
+  )
+}
+
+function TenantBoard({ tenants, selectedTenantId, onSelectTenant, onEnterTenant }: { tenants: Tenant[]; selectedTenantId?: string; onSelectTenant: (id: string) => void; onEnterTenant: (id: string) => void }) {
+  if (!tenants.length) return <EmptyState label="아직 데이터 없음 — 등록된 고객사가 없습니다." />
+  return (
+    <div className="pc-tenant-board">
+      {tenants.map((tenant) => <TenantCard key={tenant.id} tenant={tenant} selected={tenant.id === selectedTenantId} onSelect={() => onSelectTenant(tenant.id)} onEnter={() => onEnterTenant(tenant.id)} />)}
+    </div>
+  )
+}
+
 function TenantDetail({ tenant, onSectionChange, onRequestSupport, onScope, onEnterTenant }: { tenant?: Tenant; onSectionChange: PlatformConsoleProps['onSectionChange']; onRequestSupport: PlatformConsoleProps['onRequestSupport']; onScope: (scope: TenantScope) => void; onEnterTenant: PlatformConsoleProps['onEnterTenant'] }) {
-  const { integrations } = usePlatformData()
   if (!tenant) return <aside className="pc-detail"><EmptyState label="고객사를 선택해 주세요." /></aside>
+  const signal = tenantSignal(tenant)
   return (
     <aside className="pc-detail" aria-label={`${tenant.name} 상세`}>
       <div className="pc-detail-head">
-        <div className="pc-detail-eyebrow"><span>{tenant.id}</span><Badge tone={toneForService(tenant.service)}>{tenant.service}</Badge></div>
+        <div className="pc-detail-eyebrow"><span>{tenant.id}</span><Badge tone={signal.tone}>{signal.label}</Badge></div>
         <h2>{tenant.name}</h2>
+        <p>{industryLabel(tenant)} · {tenant.industry}</p>
       </div>
       <div className="pc-detail-body">
         <div>
           <div className="pc-detail-grid">
             <DetailStat label="계약" value={tenant.contract} />
             <DetailStat label="요금제" value={tenant.plan} />
-            <DetailStat label="활성 사용자" value={`${tenant.activeUsers} / ${tenant.users}명`} />
-            <DetailStat label="사업장" value={`${tenant.sites}곳`} />
-            <DetailStat label="정상 연동" value={integrationSummaryForTenant(tenant.id, integrations)} />
-            <DetailStat label="열린 CS" value={`${tenant.tickets}건`} />
+            <DetailStat label="멤버" value={`${tenant.metrics.members}명`} />
+            <DetailStat label="오늘 활동" value={`${tenant.metrics.todayActivity}건`} />
+            <DetailStat label="미처리 티켓" value={`${tenant.metrics.openTickets}건`} />
+            <DetailStat label="마지막 활동" value={relativeActivity(tenant.metrics.lastActivityAt)} />
           </div>
           <div className="pc-detail-section">
-            <strong>사용량</strong>
-            <p>Claude {tenant.aiUsage}<br />저장공간 {tenant.storage}</p>
-          </div>
-          <div className="pc-detail-section">
-            <strong>담당 CSM</strong>
-            <p>{tenant.csm} · 최근 동기화 {tenant.sync}</p>
+            <strong>사용량 (실시간 집계)</strong>
+            <p>이번 달 포인트 {pointsLabel(tenant.metrics.pointsUsed)}<br />저장 용량 {formatBytes(tenant.metrics.storageBytes)}</p>
           </div>
         </div>
         <div className="pc-detail-actions">
           <Button onClick={() => { onScope(tenant.id); onSectionChange('support') }}><LifeBuoy size={15} /> 관련 CS 보기</Button>
-          <Button onClick={() => { onScope(tenant.id); onSectionChange('integrations') }}><Activity size={15} /> 연동 상태 보기</Button>
           <Button onClick={() => onRequestSupport(tenant)}><LockKeyhole size={15} /> 지원 세션 요청</Button>
           <Button primary onClick={() => onEnterTenant(tenant.id)}><ArrowRight size={15} /> 워크스페이스 접속</Button>
         </div>
@@ -482,26 +540,8 @@ function Overview({ scope, scopedTenants, scopedTickets, scopedIntegrations, sel
   return (
     <div className="pc-workspace">
       <div className="pc-overview-stack">
-        <Panel title="고객사 상태" subtitle="행을 선택하면 지원에 필요한 요약만 확인합니다." footer={`${scopedTenants.length}개 고객사 · 범위: ${scope === 'all' ? '전체' : selectedTenant?.name ?? ''}`}>
-          <div className="pc-table-wrap">
-            <table className="pc-table">
-              <thead><tr><th>고객사</th><th>계약</th><th>건강도</th><th>활성 사용자</th><th>연동</th><th>열린 CS</th><th>최근 동기화</th><th aria-label="상세" /></tr></thead>
-              <tbody>
-                {scopedTenants.map((tenant) => (
-                  <tr key={tenant.id} className={selectedTenant?.id === tenant.id ? 'selected' : undefined}>
-                    <td><TenantIdentity tenant={tenant} /></td>
-                    <td><Badge tone={toneForService(tenant.contract)}>{tenant.contract}</Badge></td>
-                    <td><Health tenant={tenant} /></td>
-                    <td>{tenant.activeUsers} / {tenant.users}명</td>
-                    <td>{integrationSummaryForTenant(tenant.id, scopedIntegrations)}</td>
-                    <td><strong>{tenant.tickets}건</strong></td>
-                    <td className="pc-code">{tenant.sync}</td>
-                    <td><button type="button" className="pc-row-button" aria-label={`${tenant.name} 상세 보기`} onClick={() => onSelectTenant(tenant.id)}><ChevronRight size={17} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <Panel title="사업체 보드" subtitle="실제 스토어 집계 · 30초마다 자동 갱신" footer={`${scopedTenants.length}개 고객사 · 범위: ${scope === 'all' ? '전체' : selectedTenant?.name ?? ''}`}>
+          <TenantBoard tenants={scopedTenants} selectedTenantId={selectedTenant?.id} onSelectTenant={onSelectTenant} onEnterTenant={props.onEnterTenant} />
         </Panel>
         <Panel title="지금 확인할 항목" subtitle="장애·SLA·인증 문제만 표시" tools={<button type="button" className="pc-button ghost" onClick={() => props.onSectionChange('support')}>CS 전체 <ArrowRight size={14} /></button>}>
           <div className="pc-alert-list">
@@ -540,21 +580,12 @@ type SectionProps = {
 function TenantsView({ scope, scopedTenants, selectedTenantId, onSelectTenant, onScope, props }: SectionProps) {
   const [query, setQuery] = useState('')
   const normalized = query.trim().toLowerCase()
-  const results = scopedTenants.filter((tenant) => !normalized || `${tenant.name} ${tenant.id} ${tenant.industry} ${tenant.plan}`.toLowerCase().includes(normalized))
+  const results = scopedTenants.filter((tenant) => !normalized || `${tenant.name} ${tenant.id} ${tenant.industry} ${industryLabel(tenant)} ${tenant.plan}`.toLowerCase().includes(normalized))
   const selectedTenant = results.find((tenant) => tenant.id === selectedTenantId) ?? results[0]
   return (
     <div className="pc-workspace">
-      <Panel title="고객사 목록" subtitle="계약과 이용 상태를 기준으로 조회" tools={<div className="pc-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="회사명·테넌트 ID 검색" aria-label="고객사 검색" /></div>} footer={`${results.length}개 결과 · ${scope === 'all' ? '전체 고객사' : '선택 고객사'}`}>
-        {results.length ? <div className="pc-table-wrap"><table className="pc-table">
-          <thead><tr><th>고객사</th><th>산업</th><th>계약 / 서비스</th><th>요금제</th><th>활성 사용자</th><th>건강도</th><th aria-label="상세" /></tr></thead>
-          <tbody>{results.map((tenant) => <tr key={tenant.id} className={selectedTenant?.id === tenant.id ? 'selected' : undefined}>
-            <td><TenantIdentity tenant={tenant} /></td>
-            <td>{tenant.industry}</td>
-            <td><div className="pc-actions"><Badge tone={toneForService(tenant.contract)}>{tenant.contract}</Badge><Badge tone={toneForService(tenant.service)}>{tenant.service}</Badge></div></td>
-            <td>{tenant.plan}</td><td>{tenant.activeUsers} / {tenant.users}명</td><td><Health tenant={tenant} /></td>
-            <td><button type="button" className="pc-row-button" aria-label={`${tenant.name} 상세 보기`} onClick={() => onSelectTenant(tenant.id)}><ChevronRight size={17} /></button></td>
-          </tr>)}</tbody>
-        </table></div> : <EmptyState label="검색 조건에 맞는 고객사가 없습니다." />}
+      <Panel title="사업체 보드" subtitle="회사명·업종·핵심 지표 5개 — 카드를 누르면 상세, [접속]으로 워크스페이스 진입" tools={<div className="pc-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="회사명·업종·테넌트 ID 검색" aria-label="고객사 검색" /></div>} footer={`${results.length}개 결과 · ${scope === 'all' ? '전체 고객사' : '선택 고객사'}`}>
+        <TenantBoard tenants={results} selectedTenantId={selectedTenant?.id} onSelectTenant={onSelectTenant} onEnterTenant={props.onEnterTenant} />
       </Panel>
       <TenantDetail tenant={selectedTenant} onSectionChange={props.onSectionChange} onRequestSupport={props.onRequestSupport} onScope={onScope} onEnterTenant={props.onEnterTenant} />
     </div>
@@ -805,8 +836,9 @@ export function PlatformConsole(props: PlatformConsoleProps) {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
-  const refresh = useCallback(async () => {
-    setLoading(true); setLoadError('')
+  const refresh = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
+    setLoadError('')
     try {
       const state = await platformJson<PlatformState>('/api/platform/state')
       setPlatformState(state)
@@ -816,6 +848,11 @@ export function PlatformConsole(props: PlatformConsoleProps) {
   }, [])
 
   useEffect(() => { void refresh() }, [props.refreshToken, refresh])
+  // 사업체 보드는 30초마다 조용히 갱신한다 (로딩 표시 없이).
+  useEffect(() => {
+    const timer = window.setInterval(() => { void refresh(true) }, 30_000)
+    return () => window.clearInterval(timer)
+  }, [refresh])
 
   const createTenant = useCallback(async (input: OnboardingInput) => {
     const result = await platformJson<{ tenant: PlatformTenant; onboarding: { temporaryPassword: string; expiresAt: string } }>('/api/platform/tenants', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
@@ -938,7 +975,8 @@ export function PlatformConsole(props: PlatformConsoleProps) {
   const scopedTickets = useMemo(() => supportTickets.filter((ticket) => scope === 'all' || ticket.tenantId === scope), [scope, supportTickets])
   const scopedIntegrations = useMemo(() => integrations.filter((item) => scope === 'all' || item.tenantId === scope), [integrations, scope])
 
-  const averageHealth = scopedTenants.length ? Math.round(scopedTenants.reduce((sum, tenant) => sum + tenant.health, 0) / scopedTenants.length) : 0
+  const activeTenantCount = scopedTenants.filter((tenant) => tenant.metrics.lastActivityAt && Date.now() - Date.parse(tenant.metrics.lastActivityAt) < 24 * 60 * 60 * 1_000).length
+  const unresolvedTicketTotal = scopedTenants.reduce((sum, tenant) => sum + tenant.metrics.openTickets, 0)
   const healthyIntegrations = scopedIntegrations.filter((item) => item.status === '정상').length
   const openTickets = scopedTickets.filter((ticket) => !['해결', '종료'].includes(ticket.status))
   const p1Count = openTickets.filter((ticket) => ticket.priority === 'P1').length
@@ -1019,7 +1057,7 @@ export function PlatformConsole(props: PlatformConsoleProps) {
 
         <section className="pc-summary" aria-label="선택 범위 핵심 지표">
           <Metric icon={Building2} label="관리 고객사" value={`${scopedTenants.length}곳`} note={scope === 'all' ? '전체' : '선택'} />
-          <Metric icon={Activity} label="평균 건강도" value={`${averageHealth}점`} note={averageHealth >= 90 ? '안정' : '확인 필요'} warning={averageHealth < 90} />
+          <Metric icon={Activity} label="24시간 활동 고객사" value={`${activeTenantCount}/${scopedTenants.length}곳`} note={unresolvedTicketTotal ? `미처리 티켓 ${unresolvedTicketTotal}건` : '미처리 티켓 없음'} warning={unresolvedTicketTotal > 0 || activeTenantCount < scopedTenants.length} />
           <Metric icon={LifeBuoy} label="열린 CS" value={`${openTickets.length}건`} note={newRequestCount ? `새 요청 ${newRequestCount}` : unansweredCount ? `미답변 ${unansweredCount}` : p1Count ? `P1 ${p1Count}` : '대기 없음'} warning={newRequestCount > 0 || p1Count > 0} />
           <Metric icon={CheckCircle2} label="정상 연동" value={`${healthyIntegrations}/${scopedIntegrations.length}`} note={healthyIntegrations === scopedIntegrations.length ? '전체 정상' : '점검 필요'} warning={healthyIntegrations < scopedIntegrations.length} />
         </section>

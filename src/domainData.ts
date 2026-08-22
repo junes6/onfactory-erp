@@ -92,21 +92,25 @@ export type WorkRule = {
   lastGeneratedAt?: string
 }
 
+export type TenantIndustryType = 'food_manufacturing' | 'it_services'
+
+/** 플랫폼 콘솔 사업체 지표 — 전부 서버 실집계. 값이 없으면 null/0이며 화면은 '아직 데이터 없음'으로 표시한다. */
+export type TenantMetrics = {
+  members: number
+  todayActivity: number
+  openTickets: number
+  lastActivityAt: string | null
+  pointsUsed: number | null
+  storageBytes: number
+}
+
 export type Tenant = {
   id: string
   name: string
   industry: string
+  industryType: TenantIndustryType
   contract: '운영중' | '온보딩'
   service: '정상' | '주의'
-  health: number
   plan: string
-  sites: number
-  users: number
-  activeUsers: number
-  integrations: string
-  sync: string
-  tickets: number
-  aiUsage: string
-  storage: string
-  csm: string
+  metrics: TenantMetrics
 }

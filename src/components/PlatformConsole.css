@@ -255,3 +255,31 @@
 @media (max-width: 520px) {
   .pc-shell { gap: var(--space-16); }
 }
+
+
+/* P2: 사업체 보드 카드 */
+.pc-tenant-board { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--space-12); }
+.pc-tenant-card { display: flex; flex-direction: column; border: var(--hairline) solid var(--pc-line); border-radius: var(--radius-8); background: var(--pc-panel); transition: border-color .15s ease; }
+.pc-tenant-card.selected { border-color: var(--pc-accent); }
+.pc-tenant-card:hover { border-color: var(--pc-accent); }
+.pc-tenant-card-main { display: block; width: 100%; padding: var(--space-16); border: none; background: transparent; text-align: left; cursor: pointer; }
+.pc-tenant-card-head { display: flex; align-items: center; gap: var(--space-12); }
+.pc-tenant-card-title { min-width: 0; flex: 1; }
+.pc-tenant-card-title strong { display: block; overflow: hidden; font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
+.pc-tenant-card-title > span { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-4); }
+.pc-signal-dot { width: 12px; height: 12px; flex: 0 0 auto; border-radius: var(--radius-8); background: var(--color-gray-400); }
+.pc-signal-dot.success { background: var(--color-success); }
+.pc-signal-dot.warning { background: var(--color-warning); }
+.pc-signal-dot.danger { background: var(--color-danger); }
+.pc-tenant-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-8) var(--space-12); margin: var(--space-16) var(--space-0) var(--space-0); }
+.pc-tenant-metrics div:last-child { grid-column: 1 / -1; }
+.pc-tenant-metrics dt { color: var(--pc-muted); font-size: var(--font-11); font-weight: var(--weight-medium); }
+.pc-tenant-metrics dd { margin: var(--space-0); font-size: var(--font-15); font-weight: var(--weight-medium); }
+.pc-tenant-metrics dd.is-warn { color: var(--color-danger); }
+.pc-tenant-card-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); padding: var(--space-8) var(--space-16); border-top: var(--hairline) solid var(--pc-line); }
+.pc-signal-text { font-size: var(--font-13); font-weight: var(--weight-medium); }
+.pc-signal-text.success { color: var(--color-success); }
+.pc-signal-text.warning { color: var(--color-warning); }
+.pc-signal-text.danger { color: var(--color-danger); }
+.pc-signal-text.neutral { color: var(--pc-muted); }
+.pc-detail-head p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--pc-muted); font-size: var(--font-13); }

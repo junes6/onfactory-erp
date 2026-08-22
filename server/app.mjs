@@ -50,6 +50,8 @@ const MAX_MESSAGES = 30
 const MAX_MESSAGE_LENGTH = 12_000
 const MAX_CONTEXT_LENGTH = 24_000
 const SESSION_COOKIE = 'onfactory_session'
+// 업종 모듈 구분. 자유 텍스트 industry는 표시용으로 유지하고, 메뉴·AI 분기는 이 enum으로만 한다.
+const TENANT_INDUSTRY_TYPES = new Set(['food_manufacturing', 'it_services'])
 const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
 const WORKSPACE_STORE_KEYS = new Set([
   'work-items', 'inventory-locations', 'sales-channels', 'messenger-conversations',
@@ -2002,20 +2004,67 @@ export function createApp(options = {}) {
   })
 
   const platformTenant = (tenantId) => workspaceStore.platform.tenants.find((tenant) => tenant?.id === tenantId)
-  const publicPlatformTenant = (tenant) => {
-    const { adminAccount: _adminAccount, ...safeTenant } = tenant
-    const tenantAccounts = accounts.filter((account) => account.tenantId === tenant.id)
+  // 사업체 지표는 전부 스토어 실집계다. 고정 샘플 값은 어디에도 두지 않는다.
+  const seoulDateKey = (value) => {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return null
+    return new Date(date.getTime() + 9 * 60 * 60 * 1_000).toISOString().slice(0, 10)
+  }
+  const tenantActivityMetrics = (tenantId) => {
+    const tenantStore = workspaceStore.tenants[tenantId] ?? {}
+    const todayKey = seoulDateKey(new Date())
+    // 오늘 활동 건수 = 업무·일지·메시지 "생성" 수. 레코드 갱신 시각은 마지막 활동 시각에만 쓴다.
+    const activity = []
+    const touches = []
+    const push = (list, value) => { if (typeof value === 'string' && !Number.isNaN(Date.parse(value))) list.push(value) }
+    for (const item of Array.isArray(tenantStore['work-items']?.data) ? tenantStore['work-items'].data : []) push(activity, item?.createdAt)
+    for (const journal of Array.isArray(tenantStore['daily-journals']?.data) ? tenantStore['daily-journals'].data : []) push(activity, journal?.submittedAt ?? journal?.updatedAt)
+    for (const conversation of Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []) {
+      for (const message of Array.isArray(conversation?.messages) ? conversation.messages : []) push(activity, message?.createdAt)
+    }
+    for (const record of Object.values(tenantStore)) push(touches, record?.updatedAt)
+    const todayActivity = activity.filter((value) => seoulDateKey(value) === todayKey).length
+    const timestamps = [...activity, ...touches]
+    const lastActivityAt = timestamps.length ? timestamps.reduce((latest, value) => Date.parse(value) > Date.parse(latest) ? value : latest) : null
+    const documents = Array.isArray(tenantStore['company-documents']?.data) ? tenantStore['company-documents'].data : []
+    const storageBytes = documents.reduce((sum, document) => sum + Math.max(0, Number(document?.size || 0)), 0)
+    return { todayActivity, lastActivityAt, storageBytes }
+  }
+  const LEGACY_TENANT_METRIC_FIELDS = ['users', 'activeUsers', 'integrations', 'sync', 'tickets', 'aiUsage', 'storage', 'health', 'csm', 'sites', 'service']
+  const publicPlatformTenant = (tenant, pointsByTenant = new Map()) => {
+    const { adminAccount: _adminAccount, ...rest } = tenant
+    const safeTenant = Object.fromEntries(Object.entries(rest).filter(([key]) => !LEGACY_TENANT_METRIC_FIELDS.includes(key)))
+    const members = accounts.filter((account) => account.tenantId === tenant.id && account.approved && account.role !== 'platform-operator').length
     const openTickets = workspaceStore.platform.supportTickets.filter((ticket) => ticket.tenantId === tenant.id && !['해결', '종료'].includes(ticket.status)).length
-    const provisionedThroughPlatform = Boolean(tenant.adminAccount)
+    const activity = tenantActivityMetrics(tenant.id)
+    const staleDay = activity.lastActivityAt ? Date.now() - Date.parse(activity.lastActivityAt) > 24 * 60 * 60 * 1_000 : false
     return {
       ...safeTenant,
-      users: provisionedThroughPlatform ? tenantAccounts.length : tenant.users,
-      activeUsers: provisionedThroughPlatform ? tenantAccounts.filter((account) => account.approved).length : tenant.activeUsers,
-      tickets: openTickets,
+      industryType: tenant.industryType ?? 'food_manufacturing',
+      service: openTickets > 0 || staleDay ? '주의' : '정상',
+      metrics: {
+        members,
+        todayActivity: activity.todayActivity,
+        openTickets,
+        lastActivityAt: activity.lastActivityAt,
+        pointsUsed: pointsByTenant.has(tenant.id) ? pointsByTenant.get(tenant.id) : null,
+        storageBytes: activity.storageBytes,
+      },
     }
   }
-  const publicPlatformState = () => ({
-    tenants: workspaceStore.platform.tenants.map(publicPlatformTenant),
+  const tenantPointsThisMonth = async () => {
+    const points = new Map()
+    if (!billingService) return points
+    const tenantIds = workspaceStore.platform.tenants.map((tenant) => tenant?.id).filter(Boolean)
+    if (!tenantIds.length) return points
+    try {
+      const dashboard = await billingService.getDashboard({ id: 'server:platform-metrics', role: 'platform-operator', tenantId: null, trusted: true }, { tenantIds })
+      for (const row of dashboard?.details?.tenants ?? []) points.set(row.tenantId, Number(row.pointsUsed || 0))
+    } catch { /* 포인트 집계 실패는 '아직 데이터 없음'으로 표시한다 */ }
+    return points
+  }
+  const publicPlatformState = (pointsByTenant = new Map()) => ({
+    tenants: workspaceStore.platform.tenants.map((tenant) => publicPlatformTenant(tenant, pointsByTenant)),
     supportTickets: [...workspaceStore.platform.supportTickets].sort((left, right) => {
       const unanswered = Number(Boolean(right?.unanswered)) - Number(Boolean(left?.unanswered))
       if (unanswered) return unanswered
@@ -2028,8 +2077,8 @@ export function createApp(options = {}) {
     auditEvents: workspaceStore.platform.auditEvents,
   })
 
-  app.get('/api/platform/state', requireAuth, requirePlatformOperator, (_request, response) => {
-    response.json(publicPlatformState())
+  app.get('/api/platform/state', requireAuth, requirePlatformOperator, async (_request, response) => {
+    response.json(publicPlatformState(await tenantPointsThisMonth()))
   })
 
   // 운영자 모드 진입: 세션에 진입 테넌트를 기록하고 관리자 권한의 유효 신원을 돌려준다.
@@ -2398,6 +2447,11 @@ export function createApp(options = {}) {
     const adminName = String(request.body?.adminName ?? '').trim()
     const adminEmail = String(request.body?.adminEmail ?? '').trim().toLowerCase()
     const targetDate = String(request.body?.targetDate ?? '')
+    const industryType = String(request.body?.industryType ?? 'food_manufacturing')
+    if (!TENANT_INDUSTRY_TYPES.has(industryType)) {
+      response.status(400).json({ error: { code: 'INVALID_INDUSTRY_TYPE', message: '업종 구분(industryType)을 확인해 주세요.' } })
+      return
+    }
     if (companyName.length < 2 || companyName.length > 80 || !industry || industry.length > 120 || !plan || plan.length > 80
       || adminName.length < 2 || adminName.length > 40 || !/^\S+@\S+\.\S+$/.test(adminEmail) || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
       response.status(400).json({ error: { code: 'INVALID_PLATFORM_TENANT', message: '고객사명, 업종, 요금제, 목표일과 최초 관리자 정보를 확인해 주세요.' } })
@@ -2417,7 +2471,7 @@ export function createApp(options = {}) {
     const account = { id: adminId, name: adminName, email: adminEmail, role: 'tenant-admin', tenantId, tenantName: companyName, team: '경영지원', jobRole: '운영 관리자', requested: new Date().toISOString(), approved: true, approvalStatus: 'approved', password: Buffer.alloc(32) }
     const onboarding = provisionAccountCredential(workspaceStore, account, { ttlHours: 72 })
     const createdAt = new Date().toISOString()
-    const tenant = { id: tenantId, name: companyName, industry, contract: '온보딩', service: '정상', health: 100, plan, sites: 1, users: 1, activeUsers: 1, integrations: '0 / 5', sync: '설정 대기', tickets: 0, aiUsage: '미확정', storage: '미확정', csm: '미배정', adminEmail, targetDate, createdAt, adminAccount: { id: adminId, name: adminName, email: adminEmail, team: account.team, jobRole: account.jobRole } }
+    const tenant = { id: tenantId, name: companyName, industry, industryType, contract: '온보딩', plan, adminEmail, targetDate, createdAt, adminAccount: { id: adminId, name: adminName, email: adminEmail, team: account.team, jobRole: account.jobRole } }
     const integrationTemplates = [['COUPANG', '쿠팡', 'C', '판매채널'], ['NAVER', '네이버 스마트스토어', 'N', '판매채널'], ['GMARKET', 'G마켓', 'G', '판매채널'], ['DELIVERY', '택배 연동', 'T', '물류'], ['CLAUDE', 'Claude AI', 'AI', 'AI']]
     const integrations = integrationTemplates.map(([suffix, name, short, kind]) => ({ id: `${tenantId}-${suffix}`, tenantId, name, short, kind, status: '설정중', lastSync: '—', result: '고객사 설정 대기', successRate: '—' }))
     const previousTenants = workspaceStore.platform.tenants

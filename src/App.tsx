@@ -1603,7 +1603,7 @@ export default function App() {
     ? { title: openPlatformTickets[0].title, detail: `${openPlatformTickets[0].tenant} · ${openPlatformTickets[0].priority} · SLA ${openPlatformTickets[0].sla}` }
     : { title: '열린 CS 티켓이 없습니다', detail: '새 고객사 요청이 접수되면 여기에 표시됩니다.' }
   const secondaryPlatformNotice = platformServiceAttention
-    ? { title: `${platformServiceAttention.name} 서비스 상태를 확인해 주세요`, detail: `현재 상태 ${platformServiceAttention.service} · 최근 동기화 ${platformServiceAttention.sync}` }
+    ? { title: `${platformServiceAttention.name} 서비스 상태를 확인해 주세요`, detail: `미처리 티켓 ${platformServiceAttention.metrics.openTickets}건 · 마지막 활동 ${platformServiceAttention.metrics.lastActivityAt ? formatDateTime(platformServiceAttention.metrics.lastActivityAt) : '아직 데이터 없음'}` }
     : { title: '고객사 서비스가 정상 상태입니다', detail: `현재 관리 중인 고객사 ${platformTenants.length}곳 기준입니다.` }
   const platformNav: NavItem[] = [
     { id: 'platform', label: '운영 개요', icon: Home },

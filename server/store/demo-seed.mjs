@@ -20,8 +20,9 @@ export const DEMO_ACCOUNT_DEFINITIONS = Object.freeze([
 ])
 
 export const PLATFORM_TENANT_FIXTURES = Object.freeze([
-  { id: 'TENANT-SUNSEA', name: '햇살바다', industry: '수산가공 · HMR · 온라인 유통', contract: '운영중', service: '정상', health: 98, plan: 'Enterprise', sites: 2, users: 46, activeUsers: 28, integrations: '5 / 5', sync: '14:42', tickets: 1, aiUsage: '1,284 / 5,000', storage: '41.8 / 100GB', csm: '이민지', adminEmail: 'admin@sunsea.co.kr', adminAccount: { id: 'USR-SUNSEA-ADMIN', name: '김서원', email: 'admin@sunsea.co.kr', team: '경영지원', jobRole: '운영 관리자' }, createdAt: '2026-08-01T00:00:00.000Z' },
-  { id: 'TENANT-POHANG', name: '포항시수산가공협동조합', industry: '수산가공 · 조합 공동판매', contract: '온보딩', service: '주의', health: 82, plan: 'Growth', sites: 1, users: 24, activeUsers: 11, integrations: '3 / 5', sync: '14:36', tickets: 3, aiUsage: '412 / 2,000', storage: '13.2 / 50GB', csm: '박하늘', adminEmail: 'admin@pohangcoop.co.kr', adminAccount: { id: 'USR-POHANG-ADMIN', name: '박해진', email: 'admin@pohangcoop.co.kr', team: '조합 운영', jobRole: '운영 관리자' }, createdAt: '2026-08-01T00:00:00.000Z' },
+  // 지표(멤버 수·활동·티켓·포인트·용량)는 시드에 넣지 않는다 — 전부 스토어 실집계로 계산된다.
+  { id: 'TENANT-SUNSEA', name: '햇살바다', industry: '수산가공 · HMR · 온라인 유통', industryType: 'food_manufacturing', contract: '운영중', plan: 'Enterprise', adminEmail: 'admin@sunsea.co.kr', adminAccount: { id: 'USR-SUNSEA-ADMIN', name: '김서원', email: 'admin@sunsea.co.kr', team: '경영지원', jobRole: '운영 관리자' }, createdAt: '2026-08-01T00:00:00.000Z' },
+  { id: 'TENANT-POHANG', name: '포항시수산가공협동조합', industry: '수산가공 · 조합 공동판매', industryType: 'food_manufacturing', contract: '온보딩', plan: 'Growth', adminEmail: 'admin@pohangcoop.co.kr', adminAccount: { id: 'USR-POHANG-ADMIN', name: '박해진', email: 'admin@pohangcoop.co.kr', team: '조합 운영', jobRole: '운영 관리자' }, createdAt: '2026-08-01T00:00:00.000Z' },
 ])
 
 export const PLATFORM_INTEGRATION_FIXTURES = Object.freeze([

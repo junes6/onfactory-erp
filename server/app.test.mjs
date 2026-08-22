@@ -2585,7 +2585,7 @@ test('platform operations persist tenants, administrator credentials, CS evidenc
       createdTenantId = createdTenant.tenant.id
       temporaryPassword = createdTenant.onboarding.temporaryPassword
       assert.match(createdTenantId, /^TENANT-[0-9A-F]{12}$/)
-      assert.equal(createdTenant.tenant.users, 1)
+      assert.equal(createdTenant.tenant.metrics.members, 1)
       assert.equal(createdTenant.onboarding.requiresPasswordChange, true)
       assert.notEqual(createdTenant.onboarding.temporaryPassword, 'demo1234')
       assert.ok(Date.parse(createdTenant.onboarding.expiresAt) > Date.now())
