@@ -37,7 +37,8 @@ type TenantPage = 'ai' | 'schedule' | 'tasks' | 'journal' | 'products' | 'invent
 type PageId = TenantPage | PlatformSection | 'billing'
 type AppMode = 'tenant' | 'platform'
 type NavItem = { id: PageId; label: string; icon: typeof Sparkles; badge?: number }
-type AuthAccount = { id: string; name: string; email: string; role: 'tenant-admin' | 'tenant-member' | 'platform-operator'; tenantId: string | null; tenantName: string | null; approved: boolean; team?: string; jobRole?: string; requiresPasswordChange?: boolean }
+type OperatorMode = { operatorId: string; operatorName: string; tenantId: string; tenantName: string; enteredAt: string | null }
+type AuthAccount = { id: string; name: string; email: string; role: 'tenant-admin' | 'tenant-member' | 'platform-operator'; tenantId: string | null; tenantName: string | null; approved: boolean; team?: string; jobRole?: string; requiresPasswordChange?: boolean; industryType?: string; operatorMode?: OperatorMode }
 type AuthStatus = 'checking' | 'signed-out' | 'signed-in'
 type PlatformTicketSummary = { id: string; tenantId: string; tenant: string; title: string; priority: string; status: string; sla: string; owner: string }
 type PlatformDirectoryState = { tenants: Tenant[]; supportTickets: PlatformTicketSummary[] }
@@ -1650,6 +1651,34 @@ export default function App() {
     if (account?.role !== 'platform-operator') { setToast('통합 관리자는 온팩토리 운영자 계정으로만 접근할 수 있습니다.'); return }
     setMode('platform'); navigate('platform')
   }
+  // 운영자 모드: 콘솔의 [접속]으로 고객사 워크스페이스 전체를 관리자 권한으로 사용한다.
+  const enterTenant = async (tenantId: string) => {
+    try {
+      const response = await fetch(`/api/platform/tenants/${encodeURIComponent(tenantId)}/enter`, { method: 'POST' })
+      const body = await response.json() as { account?: AuthAccount; error?: { message?: string } }
+      if (!response.ok || !body.account) { setToast(body.error?.message || '고객사 워크스페이스에 접속하지 못했습니다.'); return }
+      setAccount(body.account)
+      publishSessionChange(sessionIdentity(body.account))
+      setPlatformFocusId(undefined)
+      setMode('tenant')
+      setPage('ai')
+      setToast(`운영자 모드로 ${body.account.tenantName ?? '고객사'} 워크스페이스에 접속했습니다. 모든 행위가 감사 기록에 남습니다.`)
+    } catch { setToast('플랫폼 서버에 연결할 수 없습니다.') }
+  }
+  const exitTenant = async () => {
+    try {
+      const response = await fetch('/api/platform/exit', { method: 'POST' })
+      const body = await response.json() as { account?: AuthAccount; error?: { message?: string } }
+      if (!response.ok || !body.account) { setToast(body.error?.message || '운영자 모드를 종료하지 못했습니다.'); return }
+      setAccount(body.account)
+      publishSessionChange(sessionIdentity(body.account))
+      setTaskDraft(null)
+      setMessengerOpen(false)
+      setMode('platform')
+      setPage('platform')
+      setToast('운영자 모드를 종료하고 플랫폼 콘솔로 돌아왔습니다.')
+    } catch { setToast('플랫폼 서버에 연결할 수 없습니다.') }
+  }
   const requestTenantSupportAccess = () => {
     const targetTenant = platformTenants[0]
     if (!targetTenant) { setToast('지원 세션을 요청할 고객사를 찾을 수 없습니다.'); return }
@@ -1792,7 +1821,7 @@ export default function App() {
   const renderPage = () => {
     if (mode === 'platform' && account?.role === 'platform-operator') {
       if (page === 'billing') return <BillingDashboard mode="platform" tenantOptions={platformTenants.map((tenant) => ({ id: tenant.id, name: tenant.name }))} onToast={setToast} />
-      return <PlatformConsole section={page as PlatformSection} focusId={platformFocusId} refreshToken={platformRefreshToken} onSectionChange={(section) => navigate(section)} onReturnTenant={requestTenantSupportAccess} onRequestSupport={setSupportTenant} onDataChanged={() => setPlatformRefreshToken((current) => current + 1)} onToast={setToast} />
+      return <PlatformConsole section={page as PlatformSection} focusId={platformFocusId} refreshToken={platformRefreshToken} onSectionChange={(section) => navigate(section)} onReturnTenant={requestTenantSupportAccess} onRequestSupport={setSupportTenant} onEnterTenant={(tenantId) => void enterTenant(tenantId)} onDataChanged={() => setPlatformRefreshToken((current) => current + 1)} onToast={setToast} />
     }
     if (account?.role === 'tenant-member' && !tenantMemberPages.has(page)) {
       return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyMode === 'easy'} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
@@ -1818,8 +1847,9 @@ export default function App() {
   if (account?.requiresPasswordChange) return <PasswordChangePage name={account.name} email={account.email} onChange={changeInitialPassword} onLogout={logout} />
 
   return (
-    <div className={'app-shell ' + mode + ' density-' + density + (storeStatus?.readOnly ? ' has-store-banner' : '')}>
+    <div className={'app-shell ' + mode + ' density-' + density + (storeStatus?.readOnly ? ' has-store-banner' : '') + (account?.operatorMode ? ' has-operator-banner' : '')}>
       <a className="skip-link" href="#main-content">본문으로 바로가기</a>
+      {account?.operatorMode && <div className="operator-mode-banner" role="status"><ShieldCheck size={17} /><span><strong>운영자 모드</strong> — {account.operatorMode.tenantName} 접속 중 · 모든 조회·변경이 운영자 {account.operatorMode.operatorName} 이름으로 감사 기록에 남습니다.</span><button type="button" onClick={() => void exitTenant()}>나가기</button></div>}
       {storeStatus?.readOnly && <div className="store-readonly-banner" role="alert"><AlertTriangle size={17} /><span><strong>읽기 전용 모드</strong> — 저장소가 읽기 전용(STORE_READ_ONLY)으로 기동되어 모든 변경이 저장되지 않습니다.{storeStatus.fallbackReason ? ` ${storeStatus.fallbackReason}` : ''}</span></div>}
       {isMobile && mobileNav && <button type="button" className="nav-scrim" aria-label="메뉴 닫기" onClick={() => setMobileNav(false)} />}
       <aside id="main-navigation" className={'sidebar ' + (mobileNav ? 'open' : '')} aria-label={mode === 'platform' ? '플랫폼 운영 메뉴' : `${tenantName} 업무 메뉴`} aria-hidden={isMobile && !mobileNav} inert={isMobile && !mobileNav ? true : undefined}>

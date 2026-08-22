@@ -330,3 +330,13 @@ html[data-theme='dark'] .leave-duration-preview { border-color: var(--line); bac
 /* v4: 잔여 부족 시에도 신청은 가능 — 안내만 표시 */
 .leave-balance-warning { display: flex; align-items: flex-start; gap: var(--space-8); margin-top: var(--space-8); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--color-warning-soft); border-radius: var(--radius-8); color: var(--color-warning); background: var(--color-warning-soft); font-size: var(--font-13); line-height: 1.5; }
 .leave-balance-warning svg { flex: 0 0 auto; margin-top: var(--space-4); }
+
+
+/* P1: 운영사 접속 이력 */
+.operator-access-log { margin-top: var(--space-24); padding-top: var(--space-16); border-top: var(--hairline) solid var(--line); }
+.operator-access-list { display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-12); }
+.operator-access-list article { display: grid; grid-template-columns: 150px minmax(0,1fr) auto; align-items: center; gap: var(--space-12); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.operator-access-list time { color: var(--muted); font-size: var(--font-13); }
+.operator-access-list strong { display: block; font-size: var(--font-13); }
+.operator-access-list small { display: block; overflow: hidden; color: var(--muted); font-size: var(--font-11); text-overflow: ellipsis; white-space: nowrap; }
+.operator-access-list span { padding: var(--space-0) var(--space-8); border-radius: var(--radius-8); color: var(--color-violet); background: var(--color-violet-soft); font-size: var(--font-11); font-weight: var(--weight-medium); line-height: 22px; white-space: nowrap; }

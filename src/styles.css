@@ -2738,3 +2738,13 @@ html[data-easy-mode='on'] .global-search { display: none; }
 .store-readonly-banner { position: fixed; z-index: 200; top: 0; right: 0; left: 0; display: flex; align-items: center; gap: var(--space-8); min-height: 32px; padding: var(--space-4) var(--space-16); color: var(--color-white); background: var(--color-danger); font-size: var(--font-13); }
 .store-readonly-banner strong { font-weight: var(--weight-medium); }
 .app-shell.has-store-banner { padding-top: var(--space-32); }
+
+
+/* P1: 운영자 모드 고정 배너 */
+.operator-mode-banner { position: fixed; z-index: 200; top: 0; right: 0; left: 0; display: flex; align-items: center; gap: var(--space-8); min-height: 36px; padding: var(--space-4) var(--space-16); color: var(--color-white); background: var(--color-violet); font-size: var(--font-13); }
+.operator-mode-banner strong { font-weight: var(--weight-medium); }
+.operator-mode-banner > span { flex: 1; }
+.operator-mode-banner > button { min-height: 28px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--color-white); border-radius: var(--radius-8); color: var(--color-white); background: transparent; font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
+.operator-mode-banner > button:hover { color: var(--color-violet); background: var(--color-white); }
+.app-shell.has-operator-banner { padding-top: var(--space-32); }
+.app-shell.has-operator-banner .sidebar { top: var(--space-32); height: calc(100vh - var(--space-32)); }

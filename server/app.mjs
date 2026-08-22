@@ -1608,30 +1608,96 @@ export function createApp(options = {}) {
     })
   })
 
-  const authenticatedAccount = (request) => {
-    if (authDisabled) return accounts[0]
+  const authenticatedContext = (request) => {
+    if (authDisabled) return { account: accounts[0], session: null }
     const token = parseCookies(request.headers.cookie)[SESSION_COOKIE]
     const session = token ? sessions.get(token) : null
     if (!session || session.expiresAt <= Date.now()) {
       if (token) sessions.delete(token)
-      return null
+      return { account: null, session: null }
     }
-    return accounts.find((account) => account.id === session.accountId && account.approved) ?? null
+    return { account: accounts.find((account) => account.id === session.accountId && account.approved) ?? null, session }
+  }
+  const authenticatedAccount = (request) => authenticatedContext(request).account
+
+  // 운영자 모드: 플랫폼 운영자가 세션에 "진입 테넌트"를 기록하면, 그 요청의 유효 신원은
+  // 해당 테넌트의 관리자(tenant-admin)로 해석된다. 기존 테넌트 라우트·권한 검사·
+  // x-workspace-identity(`${tenantId}:${operatorId}`) 검사가 그대로 동작하고,
+  // 운영자 신원은 operatorMode 메타데이터로 보존되어 감사 기록에 쓰인다.
+  // 일반 계정의 교차 테넌트 접근은 변함없이 차단된다 (tenantId는 세션 계정에서만 온다).
+  const effectiveAuth = (account, session) => {
+    const base = safeAccount(account)
+    const enteredTenantId = session?.enteredTenantId
+    if (account.role !== 'platform-operator' || !enteredTenantId) return base
+    const tenant = workspaceStore.platform.tenants.find((item) => item?.id === enteredTenantId)
+    if (!tenant) return base
+    return {
+      ...base,
+      role: 'tenant-admin',
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      team: '온팩토리 운영',
+      jobRole: '플랫폼 운영자',
+      operatorMode: {
+        operatorId: account.id,
+        operatorName: account.name,
+        tenantId: tenant.id,
+        tenantName: tenant.name,
+        enteredAt: session.enteredAt ?? null,
+      },
+    }
+  }
+
+  // 운영자 모드의 모든 요청을 감사 기록에 남긴다. 변경(non-GET)은 건별로,
+  // 조회(GET)는 같은 경로를 10분에 한 번만 기록해 로그 폭증을 막는다.
+  const operatorReadLog = new Map()
+  let auditCommitTimer = null
+  const scheduleAuditCommit = () => {
+    if (auditCommitTimer) return
+    auditCommitTimer = setTimeout(() => {
+      auditCommitTimer = null
+      try {
+        const result = commitWorkspaceStore()
+        if (result && typeof result.then === 'function') result.catch(() => { /* 다음 쓰기와 함께 저장 */ })
+      } catch { /* 다음 쓰기와 함께 저장 */ }
+    }, 1_500)
+    auditCommitTimer.unref?.()
+  }
+  const recordOperatorActivity = (request) => {
+    const mode = request.auth?.operatorMode
+    if (!mode) return
+    const isRead = request.method === 'GET' || request.method === 'HEAD'
+    const routePath = request.path.replace(/\/[A-Z][A-Z0-9-]{5,}(?=\/|$)/g, '/:id')
+    if (isRead) {
+      const key = `${mode.operatorId}:${mode.tenantId}:${routePath}`
+      const last = operatorReadLog.get(key) ?? 0
+      if (Date.now() - last < 10 * 60_000) return
+      operatorReadLog.set(key, Date.now())
+    }
+    appendPlatformAudit(workspaceStore.platform, {
+      tenantId: mode.tenantId,
+      event: isRead ? '운영자 조회' : '운영자 변경',
+      scope: `${request.method} ${routePath}`,
+      actor: `운영자 ${mode.operatorName}`,
+      reference: mode.operatorId,
+    })
+    scheduleAuditCommit()
   }
 
   const requireSession = (request, response, next) => {
-    const account = authenticatedAccount(request)
+    const { account, session } = authenticatedContext(request)
     if (!account) {
       response.status(401).json({ error: { code: 'AUTH_REQUIRED', message: '로그인이 필요합니다.' } })
       return
     }
     request.sessionAccount = account
-    request.auth = safeAccount(account)
+    request.session = session
+    request.auth = effectiveAuth(account, session)
     next()
   }
 
   const requireAuth = (request, response, next) => {
-    const account = authenticatedAccount(request)
+    const { account, session } = authenticatedContext(request)
     if (!account) {
       response.status(401).json({ error: { code: 'AUTH_REQUIRED', message: '로그인이 필요합니다.' } })
       return
@@ -1641,9 +1707,16 @@ export function createApp(options = {}) {
       return
     }
     request.sessionAccount = account
-    request.auth = safeAccount(account)
+    request.session = session
+    request.auth = effectiveAuth(account, session)
+    recordOperatorActivity(request)
     next()
   }
+
+  // 운영자 모드에서 업무 요청자/담당자 검증에 운영자 자신을 테넌트 구성원처럼 포함한다.
+  const operatorAwareAccounts = (auth) => auth?.operatorMode
+    ? [...accounts, { id: auth.id, name: auth.name, email: auth.email, role: 'tenant-admin', tenantId: auth.tenantId, tenantName: auth.tenantName, team: auth.team, jobRole: auth.jobRole, approved: true }]
+    : accounts
 
   const requireTenantAdmin = (request, response, next) => {
     if (request.auth?.role !== 'tenant-admin' || !request.auth.tenantId) {
@@ -1957,6 +2030,76 @@ export function createApp(options = {}) {
 
   app.get('/api/platform/state', requireAuth, requirePlatformOperator, (_request, response) => {
     response.json(publicPlatformState())
+  })
+
+  // 운영자 모드 진입: 세션에 진입 테넌트를 기록하고 관리자 권한의 유효 신원을 돌려준다.
+  app.post('/api/platform/tenants/:id/enter', requireAuth, requirePlatformOperator, async (request, response) => {
+    const tenant = platformTenant(String(request.params.id))
+    if (!tenant) {
+      response.status(404).json({ error: { code: 'PLATFORM_TENANT_NOT_FOUND', message: '접속할 고객사를 찾을 수 없습니다.' } })
+      return
+    }
+    const session = request.session
+    const token = parseCookies(request.headers.cookie)[SESSION_COOKIE]
+    if (!session || !token) {
+      response.status(401).json({ error: { code: 'AUTH_REQUIRED', message: '로그인이 필요합니다.' } })
+      return
+    }
+    session.enteredTenantId = tenant.id
+    session.enteredAt = new Date().toISOString()
+    sessions.set(token, session)
+    try { await sessions.flush?.() } catch {
+      delete session.enteredTenantId
+      delete session.enteredAt
+      response.status(503).json({ error: { code: 'SESSION_WRITE_FAILED', message: '운영자 모드 세션을 저장하지 못했습니다.' } })
+      return
+    }
+    appendPlatformAudit(workspaceStore.platform, {
+      tenantId: tenant.id,
+      event: '운영자 테넌트 접속',
+      scope: `${tenant.name} 워크스페이스에 관리자 권한으로 진입`,
+      actor: `운영자 ${request.auth.name}`,
+      reference: request.auth.id,
+    })
+    try { await commitWorkspaceStore() } catch { /* 감사 기록은 다음 쓰기와 함께 저장된다 */ }
+    response.json({ account: effectiveAuth(request.sessionAccount, session) })
+  })
+
+  app.post('/api/platform/exit', requireSession, async (request, response) => {
+    const account = request.sessionAccount
+    if (account.role !== 'platform-operator') {
+      response.status(403).json({ error: { code: 'PLATFORM_OPERATOR_REQUIRED', message: '온팩토리 플랫폼 운영자 권한이 필요합니다.' } })
+      return
+    }
+    const session = request.session
+    const token = parseCookies(request.headers.cookie)[SESSION_COOKIE]
+    const tenantId = session?.enteredTenantId
+    if (session && token) {
+      delete session.enteredTenantId
+      delete session.enteredAt
+      sessions.set(token, session)
+      try { await sessions.flush?.() } catch { /* 메모리 세션은 이미 갱신됨 */ }
+    }
+    if (tenantId) {
+      const tenant = platformTenant(tenantId)
+      appendPlatformAudit(workspaceStore.platform, {
+        tenantId,
+        event: '운영자 테넌트 나가기',
+        scope: `${tenant?.name ?? tenantId} 워크스페이스 운영자 모드 종료`,
+        actor: `운영자 ${account.name}`,
+        reference: account.id,
+      })
+      try { await commitWorkspaceStore() } catch { /* 감사 기록은 다음 쓰기와 함께 저장된다 */ }
+    }
+    response.json({ account: safeAccount(account) })
+  })
+
+  // 고객사 관리자가 보는 "운영사 접속 이력" — 고객 신뢰 장치.
+  app.get('/api/operator-access-log', requireAuth, requireTenantAdmin, (request, response) => {
+    const events = workspaceStore.platform.auditEvents
+      .filter((event) => event?.tenantId === request.auth.tenantId && typeof event.event === 'string' && event.event.startsWith('운영자'))
+      .slice(0, 300)
+    response.json({ events })
   })
 
   const developerSupportContext = (ticketId) => {
@@ -2523,7 +2666,9 @@ export function createApp(options = {}) {
       return
     }
     const isPlatformAccount = account.role === 'platform-operator'
-    if ((requestedWorkspace === 'platform') !== isPlatformAccount) {
+    // 플랫폼 운영자는 어느 워크스페이스를 골라도 로그인되어 플랫폼 콘솔로 진입한다.
+    // 일반(고객사) 계정이 플랫폼 콘솔을 선택한 경우만 거부한다.
+    if (requestedWorkspace === 'platform' && !isPlatformAccount) {
       response.status(403).json({ error: { code: 'WORKSPACE_FORBIDDEN', message: '이 계정에서 사용할 수 없는 워크스페이스입니다.' } })
       return
     }
@@ -4210,14 +4355,14 @@ export function createApp(options = {}) {
       return
     }
     if (request.auth.role === 'tenant-admin' && key === 'work-items') {
-      nextData = normalizeAdminWorkItems(nextData, request.auth.tenantId, accounts)
+      nextData = normalizeAdminWorkItems(nextData, request.auth.tenantId, operatorAwareAccounts(request.auth))
       if (!nextData) {
         response.status(400).json({ error: { code: 'INVALID_WORK_ITEMS', message: '업무 데이터 또는 담당 계정 정보를 확인해 주세요.' } })
         return
       }
     }
     if (request.auth.role === 'tenant-admin' && key === 'work-rules') {
-      nextData = normalizeAdminWorkRules(nextData, request.auth.tenantId, accounts)
+      nextData = normalizeAdminWorkRules(nextData, request.auth.tenantId, operatorAwareAccounts(request.auth))
       if (!nextData) {
         response.status(400).json({ error: { code: 'INVALID_WORK_RULES', message: '반복 업무 규칙 형식을 확인해 주세요.' } })
         return

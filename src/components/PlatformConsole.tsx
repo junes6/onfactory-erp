@@ -42,6 +42,7 @@ type PlatformConsoleProps = {
   onSectionChange: (section: PlatformSection) => void
   onReturnTenant: () => void
   onRequestSupport: (tenant: Tenant) => void
+  onEnterTenant: (tenantId: string) => void
   onDataChanged?: () => void
   onToast: (message: string) => void
 }
@@ -434,7 +435,7 @@ function DetailStat({ label, value }: { label: string; value: ReactNode }) {
   return <div className="pc-detail-stat"><span>{label}</span><strong>{value}</strong></div>
 }
 
-function TenantDetail({ tenant, onSectionChange, onRequestSupport, onScope }: { tenant?: Tenant; onSectionChange: PlatformConsoleProps['onSectionChange']; onRequestSupport: PlatformConsoleProps['onRequestSupport']; onScope: (scope: TenantScope) => void }) {
+function TenantDetail({ tenant, onSectionChange, onRequestSupport, onScope, onEnterTenant }: { tenant?: Tenant; onSectionChange: PlatformConsoleProps['onSectionChange']; onRequestSupport: PlatformConsoleProps['onRequestSupport']; onScope: (scope: TenantScope) => void; onEnterTenant: PlatformConsoleProps['onEnterTenant'] }) {
   const { integrations } = usePlatformData()
   if (!tenant) return <aside className="pc-detail"><EmptyState label="고객사를 선택해 주세요." /></aside>
   return (
@@ -465,7 +466,8 @@ function TenantDetail({ tenant, onSectionChange, onRequestSupport, onScope }: { 
         <div className="pc-detail-actions">
           <Button onClick={() => { onScope(tenant.id); onSectionChange('support') }}><LifeBuoy size={15} /> 관련 CS 보기</Button>
           <Button onClick={() => { onScope(tenant.id); onSectionChange('integrations') }}><Activity size={15} /> 연동 상태 보기</Button>
-          <Button primary onClick={() => onRequestSupport(tenant)}><LockKeyhole size={15} /> 지원 세션 요청</Button>
+          <Button onClick={() => onRequestSupport(tenant)}><LockKeyhole size={15} /> 지원 세션 요청</Button>
+          <Button primary onClick={() => onEnterTenant(tenant.id)}><ArrowRight size={15} /> 워크스페이스 접속</Button>
         </div>
       </div>
     </aside>
@@ -518,7 +520,7 @@ function Overview({ scope, scopedTenants, scopedTickets, scopedIntegrations, sel
           </div>
         </Panel>
       </div>
-      <TenantDetail tenant={selectedTenant} onSectionChange={props.onSectionChange} onRequestSupport={props.onRequestSupport} onScope={onScope} />
+      <TenantDetail tenant={selectedTenant} onSectionChange={props.onSectionChange} onRequestSupport={props.onRequestSupport} onScope={onScope} onEnterTenant={props.onEnterTenant} />
     </div>
   )
 }
@@ -554,7 +556,7 @@ function TenantsView({ scope, scopedTenants, selectedTenantId, onSelectTenant, o
           </tr>)}</tbody>
         </table></div> : <EmptyState label="검색 조건에 맞는 고객사가 없습니다." />}
       </Panel>
-      <TenantDetail tenant={selectedTenant} onSectionChange={props.onSectionChange} onRequestSupport={props.onRequestSupport} onScope={onScope} />
+      <TenantDetail tenant={selectedTenant} onSectionChange={props.onSectionChange} onRequestSupport={props.onRequestSupport} onScope={onScope} onEnterTenant={props.onEnterTenant} />
     </div>
   )
 }

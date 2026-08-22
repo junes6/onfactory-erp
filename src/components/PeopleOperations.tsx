@@ -176,6 +176,7 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
   const [modal, setModal] = useState<PeopleModal | null>(null)
   const [selectedProfile, setSelectedProfile] = useState<MemberProfile | null>(null)
   const [confirmAccrual, setConfirmAccrual] = useState(false)
+  const [operatorAccessLog, setOperatorAccessLog] = useState<Array<{ id: string; at: string; event: string; scope: string; actor: string; reference?: string }>>([])
   const modalRef = useRef<HTMLElement>(null)
   const modalTriggerRef = useRef<HTMLButtonElement | null>(null)
 
@@ -233,6 +234,16 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       window.requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus() })
     }
   }, [modal])
+
+  useEffect(() => {
+    if (!canManage || tab !== 'accounts') return
+    let active = true
+    fetch('/api/operator-access-log')
+      .then(async (response) => response.ok ? response.json() as Promise<{ events?: Array<{ id: string; at: string; event: string; scope: string; actor: string; reference?: string }> }> : { events: [] })
+      .then((body) => { if (active) setOperatorAccessLog(Array.isArray(body.events) ? body.events : []) })
+      .catch(() => { if (active) setOperatorAccessLog([]) })
+    return () => { active = false }
+  }, [canManage, tab])
 
   useEffect(() => {
     if (!canManage) {
@@ -704,6 +715,12 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
         {request.status === '승인대기' ? <div className="approval-actions"><button type="button" className="small-button reject" onClick={(event) => void decideAccount(request.id, '반려', event.currentTarget)}>반려</button><button type="button" className="small-button approve" onClick={(event) => void decideAccount(request.id, '활성', event.currentTarget)}><UserCheck size={16} /> 승인</button></div> : request.status === '활성' ? <div className="account-credential-actions"><span className="approval-result"><ShieldCheck size={17} />{request.onboardingStatus === '설정완료' ? '로그인 가능' : '초기 설정 대기'}</span><button type="button" className="small-button" disabled={credentialIssuingId === request.id} onClick={(event) => void reissueCredential(request, event.currentTarget)}><RefreshCw size={15} />{credentialIssuingId === request.id ? '발급 중…' : '비밀번호 재설정 발급'}</button></div> : <span className="approval-result"><ShieldCheck size={17} />접근 불가</span>}
       </article>)}</div>
       <div className="account-safety-note"><AlertTriangle size={19} /><div><strong>초기 비밀번호는 승인 또는 재발급 직후 한 번만 표시됩니다.</strong><p>72시간 후 만료되며 첫 로그인에서 새 비밀번호를 설정하기 전에는 업무 데이터에 접근할 수 없습니다.</p></div></div>
+      <section className="operator-access-log" aria-labelledby="operator-access-log-title">
+        <div className="people-subsection-head"><div><h3 id="operator-access-log-title">운영사(온팩토리) 접속 이력</h3><p>플랫폼 운영자가 우리 회사 워크스페이스에 접속·조회·변경한 모든 기록입니다.</p></div><strong>{operatorAccessLog.length}건</strong></div>
+        {operatorAccessLog.length === 0
+          ? <div className="people-empty-state"><ShieldCheck size={22} /><strong>운영사 접속 기록이 없습니다.</strong><span>운영자가 접속하면 시각·행위·운영자 이름이 여기에 남습니다.</span></div>
+          : <div className="operator-access-list">{operatorAccessLog.slice(0, 50).map((event) => <article key={event.id}><time>{event.at}</time><div><strong>{event.event}</strong><small>{event.scope}</small></div><span>{event.actor}</span></article>)}</div>}
+      </section>
     </section>}
 
     {modal && (modal === 'leave' || canManage) && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeModal()}>
