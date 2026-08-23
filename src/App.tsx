@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import AIChat from './components/AIChat'
 import { ChatBubbleIcon, NotificationBellIcon, OnFactoryMark } from './components/AppIcons'
-import { LoginPage, PasswordChangePage, SettingsDrawer, type AccentChoice, type DensityChoice, type EasyModeChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
+import { LoginPage, PasswordChangePage, SettingsDrawer, type AccentChoice, type EasyModeChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
 import { ProductManagement, SalesChannels } from './components/BusinessPages'
 import { BillingDashboard } from './components/BillingDashboard'
 import { CompanyLibrary } from './components/CompanyLibrary'
@@ -22,7 +22,6 @@ import {
 import { FactoryManagement } from './components/FactoryManagement'
 import './components/InventoryEnhancements.css'
 import { PeopleOperationsPage } from './components/PeopleOperations'
-import { PerformanceReports } from './components/PerformanceReports'
 import { ItServicesPage, type ItServicesView } from './components/ItServices'
 import { ApprovalQueue } from './components/ApprovalQueue'
 import { brandLabelForIndustry, routesForIndustry } from './modules/registry'
@@ -37,7 +36,7 @@ import {
   type Tenant, type WorkEvidence, type WorkItem, type WorkRule,
 } from './domainData'
 
-type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'performance' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
+type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
 type PageId = TenantPage | PlatformSection | 'billing'
 type AppMode = 'tenant' | 'platform'
 type NavItem = { id: PageId; label: string; icon: typeof Sparkles; badge?: number }
@@ -48,7 +47,7 @@ type PlatformTicketSummary = { id: string; tenantId: string; tenant: string; tit
 type PlatformDirectoryState = { tenants: Tenant[]; supportTickets: PlatformTicketSummary[] }
 type SupportSessionRequest = { tenantId: string; ticketId: string; scope: string; duration: string; reason: string }
 
-const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'products', 'inventory', 'factory', 'people', 'performance', 'documents', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
+const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'products', 'inventory', 'factory', 'people', 'documents', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
 const AUTH_SYNC_KEY = 'onfactory-auth-sync'
 const emptyWorkItems: WorkItem[] = []
 const emptyWorkRules: WorkRule[] = []
@@ -128,7 +127,7 @@ const pageTitles: Record<PageId, string> = {
   ai: 'AI 업무허브', schedule: '일정관리', tasks: '업무지시 · 결재', journal: '일일업무일지',
   products: '제품관리', inventory: '재고 · LOT', factory: '공장관리',
   sales: '판매채널', people: '인사 · 조직', documents: '기업 자료실', compliance: '식품안전 · 인증',
-  performance: '직원 성과', approvals: '승인 큐',
+  approvals: 'AI 제안 검토',
   'it-projects': '프로젝트', 'it-deliverables': '산출물', 'it-contracts': '계약 · 거래처',
   billing: '비용 · 포인트',
   platform: '플랫폼 운영 개요', tenants: '고객사 관리', support: 'CS 지원센터',
@@ -488,7 +487,7 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
             : <button className={todayEvents.length === 0 ? 'is-neutral' : ''} type="button" aria-label={`오늘 일정 ${todayEvents.length}건`} onClick={() => onNavigate('schedule')}><CalendarDays size={15} /><span>오늘 일정</span><strong>{todayEvents.length}</strong></button>}
           <button className={myWork.length === 0 ? 'is-neutral' : ''} type="button" aria-label={`확인할 업무 ${myWork.length}건`} onClick={() => onNavigate('tasks')}><ListChecks size={15} /><span>확인 업무</span><strong>{myWork.length}</strong></button>
           <button className={attentionCount === 0 ? 'is-neutral' : ''} type="button" aria-label={`AI 알림 ${attentionCount}건`} onClick={onOpenAlerts}><Sparkles size={15} /><span>AI 알림</span><strong>{attentionCount}</strong></button>
-          {canAssignTasks && <button className={pendingProposals === 0 ? 'is-neutral' : 'is-attention'} type="button" aria-label={`승인 대기 ${pendingProposals}건`} onClick={() => onNavigate('approvals')}><ClipboardCheck size={15} /><span>승인 대기</span><strong>{pendingProposals}</strong></button>}
+          {canAssignTasks && <button className={pendingProposals === 0 ? 'is-neutral' : 'is-attention'} type="button" aria-label={`검토할 AI 제안 ${pendingProposals}건`} onClick={() => onNavigate('approvals')}><ClipboardCheck size={15} /><span>AI 제안</span><strong>{pendingProposals}</strong></button>}
         </div>{layoutOpen ? <button className="button primary" type="button" onClick={finishLayoutEdit}><Check size={18} /> 편집 완료</button> : <DashboardLayoutButton onClick={() => setLayoutOpen(true)} />}{canAssignTasks ? <button className="button primary" type="button" onClick={() => onCreateTask()}><Plus size={18} /> 새 업무 지시</button> : <StatusBadge className="status-pill" tone="neutral">직원용 업무 화면</StatusBadge>}</>}
       />
       {layoutOpen && <section className="dashboard-layout-workbench" aria-labelledby="dashboard-layout-workbench-title">
@@ -649,14 +648,14 @@ function WorkReviewModal({ item, workspaceScope, onToast, onClose, onSubmit }: {
   const [mode, setMode] = useState<'approve' | 'request-changes'>('approve')
   const [comment, setComment] = useState('')
   const [busy, setBusy] = useState(false)
-  const valid = comment.trim().length >= 2
+  const valid = mode === 'approve' || comment.trim().length >= 2
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section ref={dialogRef} className="modal-card workflow-modal" role="dialog" aria-modal="true" aria-labelledby="review-modal-title">
       <header><div><span className="eyebrow">WORK REVIEW</span><h2 id="review-modal-title">{mode === 'approve' ? '결재 승인' : '수정 요청'}</h2><p>{item.title}</p></div><button type="button" className="icon-button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
       <form onSubmit={async (event) => { event.preventDefault(); if (!valid) return; setBusy(true); const message = comment.trim(); if (await onSubmit(mode, message, mode === 'request-changes' ? message : undefined)) onClose(); else setBusy(false) }}>
         <div className="workflow-submission-preview"><strong>담당자 완료 보고</strong><p>{item.completion?.summary || '레거시 업무로 완료내용이 등록되지 않았습니다.'}</p>{item.completion?.evidence.map((file) => file.id.startsWith('DOC-') ? <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={14} /> {file.name} · {file.size}</button> : <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}</span>)}</div>
         <div className="workflow-review-decision" role="radiogroup" aria-label="검토 결정"><button type="button" role="radio" aria-checked={mode === 'approve'} onClick={() => { setMode('approve'); setComment('') }}><Check size={16} /> 승인</button><button type="button" role="radio" aria-checked={mode === 'request-changes'} onClick={() => { setMode('request-changes'); setComment('') }}>수정 요청</button></div>
-        <label className="form-field full"><span>{mode === 'approve' ? '승인 코멘트' : '수정 요청 내용'} <em>필수</em></span><textarea autoFocus data-autofocus rows={4} value={comment} onChange={(event) => setComment(event.target.value)} placeholder={mode === 'approve' ? '검토한 내용과 승인 근거를 남겨 주세요.' : '무엇을 왜, 어떻게 보완해야 하는지 한 번에 작성해 주세요. 예: LOT 번호와 조치 전·후 사진을 보완해 주세요.'} required /></label>
+        <label className="form-field full"><span>{mode === 'approve' ? '승인 메모' : '수정 요청 내용'} <em>{mode === 'approve' ? '선택' : '필수'}</em></span><textarea autoFocus data-autofocus rows={mode === 'approve' ? 3 : 4} value={comment} onChange={(event) => setComment(event.target.value)} placeholder={mode === 'approve' ? '필요할 때만 남기세요. 비워 두고 바로 승인할 수 있습니다.' : '무엇을 왜, 어떻게 보완해야 하는지 한 번에 작성해 주세요. 예: LOT 번호와 조치 전·후 사진을 보완해 주세요.'} required={mode !== 'approve'} /></label>
         <footer><button type="button" className="button ghost" onClick={onClose}>취소</button><button type="submit" className={`button ${mode === 'approve' ? 'primary' : 'danger'}`} disabled={busy || !valid}>{mode === 'approve' && <Check size={18} />}{mode === 'approve' ? ' 승인 완료' : '수정 요청 보내기'}</button></footer>
       </form>
     </section>
@@ -1104,9 +1103,10 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
           const stockSummary = stockTotals.length > 0 ? stockTotals.join(' · ') : unresolvedCount > 0 ? '현재고 확인 필요' : '재고 원장 미등록'
           const expanded = expandedWarehouseIds.has(location.id)
           const visibleLots = expanded ? lots : lots.slice(0, 4)
-          return <article className="warehouse-card warehouse-inventory-block" key={location.id}>
+          const typeClass = location.type === '냉장' ? 'chilled' : location.type === '냉동' ? 'frozen' : location.type === '포장재' ? 'packaging' : 'ambient'
+          return <article className={`warehouse-card warehouse-inventory-block warehouse-type-${typeClass}`} key={location.id}>
             <div className="warehouse-card-top"><span className="warehouse-icon"><Warehouse size={21} /></span><div><StatusBadge className="status-pill" dot tone={location.alert === '이상 없음' ? 'success' : 'warning'}>{location.condition}</StatusBadge>{canManage && <button type="button" className="warehouse-edit" onClick={() => setEditing(location)}>변경</button>}</div></div>
-            <div className="warehouse-card-heading"><div><h2>{location.name}</h2><span className="warehouse-code">{location.id} · {location.type}</span></div><strong className={unresolvedCount > 0 ? 'needs-reconcile' : ''}>{stockSummary}{unresolvedCount > 0 && stockTotals.length > 0 ? ` · 미확정 ${unresolvedCount}` : ''}</strong></div>
+            <div className="warehouse-card-heading"><div><h2>{location.name}</h2><span className="warehouse-code"><b className="warehouse-type-chip">{location.type}</b> {location.id}</span></div><strong className={unresolvedCount > 0 ? 'needs-reconcile' : ''}>{stockSummary}{unresolvedCount > 0 && stockTotals.length > 0 ? ` · 미확정 ${unresolvedCount}` : ''}</strong></div>
             <div className="warehouse-utilization"><div className="progress-head"><span>공간 사용률</span><strong>{location.utilization}%</strong></div><div className="progress-track"><span style={{ width: location.utilization + '%' }} /></div></div>
             <section className="warehouse-lot-block" aria-label={`${location.name} 품목 및 LOT 수량`}>
               <header><div><strong>품목 · LOT 현재고</strong><small>입고·출고 누계, 재고조정 시 실사 수량으로 확정</small></div><span>{lots.length} LOT</span></header>
@@ -1300,7 +1300,7 @@ export default function App() {
   const workspaceScope = account?.tenantId && account.id ? `${account.tenantId}:${account.id}` : undefined
   const [pendingProposals, setPendingProposals] = useState(0)
   const [consentReminder, setConsentReminder] = useState<{ needsReconsent: boolean; version: string } | null>(null)
-  const [peopleInitialTab, setPeopleInitialTab] = useState<'members' | 'accounts'>('members')
+  const [peopleInitialTab, setPeopleInitialTab] = useState<'members' | 'accounts' | 'performance'>('members')
   const isTenantAdmin = account?.role === 'tenant-admin' && Boolean(account.tenantId)
   useEffect(() => {
     if (!isTenantAdmin || !workspaceScope) { setPendingProposals(0); setConsentReminder(null); return }
@@ -1328,7 +1328,18 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [navEditorOpen, setNavEditorOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const [unread, setUnread] = useState(0)
+  const noticeIds = ['primary', 'secondary', 'tertiary'] as const
+  const [readNoticeIds, setReadNoticeIds] = useState<string[]>([])
+  const unread = noticeIds.filter((id) => !readNoticeIds.includes(id)).length
+  const notificationWrapRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!notificationsOpen) return
+    const onPointerDown = (event: PointerEvent) => { if (!notificationWrapRef.current?.contains(event.target as Node)) setNotificationsOpen(false) }
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setNotificationsOpen(false) }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('pointerdown', onPointerDown); document.removeEventListener('keydown', onKey) }
+  }, [notificationsOpen])
   const [query, setQuery] = useState('')
   const [workItems, setWorkItems] = useWorkspaceState<WorkItem[]>('work-items', emptyWorkItems, {
     enabled: authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange,
@@ -1367,7 +1378,6 @@ export default function App() {
   const [storeStatus, setStoreStatus] = useState<{ kind: string; readOnly: boolean; fallbackReason: string | null } | null>(null)
   const [theme, setTheme] = useState<ThemeChoice>(() => (window.localStorage.getItem('onfactory-theme') as ThemeChoice | null) ?? 'light')
   const [fontSize, setFontSize] = useState<FontChoice>(() => (window.localStorage.getItem('onfactory-font') as FontChoice | null) ?? 'standard')
-  const [density, setDensity] = useState<DensityChoice>(() => (window.localStorage.getItem('onfactory-density') as DensityChoice | null) ?? 'comfortable')
   const [accent, setAccent] = useState<AccentChoice>(() => (window.localStorage.getItem('onfactory-accent') as AccentChoice | null) ?? 'blue')
   const [easyMode, setEasyMode] = useState<EasyModeChoice>(() => (window.localStorage.getItem('onfactory-easy-mode') as EasyModeChoice | null) ?? 'standard')
 
@@ -1549,7 +1559,6 @@ export default function App() {
       const resolvedTheme = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme
       document.documentElement.dataset.theme = resolvedTheme
       document.documentElement.dataset.fontSize = fontSize
-      document.documentElement.dataset.density = density
       document.documentElement.dataset.accent = accent
       document.documentElement.dataset.easyMode = easyMode === 'easy' ? 'on' : 'off'
     }
@@ -1557,11 +1566,10 @@ export default function App() {
     media.addEventListener('change', applyPreferences)
     window.localStorage.setItem('onfactory-theme', theme)
     window.localStorage.setItem('onfactory-font', fontSize)
-    window.localStorage.setItem('onfactory-density', density)
     window.localStorage.setItem('onfactory-accent', accent)
     window.localStorage.setItem('onfactory-easy-mode', easyMode)
     return () => media.removeEventListener('change', applyPreferences)
-  }, [theme, fontSize, density, accent, easyMode])
+  }, [theme, fontSize, accent, easyMode])
 
   useEffect(() => {
     if (authStatus === 'signed-in' && mode === 'platform' && account?.role !== 'platform-operator') {
@@ -1605,14 +1613,13 @@ export default function App() {
     { id: 'ai', label: 'AI 업무허브', icon: Sparkles },
     { id: 'schedule', label: '일정관리', icon: CalendarDays },
     { id: 'tasks', label: '업무지시 · 결재', icon: ListChecks, badge: scopedWorkItems.filter((x) => x.status !== '결재완료').length },
-    { id: 'approvals', label: '승인 큐', icon: ClipboardCheck, badge: pendingProposals },
+    { id: 'approvals', label: 'AI 제안 검토', icon: ClipboardCheck, badge: pendingProposals },
     { id: 'journal', label: '일일업무일지', icon: NotebookPen },
     { id: 'products', label: '제품관리', icon: Package },
     { id: 'inventory', label: '재고 · LOT', icon: Boxes },
     { id: 'factory', label: '공장관리', icon: Factory },
     { id: 'sales', label: '판매채널', icon: Store },
     { id: 'people', label: '인사 · 조직', icon: Users },
-    { id: 'performance', label: '직원 성과', icon: BarChart3 },
     { id: 'documents', label: '기업 자료실', icon: FileText },
     { id: 'compliance', label: '식품안전 · 인증', icon: ShieldCheck },
     { id: 'it-projects', label: '프로젝트', icon: Briefcase },
@@ -1833,7 +1840,7 @@ export default function App() {
     setTaskDraft(null)
     setSupportTenant(null)
     setPlatformFocusId(undefined)
-    setUnread(3)
+    setReadNoticeIds([])
     setMessengerUnread(4)
     setToast('')
     setAccount(null)
@@ -1874,8 +1881,7 @@ export default function App() {
       case 'inventory': return <InventoryPage onToast={setToast} canManage={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} />
       case 'factory': return <FactoryManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
       case 'sales': return <SalesChannels onToast={setToast} workspaceScope={workspaceScope} companyName={tenantName} canManage={account?.role === 'tenant-admin'} />
-      case 'people': return <PeopleOperationsPage initialTab={peopleInitialTab} onConsentChanged={() => setConsentReminder((current) => current ? { ...current, needsReconsent: false } : current)} onToast={setToast} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
-      case 'performance': return <PerformanceReports workspaceScope={workspaceScope ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} />
+      case 'people': return <PeopleOperationsPage initialTab={peopleInitialTab} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onConsentChanged={() => setConsentReminder((current) => current ? { ...current, needsReconsent: false } : current)} onToast={setToast} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
       case 'approvals': return <ApprovalQueue workspaceScope={workspaceScope} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onPendingChange={setPendingProposals} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} onToast={setToast} />
       case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} companyName={tenantName} onToast={setToast} />
@@ -1891,7 +1897,7 @@ export default function App() {
   if (account?.requiresPasswordChange) return <PasswordChangePage name={account.name} email={account.email} onChange={changeInitialPassword} onLogout={logout} />
 
   return (
-    <div className={'app-shell ' + mode + ' density-' + density + (storeStatus?.readOnly ? ' has-store-banner' : '') + (account?.operatorMode ? ' has-operator-banner' : '')}>
+    <div className={'app-shell ' + mode + (storeStatus?.readOnly ? ' has-store-banner' : '') + (account?.operatorMode ? ' has-operator-banner' : '')}>
       <a className="skip-link" href="#main-content">본문으로 바로가기</a>
       {account?.operatorMode && <div className="operator-mode-banner" role="status"><ShieldCheck size={17} /><span><strong>운영자 모드</strong> — {account.operatorMode.tenantName} 접속 중 · 모든 조회·변경이 운영자 {account.operatorMode.operatorName} 이름으로 감사 기록에 남습니다.</span><button type="button" onClick={() => void exitTenant()}>나가기</button></div>}
       {storeStatus?.readOnly && <div className="store-readonly-banner" role="alert"><AlertTriangle size={17} /><span><strong>읽기 전용 모드</strong> — 저장소가 읽기 전용(STORE_READ_ONLY)으로 기동되어 모든 변경이 저장되지 않습니다.{storeStatus.fallbackReason ? ` ${storeStatus.fallbackReason}` : ''}</span></div>}
@@ -1934,14 +1940,19 @@ export default function App() {
               })}</div>}
             </div>
             {mode === 'tenant' && <button type="button" className={'top-icon-button messenger-trigger ' + (messengerOpen ? 'active' : '')} aria-label={`사내 메신저 열기, 읽지 않은 대화 ${messengerUnread}개`} aria-controls="company-messenger" aria-expanded={messengerOpen} onClick={() => { setMessengerOpen((value) => !value); setNotificationsOpen(false) }}><ChatBubbleIcon />{messengerUnread > 0 && <span>{messengerUnread}</span>}</button>}
-            <div className="notification-wrap">
+            <div className="notification-wrap" ref={notificationWrapRef}>
               <button type="button" className={'top-icon-button ' + (notificationsOpen ? 'active' : '')} aria-label={'알림 ' + unread + '개'} aria-controls="notification-panel" aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((value) => !value); setMessengerOpen(false) }}><NotificationBellIcon />{unread > 0 && <span>{unread}</span>}</button>
               {notificationsOpen && <section className="notification-panel" id="notification-panel">
-                <header><div><h2>알림</h2><p>업무와 시스템 변화를 알려드려요.</p></div><button type="button" onClick={() => setUnread(0)}>모두 읽음</button></header>
+                <header><div><h2>알림</h2><p>{unread > 0 ? `읽지 않은 알림 ${unread}개` : '모든 알림을 읽었습니다.'}</p></div><button type="button" disabled={unread === 0} onClick={() => setReadNoticeIds([...noticeIds])}>모두 읽음</button></header>
                 <div className="notification-list">
-                  <button type="button" onClick={() => { navigate(mode === 'tenant' ? primaryTenantNotice.page : 'support'); setNotificationsOpen(false) }}><span className="notice-icon red"><AlertTriangle size={17} /></span><div><strong>{mode === 'tenant' ? primaryTenantNotice.title : primaryPlatformNotice.title}</strong><p>{mode === 'tenant' ? primaryTenantNotice.detail : primaryPlatformNotice.detail}</p><small>현재 상태</small></div></button>
-                  <button type="button" onClick={() => { navigate(mode === 'tenant' ? secondaryTenantNotice.page : 'integrations'); setNotificationsOpen(false) }}><span className="notice-icon amber"><Package size={17} /></span><div><strong>{mode === 'tenant' ? secondaryTenantNotice.title : secondaryPlatformNotice.title}</strong><p>{mode === 'tenant' ? secondaryTenantNotice.detail : secondaryPlatformNotice.detail}</p><small>현재 상태</small></div></button>
-                  <button type="button" onClick={() => setNotificationsOpen(false)}><span className="notice-icon green"><CheckCircle2 size={17} /></span><div><strong>{mode === 'tenant' && dashboardSalesChannels.length === 0 ? '판매채널 연결을 기다리고 있습니다' : mode === 'tenant' ? `판매채널 ${dashboardSalesChannels.length}개의 상태를 불러왔습니다` : '플랫폼 운영 데이터를 불러왔습니다'}</strong><p>{mode === 'tenant' && dashboardSalesChannels.length === 0 ? '판매채널을 연결하면 주문과 재고 동기화 상태가 표시됩니다.' : '표시된 값은 현재 워크스페이스에서 받은 데이터 기준입니다.'}</p><small>현재 상태</small></div></button>
+                  {([
+                    { id: 'primary', tone: 'red', icon: <AlertTriangle size={17} />, title: mode === 'tenant' ? primaryTenantNotice.title : primaryPlatformNotice.title, detail: mode === 'tenant' ? primaryTenantNotice.detail : primaryPlatformNotice.detail, open: () => navigate(mode === 'tenant' ? primaryTenantNotice.page : 'support') },
+                    { id: 'secondary', tone: 'amber', icon: <Package size={17} />, title: mode === 'tenant' ? secondaryTenantNotice.title : secondaryPlatformNotice.title, detail: mode === 'tenant' ? secondaryTenantNotice.detail : secondaryPlatformNotice.detail, open: () => navigate(mode === 'tenant' ? secondaryTenantNotice.page : 'integrations') },
+                    { id: 'tertiary', tone: 'green', icon: <CheckCircle2 size={17} />, title: mode === 'tenant' && dashboardSalesChannels.length === 0 ? '판매채널 연결을 기다리고 있습니다' : mode === 'tenant' ? `판매채널 ${dashboardSalesChannels.length}개의 상태를 불러왔습니다` : '플랫폼 운영 데이터를 불러왔습니다', detail: mode === 'tenant' && dashboardSalesChannels.length === 0 ? '판매채널을 연결하면 주문과 재고 동기화 상태가 표시됩니다.' : '표시된 값은 현재 워크스페이스에서 받은 데이터 기준입니다.', open: undefined as (() => void) | undefined },
+                  ]).map((notice) => {
+                    const isRead = readNoticeIds.includes(notice.id)
+                    return <button type="button" key={notice.id} className={isRead ? 'is-read' : 'is-unread'} aria-label={`${isRead ? '읽음' : '읽지 않음'} · ${notice.title}`} onClick={() => { setReadNoticeIds((current) => current.includes(notice.id) ? current : [...current, notice.id]); notice.open?.(); setNotificationsOpen(false) }}><span className={`notice-icon ${notice.tone}`}>{notice.icon}</span><div><strong>{notice.title}</strong><p>{notice.detail}</p><small>{isRead ? '읽음' : '읽지 않음 · 현재 상태'}</small></div><i className="notice-state" aria-hidden="true" /></button>
+                  })}
                 </div>
               </section>}
             </div>
@@ -1951,7 +1962,7 @@ export default function App() {
       </div>
 
       <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => setMessengerOpen(false)} onToast={setToast} onUnreadChange={setMessengerUnread} />
-      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? '온팩토리'} theme={theme} fontSize={fontSize} density={density} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onDensityChange={setDensity} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} />
+      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? '온팩토리'} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} />
       <WorkspaceNavigationEditor open={navEditorOpen} source={tenantNavSource} preferences={tenantNavPreferences} onChange={setTenantNavPreferences} onClose={() => setNavEditorOpen(false)} />
       {taskDraft !== null && <TaskModal initialText={taskDraft} requesterName={account?.name ?? '사용자'} requesterId={account?.id ?? ''} assignees={workAssignees} workspaceScope={workspaceScope} onClose={() => setTaskDraft(null)} onSave={saveTask} />}
       {supportTenant && <SupportSessionModal tenant={supportTenant} tickets={platformTickets} onClose={() => setSupportTenant(null)} onCreate={createPlatformSupportSession} />}

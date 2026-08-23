@@ -333,6 +333,14 @@ function LayoutEditor({ factory, blocks, selectedId, editable, drawing, showBack
     original: LayoutBlock
   }
   const viewportRef = useRef<HTMLDivElement>(null)
+  // React의 onWheel은 passive라 preventDefault가 먹지 않는다 → 배치 편집기 위에서 휠을 돌리면 페이지가 함께 스크롤되던 문제.
+  useEffect(() => {
+    const node = viewportRef.current
+    if (!node) return
+    const stopPageScroll = (event: WheelEvent) => { event.preventDefault() }
+    node.addEventListener('wheel', stopPageScroll, { passive: false })
+    return () => node.removeEventListener('wheel', stopPageScroll)
+  }, [])
   const gestureRef = useRef<BlockGesture | null>(null)
   const panRef = useRef<{ pointerId: number; startX: number; startY: number; x: number; y: number } | null>(null)
   const [zoom, setZoom] = useState(1)
@@ -550,7 +558,7 @@ function LayoutEditor({ factory, blocks, selectedId, editable, drawing, showBack
         key={block.id}
       >
         {structure ? (
-          block.purpose === '문' && <span className="factory-structure__label"><DoorOpen size={12} /> 문</span>
+          block.purpose === '문' && <span className="factory-structure__label"><DoorOpen size={12} /> {block.name && block.name !== '문' ? block.name : '출입구'}</span>
         ) : <>
           <span className="factory-layout-block__head"><ZoneIcon kind={block.zoneId} /><span><strong>{block.name}</strong><small>{block.purpose} · {block.kind}</small></span>{editable && <Move size={16} />}</span>
           <span className="factory-layout-block__item">{block.item || '품목·설비 미등록'}</span>
@@ -595,7 +603,7 @@ function LayoutInspector({ block, canManage, onChange, onDelete }: {
     <div className="factory-layout-form">
       {field('블록 이름', <input value={block.name} disabled={!canManage} onChange={(event) => onChange({ name: event.target.value })} />)}
       <div className="factory-layout-form__row">
-        {field('공간 용도', <select value={block.purpose} disabled={!canManage} onChange={(event) => onChange({ purpose: event.target.value as LayoutPurpose })}><option>원료·자재</option><option>냉장·냉동</option><option>생산</option><option>포장</option><option>출하</option><option>통로</option><option>벽</option><option>문</option><option>기타</option></select>)}
+        {field('공간 용도', <select value={block.purpose} disabled={!canManage} onChange={(event) => onChange({ purpose: event.target.value as LayoutPurpose })}><option>원료·자재</option><option>냉장·냉동</option><option>생산</option><option>포장</option><option>출하</option><option>통로</option><option>벽</option><option value="문">출입구</option><option>기타</option></select>)}
         {!isStructureBlock(block) && field('위치 유형', <select value={block.kind} disabled={!canManage} onChange={(event) => onChange({ kind: event.target.value as LocationKind })}><option>재고</option><option>생산</option></select>)}
       </div>
       {!isStructureBlock(block) && <div className="factory-layout-form__row">
@@ -1185,7 +1193,7 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
       id: `BLOCK-${Date.now()}`,
       factoryId: factory.id,
       zoneId: 'production',
-      name: structure ?? '새 공간 블록',
+      name: structure === '문' ? '출입구' : structure ?? '새 공간 블록',
       purpose: structure ?? '기타',
       kind: '생산',
       x: freePosition.x,
@@ -1206,7 +1214,7 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
     onToast(structure === '벽'
       ? '벽을 추가했습니다. 드래그로 위치를 잡고 모서리로 길이를 조정하세요.'
       : structure === '문'
-        ? '문을 추가했습니다. 벽 위로 끌어다 놓으면 출입구가 표시됩니다.'
+        ? '출입구를 추가했습니다. 벽 위로 끌어다 놓고, 이름을 "입구"·"출구"처럼 바꿔 쓸 수 있습니다.'
         : '새 배치 블록을 추가했습니다. 위치와 크기를 조정해 주세요.')
   }
 
@@ -1311,12 +1319,12 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
 
       <section className="factory-layout-panel" aria-labelledby="factory-layout-title">
         <div className="factory-layout-panel__head">
-          <div><span>SHARED FLOOR EDITOR</span><h2 id="factory-layout-title">공장 블록 배치 편집기</h2><p id="factory-layout-help">블록 드래그 이동 · 모서리 크기 조절 · 배경 드래그 이동 · 휠 확대/축소. 키보드는 방향키, Alt+방향키, +/−/0을 지원합니다.</p></div>
+          <div><span>SHARED FLOOR EDITOR</span><h2 id="factory-layout-title">공장 블록 배치 편집기</h2><p id="factory-layout-help">블록 드래그 이동 · 모서리 크기 조절 · 배경 드래그 이동 · 휠 확대/축소(페이지는 움직이지 않음). 키보드는 방향키, Alt+방향키, +/−/0을 지원합니다.</p></div>
           <div className="factory-layout-actions" role="group" aria-label="배치 편집 도구">
             {drawing?.kind === 'image' && <button type="button" className={showBackground ? 'is-active' : ''} aria-pressed={showBackground} onClick={() => setShowBackground((value) => !value)}><FileImage size={16} />배경 도면</button>}
             {canManage && <button type="button" className={editMode ? 'is-active' : ''} aria-pressed={editMode} onClick={() => setEditMode((value) => !value)}><MousePointer2 size={16} />{editMode ? '편집 종료' : '배치 편집'}</button>}
             {canManage && <button type="button" onClick={() => void addBlock('벽')}><BrickWall size={16} />벽 추가</button>}
-            {canManage && <button type="button" onClick={() => void addBlock('문')}><DoorOpen size={16} />문 추가</button>}
+            {canManage && <button type="button" onClick={() => void addBlock('문')}><DoorOpen size={16} />출입구 추가</button>}
             {canManage && <button type="button" className="is-primary" onClick={() => void addBlock()}><Plus size={16} />블록 추가</button>}
           </div>
         </div>
@@ -1327,8 +1335,8 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
               <LayoutEditor factory={factory} blocks={factoryBlocks} selectedId={selectedBlockId} editable={canManage && editMode} drawing={drawing} showBackground={showBackground} onSelect={selectBlock} onChange={updateBlock} />
             </div>
             <div className="factory-legend" aria-label="배치도 범례">
-              <strong><Palette size={14} /> 블록 색은 우측 속성에서 변경</strong>
-              <span><BrickWall size={14} /> 벽·문 추가로 공간 구획 표시</span>
+              <strong><Palette size={14} /> 블록 색·이름은 아래 속성 패널에서 변경</strong>
+              <span><BrickWall size={14} /> 벽·출입구 추가로 공간 구획 표시</span>
               <span><Move size={14} /> 블록·배경 드래그 이동</span>
               <span><Layers3 size={14} /> 모서리·Alt+방향키 크기 조정</span>
               <span><ZoomIn size={14} /> 휠·+/− 확대/축소</span>
@@ -1340,7 +1348,7 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
             <div className={`factory-zone-detail__head factory-zone-detail__head--${selectedZone.id}`}>
               <span><ZoneIcon kind={selectedZone.id} size={22} /></span>
               <div><small>선택 블록</small><h2>{selectedBlock?.name ?? '선택 없음'}</h2></div>
-              {selectedBlock && <span className="factory-layout-purpose">{selectedBlock.purpose}</span>}
+              {selectedBlock && <span className="factory-layout-purpose">{selectedBlock.purpose === '문' ? '출입구' : selectedBlock.purpose}</span>}
             </div>
             <LayoutInspector block={selectedBlock} canManage={canManage} onChange={(patch) => selectedBlock && updateBlock(selectedBlock.id, patch)} onDelete={deleteSelectedBlock} />
 

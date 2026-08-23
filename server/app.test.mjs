@@ -1370,11 +1370,12 @@ test('audited work transitions and recurring rules enforce evidence, comments an
     })
     assert.equal(resubmit.status, 200)
 
-    const missingApprovalComment = await fetch(`${origin}/api/work-items/${task.id}/transition`, {
+    // 승인 코멘트는 선택 사항 — 다만 1,000자를 넘으면 거부된다
+    const oversizedApprovalComment = await fetch(`${origin}/api/work-items/${task.id}/transition`, {
       method: 'POST', headers: { 'content-type': 'application/json', cookie: admin.cookie },
-      body: JSON.stringify({ action: 'approve', review: { comment: '' } }),
+      body: JSON.stringify({ action: 'approve', review: { comment: 'x'.repeat(1_001) } }),
     })
-    assert.equal(missingApprovalComment.status, 400)
+    assert.equal(oversizedApprovalComment.status, 400)
 
     const approve = await fetch(`${origin}/api/work-items/${task.id}/transition`, {
       method: 'POST', headers: { 'content-type': 'application/json', cookie: admin.cookie },

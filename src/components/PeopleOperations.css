@@ -162,7 +162,7 @@
   border-bottom: var(--hairline) solid var(--line);
 }
 .leave-ledger-list article > span { min-height: 27px; display: grid; place-items: center; padding: var(--space-0) var(--space-4); border-radius: var(--radius-8); font-size: var(--font-11); font-weight: var(--weight-medium); white-space: nowrap; }
-.leave-ledger-list article > span.plus { color: var(--color-success); background: var(--color-success-soft); }
+.leave-ledger-list article > span.plus { color: var(--color-success-ink); background: var(--color-success-soft); }
 .leave-ledger-list article > span.minus { color: var(--color-danger); background: var(--color-danger-soft); }
 .leave-ledger-list article > div { min-width: 0; }
 .leave-ledger-list article strong,
@@ -203,7 +203,7 @@
 .people-sync-status p { display: block; margin: var(--space-0); }
 .people-sync-status strong { font-size: var(--font-15); }
 .people-sync-status p { margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); }
-.people-sync-status em { min-height: 27px; display: inline-flex; align-items: center; padding: var(--space-0) var(--space-8); border-radius: var(--radius-8); color: var(--color-warning); background: var(--color-warning-soft); font-size: var(--font-11); font-style: normal; font-weight: var(--weight-medium); white-space: nowrap; }
+.people-sync-status em { min-height: 27px; display: inline-flex; align-items: center; padding: var(--space-0) var(--space-8); border-radius: var(--radius-8); color: var(--color-warning-ink); background: var(--color-warning-soft); font-size: var(--font-11); font-style: normal; font-weight: var(--weight-medium); white-space: nowrap; }
 
 .people-profile-detail { display: flex; flex-direction: column; gap: var(--space-16); padding: var(--card-inset); }
 .people-profile-detail > footer { display: flex; justify-content: flex-end; padding-top: var(--space-0); }
@@ -244,7 +244,7 @@
 .account-credential-actions { min-width: 174px; display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-8); }
 .account-credential-actions .small-button { min-height: 32px; display: inline-flex; align-items: center; gap: var(--space-4); white-space: nowrap; }
 .people-credential-panel { display: flex; flex-direction: column; gap: var(--space-16); padding: var(--card-inset); }
-.credential-warning { display: flex; align-items: flex-start; gap: var(--space-8); padding: var(--space-12); border-radius: var(--radius-8); color: var(--color-warning); background: var(--amber-soft); }
+.credential-warning { display: flex; align-items: flex-start; gap: var(--space-8); padding: var(--space-12); border-radius: var(--radius-8); color: var(--color-warning-ink); background: var(--amber-soft); }
 .credential-warning svg { flex: 0 0 auto; margin-top: var(--space-0); }
 .credential-warning strong, .credential-warning span { display: block; }
 .credential-warning strong { font-size: var(--font-15); }
@@ -325,10 +325,10 @@ html[data-theme='dark'] .leave-duration-preview { border-color: var(--line); bac
 .leave-upcoming-list article strong { display: block; font-size: var(--font-13); }
 .leave-upcoming-list article small { display: block; color: var(--muted); font-size: var(--font-11); }
 .leave-upcoming-list article em { padding: var(--space-0) var(--space-8); border-radius: var(--radius-8); color: var(--color-teal); background: var(--color-teal-soft); font-size: var(--font-11); font-style: normal; font-weight: var(--weight-medium); line-height: 20px; }
-.leave-upcoming-list article.is-active em { color: var(--color-warning); background: var(--color-surface); }
+.leave-upcoming-list article.is-active em { color: var(--color-warning-ink); background: var(--color-surface); }
 
 /* v4: 잔여 부족 시에도 신청은 가능 — 안내만 표시 */
-.leave-balance-warning { display: flex; align-items: flex-start; gap: var(--space-8); margin-top: var(--space-8); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--color-warning-soft); border-radius: var(--radius-8); color: var(--color-warning); background: var(--color-warning-soft); font-size: var(--font-13); line-height: 1.5; }
+.leave-balance-warning { display: flex; align-items: flex-start; gap: var(--space-8); margin-top: var(--space-8); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--color-warning-soft); border-radius: var(--radius-8); color: var(--color-warning-ink); background: var(--color-warning-soft); font-size: var(--font-13); line-height: 1.5; }
 .leave-balance-warning svg { flex: 0 0 auto; margin-top: var(--space-4); }
 
 
@@ -343,8 +343,8 @@ html[data-theme='dark'] .leave-duration-preview { border-color: var(--line); bac
 
 /* 가입 동의 내역 (테넌트 관리자 설정) */
 .tenant-consent { margin-top: var(--space-24); padding-top: var(--space-16); border-top: var(--hairline) solid var(--line); }
-.tenant-consent .people-subsection-head strong.is-ok { color: var(--color-success); }
-.tenant-consent .people-subsection-head strong.is-warning { color: var(--color-warning); }
+.tenant-consent .people-subsection-head strong.is-ok { color: var(--color-success-ink); }
+.tenant-consent .people-subsection-head strong.is-warning { color: var(--color-warning-ink); }
 .tenant-consent-meta { margin: var(--space-0) var(--space-0) var(--space-12); color: var(--muted); font-size: var(--font-13); }
 .tenant-consent-list { display: grid; gap: var(--space-8); margin: var(--space-0); padding: var(--space-0); list-style: none; }
 .tenant-consent-list li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-12); padding: var(--space-12) var(--space-16); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
@@ -357,3 +357,9 @@ html[data-theme='dark'] .leave-duration-preview { border-color: var(--line); bac
 .tenant-consent-body { margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-12); border-radius: var(--radius-8); color: var(--muted); background: var(--canvas); font: inherit; font-size: var(--font-13); line-height: 1.6; white-space: pre-wrap; }
 .tenant-consent-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12); margin-top: var(--space-12); }
 .tenant-consent-actions small { color: var(--muted); font-size: var(--font-13); }
+
+/* R6-9: 직원 성과를 인사·조직 탭으로 내장 */
+.people-performance { padding: var(--space-0); overflow: hidden; }
+.people-performance .performance-page { padding: var(--card-inset); }
+.people-performance .performance-header .eyebrow { display: none; }
+.people-performance .performance-header h1 { font-size: var(--font-22); }

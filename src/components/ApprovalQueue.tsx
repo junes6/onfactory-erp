@@ -63,11 +63,11 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
     try {
       const response = await fetch('/api/proposals', { headers })
       const body = await response.json() as QueueResponse & { error?: { message?: string } }
-      if (!response.ok) throw new Error(body.error?.message || '승인 큐를 불러오지 못했습니다.')
+      if (!response.ok) throw new Error(body.error?.message || 'AI 제안을 불러오지 못했습니다.')
       setData(body)
       onPendingChange?.(body.pendingCount)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '승인 큐를 불러오지 못했습니다.')
+      setError(reason instanceof Error ? reason.message : 'AI 제안을 불러오지 못했습니다.')
     } finally {
       setLoading(false)
     }
@@ -139,7 +139,7 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
 
   return <div className="content-page approval-page">
     <header className="page-header">
-      <div><span className="eyebrow">APPROVAL QUEUE</span><h1>승인 큐</h1><p>AI가 올린 제안을 사람이 결정합니다. 승인하기 전에는 아무것도 실행되지 않습니다.</p></div>
+      <div><span className="eyebrow">AI REVIEW</span><h1>AI 제안 검토</h1><p>AI가 "이렇게 할까요?"라고 올린 제안을 사람이 결정합니다. 승인하기 전에는 아무것도 실행되지 않습니다.</p></div>
       <div className="page-header-actions"><button className="button secondary" type="button" onClick={() => void evaluateNow()}><RefreshCw size={17} /> 지금 점검</button></div>
     </header>
 
@@ -153,12 +153,12 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
 
     <section className="panel approval-panel">
       <div className="approval-toolbar">
-        <div className="approval-tabs" role="tablist"><button type="button" role="tab" aria-selected={filter === 'pending'} onClick={() => setFilter('pending')}>승인 대기 <em>{pendingCount}</em></button><button type="button" role="tab" aria-selected={filter === 'all'} onClick={() => setFilter('all')}>전체 이력</button></div>
+        <div className="approval-tabs" role="tablist"><button type="button" role="tab" aria-selected={filter === 'pending'} onClick={() => setFilter('pending')}>검토 대기 <em>{pendingCount}</em></button><button type="button" role="tab" aria-selected={filter === 'all'} onClick={() => setFilter('all')}>전체 이력</button></div>
         <span className="approval-keys"><Keyboard size={15} /> ↑↓ 이동 · Enter/A 승인 · E 수정 · X 거절</span>
       </div>
-      {loading ? <div className="empty-state compact"><RefreshCw size={22} /><h3>승인 큐를 불러오는 중</h3></div>
+      {loading ? <div className="empty-state compact"><RefreshCw size={22} /><h3>AI 제안을 불러오는 중</h3></div>
         : error ? <div className="empty-state compact"><ShieldAlert size={22} /><h3>{error}</h3><button className="button secondary" type="button" onClick={() => void load()}>다시 시도</button></div>
-          : visible.length === 0 ? <div className="empty-state compact"><ClipboardCheck size={26} /><h3>{filter === 'pending' ? '승인 대기 중인 제안이 없습니다' : '아직 제안 이력이 없습니다'}</h3><p>문서를 올리거나 메신저에서 “~해주세요”라고 지시하면, 센티널이 위험 신호를 찾으면 여기에 제안이 쌓입니다.</p></div>
+          : visible.length === 0 ? <div className="empty-state compact"><ClipboardCheck size={26} /><h3>{filter === 'pending' ? '검토할 AI 제안이 없습니다' : '아직 제안 이력이 없습니다'}</h3><p>문서를 올리거나 메신저에서 “~해주세요”라고 지시하면, 센티널이 위험 신호를 찾으면 여기에 제안이 쌓입니다.</p></div>
             : <div className="approval-list" role="list" ref={listRef}>
               {visible.map((item) => {
                 const meta = kindMeta[item.kind]

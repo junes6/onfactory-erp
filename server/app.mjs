@@ -145,7 +145,7 @@ function hasWorkReviewShape(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const allowed = ['decision', 'comment', 'requestedChanges', 'reviewedAt', 'reviewerId', 'reviewerName']
   if (Object.keys(value).some((key) => !allowed.includes(key))) return false
-  if (!['approved', 'changes-requested'].includes(value.decision) || typeof value.comment !== 'string' || value.comment.trim().length < 2) return false
+  if (!['approved', 'changes-requested'].includes(value.decision) || typeof value.comment !== 'string' || value.comment.length > 1_000) return false
   if (value.decision === 'changes-requested' && (typeof value.requestedChanges !== 'string' || value.requestedChanges.trim().length < 2)) return false
   return ['reviewedAt', 'reviewerId', 'reviewerName'].every((key) => typeof value[key] === 'string' && value[key])
 }
@@ -568,7 +568,7 @@ function hasJournalReviewShape(value) {
   return hasExactFields(value, ['id', 'decision', 'comment', 'reviewedAt', 'reviewerId', 'reviewerName'])
     && typeof value.id === 'string' && Boolean(value.id)
     && (value.decision === '승인' || value.decision === '반려')
-    && typeof value.comment === 'string' && value.comment.trim().length >= 2 && value.comment.length <= 1_000
+    && typeof value.comment === 'string' && value.comment.length <= 1_000 && (value.decision !== '반려' || value.comment.trim().length >= 2)
     && ['reviewedAt', 'reviewerId', 'reviewerName'].every((key) => typeof value[key] === 'string' && Boolean(value[key]))
 }
 
@@ -4322,8 +4322,8 @@ export function createApp(options = {}) {
       response.status(400).json({ error: { code: 'INVALID_JOURNAL_DECISION', message: '승인 또는 반려 결정을 선택해 주세요.' } })
       return
     }
-    if (comment.length < 2 || comment.length > 1_000) {
-      response.status(400).json({ error: { code: 'JOURNAL_COMMENT_REQUIRED', message: '결재 코멘트를 2자 이상 입력해 주세요.' } })
+    if ((status === '반려' && comment.length < 2) || comment.length > 1_000) {
+      response.status(400).json({ error: { code: 'JOURNAL_COMMENT_REQUIRED', message: status === '반려' ? '반려 시 보완 코멘트를 2자 이상 입력해 주세요.' : '코멘트는 1,000자 이하로 입력해 주세요.' } })
       return
     }
 
@@ -4421,8 +4421,8 @@ export function createApp(options = {}) {
       }
     } else if (action === 'approve' && isRequester && previous.status === '결재대기') {
       const comment = String(request.body?.review?.comment ?? '').trim()
-      if (comment.length < 2 || comment.length > 1_000) {
-        response.status(400).json({ error: { code: 'INVALID_REVIEW', message: '승인 코멘트를 2자 이상 입력해 주세요.' } })
+      if (comment.length > 1_000) {
+        response.status(400).json({ error: { code: 'INVALID_REVIEW', message: '승인 코멘트는 1,000자 이하로 입력해 주세요.' } })
         return
       }
       const review = { decision: 'approved', comment, reviewedAt: now, reviewerId: request.auth.id, reviewerName: request.auth.name }
@@ -4435,8 +4435,8 @@ export function createApp(options = {}) {
     } else if (action === 'request-changes' && isRequester && previous.status === '결재대기') {
       const comment = String(request.body?.review?.comment ?? '').trim()
       const requestedChanges = String(request.body?.review?.requestedChanges ?? '').trim()
-      if (comment.length < 2 || comment.length > 1_000 || requestedChanges.length < 2 || requestedChanges.length > 2_000) {
-        response.status(400).json({ error: { code: 'INVALID_REVIEW', message: '수정 사유와 수정할 항목을 각각 2자 이상 입력해 주세요.' } })
+      if (comment.length > 1_000 || requestedChanges.length < 2 || requestedChanges.length > 2_000) {
+        response.status(400).json({ error: { code: 'INVALID_REVIEW', message: '수정할 항목을 2자 이상 입력해 주세요.' } })
         return
       }
       const review = { decision: 'changes-requested', comment, requestedChanges, reviewedAt: now, reviewerId: request.auth.id, reviewerName: request.auth.name }

@@ -5,6 +5,8 @@ import {
   ShieldCheck, Trash2, UserCheck, UserPlus, Users, X, XCircle,
 } from 'lucide-react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
+import { PerformanceReports } from './PerformanceReports'
+import { BarChart3 } from 'lucide-react'
 import { formatDateLabel, formatDateTime, seoulDateInputValue } from '../utils/dateTime'
 import './PeopleOperations.css'
 
@@ -13,12 +15,13 @@ type PeopleOperationsProps = {
   canManage: boolean
   initialTab?: PeopleTab
   onConsentChanged?: () => void
+  onOpenTask?: (taskId: string) => void
   currentUserId?: string
   currentUserName: string
   currentUserTeam: string
   workspaceScope?: string
 }
-type PeopleTab = 'members' | 'leave' | 'leave-admin' | 'accounts'
+type PeopleTab = 'members' | 'leave' | 'leave-admin' | 'accounts' | 'performance'
 type LeaveStatus = '결재대기' | '승인' | '반려'
 type AccountStatus = '승인대기' | '활성' | '반려'
 
@@ -162,7 +165,7 @@ function StateBadge({ children, tone = 'neutral' }: { children: string; tone?: s
 type ConsentTermItem = { id: string; title: string; summary: string; body: string }
 type ConsentState = { consent: { version: string; agreedAt: string; agreedBy: { id: string; name: string; email: string }; items: Array<{ id: string; title: string; agreed: boolean }> } | null; currentVersion: string; needsReconsent: boolean; terms: { version: string; items: ConsentTermItem[] } }
 
-export function PeopleOperationsPage({ onToast, canManage, currentUserId, currentUserName, currentUserTeam, workspaceScope, initialTab, onConsentChanged }: PeopleOperationsProps) {
+export function PeopleOperationsPage({ onToast, canManage, currentUserId, currentUserName, currentUserTeam, workspaceScope, initialTab, onConsentChanged, onOpenTask }: PeopleOperationsProps) {
   const [tab, setTab] = useState<PeopleTab>(initialTab && canManage ? initialTab : canManage ? 'members' : 'leave')
   const [consentState, setConsentState] = useState<ConsentState | null>(null)
   const [consentChecks, setConsentChecks] = useState<Record<string, boolean>>({})
@@ -683,6 +686,7 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       <button type="button" role="tab" aria-selected={tab === 'leave'} onClick={() => setTab('leave')}><CalendarDays size={18} /> 휴가 · 근태 {pendingLeaves > 0 && <em>{pendingLeaves}</em>}</button>
       {canManage && <button type="button" role="tab" aria-selected={tab === 'leave-admin'} onClick={() => setTab('leave-admin')}><Settings2 size={18} /> 휴가 정책 · 원장</button>}
       {canManage && <button type="button" role="tab" aria-selected={tab === 'accounts'} onClick={() => setTab('accounts')}><KeyRound size={18} /> 계정 · 권한 {pendingAccounts > 0 && <em>{pendingAccounts}</em>}</button>}
+      <button type="button" role="tab" aria-selected={tab === 'performance'} onClick={() => setTab('performance')}><BarChart3 size={18} /> {canManage ? '직원 성과' : '내 성과'}</button>
     </div>
 
     {canManage && tab === 'members' && <section className="people-content-card" role="tabpanel">
@@ -739,6 +743,7 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       </div>
     </section>}
 
+    {tab === 'performance' && <section className="people-content-card people-performance" role="tabpanel"><PerformanceReports workspaceScope={workspaceScope ?? ''} canManage={canManage} onToast={onToast} onOpenTask={(taskId) => onOpenTask?.(taskId)} /></section>}
     {canManage && tab === 'accounts' && <section className="people-content-card" role="tabpanel">
       <header><div><h2>신규 계정 · 접근 권한</h2><p>초대 → 관리자 승인 → 1회용 초기 비밀번호 → 본인 비밀번호 설정 순서로 활성화됩니다.</p></div><button className="button primary" type="button" onClick={(event) => openModal('invite', event.currentTarget)}><Send size={17} /> 초대 보내기</button></header>
       <div className="access-flow"><span className="done"><Check size={15} /> 계정 생성</span><i /><span className="active">관리자 승인</span><i /><span>72시간 초기 암호</span><i /><span>첫 로그인 변경</span></div>

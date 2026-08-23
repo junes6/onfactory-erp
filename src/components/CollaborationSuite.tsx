@@ -1337,7 +1337,8 @@ function JournalReviewDialog({
   const [comment, setComment] = useState('')
   const dialogRef = useOverlayFocus(true, onClose)
   const isReject = decision === '반려'
-  const valid = comment.trim().length >= 2
+  const commentOptional = !isReject
+  const valid = commentOptional || comment.trim().length >= 2
 
   return (
     <div className="collab-overlay">
@@ -1355,21 +1356,21 @@ function JournalReviewDialog({
             <div className={'journal-review-dialog-guide ' + (isReject ? 'red' : 'green')}>
               {isReject ? <AlertCircle size={21} /> : <ShieldCheck size={21} />}
               <div>
-                <strong>{isReject ? '작성자가 보완할 내용을 구체적으로 남겨 주세요.' : '확인한 결과와 승인 근거를 남겨 주세요.'}</strong>
-                <p>코멘트는 작성자에게 공유되고 결재 이력에 보관됩니다.</p>
+                <strong>{isReject ? '작성자가 보완할 내용을 구체적으로 남겨 주세요.' : '확인했다면 바로 승인할 수 있습니다.'}</strong>
+                <p>{isReject ? '보완 코멘트는 작성자에게 공유되고 결재 이력에 보관됩니다.' : '메모는 선택 사항이며, 남기면 작성자에게 공유되고 결재 이력에 보관됩니다.'}</p>
               </div>
             </div>
             <label className="collab-field journal-review-comment">
-              <span>결재 코멘트 <em>필수</em></span>
+              <span>{isReject ? '보완 코멘트' : '승인 메모'} <em>{isReject ? '필수' : '선택'}</em></span>
               <textarea
                 data-autofocus
                 rows={6}
                 maxLength={1000}
                 value={comment}
                 onChange={(event) => setComment(event.target.value)}
-                placeholder={isReject ? '예: 냉동창고 LOT별 실사 수량과 조치 결과를 보완해 주세요.' : '예: 업무 결과와 다음 계획을 확인했습니다.'}
+                placeholder={isReject ? '예: 냉동창고 LOT별 실사 수량과 조치 결과를 보완해 주세요.' : '필요할 때만 남기세요. 예: 다음 주 계획까지 확인했습니다.'}
               />
-              <small>{comment.length}/1000 · 2자 이상 입력</small>
+              <small>{comment.length}/1000{isReject ? ' · 2자 이상 입력' : ' · 비워 두어도 승인됩니다'}</small>
             </label>
           </div>
           <footer className="collab-dialog-footer">
@@ -1396,8 +1397,7 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
   const [viewMode, setViewMode] = useState<'list' | 'editor'>('list')
   const [browseMode, setBrowseMode] = useState<'week' | 'all'>('week')
   const [weekAnchor, setWeekAnchor] = useState(scheduleToday)
-  const [rangeFrom, setRangeFrom] = useState('')
-  const [rangeTo, setRangeTo] = useState('')
+  const [monthAnchor, setMonthAnchor] = useState(scheduleToday.slice(0, 7))
   const [authorFilter, setAuthorFilter] = useState('전체')
   const [journalEditorMode, setJournalEditorMode] = useState<'view' | 'edit'>('view')
   const [filter, setFilter] = useState<JournalFilter>('전체')
@@ -1461,8 +1461,27 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
     const matchesAuthor = authorFilter === '전체' || journal.author === authorFilter
     return matchesFilter && matchesQuery && matchesAuthor
   })
-  const filteredJournals = browseFiltered.filter((journal) => (!rangeFrom || journal.date >= rangeFrom) && (!rangeTo || journal.date <= rangeTo))
-  const sortedJournals = [...filteredJournals].sort((left, right) => {
+  const monthJournals = browseFiltered.filter((journal) => journal.date.startsWith(monthAnchor))
+  const monthCells = (() => {
+    const [year, month] = monthAnchor.split('-').map(Number)
+    const first = new Date(Date.UTC(year, month - 1, 1))
+    const lead = (first.getUTCDay() + 6) % 7 // 월요일 시작
+    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+    const cells: Array<{ key: string; day: number; kind: DayKind; holiday: string | null } | null> = Array.from({ length: lead }, () => null)
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const key = `${monthAnchor}-${String(day).padStart(2, '0')}`
+      cells.push({ key, day, kind: dayKind(key), holiday: holidayName(key) })
+    }
+    while (cells.length % 7 !== 0) cells.push(null)
+    return cells
+  })()
+  const monthLabel = `${monthAnchor.slice(0, 4)}년 ${Number(monthAnchor.slice(5, 7))}월`
+  const moveMonth = (delta: number) => {
+    const [year, month] = monthAnchor.split('-').map(Number)
+    const date = new Date(Date.UTC(year, month - 1 + delta, 1))
+    setMonthAnchor(date.toISOString().slice(0, 7))
+  }
+  const sortedJournals = [...monthJournals].sort((left, right) => {
     const byDate = right.date.localeCompare(left.date)
     return byDate || right.updatedAt.localeCompare(left.updatedAt)
   })
@@ -1957,7 +1976,7 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
       setReviewDecision(null)
       setJournalEditorMode('view')
       setViewMode('list')
-      onToast(status === '승인' ? '코멘트와 함께 업무일지를 승인했습니다.' : '보완 코멘트와 함께 업무일지를 반려했습니다.')
+      onToast(status === '승인' ? (comment.trim() ? '메모와 함께 업무일지를 승인했습니다.' : '업무일지를 승인했습니다.') : '보완 코멘트와 함께 업무일지를 반려했습니다.')
     } catch {
       onToast('업무일지 결재 서버에 연결하지 못했습니다.')
     } finally {
@@ -2078,7 +2097,7 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
           <div className="journal-browse-toolbar">
             <div className="journal-browse-tabs" role="tablist" aria-label="일지 보기 방식">
               <button type="button" role="tab" aria-selected={browseMode === 'week'} onClick={() => setBrowseMode('week')}><CalendarDays size={17} /> 주간 보드</button>
-              <button type="button" role="tab" aria-selected={browseMode === 'all'} onClick={() => setBrowseMode('all')}><Search size={17} /> 지난 일지 검색</button>
+              <button type="button" role="tab" aria-selected={browseMode === 'all'} onClick={() => setBrowseMode('all')}><CalendarDays size={17} /> 월간 달력</button>
             </div>
             {browseMode === 'week' ? (
               <div className="journal-week-nav">
@@ -2089,13 +2108,17 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
               </div>
             ) : (
               <div className="journal-search-controls">
+                <div className="journal-week-nav">
+                  <button type="button" aria-label="이전 달" onClick={() => moveMonth(-1)}><ChevronLeft size={19} /></button>
+                  <strong>{monthLabel}</strong>
+                  <button type="button" aria-label="다음 달" onClick={() => moveMonth(1)}><ChevronRight size={19} /></button>
+                  {monthAnchor !== scheduleToday.slice(0, 7) && <button className="journal-week-today" type="button" onClick={() => setMonthAnchor(scheduleToday.slice(0, 7))}>이번 달</button>}
+                </div>
                 <label className="collab-search">
                   <Search size={18} />
                   <span className="sr-only">업무일지 검색</span>
-                  <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="작성자·날짜·업무 검색" />
+                  <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="작성자·업무 내용 검색" />
                 </label>
-                <label className="journal-range-field"><span>시작일</span><input type="date" value={rangeFrom} max={rangeTo || undefined} onChange={(event) => setRangeFrom(event.target.value)} /></label>
-                <label className="journal-range-field"><span>종료일</span><input type="date" value={rangeTo} min={rangeFrom || undefined} onChange={(event) => setRangeTo(event.target.value)} /></label>
                 {canManage && journalAuthors.length > 1 && <label className="journal-range-field"><span>작성자</span><select value={authorFilter} onChange={(event) => setAuthorFilter(event.target.value)}><option>전체</option>{journalAuthors.map((name) => <option key={name}>{name}</option>)}</select></label>}
               </div>
             )}
@@ -2134,22 +2157,28 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
               })}
             </div>
           ) : (
-            <div className="journal-list">
-              {sortedJournals.map((journal) => (
-                <button
-                  className={'journal-list-card' + (journal.id === selectedId ? ' active' : '')}
-                  type="button"
-                  aria-label={`${journal.author}님의 ${journal.date} ${journal.status} 업무일지, ${journalSummaryLine(journal.completed)} 상세 보기 (${journal.id})`}
-                  onClick={() => chooseJournal(journal)}
-                  key={journal.id}
-                >
-                  <span className="journal-card-person"><strong>{journal.author}</strong><time dateTime={journal.date}>{formatDateLabel(journal.date)}</time></span>
-                  <span className="journal-card-summary">{journalSummaryLine(journal.completed)}</span>
-                  <StatusChip tone={journalTone(journal.status)}>{journal.status}</StatusChip>
-                  <ChevronRight size={17} aria-hidden="true" />
-                </button>
-              ))}
-              {filteredJournals.length === 0 && <div className="collab-empty compact"><BookOpenCheck size={28} /><strong>해당 일지가 없습니다</strong><span>검색어, 기간 또는 상태 필터를 변경해 보세요.</span></div>}
+            <div className="journal-month" aria-label={`${monthLabel} 업무일지 달력`}>
+              <div className="journal-month-weekdays" aria-hidden="true">{['월', '화', '수', '목', '금', '토', '일'].map((name, index) => <span key={name} className={index === 5 ? 'is-saturday' : index === 6 ? 'is-holiday-day' : ''}>{name}</span>)}</div>
+              <div className="journal-month-grid" role="grid">
+                {monthCells.map((cell, index) => {
+                  if (!cell) return <div className="journal-month-cell is-blank" key={`blank-${index}`} aria-hidden="true" />
+                  const dayJournals = sortedJournals.filter((journal) => journal.date === cell.key)
+                  const isToday = cell.key === scheduleToday
+                  const toneClass = cell.kind === 'holiday' || cell.kind === 'sunday' ? ' is-holiday-day' : cell.kind === 'saturday' ? ' is-saturday' : ''
+                  return <div className={`journal-month-cell${isToday ? ' is-today' : ''}${toneClass}`} role="gridcell" key={cell.key}>
+                    <header><strong>{cell.day}</strong>{isToday && <em>오늘</em>}{cell.holiday && <small title={cell.holiday}>{cell.holiday}</small>}</header>
+                    <div className="journal-month-blocks">
+                      {dayJournals.slice(0, 4).map((journal) => (
+                        <button className={`journal-month-block tone-${journalTone(journal.status)}`} type="button" key={journal.id} onClick={() => chooseJournal(journal)} title={`${journal.author} · ${journal.status} · ${journalSummaryLine(journal.completed)}`} aria-label={`${journal.author}님의 ${cell.key} ${journal.status} 업무일지 열기`}>
+                          <i aria-hidden="true">{journal.author.slice(0, 1)}</i><strong>{journal.author}</strong><em>{journal.status}</em>
+                        </button>
+                      ))}
+                      {dayJournals.length > 4 && <button type="button" className="journal-month-more" onClick={() => { setWeekAnchor(cell.key); setBrowseMode('week') }}>+{dayJournals.length - 4}건 더 보기</button>}
+                    </div>
+                  </div>
+                })}
+              </div>
+              {sortedJournals.length === 0 && <div className="collab-empty compact"><BookOpenCheck size={28} /><strong>{monthLabel}에 해당 일지가 없습니다</strong><span>달을 이동하거나 검색어·상태 필터를 바꿔 보세요.</span></div>}
             </div>
           )}
         </section>}

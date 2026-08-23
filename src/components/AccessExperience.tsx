@@ -4,7 +4,6 @@ import { OnFactoryMark } from './AppIcons'
 
 export type ThemeChoice = 'light' | 'dark' | 'system'
 export type FontChoice = 'standard' | 'large' | 'extra'
-export type DensityChoice = 'comfortable' | 'compact'
 export type AccentChoice = 'blue' | 'green' | 'violet' | 'teal' | 'rose' | 'navy'
 export type EasyModeChoice = 'standard' | 'easy'
 
@@ -266,18 +265,16 @@ type SettingsDrawerProps = {
   companyName: string
   theme: ThemeChoice
   fontSize: FontChoice
-  density: DensityChoice
   accent: AccentChoice
   easyMode: EasyModeChoice
   onThemeChange: (value: ThemeChoice) => void
   onFontSizeChange: (value: FontChoice) => void
-  onDensityChange: (value: DensityChoice) => void
   onAccentChange: (value: AccentChoice) => void
   onEasyModeChange: (value: EasyModeChoice) => void
   onLogout: () => void
 }
 
-export function SettingsDrawer({ open, onClose, profileName, profileRole, companyName, theme, fontSize, density, accent, easyMode, onThemeChange, onFontSizeChange, onDensityChange, onAccentChange, onEasyModeChange, onLogout }: SettingsDrawerProps) {
+export function SettingsDrawer({ open, onClose, profileName, profileRole, companyName, theme, fontSize, accent, easyMode, onThemeChange, onFontSizeChange, onAccentChange, onEasyModeChange, onLogout }: SettingsDrawerProps) {
   const drawerRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
@@ -313,14 +310,14 @@ export function SettingsDrawer({ open, onClose, profileName, profileRole, compan
         </div>
       </section>
       <section className="setting-section">
-        <div className="setting-section-title"><Type size={19} /><div><h3>글자 크기</h3><p>설정 즉시 전체 화면에 반영됩니다.</p></div></div>
+        <div className="setting-section-title"><Type size={19} /><div><h3>글자 크기</h3><p>본문·버튼·표 글자가 단계별로 커집니다.</p></div></div>
         <div className="font-preview"><span>가</span><span>가</span><span>가</span></div>
         <div className="setting-segmented" role="group" aria-label="글자 크기">
           {([['standard', '기본'], ['large', '크게'], ['extra', '아주 크게']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={fontSize === value} onClick={() => onFontSizeChange(value)}>{label}</button>)}
         </div>
       </section>
       <section className="setting-section">
-        <div className="setting-section-title"><Palette size={19} /><div><h3>포인트 컬러</h3><p>버튼과 강조 표시에 쓰는 색을 고르세요.</p></div></div>
+        <div className="setting-section-title"><Palette size={19} /><div><h3>포인트 컬러</h3><p>왼쪽 메뉴·버튼·강조 표시가 함께 바뀝니다.</p></div></div>
         <div className="setting-accent-grid" role="group" aria-label="포인트 컬러 선택">
           {accentOptions.map((option) => (
             <button key={option.id} type="button" className={`setting-accent-swatch accent-${option.id}${accent === option.id ? ' selected' : ''}`} aria-pressed={accent === option.id} onClick={() => onAccentChange(option.id)}>
@@ -331,17 +328,10 @@ export function SettingsDrawer({ open, onClose, profileName, profileRole, compan
         </div>
       </section>
       <section className="setting-section">
-        <div className="setting-section-title"><Accessibility size={19} /><div><h3>쉬운 화면</h3><p>글자와 버튼을 크게, 영문 표기를 줄여 누구나 보기 쉽게 바꿉니다.</p></div></div>
+        <div className="setting-section-title"><Accessibility size={19} /><div><h3>쉬운 화면</h3><p>모든 화면을 한 줄 구성·큰 글자·큰 버튼으로 바꾸고 부가 정보는 숨깁니다.</p></div></div>
         <div className="setting-segmented" role="group" aria-label="쉬운 화면 모드">
           <button type="button" aria-pressed={easyMode === 'standard'} onClick={() => onEasyModeChange('standard')}>기본 화면</button>
           <button type="button" aria-pressed={easyMode === 'easy'} onClick={() => onEasyModeChange('easy')}>쉬운 화면</button>
-        </div>
-      </section>
-      <section className="setting-section">
-        <div className="setting-section-title"><Smartphone size={19} /><div><h3>정보 밀도</h3><p>현장에서는 편안하게 보기를 권장합니다.</p></div></div>
-        <div className="setting-segmented" role="group" aria-label="정보 밀도">
-          <button type="button" aria-pressed={density === 'comfortable'} onClick={() => onDensityChange('comfortable')}>편안하게</button>
-          <button type="button" aria-pressed={density === 'compact'} onClick={() => onDensityChange('compact')}>조밀하게</button>
         </div>
       </section>
       <footer><button className="settings-logout" type="button" onClick={onLogout}><LogIn size={18} /> 로그아웃</button></footer>
