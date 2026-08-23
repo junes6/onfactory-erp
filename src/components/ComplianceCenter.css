@@ -8,7 +8,7 @@
 .compliance-overview > :last-child { border-right: none; }
 .compliance-overview span { color: var(--muted); font-size: var(--font-13); font-weight: var(--weight-medium); }
 .compliance-overview strong { grid-column: 2; font-size: var(--font-15); }
-.compliance-overview .warning { color: var(--amber); }
+.compliance-overview .warning { color: var(--color-warning-ink); }
 .compliance-overview > button { cursor: pointer; }
 .compliance-overview > button:hover { background: var(--forest-soft); }
 .compliance-ai-result { position: relative; display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: var(--space-8); margin-bottom: var(--space-16); padding: var(--card-inset); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
@@ -98,7 +98,7 @@ html[data-theme='dark'] :is(.compliance-page,.compliance-modal) :is(input,select
 .compliance-overview > :last-child { border-right: none; }
 .compliance-overview-stat span { font-size: var(--font-13); }
 .compliance-overview-stat strong { grid-column: auto; margin-left: auto; font-size: var(--font-22); }
-.compliance-overview-stat.warning { color: var(--amber); }
+.compliance-overview-stat.warning { color: var(--color-warning-ink); }
 .compliance-ai-button { justify-content: flex-end; cursor: pointer; }
 .compliance-ai-button:hover:not(:disabled) { background: var(--forest-soft); }
 .compliance-ai-button > span { display: grid; text-align: left; }
@@ -146,7 +146,7 @@ html[data-theme='dark'] :is(.compliance-page,.compliance-modal) :is(input,select
 .compliance-category-grid > button.violet > span,
 .compliance-record-icon.violet { color: var(--color-blue); background: var(--color-blue-soft); }
 .compliance-category-grid > button.amber > span,
-.compliance-record-icon.amber { color: var(--color-warning); background: var(--color-warning-soft); }
+.compliance-record-icon.amber { color: var(--color-warning-ink); background: var(--color-warning-soft); }
 .compliance-category-grid > button.slate > span,
 .compliance-record-icon.slate { color: var(--color-blue); background: var(--color-blue-soft); }
 .compliance-category-grid > button > div { min-width: 0; display: grid; }
@@ -269,7 +269,7 @@ html[data-theme='dark'] :is(.compliance-page,.compliance-modal) :is(input,select
 .compliance-detail-section-title span { min-width: 20px; padding: var(--space-0) var(--space-4); border-radius: var(--radius-8); background: var(--forest-soft); font-size: var(--font-11); text-align: center; }
 .compliance-checklist { display: grid; gap: var(--space-4); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
 .compliance-checklist li { display: flex; align-items: flex-start; gap: var(--space-8); padding: var(--space-8) var(--space-0); border-top: var(--hairline) solid var(--line); color: var(--color-blue-deep); background: transparent; font-size: var(--font-11); line-height: 1.4; }
-.compliance-checklist li svg { flex: 0 0 auto; color: var(--color-success); }
+.compliance-checklist li svg { flex: 0 0 auto; color: var(--color-success-ink); }
 .compliance-checklist li.empty { color: var(--muted); }
 .compliance-detail-files { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: var(--space-4); margin-top: var(--space-8); }
 .compliance-detail-files > button {
@@ -346,13 +346,13 @@ html[data-theme='dark'] .compliance-detail-note p { color: var(--muted); }
 .compliance-summary-strip article.is-warning { border-color: var(--color-warning); background: var(--color-warning-soft); }
 .compliance-summary-strip article > span { width: 38px; height: 38px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); }
 .compliance-summary-strip .tone-blue { color: var(--color-primary); background: var(--color-primary-soft); }
-.compliance-summary-strip .tone-green { color: var(--color-success); background: var(--color-success-soft); }
-.compliance-summary-strip .tone-warn { color: var(--color-warning); background: var(--color-warning-soft); }
+.compliance-summary-strip .tone-green { color: var(--color-success-ink); background: var(--color-success-soft); }
+.compliance-summary-strip .tone-warn { color: var(--color-warning-ink); background: var(--color-warning-soft); }
 .compliance-summary-strip small { display: block; color: var(--color-gray-600); font-size: var(--font-11); font-weight: var(--weight-medium); }
 .compliance-summary-strip strong { display: block; margin-top: var(--space-4); font-size: var(--font-22); letter-spacing: -.02em; }
 
 .compliance-action-strip { margin-bottom: var(--space-16); padding: var(--space-12) var(--space-16); border: var(--hairline) solid var(--color-warning); border-radius: var(--radius-8); background: var(--color-warning-soft); }
-.compliance-action-head { display: flex; align-items: center; gap: var(--space-8); color: var(--color-warning); }
+.compliance-action-head { display: flex; align-items: center; gap: var(--space-8); color: var(--color-warning-ink); }
 .compliance-action-head strong { color: var(--color-ink); font-size: var(--font-15); }
 .compliance-action-head span { color: var(--color-gray-600); font-size: var(--font-13); }
 .compliance-action-list { display: flex; flex-wrap: wrap; gap: var(--space-8); margin-top: var(--space-12); }
@@ -385,9 +385,9 @@ html[data-theme='dark'] :is(.compliance-summary-strip article,.compliance-action
 .compliance-next-step.tone-danger { border-color: var(--color-danger-soft); background: var(--color-danger-soft); }
 .compliance-next-step.tone-danger svg { color: var(--color-danger); }
 .compliance-next-step.tone-warning { border-color: var(--color-warning-soft); background: var(--color-warning-soft); }
-.compliance-next-step.tone-warning svg { color: var(--color-warning); }
+.compliance-next-step.tone-warning svg { color: var(--color-warning-ink); }
 .compliance-next-step.tone-success { border-color: var(--color-success-soft); background: var(--color-success-soft); }
-.compliance-next-step.tone-success svg { color: var(--color-success); }
+.compliance-next-step.tone-success svg { color: var(--color-success-ink); }
 .compliance-next-step svg { flex: 0 0 auto; margin-top: var(--space-4); }
 .compliance-next-step strong { display: block; font-size: var(--font-13); }
 .compliance-next-step p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--color-ink); font-size: var(--font-13); line-height: 1.55; }
@@ -396,10 +396,10 @@ html[data-theme='dark'] :is(.compliance-summary-strip article,.compliance-action
 .compliance-topline { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-12); margin-bottom: var(--space-16); padding: var(--space-8) var(--space-16); border: var(--dashboard-stroke) solid var(--color-card-line); border-radius: var(--radius-8); background: var(--color-surface); }
 .compliance-topline > span { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--color-gray-600); font-size: var(--font-13); }
 .compliance-topline > span strong { color: var(--color-ink); font-size: var(--font-15); }
-.compliance-topline > span.is-good { color: var(--color-success); }
-.compliance-topline > span.is-good strong { color: var(--color-success); }
-.compliance-topline > span.is-warn { color: var(--color-warning); }
-.compliance-topline > span.is-warn strong { color: var(--color-warning); }
+.compliance-topline > span.is-good { color: var(--color-success-ink); }
+.compliance-topline > span.is-good strong { color: var(--color-success-ink); }
+.compliance-topline > span.is-warn { color: var(--color-warning-ink); }
+.compliance-topline > span.is-warn strong { color: var(--color-warning-ink); }
 .compliance-topline > i { width: 1px; height: 18px; background: var(--color-card-line); }
 .compliance-topline > button { display: inline-flex; align-items: center; gap: var(--space-4); min-height: 38px; margin-left: auto; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--color-primary); border-radius: var(--radius-8); color: var(--color-primary); background: var(--color-primary-soft); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
 .compliance-topline > button:disabled { opacity: .6; cursor: default; }

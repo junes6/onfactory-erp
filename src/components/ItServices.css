@@ -5,9 +5,9 @@
 .it-summary-strip article.is-danger { border-color: var(--color-danger); }
 .it-summary-strip article > span { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); }
 .it-summary-strip .tone-blue { color: var(--color-primary); background: var(--color-primary-soft); }
-.it-summary-strip .tone-warn { color: var(--color-warning); background: var(--color-warning-soft); }
+.it-summary-strip .tone-warn { color: var(--color-warning-ink); background: var(--color-warning-soft); }
 .it-summary-strip .tone-danger { color: var(--color-danger); background: var(--color-danger-soft); }
-.it-summary-strip .tone-green { color: var(--color-success); background: var(--color-success-soft); }
+.it-summary-strip .tone-green { color: var(--color-success-ink); background: var(--color-success-soft); }
 .it-summary-strip small { display: block; color: var(--muted); font-size: var(--font-11); font-weight: var(--weight-medium); }
 .it-summary-strip strong { display: block; margin-top: var(--space-4); font-size: var(--font-22); letter-spacing: -.02em; }
 

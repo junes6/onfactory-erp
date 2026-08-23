@@ -7,9 +7,14 @@
   --color-white: #FFFFFF;
   --color-ink: #1A1D23;
   --color-blue-deep: #16324F;
+  /* 채움(배경) 전용 남색 — 다크 모드에서 --color-blue-deep은 글자용 밝은 청색으로 바뀌므로, 배경에는 항상 이 토큰을 쓴다. */
+  --color-blue-deep-fill: #16324F;
   --color-blue: #2F6B8F;
   --color-success: #1D9E75;
   --color-warning: #EF9F27;
+  /* 글자용 상태색: 옅은 soft 배경 위에서도 읽히도록 어둡게 누른 값. 배경·점·막대에는 원색을 그대로 쓴다. */
+  --color-warning-ink: #9A5B00;
+  --color-success-ink: #157A5B;
   --color-danger: #E24B4A;
   /* Extended accent palette: One UI 컨셉의 다색 구분용. 화면 요소는 반드시
      이 토큰으로만 색을 얻는다 (verify-design-tokens allowedPalette와 동기화). */
@@ -66,15 +71,25 @@
 
   /* Structural dimensions are layout tokens, not spacing values. */
   --layout-sidebar-width: 248px;
+  /* 워크스페이스(테넌트) 사이드바 — 포인트 컬러를 어둡게 눌러 만든다. 글자 토큰은 테마와 무관하게 밝은 계열. */
+  --color-sidebar-base: #0E1A26;
+  --color-sidebar: color-mix(in srgb, var(--color-primary) 64%, var(--color-sidebar-base));
+  --color-sidebar-text: color-mix(in srgb, var(--color-white) 92%, transparent);
+  --color-sidebar-muted: color-mix(in srgb, var(--color-white) 62%, transparent);
+  --color-sidebar-line: color-mix(in srgb, var(--color-white) 16%, transparent);
+  --color-sidebar-raised: color-mix(in srgb, var(--color-white) 10%, transparent);
+  --color-sidebar-raised-strong: color-mix(in srgb, var(--color-white) 18%, transparent);
 
   /* Backward-compatible aliases used by the existing component classes. */
   --ink: var(--color-ink);
   --muted: var(--color-gray-600);
-  --subtle: var(--color-gray-400);
+  /* 보조 글자: 순수 gray-400은 흰 배경에서 2.6:1로 너무 옅어 한 단계 눌렀다(≈3.9:1). */
+  --subtle: color-mix(in srgb, var(--color-gray-400) 55%, var(--color-gray-600));
   /* 레거시 액센트 별칭을 포인트 컬러로 연결해, 설정에서 고른 색이
      화면 전체(아이콘·텍스트 버튼·강조 배경)에 일관되게 적용되도록 한다. */
   --forest: var(--color-primary);
-  --forest-dark: var(--color-blue-deep);
+  /* 주 버튼·강조 채움: 포인트 컬러를 살짝 눌러 만든다 → 포인트 컬러를 바꾸면 버튼도 함께 바뀐다. */
+  --forest-dark: color-mix(in srgb, var(--color-primary) 84%, var(--color-sidebar-base));
   --forest-soft: var(--color-primary-soft);
   --lime: var(--color-success);
   --line: var(--color-gray-200);
@@ -118,6 +133,14 @@ html[data-theme='dark'] {
   --color-gray-600: #A9B2C0;
   --color-gray-800: #CFD6E0;
   --color-card-line: #2A323E;
+  /* 다크 모드: 남색 글자는 배경에 묻히므로 밝은 강청색으로 — 배경 용도는 --color-blue-deep-fill이 #16324F를 유지한다. */
+  --color-blue-deep: #9DBBE0;
+  --forest-dark: var(--color-primary);
+  /* 다크 배경에서 읽히도록 청색 계열을 한 단계 밝힌다 (기본 포인트 컬러 포함) */
+  --color-blue: #4F8FC0;
+  --color-primary: #3B82F6;
+  --color-warning-ink: #F2B35C;
+  --color-success-ink: #3FC394;
   --color-blue-soft: color-mix(in srgb, var(--color-blue) 26%, var(--color-gray-50));
   --color-success-soft: color-mix(in srgb, var(--color-success) 24%, var(--color-gray-50));
   --color-warning-soft: color-mix(in srgb, var(--color-warning) 24%, var(--color-gray-50));
@@ -128,6 +151,8 @@ html[data-theme='dark'] {
   --color-rose-soft: color-mix(in srgb, var(--color-rose) 26%, var(--color-gray-50));
   --color-overlay: color-mix(in srgb, var(--color-page) 74%, transparent);
   --color-overlay-subtle: color-mix(in srgb, var(--color-ink) 10%, transparent);
+  /* 다크 모드 사이드바: 포인트 컬러를 살짝만 섞은 깊은 면 */
+  --color-sidebar: color-mix(in srgb, var(--color-primary) 26%, var(--color-sidebar-base));
 }
 
 /* 다크 모드에서 남색 액센트는 배경과 겹쳐 보이지 않으므로 밝은 강청색으로 대체한다. */
@@ -159,3 +184,9 @@ html[data-easy-mode='on'] {
   --font-13: 16px;
   --font-11: 14px;
 }
+
+/* 글자 크기 설정 — 기본/크게/아주 크게. 토큰만 바꾸므로 본문·버튼·표·배지가 함께 커진다. */
+html[data-font-size='large'] { --font-22: 25px; --font-15: 17px; --font-13: 15px; --font-11: 13px; }
+html[data-font-size='extra'] { --font-22: 28px; --font-15: 19px; --font-13: 17px; --font-11: 15px; }
+html[data-easy-mode='on'][data-font-size='large'] { --font-22: 29px; --font-15: 20px; --font-13: 18px; --font-11: 16px; }
+html[data-easy-mode='on'][data-font-size='extra'] { --font-22: 32px; --font-15: 22px; --font-13: 20px; --font-11: 17px; }

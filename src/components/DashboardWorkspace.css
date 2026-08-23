@@ -42,9 +42,9 @@
 .dashboard-link-item a, .dashboard-link-empty { min-width: 0; min-height: 64px; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: var(--space-8); width: 100%; padding: var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--canvas); text-decoration: none; transition: .15s ease; }
 .dashboard-link-item a:hover { border-color: var(--color-blue-deep); background: var(--forest-soft); transform: translateY(-1px); }
 .dashboard-link-item a > span { width: 38px; height: 38px; display: grid; place-items: center; border-radius: var(--radius-8); font-weight: var(--weight-medium); }
-.dashboard-link-item a > span.green { color: var(--color-success); background: var(--color-success-soft); }
+.dashboard-link-item a > span.green { color: var(--color-success-ink); background: var(--color-success-soft); }
 .dashboard-link-item a > span.blue { color: var(--color-blue); background: var(--color-blue-soft); }
-.dashboard-link-item a > span.amber { color: var(--color-warning); background: var(--color-warning-soft); }
+.dashboard-link-item a > span.amber { color: var(--color-warning-ink); background: var(--color-warning-soft); }
 .dashboard-link-item a > span.violet { color: var(--color-blue); background: var(--color-blue-soft); }
 .dashboard-link-item a strong { overflow: hidden; font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
 .dashboard-link-manage-actions { position: absolute; z-index: 1; top: calc(var(--space-4) * -1); right: calc(var(--space-4) * -1); display: flex; gap: var(--space-4); }

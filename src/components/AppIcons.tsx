@@ -24,7 +24,7 @@ export function OnFactoryMark({ size = 38, ...props }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 38 38" fill="none" aria-hidden="true" {...props}>
       <rect width="38" height="38" rx="11" fill="currentColor" />
-      <path d="M9.5 27.5v-15l6.2 3.6v-3.6l6.1 3.6v-6l6.7 3.9v13.5h-19Z" fill="var(--color-blue-deep)" stroke="var(--color-blue-deep)" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M9.5 27.5v-15l6.2 3.6v-3.6l6.1 3.6v-6l6.7 3.9v13.5h-19Z" fill="var(--color-blue-deep-fill)" stroke="var(--color-blue-deep-fill)" strokeWidth="1.4" strokeLinejoin="round" />
       <path d="M14 22h2.5M20 22h2.5M14 25h2.5M20 25h2.5" stroke="var(--color-success)" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   )

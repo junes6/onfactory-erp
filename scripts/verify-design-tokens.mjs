@@ -14,7 +14,7 @@ const allowedPalette = new Set([
   '#dee1e8',
   '#2563eb', '#7c4dff', '#0e8c8c', '#c9366c',
   // 다크 모드 중립 토큰
-  '#0f141b', '#1a2029', '#e9ecf2', '#222935', '#333c4a', '#7e8898', '#a9b2c0', '#cfd6e0', '#2a323e',
+  '#0f141b', '#0e1a26', '#9dbbe0', '#9a5b00', '#157a5b', '#f2b35c', '#3fc394', '#4f8fc0', '#3b82f6', '#1a2029', '#e9ecf2', '#222935', '#333c4a', '#7e8898', '#a9b2c0', '#cfd6e0', '#2a323e',
 ])
 const fontTokens = new Set(['var(--font-22)', 'var(--font-15)', 'var(--font-13)', 'var(--font-11)'])
 const weightTokens = new Set(['var(--weight-regular)', 'var(--weight-medium)'])

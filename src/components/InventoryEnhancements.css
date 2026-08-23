@@ -3,7 +3,7 @@
 .movement-direction { display: flex; align-items: center; gap: var(--space-8); color: var(--muted); }
 .movement-direction.입고 { color: var(--forest); }
 .movement-direction.출고 { color: var(--color-blue); }
-.movement-direction.재고조정 { color: var(--amber); }
+.movement-direction.재고조정 { color: var(--color-warning-ink); }
 .movement-direction > span { min-width: 0; }
 .movement-direction strong, .movement-direction small { display: block; }
 .movement-direction small { margin-top: var(--space-0); color: var(--muted); font-size: var(--font-13); }

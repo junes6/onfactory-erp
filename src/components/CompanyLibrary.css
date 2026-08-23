@@ -60,7 +60,7 @@
 .library-form-grid :is(input,select,textarea) { width: 100%; min-height: 43px; padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); }
 .library-error { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--color-danger); font-size: var(--font-15); font-weight: var(--weight-medium); }
 .library-modal footer { display: flex; justify-content: flex-end; gap: var(--space-8); margin-top: var(--space-16); }
-.nas-security-note { display: flex; gap: var(--space-8); margin-top: var(--space-12); padding: var(--space-12); border-radius: var(--radius-8); color: var(--amber); background: var(--amber-soft); }
+.nas-security-note { display: flex; gap: var(--space-8); margin-top: var(--space-12); padding: var(--space-12); border-radius: var(--radius-8); color: var(--color-warning-ink); background: var(--amber-soft); }
 .nas-security-note p { margin: var(--space-0) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); }
 html[data-theme='dark'] :is(.library-page,.library-modal) :is(input,select,textarea,button) { color: var(--ink); }
 @media (max-width: 1100px) { .library-list > article { grid-template-columns: auto minmax(0,1fr) auto; } .library-list dl { grid-column: 2 / -1; } .library-file-actions { grid-column: 2 / -1; } }

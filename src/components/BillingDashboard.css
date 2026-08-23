@@ -159,8 +159,8 @@
 }
 
 .billing-metric--info .billing-metric__icon { color: var(--color-blue); background: var(--color-blue-soft); }
-.billing-metric--success .billing-metric__icon { color: var(--color-success); background: var(--color-success-soft); }
-.billing-metric--warning .billing-metric__icon { color: var(--color-warning); background: var(--color-warning-soft); }
+.billing-metric--success .billing-metric__icon { color: var(--color-success-ink); background: var(--color-success-soft); }
+.billing-metric--warning .billing-metric__icon { color: var(--color-warning-ink); background: var(--color-warning-soft); }
 .billing-metric--danger .billing-metric__icon { color: var(--color-danger); background: var(--color-danger-soft); }
 
 .billing-metric > div { min-width: 0; }

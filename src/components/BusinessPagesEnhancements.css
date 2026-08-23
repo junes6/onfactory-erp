@@ -510,7 +510,7 @@ html[data-theme='dark'] .shipment-editor-help,
 html[data-theme='dark'] .shipment-table th {
   color: var(--ink);
   border-color: var(--line);
-  background: var(--color-blue-deep);
+  background: var(--color-blue-deep-fill);
 }
 
 html[data-theme='dark'] .shipment-integration-note,
@@ -519,7 +519,7 @@ html[data-theme='dark'] .channel-health-panel > header,
 html[data-theme='dark'] .channel-health-row.header {
   color: var(--ink);
   border-color: var(--line);
-  background: var(--color-blue-deep);
+  background: var(--color-blue-deep-fill);
 }
 
 @media (max-width: 1120px) {

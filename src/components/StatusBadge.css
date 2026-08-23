@@ -22,12 +22,12 @@
 }
 
 .unified-status-badge--success {
-  color: var(--color-success);
+  color: var(--color-success-ink);
   background: var(--color-success-soft);
 }
 
 .unified-status-badge--warning {
-  color: var(--color-warning);
+  color: var(--color-warning-ink);
   background: var(--color-warning-soft);
 }
 

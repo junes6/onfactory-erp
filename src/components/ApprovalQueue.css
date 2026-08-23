@@ -21,7 +21,7 @@
 .approval-row-main strong { display: block; overflow: hidden; font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
 .approval-row-main small { display: block; overflow: hidden; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
 .approval-row-main em { font-style: normal; }
-.approval-row-main em.is-high { color: var(--color-success); font-weight: var(--weight-medium); }
+.approval-row-main em.is-high { color: var(--color-success-ink); font-weight: var(--weight-medium); }
 .approval-diff { display: block; overflow: hidden; margin-top: var(--space-4); color: var(--color-violet); font-size: var(--font-11); text-overflow: ellipsis; white-space: nowrap; }
 .approval-actions { display: flex; gap: var(--space-4); }
 .approval-actions button { display: inline-flex; align-items: center; gap: var(--space-4); min-height: 38px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
@@ -32,7 +32,7 @@
 .approval-link { min-height: 34px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--color-primary); background: var(--surface); font-size: var(--font-13); cursor: pointer; }
 .approval-link.muted { border: none; color: var(--subtle); background: transparent; cursor: default; }
 .approval-edit-modal { width: min(620px, 100%); }
-.approval-edit-evidence { display: flex; align-items: center; gap: var(--space-8); margin: var(--space-0) var(--space-0) var(--space-12); padding: var(--space-8) var(--space-12); border-radius: var(--radius-8); color: var(--color-warning); background: var(--color-warning-soft); font-size: var(--font-13); }
+.approval-edit-evidence { display: flex; align-items: center; gap: var(--space-8); margin: var(--space-0) var(--space-0) var(--space-12); padding: var(--space-8) var(--space-12); border-radius: var(--radius-8); color: var(--color-warning-ink); background: var(--color-warning-soft); font-size: var(--font-13); }
 .approval-edit-note { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); }
 
 html[data-theme='dark'] :is(.approval-stats article,.approval-actions button,.approval-link) { background: var(--surface); }
