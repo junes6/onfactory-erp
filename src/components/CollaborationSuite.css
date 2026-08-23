@@ -1729,3 +1729,42 @@ html[data-theme='dark'] .journal-month-cell, html[data-theme='dark'] .journal-mo
   .journal-month-cell { min-height: 84px; padding: var(--space-4); }
   .journal-month-block strong { display: none; }
 }
+
+/* R7-2: 일정 등록 버튼을 달력 툴바로 — 툴바는 스크롤해도 상단에 고정 */
+.schedule-toolbar { position: sticky; top: var(--space-0); z-index: 5; flex-wrap: wrap; }
+.schedule-create-button { margin-left: auto; }
+.schedule-day-head > button.schedule-day-add { width: auto; min-height: 40px; display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-0) var(--space-12); font-size: var(--font-13); font-weight: var(--weight-medium); }
+@media (max-width: 760px) { .schedule-create-button { width: 100%; margin-left: var(--space-0); } }
+
+/* R7-7: 파일 블록 */
+.journal-file-blocks { display: flex; flex-direction: column; gap: var(--space-8); }
+.journal-file-block { min-height: 48px; padding: var(--space-4) var(--space-8) var(--space-4) var(--space-4); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.journal-file-block .journal-block-index { color: var(--color-teal); background: var(--color-teal-soft); }
+.journal-file-block-body { min-width: 0; flex: 1; }
+.journal-file-block-body strong { display: block; overflow: hidden; font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
+.journal-file-block-body small { display: block; color: var(--muted); font-size: var(--font-11); }
+.journal-attachments.is-drop-active { outline: var(--hairline) dashed var(--color-primary); outline-offset: var(--space-4); background: var(--color-primary-soft); }
+/* R7-6: 업무일지 댓글 */
+.journal-comment-list { display: flex; flex-direction: column; gap: var(--space-4); }
+.journal-comment { display: flex; gap: var(--space-8); padding: var(--space-8) var(--space-0); }
+.journal-comment > div { min-width: 0; flex: 1; }
+.journal-comment-avatar { width: 28px; height: 28px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-primary); font-size: var(--font-11); font-style: normal; font-weight: var(--weight-medium); }
+.journal-comment-head { display: flex; align-items: center; gap: var(--space-8); font-size: var(--font-13); }
+.journal-comment-head time { color: var(--subtle); font-size: var(--font-11); }
+.journal-comment-head button { width: 22px; height: 22px; display: grid; place-items: center; margin-left: auto; border: none; border-radius: var(--radius-8); color: var(--subtle); background: transparent; cursor: pointer; }
+.journal-comment p { margin: var(--space-4) var(--space-0) var(--space-0); white-space: pre-wrap; font-size: var(--font-15); line-height: 1.55; }
+.journal-comment-files { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-4); }
+.journal-comment-files button { display: inline-flex; align-items: center; gap: var(--space-4); min-height: 30px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--color-primary); background: var(--color-primary-soft); font-size: var(--font-13); cursor: pointer; }
+.journal-comment-files small { color: var(--muted); }
+.journal-comment-empty { margin: var(--space-0); color: var(--subtle); font-size: var(--font-13); }
+.journal-comment-composer { display: flex; flex-direction: column; gap: var(--space-8); margin-top: var(--space-12); }
+.journal-comment-composer textarea { width: 100%; padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); font: inherit; font-size: var(--font-15); resize: vertical; }
+.journal-comment-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-8); }
+.journal-comment-attachments { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
+.journal-comment-attachments > span { display: inline-flex; align-items: center; gap: var(--space-4); min-height: 30px; padding: var(--space-0) var(--space-8); border-radius: var(--radius-8); background: var(--color-primary-soft); font-size: var(--font-13); }
+.journal-comment-attachments > span button { width: 18px; height: 18px; display: grid; place-items: center; border: none; border-radius: var(--radius-8); color: var(--muted); background: transparent; cursor: pointer; }
+.journal-comment-attach { display: inline-flex; align-items: center; gap: var(--space-4); min-height: 30px; padding: var(--space-0) var(--space-12); border: var(--hairline) dashed var(--line-strong); border-radius: var(--radius-8); color: var(--color-primary); background: transparent; font-size: var(--font-13); cursor: pointer; }
+html[data-theme='dark'] :is(.journal-file-block,.journal-comment-composer textarea) { background: var(--surface); }
+.schedule-create-group { display: flex; align-items: center; gap: var(--space-8); margin-left: auto; }
+.schedule-selected-hint { color: var(--muted); font-size: var(--font-13); }
+.schedule-create-button { margin-left: var(--space-0); }

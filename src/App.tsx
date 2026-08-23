@@ -5,11 +5,12 @@ import {
   Database, Factory, FileClock, FileText, Headphones, Home, Layers3, ListChecks, LockKeyhole, Menu,
   NotebookPen, Package, Paperclip, PauseCircle, PlayCircle, Plus, Repeat2, Search, Settings2, ShieldCheck, ShoppingCart,
   Sparkles, Store, Trash2, Upload, Users, Warehouse, X, GripVertical, EyeOff, RotateCcw,
-  Briefcase, FileStack, FileSignature,
+  Briefcase, FileStack, FileSignature, FolderKanban,
 } from 'lucide-react'
 import AIChat from './components/AIChat'
 import { ChatBubbleIcon, NotificationBellIcon, OnFactoryMark } from './components/AppIcons'
-import { LoginPage, PasswordChangePage, SettingsDrawer, type AccentChoice, type EasyModeChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
+import { LoginPage, PasswordChangePage, ProfileEditor, SettingsDrawer, type AccentChoice, type EasyModeChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
+import { ProjectSpacesPage } from './components/ProjectSpaces'
 import { ProductManagement, SalesChannels } from './components/BusinessPages'
 import { BillingDashboard } from './components/BillingDashboard'
 import { CompanyLibrary } from './components/CompanyLibrary'
@@ -36,7 +37,7 @@ import {
   type Tenant, type WorkEvidence, type WorkItem, type WorkRule,
 } from './domainData'
 
-type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
+type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
 type PageId = TenantPage | PlatformSection | 'billing'
 type AppMode = 'tenant' | 'platform'
 type NavItem = { id: PageId; label: string; icon: typeof Sparkles; badge?: number }
@@ -47,7 +48,7 @@ type PlatformTicketSummary = { id: string; tenantId: string; tenant: string; tit
 type PlatformDirectoryState = { tenants: Tenant[]; supportTickets: PlatformTicketSummary[] }
 type SupportSessionRequest = { tenantId: string; ticketId: string; scope: string; duration: string; reason: string }
 
-const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'products', 'inventory', 'factory', 'people', 'documents', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
+const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'projects', 'products', 'inventory', 'factory', 'people', 'documents', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
 const AUTH_SYNC_KEY = 'onfactory-auth-sync'
 const emptyWorkItems: WorkItem[] = []
 const emptyWorkRules: WorkRule[] = []
@@ -127,7 +128,7 @@ const pageTitles: Record<PageId, string> = {
   ai: 'AI 업무허브', schedule: '일정관리', tasks: '업무지시 · 결재', journal: '일일업무일지',
   products: '제품관리', inventory: '재고 · LOT', factory: '공장관리',
   sales: '판매채널', people: '인사 · 조직', documents: '기업 자료실', compliance: '식품안전 · 인증',
-  approvals: 'AI 제안 검토',
+  approvals: 'AI 제안 검토', projects: '프로젝트 공간',
   'it-projects': '프로젝트', 'it-deliverables': '산출물', 'it-contracts': '계약 · 거래처',
   billing: '비용 · 포인트',
   platform: '플랫폼 운영 개요', tenants: '고객사 관리', support: 'CS 지원센터',
@@ -1299,6 +1300,7 @@ export default function App() {
   // same browser can never reuse another employee's filtered response.
   const workspaceScope = account?.tenantId && account.id ? `${account.tenantId}:${account.id}` : undefined
   const [pendingProposals, setPendingProposals] = useState(0)
+  const [profileOpen, setProfileOpen] = useState(false)
   const [consentReminder, setConsentReminder] = useState<{ needsReconsent: boolean; version: string } | null>(null)
   const [peopleInitialTab, setPeopleInitialTab] = useState<'members' | 'accounts' | 'performance'>('members')
   const isTenantAdmin = account?.role === 'tenant-admin' && Boolean(account.tenantId)
@@ -1615,6 +1617,7 @@ export default function App() {
     { id: 'tasks', label: '업무지시 · 결재', icon: ListChecks, badge: scopedWorkItems.filter((x) => x.status !== '결재완료').length },
     { id: 'approvals', label: 'AI 제안 검토', icon: ClipboardCheck, badge: pendingProposals },
     { id: 'journal', label: '일일업무일지', icon: NotebookPen },
+    { id: 'projects', label: '프로젝트 공간', icon: FolderKanban },
     { id: 'products', label: '제품관리', icon: Package },
     { id: 'inventory', label: '재고 · LOT', icon: Boxes },
     { id: 'factory', label: '공장관리', icon: Factory },
@@ -1877,6 +1880,7 @@ export default function App() {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onCreate={() => setTaskDraft('')} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
+      case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'products': return <ProductManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
       case 'inventory': return <InventoryPage onToast={setToast} canManage={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} />
       case 'factory': return <FactoryManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
@@ -1962,7 +1966,8 @@ export default function App() {
       </div>
 
       <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => setMessengerOpen(false)} onToast={setToast} onUnreadChange={setMessengerUnread} />
-      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? '온팩토리'} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} />
+      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? '온팩토리'} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
+      {profileOpen && account && <ProfileEditor account={account} onClose={() => setProfileOpen(false)} onToast={setToast} onSaved={(next) => { setAccount((current) => current ? { ...current, ...next } as AuthAccount : current) }} />}
       <WorkspaceNavigationEditor open={navEditorOpen} source={tenantNavSource} preferences={tenantNavPreferences} onChange={setTenantNavPreferences} onClose={() => setNavEditorOpen(false)} />
       {taskDraft !== null && <TaskModal initialText={taskDraft} requesterName={account?.name ?? '사용자'} requesterId={account?.id ?? ''} assignees={workAssignees} workspaceScope={workspaceScope} onClose={() => setTaskDraft(null)} onSave={saveTask} />}
       {supportTenant && <SupportSessionModal tenant={supportTenant} tickets={platformTickets} onClose={() => setSupportTenant(null)} onCreate={createPlatformSupportSession} />}

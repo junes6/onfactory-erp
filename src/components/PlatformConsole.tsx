@@ -30,6 +30,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import type { Tenant } from '../domainData'
 import { formatDateTime } from '../utils/dateTime'
+import { Bot, Radar, Sparkles, Users } from 'lucide-react'
 import { StatusBadge } from './StatusBadge'
 import './PlatformConsole.css'
 
@@ -203,7 +204,7 @@ type PlatformDialogState =
 
 
 const sectionMeta: Record<PlatformSection, { label: string; title: string; description: string; icon: LucideIcon }> = {
-  platform: { label: '운영 개요', title: '플랫폼 운영 현황', description: '서비스 이상과 고객 지원 우선순위만 확인합니다.', icon: Home },
+  platform: { label: '관제센터', title: '플랫폼 관제센터', description: '모든 고객사의 상태·계정·지원·AI 신호를 한 화면에서 총괄하고, AI 브리핑으로 우선순위를 잡습니다.', icon: Home },
   tenants: { label: '고객사', title: '고객사 관리', description: '계약·활성도·사용량을 고객사 단위로 관리합니다.', icon: Building2 },
   support: { label: 'CS 지원', title: 'CS 지원센터', description: 'SLA와 다음 행동을 기준으로 티켓을 처리합니다.', icon: Headphones },
   integrations: { label: '연동 상태', title: '연동 모니터링', description: '판매채널·물류·AI의 동기화 상태를 진단합니다.', icon: Layers3 },
@@ -464,13 +465,127 @@ function relativeActivity(at: string | null) {
   return `${Math.floor(hours / 24)}일 전`
 }
 
-/** 이상 신호: 미처리 티켓(빨강) > 24시간 무활동(주황) > 활동 없음(회색) > 정상(초록) */
+/** 이상 신호: 관리자 없음/미처리 티켓(빨강) > 센티널 경고·약관 미동의·24시간 무활동(주황) > 활동 없음(회색) > 정상(초록) */
 function tenantSignal(tenant: Tenant): { tone: Tone; label: string } {
   const metrics = tenant.metrics
+  if (tenant.admins && tenant.admins.length === 0) return { tone: 'danger', label: '관리자 계정 없음' }
   if (metrics.openTickets > 0) return { tone: 'danger', label: `미처리 티켓 ${metrics.openTickets}건` }
+  if ((metrics.sentinelAlerts ?? 0) > 0) return { tone: 'warning', label: `센티널 경고 ${metrics.sentinelAlerts}건` }
+  if (tenant.consentCurrent === false) return { tone: 'warning', label: '약관 재동의 필요' }
   if (!metrics.lastActivityAt) return { tone: 'neutral', label: '아직 활동 데이터 없음' }
   if (Date.now() - Date.parse(metrics.lastActivityAt) > 24 * 60 * 60 * 1_000) return { tone: 'warning', label: '24시간 무활동' }
   return { tone: 'success', label: '정상 활동 중' }
+}
+
+type TenantAccountRow = { id: string; name: string; email: string; role: 'tenant-admin' | 'tenant-member'; team: string; jobRole: string; approved: boolean; approvalStatus: string; mustChangePassword: boolean; temporaryPasswordExpiresAt: string | null; requested: string; isDemo: boolean }
+type BriefingFinding = { id: string; tenantId: string; tenantName: string; severity: 'critical' | 'warning' | 'info'; title: string; detail: string; action: string }
+type Briefing = { generatedAt: string; headline: string; mode: 'ai' | 'rules'; summary: { tenants: number; active24h: number; members: number; openTickets: number; pendingProposals: number; sentinelAlerts: number; consentMissing: number; critical: number; warning: number }; findings: BriefingFinding[] }
+
+function severityTone(severity: BriefingFinding['severity']): Tone { return severity === 'critical' ? 'danger' : severity === 'warning' ? 'warning' : 'info' }
+function severityLabel(severity: BriefingFinding['severity']) { return severity === 'critical' ? '즉시' : severity === 'warning' ? '주의' : '참고' }
+
+/** 고객사 계정 목록 — 관제센터 상세에서 관리자·직원 계정과 온보딩 상태를 보여준다. */
+function TenantAccountsPanel({ tenantId, refreshToken }: { tenantId: string; refreshToken?: number }) {
+  const [rows, setRows] = useState<TenantAccountRow[] | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let active = true
+    setRows(null); setError('')
+    platformJson<{ accounts: TenantAccountRow[] }>(`/api/platform/tenants/${encodeURIComponent(tenantId)}/accounts`)
+      .then((body) => { if (active) setRows(body.accounts) })
+      .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : '계정 목록을 불러오지 못했습니다.') })
+    return () => { active = false }
+  }, [tenantId, refreshToken])
+  const accountState = (row: TenantAccountRow): { tone: Tone; label: string } => {
+    if (row.approvalStatus === 'rejected') return { tone: 'danger', label: '반려' }
+    if (!row.approved) return { tone: 'warning', label: '승인 대기' }
+    if (row.mustChangePassword && row.temporaryPasswordExpiresAt && Date.parse(row.temporaryPasswordExpiresAt) < Date.now()) return { tone: 'danger', label: '초기 비밀번호 만료' }
+    if (row.mustChangePassword) return { tone: 'info', label: '첫 로그인 대기' }
+    return { tone: 'success', label: '사용 중' }
+  }
+  return <div className="pc-detail-section pc-accounts">
+    <strong><Users size={15} /> 계정 {rows ? `${rows.length}개 (관리자 ${rows.filter((row) => row.role === 'tenant-admin').length})` : ''}</strong>
+    {error && <p className="pc-accounts-error">{error}</p>}
+    {!rows && !error && <p>계정 목록을 불러오는 중…</p>}
+    {rows && rows.length === 0 && <p>등록된 계정이 없습니다.</p>}
+    {rows && rows.length > 0 && <ul className="pc-account-list">
+      {rows.map((row) => { const state = accountState(row); return <li key={row.id} className={row.role === 'tenant-admin' ? 'is-admin' : ''}>
+        <span className="pc-account-avatar">{row.name.slice(0, 1)}</span>
+        <div><strong>{row.name} {row.role === 'tenant-admin' && <em>관리자</em>}</strong><small>{row.email}</small><small>{[row.team, row.jobRole].filter(Boolean).join(' · ')}</small></div>
+        <Badge tone={state.tone}>{state.label}</Badge>
+      </li> })}
+    </ul>}
+  </div>
+}
+
+/** AI 운영 브리핑 + 질문 — 규칙 기반 신호 위에 선택적으로 모델 답변을 얹는다. */
+function ControlBriefing({ briefing, loading, onRefresh, onEnterTenant, onSelectTenant, onSectionChange }: { briefing: Briefing | null; loading: boolean; onRefresh: () => void; onEnterTenant: (id: string) => void; onSelectTenant: (id: string) => void; onSectionChange: (section: PlatformSection) => void }) {
+  const [question, setQuestion] = useState('')
+  const [thread, setThread] = useState<Array<{ role: 'user' | 'assistant'; text: string; mode?: string }>>([])
+  const [asking, setAsking] = useState(false)
+  const [showAll, setShowAll] = useState(false)
+  const ask = async (text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed || asking) return
+    setAsking(true)
+    setThread((current) => [...current, { role: 'user', text: trimmed }])
+    setQuestion('')
+    try {
+      const body = await platformJson<{ answer: string; mode: string }>('/api/platform/assistant', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: trimmed }) })
+      setThread((current) => [...current, { role: 'assistant', text: body.answer, mode: body.mode }])
+    } catch (reason) { setThread((current) => [...current, { role: 'assistant', text: reason instanceof Error ? reason.message : '답변을 가져오지 못했습니다.' }]) }
+    finally { setAsking(false) }
+  }
+  const findings = briefing?.findings ?? []
+  const visible = showAll ? findings : findings.slice(0, 6)
+  return <Panel title="AI 운영 브리핑" subtitle={briefing ? `${formatDateTime(briefing.generatedAt)} 기준 · ${briefing.mode === 'ai' ? 'AI 모델 + 규칙' : '규칙 기반 (모델 키 미설정)'}` : '실시간 신호 수집 중'} tools={<button type="button" className="pc-button ghost" onClick={onRefresh} disabled={loading}><RefreshCw size={14} /> 새로 고침</button>}>
+    <div className="pc-briefing">
+      <div className="pc-briefing-head"><span className="pc-briefing-icon"><Sparkles size={18} /></span><div><strong>{briefing?.headline ?? '브리핑을 준비하고 있습니다.'}</strong>{briefing && <span className="pc-briefing-chips"><em>고객사 {briefing.summary.tenants}</em><em>24시간 활동 {briefing.summary.active24h}</em><em>멤버 {briefing.summary.members}</em><em className={briefing.summary.openTickets ? 'is-warn' : ''}>열린 CS {briefing.summary.openTickets}</em><em className={briefing.summary.pendingProposals ? 'is-info' : ''}>AI 제안 대기 {briefing.summary.pendingProposals}</em><em className={briefing.summary.sentinelAlerts ? 'is-warn' : ''}>센티널 {briefing.summary.sentinelAlerts}</em><em className={briefing.summary.consentMissing ? 'is-warn' : ''}>약관 미동의 {briefing.summary.consentMissing}</em></span>}</div></div>
+      <ol className="pc-finding-list">
+        {visible.map((finding) => <li key={finding.id} className={`severity-${finding.severity}`}>
+          <Badge tone={severityTone(finding.severity)}>{severityLabel(finding.severity)}</Badge>
+          <div><strong><button type="button" className="pc-link" onClick={() => onSelectTenant(finding.tenantId)}>{finding.tenantName}</button> · {finding.title}</strong><span>{finding.detail}</span><small>권장: {finding.action}</small></div>
+          <div className="pc-finding-actions"><Button small onClick={() => { onSelectTenant(finding.tenantId); if (/티켓/.test(finding.title)) onSectionChange('support') }}>상세</Button><Button small primary onClick={() => onEnterTenant(finding.tenantId)}><ArrowRight size={13} /> 접속</Button></div>
+        </li>)}
+        {briefing && findings.length === 0 && <li className="severity-info"><Badge tone="success">정상</Badge><div><strong>우선 조치할 신호가 없습니다.</strong><span>모든 고객사가 정상 범위에서 운영 중입니다.</span></div></li>}
+      </ol>
+      {findings.length > 6 && <button type="button" className="pc-link pc-finding-more" onClick={() => setShowAll((value) => !value)}>{showAll ? '접기' : `신호 ${findings.length - 6}건 더 보기`}</button>}
+      <div className="pc-assistant">
+        <div className="pc-assistant-thread">
+          {thread.length === 0 && <p className="pc-assistant-hint"><Bot size={15} /> 예: "지금 문제 있는 고객사는?", "햇살바다 상태 알려줘", "관리자 계정 현황"</p>}
+          {thread.map((message, index) => <div key={index} className={`pc-assistant-message ${message.role}`}>{message.role === 'assistant' && <Bot size={15} />}<p>{message.text}</p></div>)}
+          {asking && <div className="pc-assistant-message assistant"><Bot size={15} /><p>분석 중…</p></div>}
+        </div>
+        <form className="pc-assistant-form" onSubmit={(event) => { event.preventDefault(); void ask(question) }}>
+          <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="관제 데이터에 대해 물어보세요" aria-label="AI 관제 질문" disabled={asking} />
+          <button type="submit" className="pc-button primary" disabled={asking || !question.trim()}><Send size={14} /> 질문</button>
+        </form>
+        <div className="pc-assistant-presets">{['지금 문제 있는 고객사는?', '관리자 계정 현황', '약관 동의 현황', '열린 티켓 정리'].map((preset) => <button key={preset} type="button" onClick={() => void ask(preset)} disabled={asking}>{preset}</button>)}</div>
+      </div>
+    </div>
+  </Panel>
+}
+
+/** 고객사 관제 테이블 — 한 줄에 상태·관리자·멤버·활동·CS·AI 신호·약관·액션 */
+function TenantControlTable({ tenants, selectedTenantId, onSelectTenant, onEnterTenant }: { tenants: Tenant[]; selectedTenantId?: string; onSelectTenant: (id: string) => void; onEnterTenant: (id: string) => void }) {
+  if (!tenants.length) return <EmptyState label="아직 데이터 없음 — 등록된 고객사가 없습니다." />
+  return <div className="pc-table-wrap"><table className="pc-control-table">
+    <thead><tr><th>상태</th><th>고객사</th><th>관리자</th><th>멤버</th><th>오늘 활동</th><th>마지막 활동</th><th>CS</th><th>AI 제안</th><th>약관</th><th>액션</th></tr></thead>
+    <tbody>
+      {tenants.map((tenant) => { const signal = tenantSignal(tenant); const admin = tenant.admins?.[0]; return <tr key={tenant.id} className={tenant.id === selectedTenantId ? 'is-selected' : ''} onClick={() => onSelectTenant(tenant.id)}>
+        <td><span className={`pc-signal-text ${signal.tone}`}><i className={`pc-signal-dot ${signal.tone}`} />{signal.label}</span></td>
+        <td><div className="pc-cell-tenant"><span className="pc-logo">{tenant.name.replace(/\s+/g, '').slice(0, 2)}</span><div><strong>{tenant.name}</strong><small>{industryLabel(tenant)} · {tenant.plan} · {tenant.contract}</small></div></div></td>
+        <td>{admin ? <div className="pc-cell-admin"><strong>{admin.name}</strong><small>{admin.email}</small>{(tenant.admins?.length ?? 0) > 1 && <small>외 {(tenant.admins?.length ?? 1) - 1}명</small>}</div> : <Badge tone="danger">없음</Badge>}</td>
+        <td>{tenant.metrics.members}명{tenant.metrics.pendingAccounts ? <small className="pc-cell-sub is-warn">승인 대기 {tenant.metrics.pendingAccounts}</small> : null}</td>
+        <td>{tenant.metrics.todayActivity}건</td>
+        <td>{relativeActivity(tenant.metrics.lastActivityAt)}</td>
+        <td className={tenant.metrics.openTickets ? 'is-warn' : ''}>{tenant.metrics.openTickets}건</td>
+        <td>{tenant.metrics.pendingProposals ?? 0}건{tenant.metrics.sentinelAlerts ? <small className="pc-cell-sub is-warn">센티널 {tenant.metrics.sentinelAlerts}</small> : null}</td>
+        <td>{tenant.consentCurrent ? <Badge tone="success">동의</Badge> : <Badge tone="warning">재동의</Badge>}</td>
+        <td><Button primary small onClick={() => onEnterTenant(tenant.id)}><ArrowRight size={13} /> 접속</Button></td>
+      </tr> })}
+    </tbody>
+  </table></div>
 }
 
 function pointsLabel(points: number | null) {
@@ -497,7 +612,8 @@ function TenantCard({ tenant, selected, onSelect, onEnter }: { tenant: Tenant; s
           <div><dt>오늘 활동</dt><dd>{metrics.todayActivity}건</dd></div>
           <div><dt>미처리 티켓</dt><dd className={metrics.openTickets ? 'is-warn' : ''}>{metrics.openTickets}건</dd></div>
           <div><dt>마지막 활동</dt><dd>{relativeActivity(metrics.lastActivityAt)}</dd></div>
-          <div><dt>이번 달 포인트</dt><dd>{pointsLabel(metrics.pointsUsed)}</dd></div>
+          <div><dt>AI 제안 대기</dt><dd className={metrics.sentinelAlerts ? 'is-warn' : ''}>{metrics.pendingProposals ?? 0}건{metrics.sentinelAlerts ? ` · 센티널 ${metrics.sentinelAlerts}` : ''}</dd></div>
+          <div><dt>관리자</dt><dd>{tenant.admins?.[0] ? `${tenant.admins[0].name}${tenant.admins.length > 1 ? ` 외 ${tenant.admins.length - 1}` : ''}` : '없음'}</dd></div>
         </dl>
       </button>
       <div className="pc-tenant-card-actions"><span className={`pc-signal-text ${signal.tone}`}>{signal.label}</span><Button primary small onClick={onEnter}><ArrowRight size={14} /> 접속</Button></div>
@@ -548,6 +664,11 @@ function TenantDetail({ tenant, onSectionChange, onRequestSupport, onScope, onEn
           </div>
           <TenantIndustryControl tenant={tenant} />
           <div className="pc-detail-section">
+            <strong>약관 동의</strong>
+            <p>{tenant.consent ? `버전 ${tenant.consent.version} · ${formatDateTime(tenant.consent.agreedAt)} · ${tenant.consent.agreedBy}` : '동의 기록 없음'}{tenant.consentCurrent === false && <><br /><Badge tone="warning">재동의 필요</Badge></>}</p>
+          </div>
+          <TenantAccountsPanel tenantId={tenant.id} />
+          <div className="pc-detail-section">
             <strong>사용량 (실시간 집계)</strong>
             <p>이번 달 포인트 {pointsLabel(tenant.metrics.pointsUsed)}<br />저장 용량 {formatBytes(tenant.metrics.storageBytes)}</p>
           </div>
@@ -567,11 +688,19 @@ function Overview({ scope, scopedTenants, scopedTickets, scopedIntegrations, sel
   const selectedTenant = scopedTenants.find((tenant) => tenant.id === selectedTenantId) ?? scopedTenants[0]
   const exceptionTickets = scopedTickets.filter((ticket) => ticket.priority === 'P1' || ticket.status.includes('대기')).slice(0, 3)
   const exceptionIntegrations = scopedIntegrations.filter((item) => item.status !== '정상')
+  const [briefing, setBriefing] = useState<Briefing | null>(null)
+  const [briefingLoading, setBriefingLoading] = useState(false)
+  const loadBriefing = useCallback(async () => {
+    setBriefingLoading(true)
+    try { setBriefing(await platformJson<Briefing>('/api/platform/briefing')) } catch { /* 패널에 '준비 중' 유지 */ } finally { setBriefingLoading(false) }
+  }, [])
+  useEffect(() => { void loadBriefing(); const timer = window.setInterval(() => { void loadBriefing() }, 60_000); return () => window.clearInterval(timer) }, [loadBriefing, props.refreshToken])
   return (
-    <div className="pc-workspace">
+    <div className="pc-workspace pc-control-center">
       <div className="pc-overview-stack">
-        <Panel title="사업체 보드" subtitle="실제 스토어 집계 · 30초마다 자동 갱신" footer={`${scopedTenants.length}개 고객사 · 범위: ${scope === 'all' ? '전체' : selectedTenant?.name ?? ''}`}>
-          <TenantBoard tenants={scopedTenants} selectedTenantId={selectedTenant?.id} onSelectTenant={onSelectTenant} onEnterTenant={props.onEnterTenant} />
+        <ControlBriefing briefing={briefing} loading={briefingLoading} onRefresh={() => void loadBriefing()} onEnterTenant={props.onEnterTenant} onSelectTenant={onSelectTenant} onSectionChange={props.onSectionChange} />
+        <Panel title="고객사 관제 보드" subtitle="실제 스토어 집계 · 30초마다 자동 갱신 · 행을 누르면 오른쪽에 상세·계정 목록" tools={<button type="button" className="pc-button ghost" onClick={() => props.onSectionChange('tenants')}><Radar size={14} /> 고객사 관리 <ArrowRight size={14} /></button>} footer={`${scopedTenants.length}개 고객사 · 범위: ${scope === 'all' ? '전체' : selectedTenant?.name ?? ''}`}>
+          <TenantControlTable tenants={scopedTenants} selectedTenantId={selectedTenant?.id} onSelectTenant={onSelectTenant} onEnterTenant={props.onEnterTenant} />
         </Panel>
         <Panel title="지금 확인할 항목" subtitle="장애·SLA·인증 문제만 표시" tools={<button type="button" className="pc-button ghost" onClick={() => props.onSectionChange('support')}>CS 전체 <ArrowRight size={14} /></button>}>
           <div className="pc-alert-list">

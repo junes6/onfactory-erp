@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Accessibility, ArrowLeft, Check, ChevronRight, Download, Eye, EyeOff, KeyRound, Laptop, LockKeyhole, LogIn, Mail, Moon, Palette, ShieldCheck, Smartphone, Sun, Type, X } from 'lucide-react'
+import { Accessibility, ArrowLeft, Briefcase, Check, ChevronRight, Download, Eye, EyeOff, KeyRound, Laptop, LockKeyhole, LogIn, Mail, Moon, Palette, Phone, Save, ShieldCheck, Smartphone, Sun, Type, UserPen, X } from 'lucide-react'
 import { OnFactoryMark } from './AppIcons'
 
 export type ThemeChoice = 'light' | 'dark' | 'system'
@@ -260,6 +260,7 @@ export function PasswordChangePage({ name, email, onChange, onLogout }: Password
 type SettingsDrawerProps = {
   open: boolean
   onClose: () => void
+  onEditProfile?: () => void
   profileName: string
   profileRole: string
   companyName: string
@@ -274,7 +275,7 @@ type SettingsDrawerProps = {
   onLogout: () => void
 }
 
-export function SettingsDrawer({ open, onClose, profileName, profileRole, companyName, theme, fontSize, accent, easyMode, onThemeChange, onFontSizeChange, onAccentChange, onEasyModeChange, onLogout }: SettingsDrawerProps) {
+export function SettingsDrawer({ open, onClose, profileName, profileRole, companyName, theme, fontSize, accent, easyMode, onThemeChange, onFontSizeChange, onAccentChange, onEasyModeChange, onLogout, onEditProfile }: SettingsDrawerProps) {
   const drawerRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
@@ -300,7 +301,7 @@ export function SettingsDrawer({ open, onClose, profileName, profileRole, compan
     <button className="drawer-scrim" type="button" aria-label="개인 설정 닫기" onClick={onClose} />
     <aside ref={drawerRef} className="settings-drawer" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header><div><span className="eyebrow">PERSONAL SETTINGS</span><h2 id="settings-title">내 화면 설정</h2></div><button className="icon-button" type="button" aria-label="설정 닫기" onClick={onClose}><X size={21} /></button></header>
-      <div className="settings-profile"><span>{profileName.slice(0, 1)}</span><div><strong>{profileName}</strong><p>{profileRole} · {companyName}</p></div></div>
+      <div className="settings-profile"><span>{profileName.slice(0, 1)}</span><div><strong>{profileName}</strong><p>{profileRole} · {companyName}</p></div>{onEditProfile && <button type="button" className="settings-profile-edit" onClick={onEditProfile}><UserPen size={16} /> 프로필 수정</button>}</div>
       <section className="setting-section">
         <div className="setting-section-title"><Sun size={19} /><div><h3>화면 테마</h3><p>눈에 편한 화면을 선택하세요.</p></div></div>
         <div className="setting-option-grid three">
@@ -337,4 +338,77 @@ export function SettingsDrawer({ open, onClose, profileName, profileRole, compan
       <footer><button className="settings-logout" type="button" onClick={onLogout}><LogIn size={18} /> 로그아웃</button></footer>
     </aside>
   </>
+}
+
+export type ProfileAccount = { id: string; name: string; email: string; team?: string; jobRole?: string; phone?: string; bio?: string; role: string; tenantName: string | null }
+
+/** 내 프로필 수정 — 이름·부서·직책·연락처·소개 + 비밀번호 변경 */
+export function ProfileEditor({ account, onClose, onSaved, onToast }: { account: ProfileAccount; onClose: () => void; onSaved: (account: ProfileAccount & Record<string, unknown>) => void; onToast: (message: string) => void }) {
+  const [name, setName] = useState(account.name)
+  const [team, setTeam] = useState(account.team ?? '')
+  const [jobRole, setJobRole] = useState(account.jobRole ?? '')
+  const [phone, setPhone] = useState(account.phone ?? '')
+  const [bio, setBio] = useState(account.bio ?? '')
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [passwordBusy, setPasswordBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => { const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }; document.addEventListener('keydown', onKey); return () => document.removeEventListener('keydown', onKey) }, [onClose])
+  const operator = account.role === 'platform-operator'
+  const saveProfile = async (event: FormEvent) => {
+    event.preventDefault()
+    setBusy(true); setError('')
+    try {
+      const response = await fetch('/api/me/profile', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: name.trim(), team: team.trim(), jobRole: jobRole.trim(), phone: phone.trim(), bio: bio.trim() }) })
+      const body = await response.json() as { account?: ProfileAccount & Record<string, unknown>; error?: { message?: string } }
+      if (!response.ok || !body.account) { setError(body.error?.message || '프로필을 저장하지 못했습니다.'); return }
+      onSaved(body.account)
+      onToast('프로필을 저장했습니다.')
+      onClose()
+    } catch { setError('서버에 연결하지 못했습니다.') }
+    finally { setBusy(false) }
+  }
+  const changePassword = async () => {
+    if (newPassword !== newPasswordConfirm) { setError('새 비밀번호 확인이 일치하지 않습니다.'); return }
+    setPasswordBusy(true); setError('')
+    try {
+      const response = await fetch('/api/me/password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ currentPassword, newPassword }) })
+      const body = await response.json() as { ok?: boolean; error?: { message?: string } }
+      if (!response.ok) { setError(body.error?.message || '비밀번호를 변경하지 못했습니다.'); return }
+      setCurrentPassword(''); setNewPassword(''); setNewPasswordConfirm('')
+      onToast('비밀번호를 변경했습니다. 다음 로그인부터 새 비밀번호를 사용하세요.')
+    } catch { setError('서버에 연결하지 못했습니다.') }
+    finally { setPasswordBusy(false) }
+  }
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="modal-card profile-editor" role="dialog" aria-modal="true" aria-labelledby="profile-editor-title">
+      <header><div><span className="eyebrow">MY PROFILE</span><h2 id="profile-editor-title">내 프로필</h2><p>{account.email}{account.tenantName ? ` · ${account.tenantName}` : ''}</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
+      <form onSubmit={saveProfile}>
+        <div className="profile-editor-identity"><span className="profile-editor-avatar">{name.trim().slice(0, 1) || account.name.slice(0, 1)}</span><div><strong>{name.trim() || account.name}</strong><small>{[jobRole.trim(), team.trim()].filter(Boolean).join(' · ') || (operator ? '플랫폼 운영자' : '직책·부서 미입력')}</small></div></div>
+        <div className="form-grid">
+          <label className="form-field"><span>이름 <em>필수</em></span><input value={name} onChange={(event) => setName(event.target.value)} required minLength={2} maxLength={40} autoFocus /></label>
+          <label className="form-field"><span>연락처</span><div className="input-with-icon"><Phone size={17} /><input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="010-0000-0000" maxLength={30} /></div></label>
+        </div>
+        <div className="form-grid">
+          <label className="form-field"><span>부서</span><input value={team} onChange={(event) => setTeam(event.target.value)} maxLength={40} placeholder={operator ? '온팩토리 운영' : '예: 품질관리'} /></label>
+          <label className="form-field"><span>직책</span><div className="input-with-icon"><Briefcase size={17} /><input value={jobRole} onChange={(event) => setJobRole(event.target.value)} maxLength={40} placeholder="예: 품질 책임자" /></div></label>
+        </div>
+        <label className="form-field full"><span>한 줄 소개 <em>선택</em></span><input value={bio} onChange={(event) => setBio(event.target.value)} maxLength={200} placeholder="담당 업무나 연락 가능한 시간을 적어 두면 동료가 찾기 쉽습니다." /></label>
+        <p className="profile-editor-note">이메일과 역할(관리자·직원)은 회사 관리자가 관리합니다. 이름·부서·직책은 업무지시·일지·메신저에 바로 반영됩니다.</p>
+        {error && <div className="auth-inline-error" role="alert">{error}</div>}
+        <footer><button type="button" className="button ghost" onClick={onClose} disabled={busy}>닫기</button><button type="submit" className="button primary" disabled={busy || name.trim().length < 2}><Save size={17} /> {busy ? '저장 중…' : '프로필 저장'}</button></footer>
+      </form>
+      <section className="profile-password" aria-labelledby="profile-password-title">
+        <h3 id="profile-password-title"><KeyRound size={16} /> 비밀번호 변경</h3>
+        <div className="form-grid three">
+          <label className="form-field"><span>현재 비밀번호</span><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" /></label>
+          <label className="form-field"><span>새 비밀번호</span><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" placeholder="10자 이상, 대/소문자·숫자·특수문자" /></label>
+          <label className="form-field"><span>새 비밀번호 확인</span><input type="password" value={newPasswordConfirm} onChange={(event) => setNewPasswordConfirm(event.target.value)} autoComplete="new-password" /></label>
+        </div>
+        <div className="profile-password-actions"><button type="button" className="button secondary" disabled={passwordBusy || !currentPassword || newPassword.length < 10 || !newPasswordConfirm} onClick={() => void changePassword()}><KeyRound size={16} /> {passwordBusy ? '변경 중…' : '비밀번호 변경'}</button></div>
+      </section>
+    </section>
+  </div>
 }

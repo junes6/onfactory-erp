@@ -233,7 +233,7 @@ html[data-theme='dark'] .nav-list button.active em { background: var(--color-pri
   padding: var(--space-0) var(--space-16); border: var(--hairline) solid transparent; border-radius: var(--radius-8); font-size: var(--font-15); font-weight: var(--weight-medium); cursor: pointer;
 }
 .button.primary, .primary-button { color: var(--color-white); border-color: var(--forest-dark); background: var(--forest-dark); }
-.button.primary:hover, .primary-button:hover { background: var(--color-blue-deep-fill); }
+.button.primary:hover, .primary-button:hover { background: color-mix(in srgb, var(--forest-dark) 82%, var(--color-sidebar-base)); }
 .button.secondary { color: var(--forest); border-color: var(--color-blue-soft); background: var(--forest-soft); }
 .button.ghost, .secondary-button { color: var(--color-blue-deep); border-color: var(--line); background: var(--color-surface); }
 .button.ghost:hover, .secondary-button:hover { border-color: var(--color-blue-deep); background: var(--color-blue-soft); }
@@ -632,11 +632,11 @@ html[data-theme='dark'] .nav-list button.active em { background: var(--color-pri
 .toast {
   position: fixed; z-index: 160; right: 25px; bottom: 25px; max-width: min(430px,calc(100vw - 30px));
   min-height: 56px; display: flex; align-items: center; gap: var(--space-8); padding: var(--space-12) var(--space-12) var(--space-12) var(--space-16);
-  border: var(--hairline) solid var(--color-blue-soft); border-radius: var(--radius-8); color: var(--color-white); background: var(--color-blue-deep-fill); box-shadow: var(--shadow-none);
+  border: var(--hairline) solid var(--color-sidebar-line); border-radius: var(--radius-8); color: var(--color-white); background: var(--color-sidebar); box-shadow: var(--shadow-none);
 }
-.toast > svg { flex: 0 0 auto; color: var(--color-success-ink); }
+.toast > svg { flex: 0 0 auto; color: var(--color-white); }
 .toast > span { flex: 1; font-size: var(--font-13); font-weight: var(--weight-medium); }
-.toast button { width: 30px; height: 30px; display: grid; place-items: center; border: none; border-radius: var(--radius-8); color: var(--color-blue-soft); background: var(--color-overlay-subtle); cursor: pointer; }
+.toast button { width: 30px; height: 30px; display: grid; place-items: center; border: none; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-sidebar-raised-strong); cursor: pointer; }
 .nav-scrim { display: none; }
 
 @media (max-width: 1320px) {
@@ -1091,17 +1091,17 @@ html[data-theme='dark'] {
 
 /* Authentication */
 .auth-shell { min-height: 100vh; display: grid; grid-template-columns: minmax(420px,.9fr) minmax(520px,1.1fr); background: var(--canvas); }
-.auth-brand-panel { position: relative; min-height: 100vh; display: flex; flex-direction: column; overflow: hidden; padding: var(--space-32); color: var(--color-white); background: radial-gradient(circle at 82% 16%, var(--color-overlay-subtle), transparent 28%), radial-gradient(circle at 14% 84%, var(--color-overlay-subtle), transparent 30%), var(--color-blue-deep-fill); }
+.auth-brand-panel { position: relative; min-height: 100vh; display: flex; flex-direction: column; overflow: hidden; padding: var(--space-32); color: var(--color-white); background: radial-gradient(circle at 82% 16%, var(--color-overlay-subtle), transparent 28%), radial-gradient(circle at 14% 84%, var(--color-overlay-subtle), transparent 30%), var(--color-sidebar); }
 .auth-brand-panel::after { content: ''; position: absolute; right: -17%; bottom: -24%; width: 62%; aspect-ratio: 1; border: var(--hairline) solid var(--color-overlay-subtle); border-radius: var(--radius-8); box-shadow: var(--shadow-none); }
 .auth-brand { position: relative; z-index: 1; display: flex; align-items: center; gap: var(--space-12); }
-.auth-brand > svg { color: var(--color-success-ink); }
+.auth-brand > svg { color: var(--color-white); }
 .auth-brand strong { display: block; font-size: var(--font-22); letter-spacing: -.035em; }
-.auth-brand span { display: block; margin-top: var(--space-4); color: var(--color-blue-soft); font-size: var(--font-13); font-weight: var(--weight-medium); letter-spacing: .1em; }
+.auth-brand span { display: block; margin-top: var(--space-4); color: var(--color-sidebar-muted); font-size: var(--font-13); font-weight: var(--weight-medium); letter-spacing: .1em; }
 .auth-brand-copy { position: relative; z-index: 1; max-width: 560px; margin: auto var(--space-0); padding: var(--space-32) var(--space-0); }
-.auth-overline { color: var(--color-success-ink); font-size: var(--font-15); font-weight: var(--weight-medium); letter-spacing: .12em; }
+.auth-overline { color: var(--color-sidebar-text); font-size: var(--font-15); font-weight: var(--weight-medium); letter-spacing: .12em; }
 .auth-brand-copy h1 { margin: var(--space-16) var(--space-0) var(--space-16); font-size: var(--font-22); line-height: 1.13; letter-spacing: -.055em; }
-.auth-brand-copy p { max-width: 500px; margin: var(--space-0); color: var(--color-blue-soft); font-size: var(--font-22); line-height: 1.75; }
-.auth-trust-row { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: var(--space-12) var(--space-24); color: var(--color-blue-soft); font-size: var(--font-15); }
+.auth-brand-copy p { max-width: 500px; margin: var(--space-0); color: var(--color-sidebar-muted); font-size: var(--font-22); line-height: 1.75; }
+.auth-trust-row { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: var(--space-12) var(--space-24); color: var(--color-sidebar-muted); font-size: var(--font-15); }
 .auth-trust-row span { display: flex; align-items: center; gap: var(--space-8); }
 .auth-form-panel { display: grid; place-items: center; min-height: 100vh; padding: var(--space-24); }
 .auth-form-card { width: min(470px,100%); }
@@ -1402,7 +1402,7 @@ html[data-theme='dark'] :is(
   .journal-attachment-head,
   .journal-editor-footer,
   .collab-dialog-footer
-) { color: var(--ink); border-color: var(--line); background: var(--color-blue-deep-fill); }
+) { color: var(--ink); border-color: var(--line); background: var(--color-gray-50); }
 html[data-theme='dark'] :is(
   .collab-empty strong,
   .collab-field > span,
@@ -2519,7 +2519,7 @@ html[data-theme='dark'] .workflow-detail-stepper :is(i,li > span) { background: 
 .workflow-card-meta time { flex: 0 0 auto; color: var(--muted); font-size: var(--font-13); }
 .workflow-card-meta time.is-overdue { color: var(--color-danger); font-weight: var(--weight-medium); }
 .workflow-card-action { width: 100%; min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-4); margin-top: var(--space-12); border: none; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-primary); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
-.workflow-card-action:hover { background: var(--color-blue-deep-fill); }
+.workflow-card-action:hover { background: color-mix(in srgb, var(--forest-dark) 82%, var(--color-sidebar-base)); }
 
 .workflow-drawer-backdrop { position: fixed; z-index: 140; inset: 0; display: flex; justify-content: flex-end; background: var(--color-overlay); backdrop-filter: blur(3px); }
 .workflow-drawer { width: min(520px,100%); height: 100%; display: flex; flex-direction: column; overflow-y: auto; border-left: var(--hairline) solid var(--line); background: var(--surface); }
@@ -2830,3 +2830,25 @@ html[data-easy-mode='on'] .app-shell .icon-button { width: 48px; height: 48px; }
 @media (max-width: 960px) {
   html[data-easy-mode='on'] :is(.metric-grid,.summary-grid,.dashboard-metrics,.business-summary-grid,.people-summary,.factory-summary,.approval-stats,.home-header-chips) { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* R7-4: 내 프로필 */
+.settings-profile { position: relative; }
+.settings-profile-edit { display: inline-flex; align-items: center; gap: var(--space-4); margin-left: auto; min-height: 34px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--color-primary); background: var(--surface); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
+.profile-editor { width: min(640px, 100%); }
+.profile-editor-identity { display: flex; align-items: center; gap: var(--space-12); margin-bottom: var(--space-16); }
+.profile-editor-avatar { width: 52px; height: 52px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-primary); font-size: var(--font-22); font-weight: var(--weight-medium); }
+.profile-editor-identity strong { display: block; font-size: var(--font-15); }
+.profile-editor-identity small { color: var(--muted); font-size: var(--font-13); }
+.profile-editor-note { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.profile-password { margin-top: var(--space-16); padding-top: var(--space-16); border-top: var(--hairline) solid var(--line); }
+.profile-password h3 { display: flex; align-items: center; gap: var(--space-4); margin: var(--space-0) var(--space-0) var(--space-12); font-size: var(--font-15); }
+.profile-password-actions { display: flex; justify-content: flex-end; margin-top: var(--space-8); }
+.form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 760px) { .form-grid.three { grid-template-columns: minmax(0, 1fr); } }
+/* 공용 세그먼트 컨트롤 (그동안 정의가 없어 performance/프로젝트/IT 탭이 스타일 없이 렌더됨) */
+.segmented { display: inline-flex; gap: var(--space-4); padding: var(--space-4); border-radius: var(--radius-8); background: var(--canvas); }
+.segmented button { min-height: 38px; display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-0) var(--space-12); border: none; border-radius: var(--radius-8); color: var(--muted); background: transparent; font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
+.segmented button.active, .segmented button[aria-pressed='true'], .segmented button[aria-selected='true'] { color: var(--color-primary); background: var(--surface); }
+/* R7-11: 다크 모드 로그인 안내 박스 — 포인트색 글자가 soft 배경에 묻히지 않도록 본문색 */
+html[data-theme='dark'] :is(.auth-demo-note,.auth-demo-note strong,.auth-install-banner,.auth-install-banner strong) { color: var(--ink); }
+html[data-theme='dark'] :is(.auth-demo-note,.auth-install-banner) { border-color: var(--color-primary); }

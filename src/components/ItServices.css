@@ -45,3 +45,10 @@ html[data-theme='dark'] :is(.it-summary-strip article,.it-toolbar select,.it-row
   .it-row { grid-template-columns: auto minmax(0, 1fr) auto; }
   .it-row-files, .it-row-meta:nth-of-type(2) { grid-column: 2 / -1; }
 }
+
+/* R7-3: 계약 / 거래처 / 지원사업 탭 */
+.it-subtabs { margin-bottom: var(--space-12); }
+.it-subtabs button { display: inline-flex; align-items: center; gap: var(--space-4); }
+.it-client-mark { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-teal); background: var(--color-teal-soft); }
+.it-client-contact { flex: 0 1 220px; }
+.it-row-meta.is-urgent { color: var(--color-warning-ink); font-weight: var(--weight-medium); }

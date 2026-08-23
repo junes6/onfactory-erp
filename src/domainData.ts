@@ -102,7 +102,12 @@ export type TenantMetrics = {
   lastActivityAt: string | null
   pointsUsed: number | null
   storageBytes: number
+  pendingAccounts?: number
+  pendingProposals?: number
+  sentinelAlerts?: number
 }
+
+export type TenantAdminSummary = { id: string; name: string; email: string; mustChangePassword?: boolean; temporaryPasswordExpiresAt?: string | null }
 
 export type Tenant = {
   id: string
@@ -113,4 +118,7 @@ export type Tenant = {
   service: '정상' | '주의'
   plan: string
   metrics: TenantMetrics
+  admins?: TenantAdminSummary[]
+  consent?: { version: string; agreedAt: string; agreedBy: string } | null
+  consentCurrent?: boolean
 }

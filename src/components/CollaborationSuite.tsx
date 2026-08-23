@@ -960,8 +960,7 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
       <CollabPageHeader
         kicker="SHARED SCHEDULE"
         title="공유 일정"
-        description="전사 행사, 부서 일정과 개인 업무를 한 달 흐름에서 함께 확인합니다."
-        actions={<button className="collab-button primary" type="button" onClick={() => openCreate()}><Plus size={18} /> 일정 등록</button>}
+        description="전사 행사, 부서 일정과 개인 업무를 한 달 흐름에서 함께 확인합니다. 날짜를 고른 뒤 달력 옆 버튼으로 바로 등록하세요."
       />
 
       <section className="schedule-toolbar" aria-label="일정 보기 설정">
@@ -988,6 +987,7 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
             </button>
           ))}
         </div>
+        <div className="schedule-create-group"><span className="schedule-selected-hint">{selectedDate === scheduleToday ? '오늘' : selectedDate.slice(5).replace('-', '/')} 선택됨</span><button className="collab-button primary schedule-create-button" type="button" onClick={() => openCreate()}><Plus size={18} /> 일정 등록</button></div>
       </section>
 
       <div className="schedule-workspace">
@@ -1042,7 +1042,7 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
               <h2 id="selected-day-title">{koreanDateLabel(selectedDate)}</h2>
               <p>{holidayName(selectedDate) ? <em className="schedule-day-holiday">{holidayName(selectedDate)}</em> : null}{selectedEvents.length}개의 일정</p>
             </div>
-            <button type="button" aria-label="선택한 날짜에 일정 추가" onClick={() => openCreate(selectedDate)}><Plus size={20} /></button>
+            <button type="button" className="schedule-day-add" aria-label="선택한 날짜에 일정 추가" onClick={() => openCreate(selectedDate)}><Plus size={18} /> 이 날짜에 등록</button>
           </div>
           <div className="schedule-day-list">
             {selectedEvents.map((event) => (
@@ -1211,6 +1211,15 @@ type JournalAttachment = {
   size: string
 }
 
+type JournalComment = {
+  id: string
+  authorId: string
+  author: string
+  text: string
+  attachments: JournalAttachment[]
+  createdAt: string
+}
+
 type JournalReview = {
   id: string
   decision: '승인' | '반려'
@@ -1238,6 +1247,7 @@ type Journal = {
   feedback: string
   attachments: JournalAttachment[]
   reviews?: JournalReview[]
+  comments?: JournalComment[]
 }
 
 type JournalFilter = '전체' | JournalStatus
@@ -1254,6 +1264,7 @@ function cloneJournal(journal: Journal): Journal {
     ...journal,
     attachments: journal.attachments.map((attachment) => ({ ...attachment })),
     reviews: (journal.reviews ?? []).map((review) => ({ ...review })),
+    ...(journal.comments ? { comments: journal.comments.map((comment) => ({ ...comment, attachments: comment.attachments.map((attachment) => ({ ...attachment })) })) } : {}),
   }
 }
 
@@ -1633,6 +1644,13 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
     if (journalSavingRef.current) return
     if (journalDirty && !window.confirm('저장하지 않은 업무일지 변경사항이 있습니다. 변경사항을 버리고 새 일지를 작성할까요?')) return
     if (attachmentBusy || !(await cleanupUnsavedUploads())) return
+    const todayMine = accessibleJournals.find((journal) => journal.date === scheduleToday && isJournalOwner(journal))
+    if (todayMine) {
+      chooseJournal(todayMine)
+      if (todayMine.status === '임시저장' || todayMine.status === '반려') setJournalEditorMode('edit')
+      onToast(todayMine.status === '임시저장' ? '오늘 작성 중인 임시저장 일지를 불러왔습니다. 이어서 작성하세요.' : `오늘 일지는 이미 ${todayMine.status === '결재요청' ? '결재 요청' : todayMine.status} 상태입니다. 같은 날짜에는 한 건만 작성할 수 있어 기존 일지를 열었습니다.`)
+      return
+    }
     const next = newJournalDraft(currentUserId, currentUserName, currentUserTeam)
     uploadedAttachmentIdsRef.current.clear()
     removedAttachmentIdsRef.current.clear()
@@ -1984,6 +2002,76 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
     }
   }
 
+  const [attachmentDropActive, setAttachmentDropActive] = useState(false)
+  const [commentText, setCommentText] = useState('')
+  const [commentAttachments, setCommentAttachments] = useState<JournalAttachment[]>([])
+  const [commentBusy, setCommentBusy] = useState(false)
+  const [commentUploading, setCommentUploading] = useState(false)
+  const commentFileRef = useRef<HTMLInputElement>(null)
+  const isNewUnsavedJournal = !journals.some((journal) => journal.id === editor.id)
+  const attachCommentFiles = async (files: File[]) => {
+    if (commentAttachments.length + files.length > 10) { onToast('댓글에는 파일을 최대 10개까지 첨부할 수 있습니다.'); return }
+    setCommentUploading(true)
+    try {
+      const added = await uploadDocumentAttachments(files, { workspaceScope, category: '일일업무일지', summary: `${editor.date} ${editor.author} 업무일지 댓글 첨부`, tags: ['업무일지', '댓글'] })
+      setCommentAttachments((current) => [...current, ...added])
+    } catch (error) { onToast(error instanceof Error ? error.message : '파일을 업로드하지 못했습니다.') }
+    finally { setCommentUploading(false) }
+  }
+  const submitJournalComment = async () => {
+    if (commentBusy || (!commentText.trim() && commentAttachments.length === 0)) return
+    setCommentBusy(true)
+    try {
+      const response = await fetch(`/api/daily-journals/${encodeURIComponent(editor.id)}/comments`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}) },
+        body: JSON.stringify({ text: commentText.trim(), attachments: commentAttachments }),
+      })
+      const body = await response.json().catch(() => null) as { journal?: Journal; version?: string; error?: { message?: string } } | null
+      if (!response.ok || !body?.journal) { onToast(body?.error?.message ?? '댓글을 남기지 못했습니다.'); return }
+      const next = cloneJournal(body.journal)
+      await setJournals((current) => current.map((journal) => journal.id === next.id ? next : journal), { persist: false, serverVersion: body.version })
+      setEditor((current) => ({ ...current, comments: next.comments ?? [] }))
+      setCommentText('')
+      setCommentAttachments([])
+      onToast('댓글을 남겼습니다.')
+    } catch { onToast('댓글 서버에 연결하지 못했습니다.') }
+    finally { setCommentBusy(false) }
+  }
+  const deleteJournalComment = async (comment: JournalComment) => {
+    if (!window.confirm('이 댓글을 삭제할까요?')) return
+    setCommentBusy(true)
+    try {
+      const response = await fetch(`/api/daily-journals/${encodeURIComponent(editor.id)}/comments/${encodeURIComponent(comment.id)}`, { method: 'DELETE', headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+      const body = await response.json().catch(() => null) as { journal?: Journal; version?: string; error?: { message?: string } } | null
+      if (!response.ok || !body?.journal) { onToast(body?.error?.message ?? '댓글을 삭제하지 못했습니다.'); return }
+      const next = cloneJournal(body.journal)
+      await setJournals((current) => current.map((journal) => journal.id === next.id ? next : journal), { persist: false, serverVersion: body.version })
+      setEditor((current) => ({ ...current, comments: next.comments ?? [] }))
+    } catch { onToast('댓글 서버에 연결하지 못했습니다.') }
+    finally { setCommentBusy(false) }
+  }
+  const attachFileList = async (files: File[]) => {
+    if (!canEdit || attachmentBusy || journalManualSavingRef.current || files.length === 0) return
+    if (editor.attachments.length + files.length > 20) {
+      const message = '업무일지에는 첨부파일을 최대 20개까지 등록할 수 있습니다.'
+      setSaveError(message)
+      onToast(message)
+      return
+    }
+    setAttachmentBusy(true)
+    setSaveError('')
+    try {
+      const additions = await uploadDocumentAttachments(files, { workspaceScope, category: '일일업무일지', summary: `${editor.date} ${editor.author} 업무일지 첨부`, tags: ['업무일지', editor.department] })
+      for (const attachment of additions) uploadedAttachmentIdsRef.current.add(attachment.id)
+      markJournalDirty(true)
+      setEditor((current) => ({ ...current, attachments: [...current.attachments, ...additions] }))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '파일을 업로드하지 못했습니다.'
+      setSaveError(message)
+      onToast(message)
+    } finally { setAttachmentBusy(false) }
+  }
   const attachFiles = async (event: ChangeEvent<HTMLInputElement>) => {
     if (!canEdit || attachmentBusy || journalManualSavingRef.current) return
     const files = Array.from(event.target.files ?? [])
@@ -2263,30 +2351,58 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
                 </div>}
             </section>
 
-            <section className="journal-attachments journal-entry-section" aria-labelledby="journal-attachment-title">
+            <section className={`journal-attachments journal-entry-section${attachmentDropActive ? ' is-drop-active' : ''}`} aria-labelledby="journal-attachment-title"
+              onDragOver={(event) => { if (!canEdit) return; event.preventDefault(); setAttachmentDropActive(true) }}
+              onDragLeave={() => setAttachmentDropActive(false)}
+              onDrop={(event) => { if (!canEdit) return; event.preventDefault(); setAttachmentDropActive(false); const files = Array.from(event.dataTransfer?.files ?? []); if (files.length) void attachFileList(files) }}>
               <div className="journal-attachment-head">
-                <div><h3 id="journal-attachment-title">3. 사진·파일 <em>선택</em></h3><p>관련 사진, 보고서 또는 작업 결과를 첨부합니다.</p></div>
-                {canEdit && (
-                  <>
-                    <input ref={fileInputRef} className="sr-only" type="file" aria-labelledby="journal-attachment-title" multiple disabled={journalManualSaving} onChange={attachFiles} />
-                    <button className="collab-button secondary" type="button" onClick={() => fileInputRef.current?.click()} disabled={attachmentBusy || journalManualSaving}><Upload size={17} /> {attachmentBusy ? '처리 중…' : '파일 첨부'}</button>
-                  </>
-                )}
+                <div><h3 id="journal-attachment-title">3. 사진·파일 <em>선택</em></h3><p>파일을 블록으로 쌓습니다. 여러 개를 한 번에 고르거나 이 영역에 끌어다 놓으세요.</p></div>
+                {canEdit && <input ref={fileInputRef} className="sr-only" type="file" aria-labelledby="journal-attachment-title" multiple disabled={journalManualSaving} onChange={attachFiles} />}
               </div>
-              <div className="journal-attachment-list">
-                {editor.attachments.map((attachment) => (
-                  <div className="journal-attachment-item" key={attachment.id}>
-                    <span><FileText size={20} /></span>
-                    <div><strong>{attachment.name}</strong><small>{attachment.size} · {isStoredDocumentAttachment(attachment) ? '원본 저장됨' : '이전 파일 정보'}</small></div>
+              <div className="journal-block-list journal-file-blocks">
+                {editor.attachments.map((attachment, index) => (
+                  <div className="journal-block-item journal-file-block" key={attachment.id}>
+                    <span className="journal-block-index"><FileText size={14} /></span>
+                    <div className="journal-file-block-body"><strong>{attachment.name}</strong><small>{index + 1}번 파일 · {attachment.size} · {isStoredDocumentAttachment(attachment) ? '원본 저장됨' : '이전 파일 정보'}</small></div>
                     <div className="journal-attachment-actions">
                       {isStoredDocumentAttachment(attachment) && <button type="button" aria-label={attachment.name + ' 다운로드'} disabled={Boolean(downloadingAttachmentId)} onClick={() => void downloadAttachment(attachment)}><Download size={18} /></button>}
                       {canEdit && <button type="button" aria-label={attachment.name + ' 삭제'} disabled={attachmentBusy || journalManualSaving} onClick={() => void removeAttachment(attachment)}><X size={18} /></button>}
                     </div>
                   </div>
                 ))}
-                {editor.attachments.length === 0 && <div className="journal-no-attachment"><Paperclip size={20} /><span>첨부된 파일이 없습니다.</span></div>}
+                {canEdit
+                  ? <button className="journal-block-add" type="button" onClick={() => fileInputRef.current?.click()} disabled={attachmentBusy || journalManualSaving}><Plus size={16} /> {attachmentBusy ? '업로드 중…' : editor.attachments.length ? '파일 블록 추가' : '파일 블록 추가 (여러 개 가능)'}</button>
+                  : editor.attachments.length === 0 && <div className="journal-no-attachment"><Paperclip size={20} /><span>첨부된 파일이 없습니다.</span></div>}
               </div>
             </section>
+
+            {!isNewUnsavedJournal && <section className="journal-comments journal-entry-section" aria-labelledby="journal-comments-title">
+              <div className="journal-attachment-head">
+                <div><h3 id="journal-comments-title">4. 댓글 <em>{editor.comments?.length ? `${editor.comments.length}개` : '선택'}</em></h3><p>{canManage ? '작성자와 결재자가 글과 파일로 이야기를 이어갑니다.' : '결재자에게 묻거나 보충 자료를 댓글로 남기세요.'}</p></div>
+              </div>
+              <div className="journal-comment-list">
+                {(editor.comments ?? []).map((comment) => <article className="journal-comment" key={comment.id}>
+                  <i className="journal-comment-avatar">{comment.author.slice(0, 1)}</i>
+                  <div>
+                    <span className="journal-comment-head"><strong>{comment.author}</strong><time dateTime={comment.createdAt}>{formatShortDateTime(comment.createdAt)}</time>{(comment.authorId === currentUserId || canManage) && <button type="button" aria-label="댓글 삭제" disabled={commentBusy} onClick={() => void deleteJournalComment(comment)}><X size={14} /></button>}</span>
+                    {comment.text && <p>{comment.text}</p>}
+                    {comment.attachments.length > 0 && <span className="journal-comment-files">{comment.attachments.map((attachment) => <button type="button" key={attachment.id} onClick={() => void downloadAttachment(attachment)}><Download size={13} /> {attachment.name} <small>{attachment.size}</small></button>)}</span>}
+                  </div>
+                </article>)}
+                {(editor.comments ?? []).length === 0 && <p className="journal-comment-empty">아직 댓글이 없습니다.</p>}
+              </div>
+              <form className="journal-comment-composer" onSubmit={(event) => { event.preventDefault(); void submitJournalComment() }}>
+                <textarea rows={2} value={commentText} maxLength={2000} onChange={(event) => setCommentText(event.target.value)} placeholder="댓글을 남기거나 파일을 첨부하세요 (Enter는 줄바꿈)" disabled={commentBusy} />
+                <div className="journal-comment-tools">
+                  <input ref={commentFileRef} className="sr-only" type="file" multiple onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; if (files.length) void attachCommentFiles(files) }} />
+                  <div className="journal-comment-attachments">
+                    {commentAttachments.map((attachment) => <span key={attachment.id}><Paperclip size={13} /> {attachment.name}<button type="button" aria-label={attachment.name + ' 제외'} onClick={() => setCommentAttachments((current) => current.filter((item) => item.id !== attachment.id))}><X size={12} /></button></span>)}
+                    <button type="button" className="journal-comment-attach" disabled={commentBusy || commentUploading} onClick={() => commentFileRef.current?.click()}><Upload size={14} /> {commentUploading ? '업로드 중…' : '파일'}</button>
+                  </div>
+                  <button type="submit" className="collab-button primary compact" disabled={commentBusy || commentUploading || (!commentText.trim() && commentAttachments.length === 0)}><Send size={15} /> {commentBusy ? '남기는 중…' : '댓글 남기기'}</button>
+                </div>
+              </form>
+            </section>}
           </div>
 
           <footer className="journal-editor-footer">

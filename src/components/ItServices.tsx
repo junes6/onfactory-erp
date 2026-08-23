@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Briefcase, Check, Download, FileSignature, FileStack, Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { Briefcase, Building2, Check, Download, FileSignature, FileStack, Landmark, Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { formatDateLabel, seoulDateInputValue } from '../utils/dateTime'
 import {
@@ -56,6 +56,43 @@ type ItContract = {
   updatedAt: string
 }
 
+// 거래처: 계약 없이도 정보만 먼저 등록해 둘 수 있다.
+type ItClient = {
+  id: string
+  name: string
+  businessNo: string
+  contactName: string
+  phone: string
+  email: string
+  address: string
+  industry: string
+  note: string
+  updatedAt: string
+}
+type SupportProgramStatus = '준비' | '신청' | '선정' | '진행' | '완료' | '탈락'
+// 지원사업: 정부·지자체·기관 지원사업의 신청~종료 관리
+type ItSupportProgram = {
+  id: string
+  title: string
+  agency: string
+  status: SupportProgramStatus
+  amount: number
+  applyStart: string
+  applyEnd: string
+  startDate: string
+  endDate: string
+  owner: string
+  attachments: StoredDocumentAttachment[]
+  note: string
+  updatedAt: string
+}
+const SUPPORT_PROGRAM_STATUSES: SupportProgramStatus[] = ['준비', '신청', '선정', '진행', '완료', '탈락']
+const isClients = (value: unknown): value is ItClient[] => Array.isArray(value) && value.every((item) => item && typeof item.id === 'string' && typeof item.name === 'string')
+const isPrograms = (value: unknown): value is ItSupportProgram[] => Array.isArray(value) && value.every((item) => item && typeof item.id === 'string' && typeof item.title === 'string' && Array.isArray(item.attachments))
+function programTone(status: SupportProgramStatus): StatusBadgeTone {
+  return status === '선정' || status === '진행' ? 'success' : status === '완료' ? 'info' : status === '탈락' ? 'danger' : status === '신청' ? 'warning' : 'neutral'
+}
+
 type Props = {
   view: ItServicesView
   workspaceScope?: string
@@ -104,7 +141,10 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
   const [projects, setProjects] = useWorkspaceState<ItProject[]>('it-projects', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isProjects })
   const [deliverables, setDeliverables] = useWorkspaceState<ItDeliverable[]>('it-deliverables', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isDeliverables })
   const [contracts, setContracts] = useWorkspaceState<ItContract[]>('it-contracts', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isContracts })
-  const [editor, setEditor] = useState<{ kind: 'project'; item?: ItProject } | { kind: 'deliverable'; item?: ItDeliverable } | { kind: 'contract'; item?: ItContract } | null>(null)
+  const [clients, setClients] = useWorkspaceState<ItClient[]>('it-clients', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isClients })
+  const [programs, setPrograms] = useWorkspaceState<ItSupportProgram[]>('it-support-programs', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isPrograms })
+  const [contractTab, setContractTab] = useState<'contracts' | 'clients' | 'programs'>('contracts')
+  const [editor, setEditor] = useState<{ kind: 'project'; item?: ItProject } | { kind: 'deliverable'; item?: ItDeliverable } | { kind: 'contract'; item?: ItContract } | { kind: 'client'; item?: ItClient } | { kind: 'program'; item?: ItSupportProgram } | null>(null)
   const [projectFilter, setProjectFilter] = useState<string>('all')
 
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
@@ -122,6 +162,20 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
     if (!result.ok) { onToast(result.message ?? '산출물을 삭제하지 못했습니다.'); return }
     const cleanup = await deleteDocumentAttachments(deliverable.attachments.filter(isStoredDocumentAttachment).map((item) => item.id), workspaceScope)
     onToast(cleanup.failed.length ? `산출물은 삭제했지만 파일 ${cleanup.failed.length}개 정리에 실패했습니다.` : '산출물을 삭제했습니다.')
+  }
+  const removeClient = async (client: ItClient) => {
+    const linked = contracts.filter((contract) => contract.client === client.name).length
+    if (!window.confirm(`‘${client.name}’ 거래처를 삭제할까요?${linked ? ` 연결된 계약 ${linked}건의 거래처명은 그대로 남습니다.` : ''}`)) return
+    const result = await setClients((current) => current.filter((item) => item.id !== client.id))
+    if (!result.ok) { onToast(result.message ?? '거래처를 삭제하지 못했습니다.'); return }
+    onToast('거래처를 삭제했습니다.')
+  }
+  const removeProgram = async (program: ItSupportProgram) => {
+    if (!window.confirm(`‘${program.title}’ 지원사업을 삭제할까요?`)) return
+    const result = await setPrograms((current) => current.filter((item) => item.id !== program.id))
+    if (!result.ok) { onToast(result.message ?? '지원사업을 삭제하지 못했습니다.'); return }
+    const cleanup = await deleteDocumentAttachments(program.attachments.filter(isStoredDocumentAttachment).map((item) => item.id), workspaceScope)
+    onToast(cleanup.failed.length ? `지원사업은 삭제했지만 문서 ${cleanup.failed.length}개 정리에 실패했습니다.` : '지원사업을 삭제했습니다.')
   }
   const removeContract = async (contract: ItContract) => {
     if (!window.confirm(`‘${contract.title}’ 계약을 삭제할까요?`)) return
@@ -196,10 +250,72 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
     </div>
   }
 
-  // ---------------- 계약 · 거래처 ----------------
+  // ---------------- 계약 · 거래처 · 지원사업 ----------------
   const sortedContracts = [...contracts].sort((left, right) => (left.endDate || '9999').localeCompare(right.endDate || '9999'))
+  const sortedClients = [...clients].sort((left, right) => left.name.localeCompare(right.name, 'ko'))
+  const sortedPrograms = [...programs].sort((left, right) => (left.applyEnd || left.endDate || '9999').localeCompare(right.applyEnd || right.endDate || '9999'))
+  const clientContractCount = (name: string) => contracts.filter((contract) => contract.client === name).length
+  const programDue = (program: ItSupportProgram) => {
+    const target = program.status === '준비' || program.status === '신청' ? program.applyEnd : program.endDate
+    if (!target) return null
+    const days = Math.ceil((Date.parse(target) - Date.parse(today)) / 86_400_000)
+    return { label: program.status === '준비' || program.status === '신청' ? (days < 0 ? `접수 마감 ${Math.abs(days)}일 지남` : `접수 마감 D-${days}`) : (days < 0 ? '사업 종료' : `종료 D-${days}`), urgent: days >= 0 && days <= 7 }
+  }
+  const contractTabs = <div className="segmented it-subtabs" role="tablist" aria-label="계약·거래처·지원사업">
+    <button type="button" role="tab" aria-selected={contractTab === 'contracts'} className={contractTab === 'contracts' ? 'active' : ''} onClick={() => setContractTab('contracts')}><FileSignature size={15} /> 계약 {contracts.length}</button>
+    <button type="button" role="tab" aria-selected={contractTab === 'clients'} className={contractTab === 'clients' ? 'active' : ''} onClick={() => setContractTab('clients')}><Building2 size={15} /> 거래처 {clients.length}</button>
+    <button type="button" role="tab" aria-selected={contractTab === 'programs'} className={contractTab === 'programs' ? 'active' : ''} onClick={() => setContractTab('programs')}><Landmark size={15} /> 지원사업 {programs.length}</button>
+  </div>
+  if (contractTab === 'clients') {
+    return <div className="content-page it-page">
+      <header className="page-header"><div><span className="eyebrow">CLIENTS</span><h1>계약 · 거래처</h1><p>거래처 정보는 계약 없이도 먼저 등록해 둘 수 있습니다. 계약을 만들 때 거래처를 골라 연결하세요.</p></div><div className="page-header-actions">{canManage && <button className="button primary" type="button" onClick={() => setEditor({ kind: 'client' })}><Plus size={18} /> 거래처 등록</button>}</div></header>
+      {contractTabs}
+      <section className="panel it-list-panel">
+        {sortedClients.length === 0
+          ? <div className="empty-state"><Building2 size={30} /><h3>등록된 거래처가 없습니다</h3><p>회사명·담당자·연락처만으로 먼저 등록하고, 계약은 나중에 연결하세요.</p>{canManage && <button className="button primary" type="button" onClick={() => setEditor({ kind: 'client' })}><Plus size={18} /> 첫 거래처 등록</button>}</div>
+          : <div className="it-rows" role="list">{sortedClients.map((client) => <article className="it-row" role="listitem" key={client.id}>
+            <span className="it-client-mark"><Building2 size={17} /></span>
+            <div className="it-row-main"><strong>{client.name}</strong><small>{[client.industry, client.businessNo ? `사업자 ${client.businessNo}` : '', client.address].filter(Boolean).join(' · ') || '상세 정보 미입력'}</small></div>
+            <div className="it-row-main it-client-contact"><strong>{client.contactName || '담당자 미지정'}</strong><small>{[client.phone, client.email].filter(Boolean).join(' · ') || '연락처 미입력'}</small></div>
+            <span className="it-row-meta">{clientContractCount(client.name) ? `계약 ${clientContractCount(client.name)}건` : '계약 없음'}</span>
+            {canManage && <div className="it-row-actions"><button type="button" aria-label={`${client.name} 수정`} onClick={() => setEditor({ kind: 'client', item: client })}><Pencil size={15} /></button><button type="button" aria-label={`${client.name} 삭제`} onClick={() => void removeClient(client)}><Trash2 size={15} /></button></div>}
+          </article>)}</div>}
+      </section>
+      {editor?.kind === 'client' && <ClientEditor item={editor.item} onClose={() => setEditor(null)} onSave={async (next) => {
+        const result = await setClients((current) => current.some((item) => item.id === next.id) ? current.map((item) => item.id === next.id ? next : item) : [next, ...current])
+        if (!result.ok) { onToast(result.message ?? '거래처를 저장하지 못했습니다.'); return false }
+        onToast(`${next.name} 거래처를 저장했습니다.`)
+        return true
+      }} />}
+    </div>
+  }
+  if (contractTab === 'programs') {
+    return <div className="content-page it-page">
+      <header className="page-header"><div><span className="eyebrow">SUPPORT PROGRAMS</span><h1>계약 · 거래처</h1><p>정부·지자체·기관 지원사업을 준비부터 신청·선정·진행·완료까지 한 곳에서 관리합니다. 접수 마감 7일 전부터 강조됩니다.</p></div><div className="page-header-actions">{canManage && <button className="button primary" type="button" onClick={() => setEditor({ kind: 'program' })}><Plus size={18} /> 지원사업 등록</button>}</div></header>
+      {contractTabs}
+      <section className="panel it-list-panel">
+        {sortedPrograms.length === 0
+          ? <div className="empty-state"><Landmark size={30} /><h3>등록된 지원사업이 없습니다</h3><p>사업명·주관기관·접수 기간을 등록하면 마감 일정을 놓치지 않게 표시합니다.</p>{canManage && <button className="button primary" type="button" onClick={() => setEditor({ kind: 'program' })}><Plus size={18} /> 첫 지원사업 등록</button>}</div>
+          : <div className="it-rows" role="list">{sortedPrograms.map((program) => { const due = programDue(program); return <article className="it-row" role="listitem" key={program.id}>
+            <StatusBadge className="status-pill" dot tone={programTone(program.status)}>{program.status}</StatusBadge>
+            <div className="it-row-main"><strong>{program.title}</strong><small>{program.agency || '주관기관 미입력'}{program.owner ? ` · 담당 ${program.owner}` : ''}{program.applyStart || program.applyEnd ? ` · 접수 ${program.applyStart ? formatDateLabel(program.applyStart) : '?'} ~ ${program.applyEnd ? formatDateLabel(program.applyEnd) : '?'}` : ''}{program.startDate || program.endDate ? ` · 사업 ${program.startDate ? formatDateLabel(program.startDate) : '?'} ~ ${program.endDate ? formatDateLabel(program.endDate) : '?'}` : ''}</small></div>
+            <span className={`it-row-meta${due?.urgent ? ' is-urgent' : ''}`}>{due?.label ?? (program.amount ? money(program.amount) : '기간 미정')}</span>
+            <span className="it-row-meta">{program.amount ? money(program.amount) : '—'}</span>
+            <div className="it-row-files">{program.attachments.length === 0 ? <span className="it-row-meta">문서 없음</span> : program.attachments.map((file) => <button type="button" key={file.id} onClick={() => void download(file)}><Download size={13} /> {file.name}</button>)}</div>
+            {canManage && <div className="it-row-actions"><button type="button" aria-label={`${program.title} 수정`} onClick={() => setEditor({ kind: 'program', item: program })}><Pencil size={15} /></button><button type="button" aria-label={`${program.title} 삭제`} onClick={() => void removeProgram(program)}><Trash2 size={15} /></button></div>}
+          </article> })}</div>}
+      </section>
+      {editor?.kind === 'program' && <ProgramEditor item={editor.item} workspaceScope={workspaceScope} currentUserName={currentUserName} onToast={onToast} onClose={() => setEditor(null)} onSave={async (next) => {
+        const result = await setPrograms((current) => current.some((item) => item.id === next.id) ? current.map((item) => item.id === next.id ? next : item) : [next, ...current])
+        if (!result.ok) { onToast(result.message ?? '지원사업을 저장하지 못했습니다.'); return false }
+        onToast(`${next.title} 지원사업을 저장했습니다.`)
+        return true
+      }} />}
+    </div>
+  }
   return <div className="content-page it-page">
-    <header className="page-header"><div><span className="eyebrow">CONTRACTS</span><h1>계약 · 거래처</h1><p>계약 기간·금액·문서를 거래처별로 관리합니다. 만료 60일 전부터 갱신 준비로 표시됩니다.</p></div><div className="page-header-actions">{canManage ? <button className="button primary" type="button" onClick={() => setEditor({ kind: 'contract' })}><Plus size={18} /> 계약 등록</button> : <StatusBadge className="status-pill" tone="neutral">조회 전용</StatusBadge>}</div></header>
+    <header className="page-header"><div><span className="eyebrow">CONTRACTS</span><h1>계약 · 거래처</h1><p>계약 기간·금액·문서를 거래처별로 관리합니다. 만료 60일 전부터 갱신 준비로 표시됩니다. 거래처 정보와 지원사업은 탭에서 따로 관리합니다.</p></div><div className="page-header-actions">{canManage ? <button className="button primary" type="button" onClick={() => setEditor({ kind: 'contract' })}><Plus size={18} /> 계약 등록</button> : <StatusBadge className="status-pill" tone="neutral">조회 전용</StatusBadge>}</div></header>
+    {contractTabs}
     <section className="panel it-list-panel">
       {sortedContracts.length === 0
         ? <div className="empty-state"><FileSignature size={30} /><h3>등록된 계약이 없습니다</h3><p>거래처·기간·금액과 계약서 파일을 등록하세요.</p>{canManage && <button className="button primary" type="button" onClick={() => setEditor({ kind: 'contract' })}><Plus size={17} /> 첫 계약 등록</button>}</div>
@@ -211,7 +327,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
           {canManage && <div className="it-row-actions"><button type="button" aria-label={`${contract.title} 수정`} onClick={() => setEditor({ kind: 'contract', item: contract })}><Pencil size={15} /></button><button type="button" aria-label={`${contract.title} 삭제`} onClick={() => void removeContract(contract)}><Trash2 size={15} /></button></div>}
         </article> })}</div>}
     </section>
-    {editor?.kind === 'contract' && <ContractEditor item={editor.item} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setEditor(null)} onSave={async (next) => {
+    {editor?.kind === 'contract' && <ContractEditor item={editor.item} clients={sortedClients} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setEditor(null)} onSave={async (next) => {
       const result = await setContracts((current) => current.some((item) => item.id === next.id) ? current.map((item) => item.id === next.id ? next : item) : [next, ...current])
       if (!result.ok) { onToast(result.message ?? '계약을 저장하지 못했습니다.'); return false }
       onToast(`${next.title} 계약을 저장했습니다.`)
@@ -328,7 +444,7 @@ function DeliverableEditor({ item, projects, defaultProjectId, workspaceScope, c
   </div>
 }
 
-function ContractEditor({ item, workspaceScope, onToast, onClose, onSave }: { item?: ItContract; workspaceScope?: string; onToast: (message: string) => void; onClose: () => void; onSave: (next: ItContract) => Promise<boolean> }) {
+function ContractEditor({ item, clients, workspaceScope, onToast, onClose, onSave }: { item?: ItContract; clients: ItClient[]; workspaceScope?: string; onToast: (message: string) => void; onClose: () => void; onSave: (next: ItContract) => Promise<boolean> }) {
   useEscape(onClose)
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -362,7 +478,7 @@ function ContractEditor({ item, workspaceScope, onToast, onClose, onSave }: { it
     <section className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="it-contract-title">
       <header><div><span className="eyebrow">CONTRACT</span><h2 id="it-contract-title">{item ? '계약 수정' : '계약 등록'}</h2><p>거래처와 계약명만 있으면 등록됩니다.</p></div><button className="icon-button" type="button" aria-label="닫기" disabled={busy || uploading} onClick={() => void cancel()}><X size={21} /></button></header>
       <form onSubmit={submit}>
-        <div className="form-grid"><label className="form-field"><span>거래처 <em className="field-required">필수</em></span><input name="client" autoFocus defaultValue={item?.client ?? ''} required placeholder="예: ○○주식회사" /></label><label className="form-field"><span>계약명 <em className="field-required">필수</em></span><input name="title" defaultValue={item?.title ?? ''} required placeholder="예: 유지보수 연간 계약" /></label></div>
+        <div className="form-grid"><label className="form-field"><span>거래처 <em className="field-required">필수</em></span><input name="client" list="it-client-options" autoFocus defaultValue={item?.client ?? ''} required placeholder={clients.length ? '등록된 거래처에서 고르거나 직접 입력' : '예: ○○주식회사'} /><datalist id="it-client-options">{clients.map((client) => <option key={client.id} value={client.name}>{[client.contactName, client.phone].filter(Boolean).join(' · ')}</option>)}</datalist></label><label className="form-field"><span>계약명 <em className="field-required">필수</em></span><input name="title" defaultValue={item?.title ?? ''} required placeholder="예: 유지보수 연간 계약" /></label></div>
         <div className="form-grid"><label className="form-field"><span>계약 시작일</span><input name="startDate" type="date" defaultValue={item?.startDate ?? seoulDateInputValue()} /></label><label className="form-field"><span>계약 종료일</span><input name="endDate" type="date" defaultValue={item?.endDate ?? ''} /></label></div>
         <label className="form-field full"><span>계약 금액 (원)</span><input name="amount" type="number" min="0" step="1000" defaultValue={item?.amount ?? 0} /></label>
         <label className="form-field full"><span>메모</span><textarea name="note" rows={2} defaultValue={item?.note ?? ''} placeholder="결제 조건·특약" /></label>
@@ -391,4 +507,105 @@ function form(event: { target: EventTarget | null }) {
 function text(formElement: HTMLFormElement | null, name: string) {
   if (!formElement) return ''
   return String(new FormData(formElement).get(name) ?? '').trim()
+}
+
+function ClientEditor({ item, onClose, onSave }: { item?: ItClient; onClose: () => void; onSave: (next: ItClient) => Promise<boolean> }) {
+  useEscape(onClose)
+  const [busy, setBusy] = useState(false)
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    const field = (name: string) => String(data.get(name) ?? '').trim()
+    if (!field('name')) return
+    const next: ItClient = {
+      id: item?.id ?? `CLI-${Date.now()}`,
+      name: field('name'),
+      businessNo: field('businessNo'),
+      contactName: field('contactName'),
+      phone: field('phone'),
+      email: field('email'),
+      address: field('address'),
+      industry: field('industry'),
+      note: field('note'),
+      updatedAt: new Date().toISOString(),
+    }
+    setBusy(true)
+    if (await onSave(next)) onClose(); else setBusy(false)
+  }
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="it-client-title">
+      <header><div><span className="eyebrow">CLIENT</span><h2 id="it-client-title">{item ? '거래처 수정' : '거래처 등록'}</h2><p>회사명만 있으면 등록됩니다. 나머지는 알게 될 때 채우세요.</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
+      <form onSubmit={submit}>
+        <div className="form-grid"><label className="form-field"><span>회사명 <em className="field-required">필수</em></span><input name="name" autoFocus defaultValue={item?.name ?? ''} required placeholder="예: ○○주식회사" /></label><label className="form-field"><span>사업자등록번호</span><input name="businessNo" defaultValue={item?.businessNo ?? ''} placeholder="000-00-00000" /></label></div>
+        <div className="form-grid"><label className="form-field"><span>담당자</span><input name="contactName" defaultValue={item?.contactName ?? ''} placeholder="이름 · 직책" /></label><label className="form-field"><span>연락처</span><input name="phone" defaultValue={item?.phone ?? ''} placeholder="010-0000-0000" /></label></div>
+        <div className="form-grid"><label className="form-field"><span>이메일</span><input name="email" type="email" defaultValue={item?.email ?? ''} placeholder="contact@company.co.kr" /></label><label className="form-field"><span>업종 · 분야</span><input name="industry" defaultValue={item?.industry ?? ''} placeholder="예: 제조 · 유통" /></label></div>
+        <label className="form-field full"><span>주소</span><input name="address" defaultValue={item?.address ?? ''} placeholder="도로명 주소" /></label>
+        <label className="form-field full"><span>메모</span><textarea name="note" rows={2} defaultValue={item?.note ?? ''} placeholder="거래 이력·특이사항" /></label>
+        <footer><button type="button" className="button ghost" disabled={busy} onClick={onClose}>취소</button><button type="submit" className="button primary" disabled={busy}><Check size={18} /> {busy ? '저장 중…' : '저장'}</button></footer>
+      </form>
+    </section>
+  </div>
+}
+
+function ProgramEditor({ item, workspaceScope, currentUserName, onToast, onClose, onSave }: { item?: ItSupportProgram; workspaceScope?: string; currentUserName: string; onToast: (message: string) => void; onClose: () => void; onSave: (next: ItSupportProgram) => Promise<boolean> }) {
+  useEscape(onClose)
+  const [busy, setBusy] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [attachments, setAttachments] = useState<StoredDocumentAttachment[]>(item?.attachments ?? [])
+  const fileRef = useRef<HTMLInputElement>(null)
+  const uploadedRef = useRef(new Set<string>())
+  const cancel = async () => {
+    if (uploadedRef.current.size) await deleteDocumentAttachments([...uploadedRef.current], workspaceScope)
+    onClose()
+  }
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    const field = (name: string) => String(data.get(name) ?? '').trim()
+    if (!field('title')) return
+    const status = SUPPORT_PROGRAM_STATUSES.includes(field('status') as SupportProgramStatus) ? field('status') as SupportProgramStatus : '준비'
+    const next: ItSupportProgram = {
+      id: item?.id ?? `SUP-${Date.now()}`,
+      title: field('title'),
+      agency: field('agency'),
+      status,
+      amount: Math.max(0, Number(data.get('amount') || 0)),
+      applyStart: field('applyStart'),
+      applyEnd: field('applyEnd'),
+      startDate: field('startDate'),
+      endDate: field('endDate'),
+      owner: field('owner'),
+      attachments,
+      note: field('note'),
+      updatedAt: new Date().toISOString(),
+    }
+    setBusy(true)
+    if (await onSave(next)) { uploadedRef.current.clear(); onClose() } else setBusy(false)
+  }
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && void cancel()}>
+    <section className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="it-program-title">
+      <header><div><span className="eyebrow">SUPPORT PROGRAM</span><h2 id="it-program-title">{item ? '지원사업 수정' : '지원사업 등록'}</h2><p>사업명만 있으면 등록됩니다. 접수·사업 기간을 넣으면 마감을 알려 드립니다.</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={() => void cancel()}><X size={21} /></button></header>
+      <form onSubmit={submit}>
+        <div className="form-grid"><label className="form-field"><span>사업명 <em className="field-required">필수</em></span><input name="title" autoFocus defaultValue={item?.title ?? ''} required placeholder="예: 2026 스마트공장 구축 지원" /></label><label className="form-field"><span>주관기관</span><input name="agency" defaultValue={item?.agency ?? ''} placeholder="예: 중소벤처기업부 · 테크노파크" /></label></div>
+        <div className="form-grid"><label className="form-field"><span>진행 상태</span><select name="status" defaultValue={item?.status ?? '준비'}>{SUPPORT_PROGRAM_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label><label className="form-field"><span>지원 금액 (원)</span><input name="amount" type="number" min="0" step="10000" defaultValue={item?.amount ?? 0} /></label></div>
+        <div className="form-grid"><label className="form-field"><span>접수 시작</span><input name="applyStart" type="date" defaultValue={item?.applyStart ?? ''} /></label><label className="form-field"><span>접수 마감</span><input name="applyEnd" type="date" defaultValue={item?.applyEnd ?? ''} /></label></div>
+        <div className="form-grid"><label className="form-field"><span>사업 시작</span><input name="startDate" type="date" defaultValue={item?.startDate ?? ''} /></label><label className="form-field"><span>사업 종료</span><input name="endDate" type="date" defaultValue={item?.endDate ?? ''} /></label></div>
+        <label className="form-field full"><span>담당자</span><input name="owner" defaultValue={item?.owner ?? currentUserName} /></label>
+        <label className="form-field full"><span>메모</span><textarea name="note" rows={2} defaultValue={item?.note ?? ''} placeholder="신청 요건·제출 서류·후속 일정" /></label>
+        <section className="it-upload"><div><strong>공고문 · 신청서 <small>선택</small></strong></div><input ref={fileRef} className="sr-only" type="file" multiple onChange={async (event) => {
+          const files = Array.from(event.target.files ?? []); event.target.value = ''
+          if (!files.length) return
+          setUploading(true)
+          try {
+            const added = await uploadDocumentAttachments(files, { workspaceScope, category: '지원사업', summary: '지원사업 문서', tags: ['support-program'] })
+            for (const file of added) uploadedRef.current.add(file.id)
+            setAttachments((current) => [...current, ...added])
+          } catch (error) { onToast(error instanceof Error ? error.message : '문서를 업로드하지 못했습니다.') }
+          finally { setUploading(false) }
+        }} /><button className="button secondary" type="button" disabled={uploading || busy} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '문서 추가'}</button></section>
+        {attachments.length > 0 && <div className="it-file-list">{attachments.map((file) => <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}<button type="button" aria-label={`${file.name} 제외`} onClick={() => setAttachments((current) => current.filter((entry) => entry.id !== file.id))}><X size={13} /></button></span>)}</div>}
+        <footer><button type="button" className="button ghost" disabled={busy || uploading} onClick={() => void cancel()}>취소</button><button type="submit" className="button primary" disabled={busy || uploading}><Check size={18} /> {busy ? '저장 중…' : '저장'}</button></footer>
+      </form>
+    </section>
+  </div>
 }
