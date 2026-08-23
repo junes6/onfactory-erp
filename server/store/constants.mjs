@@ -26,6 +26,11 @@ export const WORKSPACE_TABLES = Object.freeze({
   // 승인 큐: 기존 코어 테이블을 채운다
   'ai-proposals': 'proposals',
   'automation-policies': 'automation_policies',
+  // R7: 거래처·지원사업(IT), 프로젝트 공간
+  'it-clients': 'it_clients',
+  'it-support-programs': 'it_support_programs',
+  'project-spaces': 'project_spaces',
+  'project-posts': 'project_posts',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

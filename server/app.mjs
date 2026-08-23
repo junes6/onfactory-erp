@@ -64,15 +64,19 @@ const WORKSPACE_STORE_KEYS = new Set([
   'factory-locations', 'factory-layouts', 'leave-management', 'work-rules', 'product-catalog', 'inventory-movements', 'calendar-departments',
   'sales-shipments', 'compliance-records', 'document-storage-settings', 'performance-settings', 'performance-reports',
   'it-projects', 'it-deliverables', 'it-contracts', 'ai-proposals', 'automation-policies',
+  'it-clients', 'it-support-programs', 'project-spaces', 'project-posts',
 ])
+// 프로젝트 공간은 멤버십 기반이라 전용 라우트(/api/projects)로만 읽고 쓴다.
+const PROJECT_KEYS = new Set(['project-spaces', 'project-posts'])
+const PROJECT_ROLES = new Set(['owner', 'editor', 'viewer'])
 // 승인 큐·자동화 정책은 전용 라우트로만 바뀐다 (결정 diff가 원료이므로 generic PUT 금지).
-const PROPOSAL_ONLY_KEYS = new Set(['ai-proposals', 'automation-policies'])
+const PROPOSAL_ONLY_KEYS = new Set(['ai-proposals', 'automation-policies', 'project-spaces', 'project-posts'])
 // 이 키가 바뀌면 생존 센티널을 즉시 재평가한다.
 const SENTINEL_TRIGGER_KEYS = new Set(['compliance-records', 'product-catalog', 'work-items', 'inventory-movements'])
 const TENANT_MEMBER_READ_KEYS = new Set([
   'work-items', 'inventory-locations', 'messenger-conversations', 'calendar-events', 'daily-journals',
   'leave-requests', 'leave-management', 'factory-locations', 'factory-layouts', 'work-rules', 'product-catalog', 'inventory-movements', 'calendar-departments',
-  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts',
+  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts', 'it-clients', 'it-support-programs',
 ])
 const TENANT_MEMBER_WRITE_KEYS = new Set([
   'work-items', 'messenger-conversations', 'calendar-events', 'daily-journals', 'it-projects', 'it-deliverables',
@@ -94,7 +98,7 @@ const JOURNAL_FIELDS = [
   'id', 'date', 'title', 'author', 'department', 'completed', 'issue', 'nextPlan',
   'approver', 'status', 'updatedAt', 'feedback', 'attachments',
 ]
-const JOURNAL_OPTIONAL_FIELDS = ['reviews', 'submittedAt', 'draftRevision']
+const JOURNAL_OPTIONAL_FIELDS = ['reviews', 'submittedAt', 'draftRevision', 'comments']
 const JOURNAL_STATUSES = new Set(['임시저장', '결재요청', '승인', '반려'])
 const MEMBER_EDITABLE_JOURNAL_STATUSES = new Set(['임시저장', '반려'])
 const MEMBER_WRITABLE_JOURNAL_STATUSES = new Set(['임시저장', '결재요청'])
@@ -552,7 +556,40 @@ function hasJournalShape(value) {
   if (!Array.isArray(value.attachments) || value.attachments.length > 20
     || !value.attachments.every((attachment) => hasExactFields(attachment, ['id', 'name', 'size'])
       && typeof attachment.id === 'string' && typeof attachment.name === 'string' && typeof attachment.size === 'string')) return false
+  if (value.comments !== undefined && (!Array.isArray(value.comments) || value.comments.length > 200 || !value.comments.every(hasJournalCommentShape))) return false
   return value.reviews === undefined || (Array.isArray(value.reviews) && value.reviews.length <= 50 && value.reviews.every(hasJournalReviewShape))
+}
+
+function hasJournalCommentShape(value) {
+  return hasExactFields(value, ['id', 'authorId', 'author', 'text', 'attachments', 'createdAt'])
+    && typeof value.id === 'string' && Boolean(value.id)
+    && typeof value.authorId === 'string' && Boolean(value.authorId)
+    && typeof value.author === 'string'
+    && typeof value.text === 'string' && value.text.length <= 2_000
+    && typeof value.createdAt === 'string'
+    && Array.isArray(value.attachments) && value.attachments.length <= 10
+    && value.attachments.every((attachment) => hasExactFields(attachment, ['id', 'name', 'size']) && typeof attachment.id === 'string' && typeof attachment.name === 'string' && typeof attachment.size === 'string')
+    && (value.text.trim().length > 0 || value.attachments.length > 0)
+}
+
+/** 같은 날짜·같은 작성자의 업무일지는 한 건만 허용한다. 새로 추가되거나 날짜·작성자가 바뀐 일지가 기존 일지와 겹칠 때만
+ *  [기존, 새 일지]를 돌려준다(이전부터 있던 레거시 중복은 그대로 둔다). */
+function findDuplicateJournalDay(journals, tenantId, accounts, previousJournals = []) {
+  const previousById = new Map((Array.isArray(previousJournals) ? previousJournals : []).map((journal) => [journal?.id, journal]))
+  const ownerOf = (journal) => resolvedLegacyOwnerId(journal, 'authorId', 'author', tenantId, accounts) || String(journal?.author ?? '').trim()
+  const isFresh = (journal) => { const previous = previousById.get(journal.id); return !previous || previous.date !== journal.date || ownerOf(previous) !== ownerOf(journal) }
+  const seen = new Map()
+  for (const journal of journals) {
+    if (!journal || typeof journal !== 'object') continue
+    const key = `${ownerOf(journal)}::${journal.date}`
+    if (seen.has(key)) {
+      const first = seen.get(key)
+      if (isFresh(first) || isFresh(journal)) return isFresh(journal) ? [first, journal] : [journal, first]
+      continue
+    }
+    seen.set(key, journal)
+  }
+  return null
 }
 
 function stampJournalSubmission(previous, next, now) {
@@ -1270,6 +1307,8 @@ function safeAccount(account) {
     approved: account.approved,
     team: account.team,
     jobRole: account.jobRole,
+    phone: account.phone ?? '',
+    bio: account.bio ?? '',
     isDemo: Boolean(account.isDemo),
     requiresPasswordChange: Boolean(account.mustChangePassword),
   }
@@ -1824,6 +1863,7 @@ export function createApp(options = {}) {
         ? message.attachments.map((attachment) => attachment?.id)
         : []) : []),
       ...(Array.isArray(item?.completion?.evidence) ? item.completion.evidence.map((attachment) => attachment?.id) : []),
+      ...(Array.isArray(item?.comments) ? item.comments.flatMap((comment) => Array.isArray(comment?.attachments) ? comment.attachments.map((attachment) => attachment?.id) : []) : []),
       item?.evidenceId,
       item?.drawingDocumentId,
       item?.backgroundDocumentId,
@@ -1873,10 +1913,34 @@ export function createApp(options = {}) {
     const tenantStore = workspaceStore.tenants[tenantId] ?? {}
     const document = (Array.isArray(documentRecord(tenantId)?.data) ? documentRecord(tenantId).data : []).find((item) => item.id === id)
     return isFactoryDrawingDocument(document)
-      || ['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations']
+      || ['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations', 'project-posts', 'it-contracts', 'it-deliverables', 'it-support-programs']
         .some((key) => linkedDocumentIds(tenantStore[key]?.data).includes(id))
   }
   const safeDownloadName = (value) => String(value || 'document').replace(/[\r\n"]/g, '_').slice(0, 180)
+  /** 지정 문서들을 userIds가 읽을 수 있도록 allowedUserIds에 추가한다(restricted 문서). 변경이 있으면 true. */
+  const grantDocumentAccess = (tenantId, documentIds, userIds) => {
+    const ids = new Set((documentIds ?? []).map(String).filter((id) => id.startsWith('DOC-')))
+    const users = [...new Set((userIds ?? []).map(String).filter(Boolean))]
+    if (!ids.size || !users.length) return false
+    const record = documentRecord(tenantId)
+    const documents = Array.isArray(record?.data) ? record.data : []
+    let changed = false
+    const nextDocuments = documents.map((document) => {
+      if (!ids.has(document?.id)) return document
+      if (document.visibility === 'all') return document
+      const allowed = new Set(Array.isArray(document.allowedUserIds) ? document.allowedUserIds : [])
+      const before = allowed.size
+      for (const user of users) allowed.add(user)
+      if (allowed.size === before && document.visibility === 'restricted') return document
+      changed = true
+      return { ...document, visibility: 'restricted', allowedUserIds: [...allowed] }
+    })
+    if (changed) {
+      const tenantStore = workspaceStore.tenants[tenantId] ??= {}
+      tenantStore['company-documents'] = { data: nextDocuments, updatedAt: new Date().toISOString(), updatedBy: 'system:access-grant' }
+    }
+    return changed
+  }
   const isFactoryDrawingDocument = (document) => document?.category === '공장도면' || document?.tags?.includes('factory-drawing')
 
   app.get('/api/documents', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
@@ -2067,20 +2131,127 @@ export function createApp(options = {}) {
     const openTickets = workspaceStore.platform.supportTickets.filter((ticket) => ticket.tenantId === tenant.id && !['해결', '종료'].includes(ticket.status)).length
     const activity = tenantActivityMetrics(tenant.id)
     const staleDay = activity.lastActivityAt ? Date.now() - Date.parse(activity.lastActivityAt) > 24 * 60 * 60 * 1_000 : false
+    const tenantAccounts = accounts.filter((account) => account.tenantId === tenant.id && account.role !== 'platform-operator')
+    const admins = tenantAccounts.filter((account) => account.role === 'tenant-admin').map((account) => ({ id: account.id, name: account.name, email: account.email, mustChangePassword: Boolean(account.mustChangePassword), temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt ?? null }))
+    const pendingAccounts = tenantAccounts.filter((account) => !account.approved && account.approvalStatus !== 'rejected').length
+    const proposals = proposalsOf(tenant.id)
+    const pendingProposals = proposals.filter((item) => item?.status === 'pending').length
+    const sentinelAlerts = proposals.filter((item) => item?.status === 'pending' && item.kind === 'sentinel-task').length
+    const consentCurrent = consentIsCurrent(tenant.consent)
     return {
       ...safeTenant,
       industryType: tenant.industryType ?? 'food_manufacturing',
       service: openTickets > 0 || staleDay ? '주의' : '정상',
+      consent: tenant.consent ? { version: tenant.consent.version, agreedAt: tenant.consent.agreedAt, agreedBy: tenant.consent.agreedBy?.name ?? '' } : null,
+      consentCurrent,
+      admins,
       metrics: {
         members,
+        pendingAccounts,
         todayActivity: activity.todayActivity,
         openTickets,
         lastActivityAt: activity.lastActivityAt,
         pointsUsed: pointsByTenant.has(tenant.id) ? pointsByTenant.get(tenant.id) : null,
         storageBytes: activity.storageBytes,
+        pendingProposals,
+        sentinelAlerts,
       },
     }
   }
+  /** 관제 브리핑: 규칙 기반으로 고객사별 주의 신호를 모은다(심각도·근거·권장 조치). */
+  const platformFindings = () => {
+    const findings = []
+    const now = Date.now()
+    for (const tenant of workspaceStore.platform.tenants) {
+      const view = publicPlatformTenant(tenant)
+      const push = (severity, title, detail, action) => findings.push({ id: `${tenant.id}:${title}`, tenantId: tenant.id, tenantName: tenant.name, severity, title, detail, action })
+      const ticketsP1 = workspaceStore.platform.supportTickets.filter((ticket) => ticket.tenantId === tenant.id && ticket.priority === 'P1' && !['해결', '종료'].includes(ticket.status)).length
+      if (ticketsP1) push('critical', 'P1 지원 티켓 미처리', `긴급 티켓 ${ticketsP1}건이 열려 있습니다.`, 'CS 지원센터에서 담당자 배정·응답')
+      else if (view.metrics.openTickets) push('warning', '지원 티켓 대기', `열린 티켓 ${view.metrics.openTickets}건`, 'CS 지원센터 확인')
+      if (view.metrics.sentinelAlerts) push('warning', '생존 센티널 경고', `인증 만료·재고·결재 적체 등 ${view.metrics.sentinelAlerts}건이 관리자 검토를 기다립니다.`, '접속 후 AI 제안 검토 안내')
+      else if (view.metrics.pendingProposals >= 5) push('info', 'AI 제안 적체', `검토 대기 제안 ${view.metrics.pendingProposals}건`, '관리자에게 검토 요청')
+      if (!view.consentCurrent) push('warning', '약관 동의 필요', tenant.consent ? `동의 버전 ${tenant.consent.version} → 현재 ${CONSENT_TERMS_VERSION}` : '가입 동의 기록이 없습니다.', '고객사 관리자 재동의 안내')
+      const lastActivity = view.metrics.lastActivityAt ? Date.parse(view.metrics.lastActivityAt) : NaN
+      if (!Number.isFinite(lastActivity)) push('info', '활동 기록 없음', '아직 업무·일지·메시지 활동이 없습니다.', '온보딩 지원 세션 제안')
+      else if (now - lastActivity > 7 * 24 * 60 * 60 * 1_000) push('warning', '7일 이상 미사용', `마지막 활동 ${Math.floor((now - lastActivity) / 86_400_000)}일 전`, '이탈 징후 — 담당자 연락')
+      for (const admin of view.admins) {
+        if (admin.mustChangePassword && admin.temporaryPasswordExpiresAt && Date.parse(admin.temporaryPasswordExpiresAt) < now) push('warning', '관리자 초기 비밀번호 만료', `${admin.name}(${admin.email})의 초기 비밀번호가 만료되어 로그인할 수 없습니다.`, '초기 비밀번호 재발급')
+        else if (admin.mustChangePassword) push('info', '관리자 첫 로그인 대기', `${admin.name}(${admin.email})가 아직 비밀번호를 설정하지 않았습니다.`, '로그인 안내')
+      }
+      if (view.metrics.pendingAccounts) push('info', '계정 승인 대기', `승인 대기 계정 ${view.metrics.pendingAccounts}건`, '고객사 관리자에게 승인 요청')
+      if (view.admins.length === 0) push('critical', '관리자 계정 없음', '활성 관리자 계정이 없어 고객사가 운영할 수 없습니다.', '관리자 계정 재생성')
+    }
+    const rank = { critical: 0, warning: 1, info: 2 }
+    return findings.sort((left, right) => rank[left.severity] - rank[right.severity] || left.tenantName.localeCompare(right.tenantName, 'ko'))
+  }
+  const platformBriefing = () => {
+    const tenants = workspaceStore.platform.tenants.map((tenant) => publicPlatformTenant(tenant))
+    const findings = platformFindings()
+    const active24h = tenants.filter((tenant) => tenant.metrics.lastActivityAt && Date.now() - Date.parse(tenant.metrics.lastActivityAt) < 24 * 60 * 60 * 1_000).length
+    const summary = {
+      tenants: tenants.length,
+      active24h,
+      members: tenants.reduce((sum, tenant) => sum + tenant.metrics.members, 0),
+      openTickets: tenants.reduce((sum, tenant) => sum + tenant.metrics.openTickets, 0),
+      pendingProposals: tenants.reduce((sum, tenant) => sum + tenant.metrics.pendingProposals, 0),
+      sentinelAlerts: tenants.reduce((sum, tenant) => sum + tenant.metrics.sentinelAlerts, 0),
+      consentMissing: tenants.filter((tenant) => !tenant.consentCurrent).length,
+      critical: findings.filter((item) => item.severity === 'critical').length,
+      warning: findings.filter((item) => item.severity === 'warning').length,
+    }
+    const headline = summary.critical
+      ? `즉시 조치 ${summary.critical}건 · 주의 ${summary.warning}건 — 긴급 항목부터 처리하세요.`
+      : summary.warning
+        ? `즉시 조치 항목은 없고 주의 ${summary.warning}건이 있습니다.`
+        : '모든 고객사가 정상 범위입니다. 온보딩·활성화 기회를 확인하세요.'
+    return { generatedAt: new Date().toISOString(), headline, summary, findings, mode: client ? 'ai' : 'rules' }
+  }
+  app.get('/api/platform/briefing', requireAuth, requirePlatformOperator, (_request, response) => { response.json(platformBriefing()) })
+  app.get('/api/platform/tenants/:id/accounts', requireAuth, requirePlatformOperator, (request, response) => {
+    const tenant = platformTenant(String(request.params.id))
+    if (!tenant) { response.status(404).json({ error: { code: 'PLATFORM_TENANT_NOT_FOUND', message: '고객사를 찾을 수 없습니다.' } }); return }
+    const rows = accounts.filter((account) => account.tenantId === tenant.id && account.role !== 'platform-operator').map((account) => ({
+      id: account.id, name: account.name, email: account.email, role: account.role, team: account.team ?? '', jobRole: account.jobRole ?? '',
+      approved: Boolean(account.approved), approvalStatus: account.approvalStatus ?? (account.approved ? 'approved' : 'pending'),
+      mustChangePassword: Boolean(account.mustChangePassword), temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt ?? null,
+      requested: account.requested ?? '', isDemo: Boolean(account.isDemo),
+    })).sort((left, right) => Number(right.role === 'tenant-admin') - Number(left.role === 'tenant-admin') || left.name.localeCompare(right.name, 'ko'))
+    recordOperatorActivity?.(request, { event: '운영자 조회', scope: `고객사 계정 목록 (${tenant.name})` })
+    response.json({ tenantId: tenant.id, accounts: rows })
+  })
+  app.post('/api/platform/assistant', requireAuth, requirePlatformOperator, async (request, response) => {
+    const question = String(request.body?.question ?? '').trim().slice(0, 500)
+    if (!question) { response.status(400).json({ error: { code: 'QUESTION_REQUIRED', message: '질문을 입력해 주세요.' } }); return }
+    const briefing = platformBriefing()
+    const tenants = workspaceStore.platform.tenants.map((tenant) => publicPlatformTenant(tenant))
+    const lower = question.toLowerCase()
+    const ruleAnswer = () => {
+      const named = tenants.filter((tenant) => lower.includes(tenant.name.toLowerCase()))
+      if (named.length) {
+        return named.map((tenant) => {
+          const own = briefing.findings.filter((item) => item.tenantId === tenant.id)
+          return `[${tenant.name}] 멤버 ${tenant.metrics.members}명 · 오늘 활동 ${tenant.metrics.todayActivity}건 · 열린 티켓 ${tenant.metrics.openTickets}건 · AI 제안 대기 ${tenant.metrics.pendingProposals}건 · 관리자 ${tenant.admins.map((admin) => `${admin.name}(${admin.email})`).join(', ') || '없음'}${own.length ? '\n주의: ' + own.map((item) => `${item.title} — ${item.detail}`).join(' / ') : '\n특이 사항 없음'}`
+        }).join('\n\n')
+      }
+      if (/(문제|위험|주의|이상|급한|먼저|우선)/.test(question)) {
+        const top = briefing.findings.slice(0, 6)
+        return top.length ? `${briefing.headline}\n` + top.map((item, index) => `${index + 1}. [${item.tenantName}] ${item.title} — ${item.detail} → ${item.action}`).join('\n') : '현재 주의가 필요한 고객사가 없습니다.'
+      }
+      if (/(계정|관리자|사용자|멤버)/.test(question)) {
+        return tenants.map((tenant) => `${tenant.name}: 멤버 ${tenant.metrics.members}명, 관리자 ${tenant.admins.map((admin) => admin.name).join(', ') || '없음'}${tenant.metrics.pendingAccounts ? `, 승인 대기 ${tenant.metrics.pendingAccounts}` : ''}`).join('\n')
+      }
+      if (/(티켓|cs|지원)/i.test(question)) return `열린 티켓 ${briefing.summary.openTickets}건\n` + tenants.filter((tenant) => tenant.metrics.openTickets).map((tenant) => `${tenant.name}: ${tenant.metrics.openTickets}건`).join('\n')
+      if (/(동의|약관)/.test(question)) return tenants.map((tenant) => `${tenant.name}: ${tenant.consentCurrent ? `동의 완료(${tenant.consent?.version})` : '재동의 필요'}`).join('\n')
+      return `${briefing.headline}\n고객사 ${briefing.summary.tenants}곳 · 24시간 활동 ${briefing.summary.active24h}곳 · 멤버 ${briefing.summary.members}명 · 열린 티켓 ${briefing.summary.openTickets}건 · AI 제안 대기 ${briefing.summary.pendingProposals}건\n고객사 이름을 넣어 물으면 해당 고객사 상태를, "문제 있는 곳"이라고 물으면 우선순위 목록을 답합니다.`
+    }
+    if (!client) { response.json({ answer: ruleAnswer(), mode: 'rules' }); return }
+    try {
+      const context = JSON.stringify({ briefing, tenants: tenants.map((tenant) => ({ id: tenant.id, name: tenant.name, industryType: tenant.industryType, plan: tenant.plan, metrics: tenant.metrics, admins: tenant.admins.map((admin) => admin.name), consentCurrent: tenant.consentCurrent })) })
+      const result = await client.messages.create({ model, max_tokens: 800, system: '당신은 온팩토리 플랫폼 운영 관제 보조입니다. 주어진 JSON(고객사 지표·주의 신호)만 근거로 한국어로 간결히 답하고, 없는 정보는 모른다고 말하세요. 권장 조치는 한 줄씩 번호로 제시하세요.', messages: [{ role: 'user', content: `관제 데이터:\n${context}\n\n질문: ${question}` }] })
+      const text = (result.content ?? []).map((block) => block?.type === 'text' ? block.text : '').join('').trim()
+      response.json({ answer: text || ruleAnswer(), mode: text ? 'ai' : 'rules' })
+    } catch { response.json({ answer: ruleAnswer(), mode: 'rules' }) }
+  })
   const tenantPointsThisMonth = async () => {
     const points = new Map()
     if (!billingService) return points
@@ -4073,6 +4244,355 @@ export function createApp(options = {}) {
     response.json({ events, updatedAt: record?.updatedAt ?? null })
   })
 
+  // ------------------------------------------------------------------
+  // 업무일지 댓글 (글·파일) — 작성자·관리자(결재자)가 남긴다.
+  // ------------------------------------------------------------------
+  const canDiscussJournal = (journal, auth) => auth.role === 'tenant-admin' || isMemberJournal(journal, auth, accounts)
+  app.post('/api/daily-journals/:id/comments', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    if (!request.auth.tenantId) { response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } }); return }
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId] ??= {}
+    const previousRecord = tenantStore['daily-journals']
+    const journals = Array.isArray(previousRecord?.data) ? previousRecord.data : []
+    const index = journals.findIndex((journal) => journal?.id === request.params.id)
+    if (index < 0) { response.status(404).json({ error: { code: 'JOURNAL_NOT_FOUND', message: '업무일지를 찾을 수 없습니다.' } }); return }
+    const journal = journals[index]
+    if (!canDiscussJournal(journal, request.auth)) { response.status(403).json({ error: { code: 'JOURNAL_COMMENT_FORBIDDEN', message: '본인 일지 또는 결재 대상 일지에만 댓글을 남길 수 있습니다.' } }); return }
+    const text = String(request.body?.text ?? '').trim().slice(0, 2_000)
+    const attachments = await resolveMessengerAttachments(request.body?.attachments, request.auth)
+    if (attachments === null) { response.status(400).json({ error: { code: 'INVALID_COMMENT_ATTACHMENTS', message: '첨부파일을 찾을 수 없거나 열람 권한이 없습니다.' } }); return }
+    if (!text && attachments.length === 0) { response.status(400).json({ error: { code: 'COMMENT_EMPTY', message: '댓글 내용이나 파일을 추가해 주세요.' } }); return }
+    const comment = { id: `JC-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`, authorId: request.auth.id, author: request.auth.name, text, attachments, createdAt: new Date().toISOString() }
+    const comments = [...(Array.isArray(journal.comments) ? journal.comments : []), comment].slice(-200)
+    const nextJournal = { ...journal, comments }
+    const nextData = journals.map((item, itemIndex) => itemIndex === index ? nextJournal : item)
+    const previousDocuments = tenantStore['company-documents']
+    // 작성자(및 결재자)가 첨부를 내려받을 수 있도록 접근 부여
+    const authorId = resolvedLegacyOwnerId(journal, 'authorId', 'author', request.auth.tenantId, accounts)
+    grantDocumentAccess(request.auth.tenantId, attachments.map((item) => item.id), [authorId, request.auth.id].filter(Boolean))
+    tenantStore['daily-journals'] = { data: nextData, updatedAt: comment.createdAt, updatedBy: request.auth.id }
+    try { await commitWorkspaceStore() } catch (error) {
+      if (previousRecord) tenantStore['daily-journals'] = previousRecord; else delete tenantStore['daily-journals']
+      if (previousDocuments) tenantStore['company-documents'] = previousDocuments
+      console.error('[journal-comment] persist failed', { message: error?.message })
+      response.status(500).json({ error: { code: 'COMMENT_WRITE_FAILED', message: '댓글을 저장하지 못했습니다.' } })
+      return
+    }
+    response.status(201).json({ comment, journal: nextJournal, version: workspaceRecordVersion(tenantStore['daily-journals']) })
+  })
+  app.delete('/api/daily-journals/:id/comments/:commentId', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    if (!request.auth.tenantId) { response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } }); return }
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId] ??= {}
+    const previousRecord = tenantStore['daily-journals']
+    const journals = Array.isArray(previousRecord?.data) ? previousRecord.data : []
+    const index = journals.findIndex((journal) => journal?.id === request.params.id)
+    if (index < 0) { response.status(404).json({ error: { code: 'JOURNAL_NOT_FOUND', message: '업무일지를 찾을 수 없습니다.' } }); return }
+    const journal = journals[index]
+    const comments = Array.isArray(journal.comments) ? journal.comments : []
+    const target = comments.find((comment) => comment.id === request.params.commentId)
+    if (!target) { response.status(404).json({ error: { code: 'COMMENT_NOT_FOUND', message: '댓글을 찾을 수 없습니다.' } }); return }
+    if (target.authorId !== request.auth.id && request.auth.role !== 'tenant-admin') { response.status(403).json({ error: { code: 'COMMENT_DELETE_FORBIDDEN', message: '본인 댓글만 삭제할 수 있습니다.' } }); return }
+    const nextJournal = { ...journal, comments: comments.filter((comment) => comment.id !== target.id) }
+    if (nextJournal.comments.length === 0) delete nextJournal.comments
+    tenantStore['daily-journals'] = { data: journals.map((item, itemIndex) => itemIndex === index ? nextJournal : item), updatedAt: new Date().toISOString(), updatedBy: request.auth.id }
+    try { await commitWorkspaceStore() } catch {
+      if (previousRecord) tenantStore['daily-journals'] = previousRecord; else delete tenantStore['daily-journals']
+      response.status(500).json({ error: { code: 'COMMENT_WRITE_FAILED', message: '댓글을 삭제하지 못했습니다.' } })
+      return
+    }
+    response.json({ journal: nextJournal, version: workspaceRecordVersion(tenantStore['daily-journals']) })
+  })
+
+  // ------------------------------------------------------------------
+  // 내 프로필 — 이름·부서·직책·연락처·소개 수정, 비밀번호 변경
+  // ------------------------------------------------------------------
+  const persistAccountProfile = (account) => {
+    workspaceStore.accounts ??= []
+    const snapshot = {
+      id: account.id, email: account.email, name: account.name, role: account.role, tenantId: account.tenantId ?? null, tenantName: account.tenantName ?? null,
+      team: account.team ?? '미지정', jobRole: account.jobRole ?? '일반 사용자', phone: account.phone ?? '', bio: account.bio ?? '',
+      requested: account.requested ?? '계정', approved: account.approved !== false, approvalStatus: account.approvalStatus ?? (account.approved !== false ? 'approved' : 'pending'),
+      profileUpdatedAt: new Date().toISOString(),
+    }
+    const index = workspaceStore.accounts.findIndex((item) => item?.id === account.id)
+    if (index >= 0) workspaceStore.accounts[index] = { ...workspaceStore.accounts[index], ...snapshot }
+    else workspaceStore.accounts.push(snapshot)
+  }
+  app.patch('/api/me/profile', requireSession, async (request, response) => {
+    const account = request.sessionAccount
+    const name = String(request.body?.name ?? account.name).trim().slice(0, 40)
+    const team = String(request.body?.team ?? account.team ?? '').trim().slice(0, 40)
+    const jobRole = String(request.body?.jobRole ?? account.jobRole ?? '').trim().slice(0, 40)
+    const phone = String(request.body?.phone ?? account.phone ?? '').trim().slice(0, 30)
+    const bio = String(request.body?.bio ?? account.bio ?? '').trim().slice(0, 200)
+    if (name.length < 2) { response.status(400).json({ error: { code: 'INVALID_PROFILE', message: '이름은 2자 이상 입력해 주세요.' } }); return }
+    if (phone && !/^[0-9+\-\s()]{7,30}$/.test(phone)) { response.status(400).json({ error: { code: 'INVALID_PROFILE', message: '연락처 형식을 확인해 주세요.' } }); return }
+    const previous = { name: account.name, team: account.team, jobRole: account.jobRole, phone: account.phone, bio: account.bio }
+    const previousAccounts = Array.isArray(workspaceStore.accounts) ? [...workspaceStore.accounts] : undefined
+    Object.assign(account, { name, team: team || '미지정', jobRole: jobRole || '일반 사용자', phone, bio })
+    persistAccountProfile(account)
+    try { await commitWorkspaceStore() } catch {
+      Object.assign(account, previous)
+      if (previousAccounts) workspaceStore.accounts = previousAccounts
+      response.status(500).json({ error: { code: 'PROFILE_WRITE_FAILED', message: '프로필을 저장하지 못했습니다.' } })
+      return
+    }
+    response.json({ account: effectiveAuth(account, request.session) })
+  })
+  app.post('/api/me/password', requireSession, async (request, response) => {
+    const account = request.sessionAccount
+    const currentPassword = String(request.body?.currentPassword ?? '')
+    const newPassword = String(request.body?.newPassword ?? '')
+    if (!timingSafeEqual(account.password, passwordDigest(currentPassword, account.id))) {
+      response.status(400).json({ error: { code: 'PASSWORD_MISMATCH', message: '현재 비밀번호가 일치하지 않습니다.' } })
+      return
+    }
+    if (!validNewPassword(newPassword, account) || newPassword === currentPassword) {
+      response.status(400).json({ error: { code: 'WEAK_PASSWORD', message: '10자 이상이며 영문 대·소문자, 숫자와 특수문자를 모두 포함하고 현재 비밀번호와 달라야 합니다.' } })
+      return
+    }
+    const previousPassword = account.password
+    const previousCredential = workspaceStore.accountCredentials[account.id]
+    account.password = passwordDigest(newPassword, account.id)
+    account.mustChangePassword = false
+    account.temporaryPasswordExpiresAt = null
+    workspaceStore.accountCredentials[account.id] = { passwordHash: account.password.toString('hex'), mustChangePassword: false, temporaryPasswordExpiresAt: null, changedAt: new Date().toISOString() }
+    try { await commitWorkspaceStore() } catch {
+      account.password = previousPassword
+      if (previousCredential) workspaceStore.accountCredentials[account.id] = previousCredential; else delete workspaceStore.accountCredentials[account.id]
+      response.status(500).json({ error: { code: 'PASSWORD_CHANGE_FAILED', message: '새 비밀번호를 저장하지 못했습니다.' } })
+      return
+    }
+    response.json({ ok: true })
+  })
+
+  // ------------------------------------------------------------------
+  // 프로젝트 공간 — 프로젝트 단위 게시글·파일·댓글, 역할(owner/editor/viewer)별 공유
+  // ------------------------------------------------------------------
+  const projectSpacesOf = (tenantId) => Array.isArray(workspaceStore.tenants[tenantId]?.['project-spaces']?.data) ? workspaceStore.tenants[tenantId]['project-spaces'].data : []
+  const projectPostsOf = (tenantId) => Array.isArray(workspaceStore.tenants[tenantId]?.['project-posts']?.data) ? workspaceStore.tenants[tenantId]['project-posts'].data : []
+  const writeProjectData = (tenantId, key, data, actorId) => {
+    const tenantStore = workspaceStore.tenants[tenantId] ??= {}
+    tenantStore[key] = { data, updatedAt: new Date().toISOString(), updatedBy: actorId }
+  }
+  const projectRoleOf = (project, auth) => {
+    if (!project) return null
+    if (auth.role === 'tenant-admin') return 'owner'
+    const member = (project.members ?? []).find((item) => item?.id === auth.id)
+    if (member) return PROJECT_ROLES.has(member.role) ? member.role : 'viewer'
+    return project.visibility === 'company' ? 'viewer' : null
+  }
+  const projectMemberIds = (project) => [...new Set([project.ownerId, ...(project.members ?? []).map((item) => item?.id)].filter(Boolean))]
+  const tenantAccountRef = (tenantId, id) => {
+    const account = accounts.find((item) => item.id === id && item.tenantId === tenantId && item.approved && item.role !== 'platform-operator')
+    return account ? { id: account.id, name: account.name, team: account.team ?? '' } : null
+  }
+  const normalizeProjectMembers = (tenantId, ownerId, ownerName, raw) => {
+    const members = [{ id: ownerId, name: ownerName, role: 'owner' }]
+    for (const item of Array.isArray(raw) ? raw.slice(0, 100) : []) {
+      const id = String(item?.id ?? '').trim()
+      if (!id || id === ownerId || members.some((member) => member.id === id)) continue
+      const ref = tenantAccountRef(tenantId, id)
+      if (!ref) continue
+      members.push({ id: ref.id, name: ref.name, team: ref.team, role: PROJECT_ROLES.has(item?.role) && item.role !== 'owner' ? item.role : 'viewer' })
+    }
+    return members
+  }
+  const publicProject = (project, posts, auth) => {
+    const projectPosts = posts.filter((post) => post.projectId === project.id)
+    const lastPost = projectPosts.reduce((latest, post) => !latest || String(post.updatedAt ?? post.createdAt).localeCompare(String(latest.updatedAt ?? latest.createdAt)) > 0 ? post : latest, null)
+    return { ...project, role: projectRoleOf(project, auth), postCount: projectPosts.length, fileCount: projectPosts.reduce((sum, post) => sum + (post.attachments?.length ?? 0), 0), lastActivityAt: lastPost ? (lastPost.updatedAt ?? lastPost.createdAt) : project.updatedAt }
+  }
+  const projectGuards = [requireAuth, requireMatchingWorkspaceIdentity]
+  const requireTenant = (request, response) => { if (!request.auth.tenantId) { response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } }); return false } return true }
+
+  app.get('/api/projects', ...projectGuards, (request, response) => {
+    if (!requireTenant(request, response)) return
+    const posts = projectPostsOf(request.auth.tenantId)
+    const projects = projectSpacesOf(request.auth.tenantId).filter((project) => projectRoleOf(project, request.auth)).map((project) => publicProject(project, posts, request.auth))
+    projects.sort((left, right) => Number(right.status !== 'archived') - Number(left.status !== 'archived') || String(right.lastActivityAt).localeCompare(String(left.lastActivityAt)))
+    const directory = accounts.filter((account) => account.tenantId === request.auth.tenantId && account.approved && account.role !== 'platform-operator').map((account) => ({ id: account.id, name: account.name, team: account.team ?? '', jobRole: account.jobRole ?? '' }))
+    response.json({ projects, directory })
+  })
+  app.post('/api/projects', ...projectGuards, async (request, response) => {
+    if (!requireTenant(request, response)) return
+    const name = String(request.body?.name ?? '').trim().slice(0, 80)
+    if (name.length < 2) { response.status(400).json({ error: { code: 'INVALID_PROJECT', message: '프로젝트 이름은 2자 이상 입력해 주세요.' } }); return }
+    const now = new Date().toISOString()
+    const project = {
+      id: `PRJ-${Date.now().toString(36).toUpperCase()}-${randomBytes(2).toString('hex').toUpperCase()}`,
+      name,
+      description: String(request.body?.description ?? '').trim().slice(0, 500),
+      visibility: request.body?.visibility === 'company' ? 'company' : 'members',
+      status: 'active',
+      ownerId: request.auth.id,
+      ownerName: request.auth.name,
+      members: normalizeProjectMembers(request.auth.tenantId, request.auth.id, request.auth.name, request.body?.members),
+      createdAt: now,
+      updatedAt: now,
+    }
+    const previous = workspaceStore.tenants[request.auth.tenantId]?.['project-spaces']
+    writeProjectData(request.auth.tenantId, 'project-spaces', [project, ...projectSpacesOf(request.auth.tenantId)].slice(0, 500), request.auth.id)
+    try { await commitWorkspaceStore() } catch {
+      const tenantStore = workspaceStore.tenants[request.auth.tenantId]; if (previous) tenantStore['project-spaces'] = previous; else delete tenantStore['project-spaces']
+      response.status(500).json({ error: { code: 'PROJECT_WRITE_FAILED', message: '프로젝트를 저장하지 못했습니다.' } }); return
+    }
+    response.status(201).json({ project: publicProject(project, [], request.auth) })
+  })
+  app.patch('/api/projects/:id', ...projectGuards, async (request, response) => {
+    if (!requireTenant(request, response)) return
+    const projects = projectSpacesOf(request.auth.tenantId)
+    const index = projects.findIndex((item) => item?.id === request.params.id)
+    if (index < 0) { response.status(404).json({ error: { code: 'PROJECT_NOT_FOUND', message: '프로젝트를 찾을 수 없습니다.' } }); return }
+    const project = projects[index]
+    if (projectRoleOf(project, request.auth) !== 'owner') { response.status(403).json({ error: { code: 'PROJECT_OWNER_REQUIRED', message: '프로젝트 소유자 또는 관리자만 설정을 바꿀 수 있습니다.' } }); return }
+    const next = { ...project, updatedAt: new Date().toISOString() }
+    if (request.body?.name !== undefined) { const name = String(request.body.name).trim().slice(0, 80); if (name.length < 2) { response.status(400).json({ error: { code: 'INVALID_PROJECT', message: '프로젝트 이름은 2자 이상 입력해 주세요.' } }); return } next.name = name }
+    if (request.body?.description !== undefined) next.description = String(request.body.description).trim().slice(0, 500)
+    if (request.body?.visibility !== undefined) next.visibility = request.body.visibility === 'company' ? 'company' : 'members'
+    if (request.body?.status !== undefined) next.status = request.body.status === 'archived' ? 'archived' : 'active'
+    if (request.body?.members !== undefined) next.members = normalizeProjectMembers(request.auth.tenantId, project.ownerId, project.ownerName, request.body.members)
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId]
+    const previousSpaces = tenantStore['project-spaces']; const previousDocuments = tenantStore['company-documents']
+    writeProjectData(request.auth.tenantId, 'project-spaces', projects.map((item, itemIndex) => itemIndex === index ? next : item), request.auth.id)
+    // 멤버가 바뀌면 게시글·댓글 첨부 접근도 다시 부여
+    const posts = projectPostsOf(request.auth.tenantId).filter((post) => post.projectId === project.id)
+    grantDocumentAccess(request.auth.tenantId, linkedDocumentIds(posts), projectMemberIds(next))
+    try { await commitWorkspaceStore() } catch {
+      if (previousSpaces) tenantStore['project-spaces'] = previousSpaces; if (previousDocuments) tenantStore['company-documents'] = previousDocuments
+      response.status(500).json({ error: { code: 'PROJECT_WRITE_FAILED', message: '프로젝트를 저장하지 못했습니다.' } }); return
+    }
+    response.json({ project: publicProject(next, projectPostsOf(request.auth.tenantId), request.auth) })
+  })
+  app.delete('/api/projects/:id', ...projectGuards, async (request, response) => {
+    if (!requireTenant(request, response)) return
+    const projects = projectSpacesOf(request.auth.tenantId)
+    const project = projects.find((item) => item?.id === request.params.id)
+    if (!project || !projectRoleOf(project, request.auth)) { response.status(404).json({ error: { code: 'PROJECT_NOT_FOUND', message: '프로젝트를 찾을 수 없거나 참여 권한이 없습니다.' } }); return }
+    if (projectRoleOf(project, request.auth) !== 'owner') { response.status(403).json({ error: { code: 'PROJECT_OWNER_REQUIRED', message: '프로젝트 소유자 또는 관리자만 삭제할 수 있습니다.' } }); return }
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId]
+    const previousSpaces = tenantStore['project-spaces']; const previousPosts = tenantStore['project-posts']
+    writeProjectData(request.auth.tenantId, 'project-spaces', projects.filter((item) => item.id !== project.id), request.auth.id)
+    writeProjectData(request.auth.tenantId, 'project-posts', projectPostsOf(request.auth.tenantId).filter((post) => post.projectId !== project.id), request.auth.id)
+    try { await commitWorkspaceStore() } catch {
+      if (previousSpaces) tenantStore['project-spaces'] = previousSpaces; if (previousPosts) tenantStore['project-posts'] = previousPosts
+      response.status(500).json({ error: { code: 'PROJECT_WRITE_FAILED', message: '프로젝트를 삭제하지 못했습니다.' } }); return
+    }
+    response.json({ ok: true })
+  })
+  app.get('/api/projects/:id', ...projectGuards, (request, response) => {
+    if (!requireTenant(request, response)) return
+    const project = projectSpacesOf(request.auth.tenantId).find((item) => item?.id === request.params.id)
+    const role = projectRoleOf(project, request.auth)
+    if (!project || !role) { response.status(404).json({ error: { code: 'PROJECT_NOT_FOUND', message: '프로젝트를 찾을 수 없거나 참여 권한이 없습니다.' } }); return }
+    const posts = projectPostsOf(request.auth.tenantId).filter((post) => post.projectId === project.id).sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || String(right.createdAt).localeCompare(String(left.createdAt)))
+    response.json({ project: publicProject(project, posts, request.auth), posts })
+  })
+  app.post('/api/projects/:id/posts', ...projectGuards, async (request, response) => {
+    if (!requireTenant(request, response)) return
+    const project = projectSpacesOf(request.auth.tenantId).find((item) => item?.id === request.params.id)
+    const role = projectRoleOf(project, request.auth)
+    if (!project || !role) { response.status(404).json({ error: { code: 'PROJECT_NOT_FOUND', message: '프로젝트를 찾을 수 없거나 참여 권한이 없습니다.' } }); return }
+    if (role === 'viewer') { response.status(403).json({ error: { code: 'PROJECT_EDITOR_REQUIRED', message: '열람 권한으로는 글을 올릴 수 없습니다. 소유자에게 편집 권한을 요청하세요.' } }); return }
+    if (project.status === 'archived') { response.status(409).json({ error: { code: 'PROJECT_ARCHIVED', message: '보관된 프로젝트에는 글을 올릴 수 없습니다.' } }); return }
+    const title = String(request.body?.title ?? '').trim().slice(0, 120)
+    const body = String(request.body?.body ?? '').trim().slice(0, 8_000)
+    const attachments = await resolveMessengerAttachments(request.body?.attachments, request.auth)
+    if (attachments === null) { response.status(400).json({ error: { code: 'INVALID_POST_ATTACHMENTS', message: '첨부파일을 찾을 수 없거나 열람 권한이 없습니다.' } }); return }
+    if (!title && !body && attachments.length === 0) { response.status(400).json({ error: { code: 'POST_EMPTY', message: '제목, 내용 또는 파일 중 하나는 필요합니다.' } }); return }
+    const now = new Date().toISOString()
+    const post = { id: `PP-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`, projectId: project.id, title: title || (body.split('\n')[0] || '파일 공유').slice(0, 80), body, attachments, authorId: request.auth.id, author: request.auth.name, pinned: false, comments: [], createdAt: now, updatedAt: now }
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId]
+    const previousPosts = tenantStore['project-posts']; const previousDocuments = tenantStore['company-documents']
+    writeProjectData(request.auth.tenantId, 'project-posts', [post, ...projectPostsOf(request.auth.tenantId)].slice(0, 5_000), request.auth.id)
+    grantDocumentAccess(request.auth.tenantId, attachments.map((item) => item.id), projectMemberIds(project))
+    try { await commitWorkspaceStore() } catch {
+      if (previousPosts) tenantStore['project-posts'] = previousPosts; else delete tenantStore['project-posts']; if (previousDocuments) tenantStore['company-documents'] = previousDocuments
+      response.status(500).json({ error: { code: 'POST_WRITE_FAILED', message: '게시글을 저장하지 못했습니다.' } }); return
+    }
+    response.status(201).json({ post })
+  })
+  app.patch('/api/projects/:id/posts/:postId', ...projectGuards, async (request, response) => {
+    if (!requireTenant(request, response)) return
+    const project = projectSpacesOf(request.auth.tenantId).find((item) => item?.id === request.params.id)
+    const role = projectRoleOf(project, request.auth)
+    if (!project || !role) { response.status(404).json({ error: { code: 'PROJECT_NOT_FOUND', message: '프로젝트를 찾을 수 없거나 참여 권한이 없습니다.' } }); return }
+    const posts = projectPostsOf(request.auth.tenantId)
+    const index = posts.findIndex((post) => post.id === request.params.postId && post.projectId === project.id)
+    if (index < 0) { response.status(404).json({ error: { code: 'POST_NOT_FOUND', message: '게시글을 찾을 수 없습니다.' } }); return }
+    const post = posts[index]
+    const canEdit = post.authorId === request.auth.id || role === 'owner'
+    if (!canEdit) { response.status(403).json({ error: { code: 'POST_EDIT_FORBIDDEN', message: '작성자 또는 소유자만 수정할 수 있습니다.' } }); return }
+    const next = { ...post, updatedAt: new Date().toISOString() }
+    if (request.body?.title !== undefined) next.title = String(request.body.title).trim().slice(0, 120) || post.title
+    if (request.body?.body !== undefined) next.body = String(request.body.body).trim().slice(0, 8_000)
+    if (request.body?.pinned !== undefined && role === 'owner') next.pinned = Boolean(request.body.pinned)
+    if (request.body?.attachments !== undefined) {
+      const attachments = await resolveMessengerAttachments(request.body.attachments, request.auth)
+      if (attachments === null) { response.status(400).json({ error: { code: 'INVALID_POST_ATTACHMENTS', message: '첨부파일을 찾을 수 없거나 열람 권한이 없습니다.' } }); return }
+      next.attachments = attachments
+      grantDocumentAccess(request.auth.tenantId, attachments.map((item) => item.id), projectMemberIds(project))
+    }
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId]
+    const previousPosts = tenantStore['project-posts']
+    writeProjectData(request.auth.tenantId, 'project-posts', posts.map((item, itemIndex) => itemIndex === index ? next : item), request.auth.id)
+    try { await commitWorkspaceStore() } catch { if (previousPosts) tenantStore['project-posts'] = previousPosts; response.status(500).json({ error: { code: 'POST_WRITE_FAILED', message: '게시글을 저장하지 못했습니다.' } }); return }
+    response.json({ post: next })
+  })
+  app.delete('/api/projects/:id/posts/:postId', ...projectGuards, async (request, response) => {
+    if (!requireTenant(request, response)) return
+    const project = projectSpacesOf(request.auth.tenantId).find((item) => item?.id === request.params.id)
+    const role = projectRoleOf(project, request.auth)
+    if (!project || !role) { response.status(404).json({ error: { code: 'PROJECT_NOT_FOUND', message: '프로젝트를 찾을 수 없거나 참여 권한이 없습니다.' } }); return }
+    const posts = projectPostsOf(request.auth.tenantId)
+    const post = posts.find((item) => item.id === request.params.postId && item.projectId === project.id)
+    if (!post) { response.status(404).json({ error: { code: 'POST_NOT_FOUND', message: '게시글을 찾을 수 없습니다.' } }); return }
+    if (post.authorId !== request.auth.id && role !== 'owner') { response.status(403).json({ error: { code: 'POST_DELETE_FORBIDDEN', message: '작성자 또는 소유자만 삭제할 수 있습니다.' } }); return }
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId]
+    const previousPosts = tenantStore['project-posts']
+    writeProjectData(request.auth.tenantId, 'project-posts', posts.filter((item) => item.id !== post.id), request.auth.id)
+    try { await commitWorkspaceStore() } catch { if (previousPosts) tenantStore['project-posts'] = previousPosts; response.status(500).json({ error: { code: 'POST_WRITE_FAILED', message: '게시글을 삭제하지 못했습니다.' } }); return }
+    response.json({ ok: true })
+  })
+  app.post('/api/projects/:id/posts/:postId/comments', ...projectGuards, async (request, response) => {
+    if (!requireTenant(request, response)) return
+    const project = projectSpacesOf(request.auth.tenantId).find((item) => item?.id === request.params.id)
+    const role = projectRoleOf(project, request.auth)
+    if (!project || !role) { response.status(404).json({ error: { code: 'PROJECT_NOT_FOUND', message: '프로젝트를 찾을 수 없거나 참여 권한이 없습니다.' } }); return }
+    const posts = projectPostsOf(request.auth.tenantId)
+    const index = posts.findIndex((post) => post.id === request.params.postId && post.projectId === project.id)
+    if (index < 0) { response.status(404).json({ error: { code: 'POST_NOT_FOUND', message: '게시글을 찾을 수 없습니다.' } }); return }
+    const text = String(request.body?.text ?? '').trim().slice(0, 2_000)
+    const attachments = await resolveMessengerAttachments(request.body?.attachments, request.auth)
+    if (attachments === null) { response.status(400).json({ error: { code: 'INVALID_COMMENT_ATTACHMENTS', message: '첨부파일을 찾을 수 없거나 열람 권한이 없습니다.' } }); return }
+    if (!text && attachments.length === 0) { response.status(400).json({ error: { code: 'COMMENT_EMPTY', message: '댓글 내용이나 파일을 추가해 주세요.' } }); return }
+    const comment = { id: `PC-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`, authorId: request.auth.id, author: request.auth.name, text, attachments, createdAt: new Date().toISOString() }
+    const next = { ...posts[index], comments: [...(posts[index].comments ?? []), comment].slice(-300), updatedAt: comment.createdAt }
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId]
+    const previousPosts = tenantStore['project-posts']; const previousDocuments = tenantStore['company-documents']
+    writeProjectData(request.auth.tenantId, 'project-posts', posts.map((item, itemIndex) => itemIndex === index ? next : item), request.auth.id)
+    grantDocumentAccess(request.auth.tenantId, attachments.map((item) => item.id), projectMemberIds(project))
+    try { await commitWorkspaceStore() } catch { if (previousPosts) tenantStore['project-posts'] = previousPosts; if (previousDocuments) tenantStore['company-documents'] = previousDocuments; response.status(500).json({ error: { code: 'COMMENT_WRITE_FAILED', message: '댓글을 저장하지 못했습니다.' } }); return }
+    response.status(201).json({ comment, post: next })
+  })
+  app.delete('/api/projects/:id/posts/:postId/comments/:commentId', ...projectGuards, async (request, response) => {
+    if (!requireTenant(request, response)) return
+    const project = projectSpacesOf(request.auth.tenantId).find((item) => item?.id === request.params.id)
+    const role = projectRoleOf(project, request.auth)
+    if (!project || !role) { response.status(404).json({ error: { code: 'PROJECT_NOT_FOUND', message: '프로젝트를 찾을 수 없거나 참여 권한이 없습니다.' } }); return }
+    const posts = projectPostsOf(request.auth.tenantId)
+    const index = posts.findIndex((post) => post.id === request.params.postId && post.projectId === project.id)
+    if (index < 0) { response.status(404).json({ error: { code: 'POST_NOT_FOUND', message: '게시글을 찾을 수 없습니다.' } }); return }
+    const comment = (posts[index].comments ?? []).find((item) => item.id === request.params.commentId)
+    if (!comment) { response.status(404).json({ error: { code: 'COMMENT_NOT_FOUND', message: '댓글을 찾을 수 없습니다.' } }); return }
+    if (comment.authorId !== request.auth.id && role !== 'owner') { response.status(403).json({ error: { code: 'COMMENT_DELETE_FORBIDDEN', message: '본인 댓글 또는 소유자만 삭제할 수 있습니다.' } }); return }
+    const next = { ...posts[index], comments: posts[index].comments.filter((item) => item.id !== comment.id) }
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId]
+    const previousPosts = tenantStore['project-posts']
+    writeProjectData(request.auth.tenantId, 'project-posts', posts.map((item, itemIndex) => itemIndex === index ? next : item), request.auth.id)
+    try { await commitWorkspaceStore() } catch { if (previousPosts) tenantStore['project-posts'] = previousPosts; response.status(500).json({ error: { code: 'COMMENT_WRITE_FAILED', message: '댓글을 삭제하지 못했습니다.' } }); return }
+    response.json({ post: next })
+  })
+
   app.put('/api/daily-journals/:id/draft', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     if (!request.auth.tenantId) {
       response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 업무일지를 저장할 수 있습니다.' } })
@@ -4172,9 +4692,16 @@ export function createApp(options = {}) {
       feedback: latestPrevious?.feedback || '',
       reviews: Array.isArray(latestPrevious?.reviews) ? latestPrevious.reviews : [],
     }, now)
+    if (Array.isArray(latestPrevious?.comments) && latestPrevious.comments.length) next.comments = latestPrevious.comments
+    else delete next.comments
     const nextData = latestIndex >= 0
       ? latestData.map((journal, journalIndex) => journalIndex === latestIndex ? next : journal)
       : [next, ...latestData]
+    const duplicateDay = findDuplicateJournalDay(nextData, request.auth.tenantId, accounts, latestData)
+    if (duplicateDay) {
+      response.status(409).json({ error: { code: 'JOURNAL_DUPLICATE_DAY', message: `${duplicateDay[1].date} 업무일지가 이미 있습니다. 기존 일지를 열어 이어서 작성해 주세요.`, journalId: duplicateDay[0]?.id ?? null } })
+      return
+    }
     const record = { data: nextData, updatedAt: now, updatedBy: request.auth.id }
     tenantStore['daily-journals'] = record
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
@@ -4596,6 +5123,10 @@ export function createApp(options = {}) {
       response.status(404).json({ error: { code: 'STORE_KEY_NOT_FOUND', message: '지원하지 않는 저장 영역입니다.' } })
       return
     }
+    if (PROJECT_KEYS.has(key)) {
+      response.status(403).json({ error: { code: 'PROJECT_ROUTE_REQUIRED', message: '프로젝트 공간은 /api/projects 로만 조회합니다.' } })
+      return
+    }
     if (!request.auth.tenantId) {
       response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } })
       return
@@ -4770,6 +5301,20 @@ export function createApp(options = {}) {
       nextData = mergeMemberJournals(previousData, nextData, request.auth, accounts)
       if (!nextData) {
         response.status(403).json({ error: { code: 'JOURNAL_WRITE_FORBIDDEN', message: '본인 업무일지의 초안 작성과 결재 요청만 할 수 있습니다.' } })
+        return
+      }
+    }
+    if (key === 'daily-journals' && Array.isArray(nextData)) {
+      const previousData = Array.isArray(tenantStore[key]?.data) ? tenantStore[key].data : []
+      const previousById = new Map(previousData.map((journal) => [journal?.id, journal]))
+      nextData = nextData.map((journal) => {
+        const previous = previousById.get(journal?.id)
+        const comments = Array.isArray(previous?.comments) ? previous.comments : []
+        return comments.length ? { ...journal, comments } : (() => { const { comments: _comments, ...rest } = journal; return rest })()
+      })
+      const duplicate = findDuplicateJournalDay(nextData, request.auth.tenantId, accounts, previousData)
+      if (duplicate) {
+        response.status(409).json({ error: { code: 'JOURNAL_DUPLICATE_DAY', message: `${duplicate[1].author}님의 ${duplicate[1].date} 업무일지가 이미 있습니다. 같은 날짜의 일지는 한 사람당 하나만 작성할 수 있으니 기존 일지를 열어 이어서 작성해 주세요.`, journalId: duplicate[0]?.id ?? null } })
         return
       }
     }

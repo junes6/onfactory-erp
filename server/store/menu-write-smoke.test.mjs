@@ -230,7 +230,7 @@ test('journal draft deletion is owner-only and never removes submitted approval 
     await withRuntimeApp(storeFile, path.join(directory, 'documents'), async (origin) => {
       const adminCookie = await login(origin)
       const submitted = { ...journal, id: 'RBAC-SUBMITTED', title: '제출 일지', status: '결재요청', completed: '제출 완료 업무' }
-      const adminDraft = { ...journal, id: 'RBAC-ADMIN-DRAFT', title: '관리자 초안' }
+      const adminDraft = { ...journal, id: 'RBAC-ADMIN-DRAFT', title: '관리자 초안', date: '2026-08-22' }
       const initial = await fetch(`${origin}/api/workspace/daily-journals`, {
         method: 'PUT', headers: authHeaders(adminCookie), body: JSON.stringify({ data: [adminDraft, submitted] }),
       })
