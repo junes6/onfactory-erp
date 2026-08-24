@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-async function loadWorkerFactory() {
+async function loadWorkerModule() {
   const sourcePath = new URL('./index.mjs', import.meta.url)
   let source = readFileSync(sourcePath, 'utf8')
   source = source
@@ -16,11 +16,14 @@ async function loadWorkerFactory() {
     .replace(/import \{ createD1BillingRepository \} from '[^']+'/, "const createD1BillingRepository = (database) => { if (!database) throw new Error('D1 binding required'); return {} }")
     .replace(/import \{ createBillingService \} from '[^']+'/, 'const createBillingService = () => ({ reconcilePendingUsageBatch: async () => {}, recordDailyStorageSnapshot: async () => {}, createMonthlySnapshot: async () => {} })')
     .replace(/import \{ performanceMaintenanceErrors, runPerformanceMonthlyMaintenance \} from '[^']+'/, 'const performanceMaintenanceErrors = (results) => (results ?? []).filter((result) => result?.error).map((result) => result.error); const runPerformanceMonthlyMaintenance = async () => []')
+    .replace(/import \{ createLocalStorage \} from '[^']+'/, 'const createLocalStorage = () => { const values = new Map(); return { backend: "local", put: async (key, body) => { values.set(key, Buffer.from(body)); return {} }, get: async (key) => { if (values.has(key)) return values.get(key); const error = new Error("missing"); error.code = "STORAGE_NOT_FOUND"; throw error }, delete: async (key) => values.delete(key), getSignedUrl: async () => null } }')
   assert.equal(source.includes("from 'cloudflare:workers'"), false)
   assert.equal(source.includes("from '../server/app.mjs'"), false)
   const url = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
-  return (await import(url)).createSitesWorker
+  return import(url)
 }
+
+async function loadWorkerFactory() { return (await loadWorkerModule()).createSitesWorker }
 
 class FakeStatement {
   constructor(database, sql) {
@@ -294,6 +297,30 @@ test('module entrypoint defers binding access and uses request-time Cloudflare e
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true })
   }
+})
+
+test('Sites document storage reads through R2 once while put and delete stay local for CAS staging', async () => {
+  const { createSitesDocumentStorage } = await loadWorkerModule()
+  const calls = { get: [], put: 0, delete: 0 }
+  const runtimeEnv = {
+    FILES: {
+      async get(key) {
+        calls.get.push(key)
+        if (key !== 'documents/TENANT-READ/DOC-READ.bin') return null
+        return { arrayBuffer: async () => Buffer.from('r2 original'), httpMetadata: { contentType: 'text/plain' } }
+      },
+      async put() { calls.put += 1 },
+      async delete() { calls.delete += 1 },
+    },
+  }
+  const storage = createSitesDocumentStorage(runtimeEnv, '/tmp/test-read-through')
+  assert.equal((await storage.get('TENANT-READ/DOC-READ.bin')).toString(), 'r2 original')
+  assert.equal((await storage.get('TENANT-READ/DOC-READ.bin')).toString(), 'r2 original')
+  assert.deepEqual(calls.get, ['documents/TENANT-READ/DOC-READ.bin'])
+  await storage.put('TENANT-READ/DOC-LOCAL.bin', Buffer.from('local staged'))
+  await storage.delete('TENANT-READ/DOC-LOCAL.bin')
+  assert.equal(calls.put, 0)
+  assert.equal(calls.delete, 0)
 })
 
 test('Sites Worker seeds current state once and preserves it across worker instances', async () => {

@@ -10,6 +10,7 @@ import { createApp as createExpressApp } from '../server/app.mjs'
 import { createD1BillingRepository } from '../server/billing-repository.mjs'
 import { createBillingService } from '../server/billing-service.mjs'
 import { performanceMaintenanceErrors, runPerformanceMonthlyMaintenance } from '../server/performance-maintenance.mjs'
+import { createLocalStorage } from '../server/storage/local.mjs'
 
 const STATE_ID = 'onfactory'
 const REQUEST_LOCK_ID = 'onfactory-api'
@@ -295,6 +296,37 @@ function documentFilePath(documentDirectory, tenantId, id) {
   return path.join(documentDirectory, tenantId, `${id}.bin`)
 }
 
+function r2KeyForLocalStorageKey(value) {
+  const key = String(value ?? '').replaceAll('\\', '/').replace(/^\/+/, '')
+  return key.startsWith('_platform/') ? `platform/${key.slice('_platform/'.length)}` : `documents/${key}`
+}
+
+/**
+ * Express keeps its existing local-storage transaction behavior, while reads
+ * transparently hydrate a missing /tmp object from R2. This is required for
+ * multi-file reads such as annual tax evidence exports in a fresh isolate.
+ */
+export function createSitesDocumentStorage(runtimeEnv, documentDirectory) {
+  const local = createLocalStorage({ rootDirectory: documentDirectory })
+  return {
+    backend: 'local',
+    put: (key, body, metadata) => local.put(key, body, metadata),
+    delete: (key) => local.delete(key),
+    getSignedUrl: (_key, options = {}) => options.fallbackUrl ?? null,
+    async get(key) {
+      try { return await local.get(key) }
+      catch (error) {
+        if (error?.code !== 'STORAGE_NOT_FOUND') throw error
+        const object = await runtimeEnv.FILES.get(r2KeyForLocalStorageKey(key))
+        if (!object) throw error
+        const bytes = Buffer.from(await object.arrayBuffer())
+        await local.put(key, bytes, { contentType: object.httpMetadata?.contentType })
+        return bytes
+      }
+    },
+  }
+}
+
 async function hydrateDocument(runtimeEnv, workspaceStore, documentDirectory, id) {
   const found = findDocument(workspaceStore, id)
   if (!found) return
@@ -495,6 +527,7 @@ export function createSitesWorker(dependencies = {}) {
           sessions,
           distDirectory: '/tmp/onfactory-static',
           documentUploadDirectory: documentDirectory,
+          documentStorage: createSitesDocumentStorage(runtimeEnv, documentDirectory),
           apiKey: runtimeEnv.ANTHROPIC_API_KEY,
           model: runtimeEnv.CLAUDE_MODEL,
           seedPassword,

@@ -12,7 +12,7 @@
     "preview": "vite preview",
     "preview:sites": "vite preview --config vite.sites.config.ts",
     "start": "node server/index.mjs",
-    "test:server": "node --experimental-strip-types --test server/*.test.mjs server/store/*.test.mjs scripts/*.test.mjs",
+    "test:server": "node --experimental-strip-types --test server/*.test.mjs server/store/*.test.mjs scripts/*.test.mjs worker/*.test.mjs",
     "test:pg": "node --experimental-strip-types --test server/store/*.test.mjs scripts/migrate-json-to-pg.test.mjs scripts/seed-demo.test.mjs",
     "test:pg:e2e": "node scripts/run-postgres-e2e.mjs",
     "db:start": "supabase start",

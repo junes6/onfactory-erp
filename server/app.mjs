@@ -39,6 +39,7 @@ import {
   tenantDocumentSignedUrl,
 } from './document-storage-service.mjs'
 import { createStorage } from './storage/index.mjs'
+import { buildTaxEvidenceArchive, TaxEvidenceExportError } from './tax-evidence-export.mjs'
 import {
   DEFAULT_LOCAL_DEMO_PASSWORD,
   DEMO_ACCOUNT_DEFINITIONS,
@@ -2079,6 +2080,35 @@ export function createApp(options = {}) {
       const status = error instanceof DocumentStorageError ? error.status : 500
       const code = error instanceof DocumentStorageError ? error.code : 'DOCUMENT_DOWNLOAD_FAILED'
       response.status(status).json({ error: { code, message: status === 410 ? '파일 원본을 찾을 수 없습니다. 관리자에게 복구를 요청해 주세요.' : '자료를 다운로드하지 못했습니다.' } })
+    }
+  })
+
+  app.get('/api/tax/evidence-export', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
+    if (!request.auth.tenantId || !documentStorage) {
+      response.status(503).json({ error: { code: 'DOCUMENT_STORAGE_UNAVAILABLE', message: '파일 저장소가 설정되지 않았습니다.' } })
+      return
+    }
+    const year = Number(request.query.year)
+    const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : []
+    try {
+      const result = await buildTaxEvidenceArchive({
+        year,
+        documents,
+        getDocument: (document) => getTenantDocument(documentStorage, document, request.auth.tenantId),
+      })
+      response.setHeader('content-type', 'application/zip')
+      response.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`${year}_세무사_전달자료.zip`)}`)
+      response.setHeader('cache-control', 'private, no-store')
+      response.setHeader('x-content-type-options', 'nosniff')
+      response.setHeader('x-tax-evidence-files', String(result.fileCount))
+      response.setHeader('x-tax-evidence-bytes', String(result.totalBytes))
+      response.send(result.archive)
+    } catch (error) {
+      if (error instanceof TaxEvidenceExportError) {
+        response.status(error.status).json({ error: { code: error.code, message: error.message } })
+        return
+      }
+      response.status(500).json({ error: { code: 'TAX_EVIDENCE_EXPORT_FAILED', message: '세무사 전달 묶음을 만들지 못했습니다.' } })
     }
   })
 

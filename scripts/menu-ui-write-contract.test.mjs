@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const read = (relativePath) => readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
-const [app, collaboration, dashboard, business, factory, people, library, compliance, taxAssets, ipRights, apiSmoke, quickLinkSmoke, workspaceHook, serverApp, packageJsonText] = await Promise.all([
+const [app, collaboration, dashboard, business, factory, people, library, compliance, taxAssets, taxWorkspace, ipRights, apiSmoke, quickLinkSmoke, workspaceHook, serverApp, packageJsonText] = await Promise.all([
   read('src/App.tsx'),
   read('src/components/CollaborationSuite.tsx'),
   read('src/components/DashboardWorkspace.tsx'),
@@ -13,6 +13,7 @@ const [app, collaboration, dashboard, business, factory, people, library, compli
   read('src/components/CompanyLibrary.tsx'),
   read('src/components/ComplianceCenter.tsx'),
   read('src/components/TaxAssets.tsx'),
+  read('src/components/TaxWorkspace.tsx'),
   read('src/components/IpRights.tsx'),
   read('server/store/menu-write-smoke.test.mjs'),
   read('scripts/quick-links-storage.test.mjs'),
@@ -155,18 +156,20 @@ const contracts = [
       [/const removeAsset = async[\s\S]*?current\.filter\(\(item\) => item\.id !== asset\.id\)[\s\S]*?if \(!result\.ok\)/, 'delete and failure handling'],
       [/<form onSubmit=\{submit\}>/, 'create/update form wiring'],
       [/onSave=\{async \(next\) => \{[\s\S]*?setAssets\(\(current\) => current\.some[\s\S]*?: \[next, \.\.\.current\]/, 'create/update list synchronization'],
-      [/onClick=\{\(\) => setEditor\(\{ kind: 'asset' \}\)\}/, 'create button wiring'],
+      [/onClick=\{\(\) => setEditingAsset\('new'\)\}/, 'create button wiring'],
       [/onClick=\{\(\) => void removeAsset\(asset\)\}/, 'delete button wiring'],
     ],
   },
   {
-    screen: '세무·자산 · 세무일정', persistenceId: 'tax-events', source: taxAssets, checks: [
-      [/useWorkspaceState<TaxEvent\[]>\('tax-events'/, 'shared refresh source'],
-      [/const removeTax = async[\s\S]*?current\.filter\(\(item\) => item\.id !== event\.id\)[\s\S]*?if \(!result\.ok\)/, 'delete and failure handling'],
-      [/<form onSubmit=\{submit\}>/, 'create/update form wiring'],
-      [/onSave=\{async \(next\) => \{[\s\S]*?setTaxEvents\(\(current\) => current\.some[\s\S]*?: \[next, \.\.\.current\]/, 'create/update list synchronization'],
-      [/setEditor\(\{ kind: 'tax' \}\)/, 'create button wiring'],
-      [/onClick=\{\(\) => void removeTax\(event\)\}/, 'delete button wiring'],
+    screen: '세무·자산 · 세무일정', persistenceId: 'tax-events', source: taxWorkspace, checks: [
+      [/useWorkspaceState<TaxRecord\[]>\('tax-events'/, 'shared refresh source'],
+      [/buildProvidedTaxSchedule\(profile, year\)/, 'company profile generates the schedule'],
+      [/recordType: 'profile'/, 'profile record persistence'],
+      [/recordType: 'schedule'/, 'provided schedule progress persistence'],
+      [/setRecords\(\(current\) => current\.some[\s\S]*?current\.map[\s\S]*?: \[next, \.\.\.current\]/, 'create/update list synchronization'],
+      [/tags: \['tax-evidence', `tax-year:\$\{year\}`, `tax-bucket:\$\{uploadBucket\}`\]/, 'annual evidence tags'],
+      [/`\/api\/tax\/evidence-export\?year=\$\{year\}`/, 'annual accountant archive download'],
+      [/국세청 원문/, 'official source link'],
     ],
   },
   {
@@ -209,6 +212,13 @@ test('all UI contracts stay paired to the same persistence target exercised by l
   const packageJson = JSON.parse(packageJsonText)
   assert.match(packageJson.scripts['test:server'], /server\/store\/\*\.test\.mjs/)
   assert.match(packageJson.scripts['test:server'], /scripts\/\*\.test\.mjs/)
+})
+
+test('tax workspace provides schedules and evidence instead of asking users to register statutory dates', () => {
+  assert.doesNotMatch(taxAssets, /세무 일정 등록|첫 세무 일정 등록/)
+  assert.match(taxWorkspace, /회사 세무 조건을 한 번 설정/)
+  assert.match(taxWorkspace, /증빙 파일함/)
+  assert.match(taxWorkspace, /세무사 전달 묶음 받기/)
 })
 
 test('dedicated workspace writes synchronize the next generic write version', () => {
