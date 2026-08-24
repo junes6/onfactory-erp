@@ -10,6 +10,8 @@ import {
   isStoredDocumentAttachment,
   uploadDocumentAttachments,
 } from '../utils/documentAttachments'
+import { applyBlankFormValues, canExtractDocumentFile, requestDocumentExtraction } from '../utils/documentExtraction'
+import { DocumentExtractionNotice, type DocumentExtractionState } from './DocumentExtractionNotice'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ComplianceCenter.css'
 
@@ -93,7 +95,7 @@ function useComplianceDialog(onClose: () => void) {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const selector = 'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled])'
     const focusables = () => Array.from(dialog.querySelectorAll<HTMLElement>(selector))
-    window.setTimeout(() => dialog.querySelector<HTMLElement>('[autofocus]')?.focus() ?? focusables()[0]?.focus(), 0)
+    window.setTimeout(() => dialog.querySelector<HTMLElement>('[data-initial-focus]')?.focus() ?? dialog.querySelector<HTMLElement>('[autofocus]')?.focus() ?? focusables()[0]?.focus(), 0)
     const keydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); closeRef.current(); return }
       if (event.key !== 'Tab') return
@@ -108,16 +110,22 @@ function useComplianceDialog(onClose: () => void) {
   return ref
 }
 
-function RecordModal({ record, workspaceScope, onClose, onSave, onToast }: { record?: ComplianceRecord; workspaceScope?: string; onClose: () => void; onSave: (record: ComplianceRecord) => Promise<boolean>; onToast: (message: string) => void }) {
+function RecordModal({ record, workspaceScope, currentUserName, onClose, onSave, onToast }: { record?: ComplianceRecord; workspaceScope?: string; currentUserName: string; onClose: () => void; onSave: (record: ComplianceRecord) => Promise<boolean>; onToast: (message: string) => void }) {
   const fileRef = useRef<HTMLInputElement>(null)
+  const uploadButtonRef = useRef<HTMLButtonElement>(null)
+  const formRef = useRef<HTMLFormElement>(null)
   const [attachments, setAttachments] = useState(record?.attachments ?? [])
   const [busy, setBusy] = useState(false)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [downloadingId, setDownloadingId] = useState('')
+  const [extraction, setExtraction] = useState<DocumentExtractionState>({ status: 'idle' })
   const uploadedIdsRef = useRef(new Set<string>())
   const removedIdsRef = useRef(new Set<string>())
+  const extractionAbortRef = useRef<AbortController | null>(null)
+  const extracting = extraction.status === 'extracting'
 
   const requestClose = async () => {
+    extractionAbortRef.current?.abort()
     if (busy || attachmentBusy) return
     setBusy(true)
     const cleanup = await deleteDocumentAttachments(uploadedIdsRef.current, workspaceScope)
@@ -135,6 +143,27 @@ function RecordModal({ record, workspaceScope, onClose, onSave, onToast }: { rec
     onClose()
   }
   const dialogRef = useComplianceDialog(() => { void requestClose() })
+  useEffect(() => {
+    if (!record) window.setTimeout(() => uploadButtonRef.current?.focus(), 0)
+  }, [record])
+
+  const extract = async (attachment: ComplianceRecord['attachments'][number]) => {
+    if (!isStoredDocumentAttachment(attachment)) return
+    extractionAbortRef.current?.abort()
+    const controller = new AbortController()
+    extractionAbortRef.current = controller
+    setExtraction({ status: 'extracting', sourceId: attachment.id, sourceName: attachment.name })
+    try {
+      const draft = await requestDocumentExtraction(attachment.id, 'compliance', workspaceScope, controller.signal)
+      if (controller.signal.aborted || !formRef.current) return
+      const { confidence, warnings, ...values } = draft
+      const appliedFields = applyBlankFormValues(formRef.current, values)
+      setExtraction({ status: 'ready', sourceId: attachment.id, sourceName: attachment.name, appliedFields, confidence, warnings })
+    } catch (error) {
+      if (controller.signal.aborted) return
+      setExtraction({ status: 'failed', sourceId: attachment.id, sourceName: attachment.name, message: error instanceof Error ? error.message : 'AI가 파일을 읽지 못했습니다.' })
+    }
+  }
 
   const attachFiles = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? [])
@@ -155,6 +184,8 @@ function RecordModal({ record, workspaceScope, onClose, onSave, onToast }: { rec
       for (const attachment of additions) uploadedIdsRef.current.add(attachment.id)
       setAttachments((current) => [...current, ...additions])
       onToast(`${additions.length}개 증빙 원본을 안전하게 업로드했습니다.`)
+      const sourceIndex = files.findIndex(canExtractDocumentFile)
+      if (sourceIndex >= 0 && additions[sourceIndex]) void extract(additions[sourceIndex])
     } catch (error) {
       onToast(error instanceof Error ? error.message : '증빙자료를 업로드하지 못했습니다.')
     } finally {
@@ -164,6 +195,7 @@ function RecordModal({ record, workspaceScope, onClose, onSave, onToast }: { rec
 
   const removeAttachment = async (attachment: ComplianceRecord['attachments'][number]) => {
     if (busy || attachmentBusy) return
+    if (extraction.sourceId === attachment.id) { extractionAbortRef.current?.abort(); setExtraction({ status: 'idle' }) }
     if (isStoredDocumentAttachment(attachment) && uploadedIdsRef.current.has(attachment.id)) {
       setAttachmentBusy(true)
       try {
@@ -196,7 +228,7 @@ function RecordModal({ record, workspaceScope, onClose, onSave, onToast }: { rec
   return <div className="compliance-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) void requestClose() }}>
     <section ref={dialogRef} className="compliance-modal" role="dialog" aria-modal="true" aria-labelledby="compliance-modal-title">
       <header><div><span>COMPLIANCE RECORD</span><h2 id="compliance-modal-title">{record ? '인증·검토사항 수정' : '인증·검토사항 등록'}</h2></div><button type="button" aria-label="닫기" disabled={busy || attachmentBusy} onClick={() => void requestClose()}><X size={20} /></button></header>
-      <form onSubmit={async (event: FormEvent<HTMLFormElement>) => {
+      <form ref={formRef} onSubmit={async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
         if (busy || attachmentBusy) return
         const form = new FormData(event.currentTarget)
@@ -234,26 +266,27 @@ function RecordModal({ record, workspaceScope, onClose, onSave, onToast }: { rec
         if (cleanup.failed.length) onToast(`항목은 저장했지만 제거한 증빙 ${cleanup.failed.length}개의 원본 정리에 실패했습니다.`)
         onClose()
       }}>
+        <section className="compliance-attachments"><input ref={fileRef} className="sr-only" type="file" multiple onChange={(event) => void attachFiles(event)} /><div><strong>인증서 원본부터 올려 주세요</strong><span>PDF·이미지는 AI가 번호·기관·날짜를 읽어 빈 칸에 임시 입력합니다.</span></div><button ref={uploadButtonRef} className="button secondary" type="button" data-initial-focus={!record ? 'true' : undefined} disabled={busy || attachmentBusy} onClick={() => fileRef.current?.click()}><Upload size={17} /> {attachmentBusy ? '처리 중…' : '파일 선택'}</button></section>
+        <div className="compliance-file-list">{attachments.map((file) => <span key={file.id}><FileText size={15} /><span>{file.name} · {file.size}<small>{isStoredDocumentAttachment(file) ? '원본 저장됨' : '이전 파일 정보 · 원본 없음'}</small></span>{isStoredDocumentAttachment(file) && <button type="button" aria-label={`${file.name} 원본 보기`} disabled={Boolean(downloadingId)} onClick={() => void downloadAttachment(file)}><Download size={14} /></button>}<button type="button" aria-label={`${file.name} 제거`} disabled={busy || attachmentBusy} onClick={() => void removeAttachment(file)}><X size={14} /></button></span>)}</div>
+        <DocumentExtractionNotice state={extraction} disabled={busy || attachmentBusy} onRetry={extraction.sourceId ? () => { const source = attachments.find((attachment) => attachment.id === extraction.sourceId); if (source) void extract(source) } : undefined} />
         <div className="compliance-form-grid">
-          <label><span>관리 분류</span><select name="category" defaultValue={record?.category ?? 'HACCP'}><option>HACCP</option><option>품목제조보고</option><option>자가품질검사</option><option>식품표시 검토</option><option>위생교육</option><option>검교정</option><option>ISO 22000</option><option>FSSC 22000</option><option>기타 인증</option></select></label>
-          <label><span>담당자</span><input name="owner" defaultValue={record?.owner} required /></label>
+          <label><span>관리 분류</span><select name="category" defaultValue={record?.category ?? ''} required><option value="" disabled>분류 선택</option><option>HACCP</option><option>품목제조보고</option><option>자가품질검사</option><option>식품표시 검토</option><option>위생교육</option><option>검교정</option><option>ISO 22000</option><option>FSSC 22000</option><option>기타 인증</option></select></label>
+          <label><span>담당자</span><input name="owner" defaultValue={record?.owner ?? currentUserName} required /></label>
           <label className="full"><span>인증·검토 명칭</span><input name="name" defaultValue={record?.name} required autoFocus /></label>
           <label><span>발급·검토 기관</span><input name="authority" defaultValue={record?.authority} required /></label>
           <label><span>인증·보고 번호</span><input name="certificateNo" defaultValue={record?.certificateNo} placeholder="없으면 내부 관리번호" required /></label>
-          <label><span>발급·확인일</span><input name="issuedAt" type="date" defaultValue={record?.issuedAt ?? new Date().toISOString().slice(0, 10)} required /></label>
+          <label><span>발급·확인일</span><input name="issuedAt" type="date" defaultValue={record?.issuedAt ?? ''} required /></label>
           <label><span>유효·다음 검토일</span><input name="expiresAt" type="date" defaultValue={record?.expiresAt} required /></label>
           <label className="full"><span>필수 확인 항목 · 한 줄에 하나</span><textarea name="checklist" rows={4} defaultValue={record?.checklist.join('\n')} placeholder={'예: 인증서 원본 확인\n갱신 신청 일정 등록'} /></label>
           <label className="full"><span>메모</span><textarea name="note" rows={3} defaultValue={record?.note} /></label>
         </div>
-        <section className="compliance-attachments"><input ref={fileRef} className="sr-only" type="file" multiple onChange={(event) => void attachFiles(event)} /><div><strong>증빙자료</strong><span>인증서·성적서·교육 수료증 원본을 권한이 제한된 기업 자료로 저장합니다.</span></div><button className="button secondary" type="button" disabled={busy || attachmentBusy} onClick={() => fileRef.current?.click()}><Upload size={17} /> {attachmentBusy ? '처리 중…' : '파일 선택'}</button></section>
-        <div className="compliance-file-list">{attachments.map((file) => <span key={file.id}><FileText size={15} /><span>{file.name} · {file.size}<small>{isStoredDocumentAttachment(file) ? '원본 저장됨' : '이전 파일 정보 · 원본 없음'}</small></span>{isStoredDocumentAttachment(file) && <button type="button" aria-label={`${file.name} 다운로드`} disabled={Boolean(downloadingId)} onClick={() => void downloadAttachment(file)}><Download size={14} /></button>}<button type="button" aria-label={`${file.name} 제거`} disabled={busy || attachmentBusy} onClick={() => void removeAttachment(file)}><X size={14} /></button></span>)}</div>
-        <footer><button className="button ghost" type="button" disabled={busy || attachmentBusy} onClick={() => void requestClose()}>취소</button><button className="button primary" type="submit" disabled={busy || attachmentBusy}><FileCheck2 size={18} /> {busy ? '저장 중…' : '변경사항 저장'}</button></footer>
+        <footer><button className="button ghost" type="button" disabled={busy || attachmentBusy} onClick={() => void requestClose()}>취소</button><button className="button primary" type="submit" disabled={busy || attachmentBusy || extracting}><FileCheck2 size={18} /> {busy ? '저장 중…' : extracting ? 'AI 읽는 중…' : '확인 후 저장'}</button></footer>
       </form>
     </section>
   </div>
 }
 
-export function ComplianceCenter({ workspaceScope, canManage, companyName, onToast }: { workspaceScope?: string; canManage: boolean; companyName: string; onToast: (message: string) => void }) {
+export function ComplianceCenter({ workspaceScope, canManage, currentUserName, companyName, onToast }: { workspaceScope?: string; canManage: boolean; currentUserName: string; companyName: string; onToast: (message: string) => void }) {
   const [records, setRecords] = useWorkspaceState<ComplianceRecord[]>('compliance-records', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isRecordArray })
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('전체')
@@ -379,6 +412,6 @@ export function ComplianceCenter({ workspaceScope, canManage, companyName, onToa
         })() : <div className="compliance-detail-empty"><FileCheck2 size={30} /><h2>항목을 선택하세요</h2><p>왼쪽 목록에서 인증·검토 항목을 선택하면 상세 정보와 증빙을 확인할 수 있습니다.</p></div>}
       </aside>
     </section>
-    {editing && <RecordModal record={editing === 'new' ? undefined : editing} workspaceScope={workspaceScope} onClose={() => setEditing(null)} onSave={save} onToast={onToast} />}
+    {editing && <RecordModal record={editing === 'new' ? undefined : editing} workspaceScope={workspaceScope} currentUserName={currentUserName} onClose={() => setEditing(null)} onSave={save} onToast={onToast} />}
   </div>
 }

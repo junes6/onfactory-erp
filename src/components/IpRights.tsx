@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Award, BadgeCheck, Check, Copyright, Download, FileBadge, Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { formatDateLabel, seoulDateInputValue } from '../utils/dateTime'
@@ -9,6 +9,8 @@ import {
   uploadDocumentAttachments,
   type StoredDocumentAttachment,
 } from '../utils/documentAttachments'
+import { applyBlankFormValues, canExtractDocumentFile, requestDocumentExtraction } from '../utils/documentExtraction'
+import { DocumentExtractionNotice, type DocumentExtractionState } from './DocumentExtractionNotice'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './IpRights.css'
 
@@ -21,6 +23,7 @@ type IpRight = {
   title: string
   number: string
   holder: string
+  issuer?: string
   filedAt: string
   registeredAt: string
   expiresAt: string
@@ -34,6 +37,41 @@ type IpRight = {
 const IP_KINDS: IpKind[] = ['특허', '실용신안', '상표', '디자인', '저작권', '인증서', '등록증', '기타']
 const IP_STATUSES: IpStatus[] = ['준비', '출원', '심사 중', '등록', '갱신 필요', '만료']
 const isIpRights = (value: unknown): value is IpRight[] => Array.isArray(value) && value.every((item) => item && typeof item.id === 'string' && typeof item.title === 'string' && Array.isArray(item.attachments))
+
+function useIpDialog(onClose: () => void, locked: boolean, initialFocus?: () => HTMLElement | null) {
+  const ref = useRef<HTMLElement>(null)
+  const closeRef = useRef(onClose)
+  const lockedRef = useRef(locked)
+  const initialFocusRef = useRef(initialFocus)
+  closeRef.current = onClose
+  lockedRef.current = locked
+  initialFocusRef.current = initialFocus
+  useEffect(() => {
+    const dialog = ref.current
+    if (!dialog) return
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const selector = 'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled])'
+    const focusables = () => Array.from(dialog.querySelectorAll<HTMLElement>(selector))
+    const focusTimer = window.setTimeout(() => initialFocusRef.current?.()?.focus() ?? dialog.querySelector<HTMLElement>('[data-initial-focus]')?.focus() ?? focusables()[0]?.focus(), 0)
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        if (!lockedRef.current) closeRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const controls = focusables()
+      if (!controls.length) return
+      const first = controls[0]
+      const last = controls.at(-1)!
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    dialog.addEventListener('keydown', keydown)
+    return () => { window.clearTimeout(focusTimer); dialog.removeEventListener('keydown', keydown); previous?.focus() }
+  }, [])
+  return ref
+}
 
 function ipTone(status: IpStatus): StatusBadgeTone {
   return status === '등록' ? 'success' : status === '심사 중' || status === '출원' ? 'info' : status === '갱신 필요' ? 'warning' : status === '만료' ? 'danger' : 'neutral'
@@ -87,7 +125,7 @@ export function IpRightsPage({ workspaceScope, canManage, currentUserName, onToa
         : <div className="it-rows" role="list">{visible.map((right) => { const due = dday(right.expiresAt); const Icon = kindIcon(right.kind); return <article className="it-row" role="listitem" key={right.id}>
           <span className="ip-kind-mark"><Icon size={17} /></span>
           <StatusBadge className="status-pill" dot tone={ipTone(right.status)}>{right.status}</StatusBadge>
-          <div className="it-row-main"><strong>{right.title}</strong><small>{right.kind}{right.number ? ` · ${right.number}` : ''}{right.holder ? ` · 권리자 ${right.holder}` : ''}{right.registeredAt ? ` · 등록 ${formatDateLabel(right.registeredAt)}` : right.filedAt ? ` · 출원 ${formatDateLabel(right.filedAt)}` : ''}</small></div>
+          <div className="it-row-main"><strong>{right.title}</strong><small>{right.kind}{right.number ? ` · ${right.number}` : ''}{right.holder ? ` · 권리자 ${right.holder}` : ''}{right.issuer ? ` · ${right.issuer}` : ''}{right.registeredAt ? ` · 등록 ${formatDateLabel(right.registeredAt)}` : right.filedAt ? ` · 출원 ${formatDateLabel(right.filedAt)}` : ''}</small></div>
           {due && right.status !== '만료' && <span className={`it-row-meta${due.urgent ? ' is-urgent' : ''}`}>{due.label}</span>}
           <div className="it-row-files">{right.attachments.length === 0 ? <span className="it-row-meta">파일 없음</span> : right.attachments.map((file) => <button type="button" key={file.id} onClick={() => void download(file)}><Download size={13} /> {file.name}</button>)}</div>
           {canManage && <div className="it-row-actions"><button type="button" aria-label={`${right.title} 수정`} onClick={() => setEditor({ item: right })}><Pencil size={15} /></button><button type="button" aria-label={`${right.title} 삭제`} onClick={() => void remove(right)}><Trash2 size={15} /></button></div>}
@@ -105,15 +143,77 @@ export function IpRightsPage({ workspaceScope, canManage, currentUserName, onToa
 function IpEditor({ item, workspaceScope, currentUserName, onToast, onClose, onSave }: { item?: IpRight; workspaceScope?: string; currentUserName: string; onToast: (message: string) => void; onClose: () => void; onSave: (next: IpRight) => Promise<boolean> }) {
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [closing, setClosing] = useState(false)
   const [attachments, setAttachments] = useState<StoredDocumentAttachment[]>(item?.attachments ?? [])
+  const [extraction, setExtraction] = useState<DocumentExtractionState>({ status: 'idle' })
   const fileRef = useRef<HTMLInputElement>(null)
+  const formRef = useRef<HTMLFormElement>(null)
   const uploadedRef = useRef(new Set<string>())
+  const removedRef = useRef(new Set<string>())
+  const extractionAbortRef = useRef<AbortController | null>(null)
+  const closingRef = useRef(false)
+  const uploadButtonRef = useRef<HTMLButtonElement>(null)
+  const titleInputRef = useRef<HTMLInputElement>(null)
+  const extracting = extraction.status === 'extracting'
+  const locked = busy || uploading || closing
+
+  const extract = async (attachment: StoredDocumentAttachment) => {
+    extractionAbortRef.current?.abort()
+    const controller = new AbortController()
+    extractionAbortRef.current = controller
+    setExtraction({ status: 'extracting', sourceId: attachment.id, sourceName: attachment.name })
+    try {
+      const draft = await requestDocumentExtraction(attachment.id, 'ip-right', workspaceScope, controller.signal)
+      if (controller.signal.aborted || !formRef.current) return
+      const { confidence, warnings, ...values } = draft
+      const appliedFields = applyBlankFormValues(formRef.current, values)
+      setExtraction({ status: 'ready', sourceId: attachment.id, sourceName: attachment.name, appliedFields, confidence, warnings })
+    } catch (error) {
+      if (controller.signal.aborted) return
+      setExtraction({ status: 'failed', sourceId: attachment.id, sourceName: attachment.name, message: error instanceof Error ? error.message : 'AI가 파일을 읽지 못했습니다.' })
+    }
+  }
+
   const cancel = async () => {
-    if (uploadedRef.current.size) await deleteDocumentAttachments([...uploadedRef.current], workspaceScope)
+    if (busy || uploading || closingRef.current) return
+    closingRef.current = true
+    setClosing(true)
+    extractionAbortRef.current?.abort()
+    if (uploadedRef.current.size) {
+      const cleanup = await deleteDocumentAttachments([...uploadedRef.current], workspaceScope)
+      for (const id of cleanup.deleted) uploadedRef.current.delete(id)
+      if (cleanup.deleted.length) {
+        const deleted = new Set(cleanup.deleted)
+        setAttachments((current) => current.filter((attachment) => !deleted.has(attachment.id)))
+      }
+      if (cleanup.failed.length) {
+        closingRef.current = false
+        setClosing(false)
+        onToast(`저장하지 않은 원본 ${cleanup.failed.length}개를 정리하지 못했습니다. 실패한 파일만 다시 정리해 주세요.`)
+        return
+      }
+    }
     onClose()
+  }
+  const removeAttachment = async (attachment: StoredDocumentAttachment) => {
+    if (locked) return
+    if (extraction.sourceId === attachment.id) { extractionAbortRef.current?.abort(); setExtraction({ status: 'idle' }) }
+    if (isStoredDocumentAttachment(attachment) && uploadedRef.current.has(attachment.id)) {
+      setUploading(true)
+      const cleanup = await deleteDocumentAttachments([attachment.id], workspaceScope)
+      if (cleanup.failed.length) { onToast(cleanup.failed[0].message); setUploading(false); return }
+      uploadedRef.current.delete(attachment.id)
+      setUploading(false)
+    } else if (isStoredDocumentAttachment(attachment)) removedRef.current.add(attachment.id)
+    setAttachments((current) => current.filter((entry) => entry.id !== attachment.id))
+  }
+  const download = async (attachment: StoredDocumentAttachment) => {
+    try { await downloadDocumentAttachment(attachment, workspaceScope) }
+    catch (error) { onToast(error instanceof Error ? error.message : '원본 파일을 내려받지 못했습니다.') }
   }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (locked || extracting) return
     const data = new FormData(event.currentTarget)
     const field = (name: string) => String(data.get(name) ?? '').trim()
     if (!field('title')) return
@@ -123,6 +223,7 @@ function IpEditor({ item, workspaceScope, currentUserName, onToast, onClose, onS
       title: field('title'),
       number: field('number'),
       holder: field('holder'),
+      issuer: field('issuer'),
       filedAt: field('filedAt'),
       registeredAt: field('registeredAt'),
       expiresAt: field('expiresAt'),
@@ -133,34 +234,58 @@ function IpEditor({ item, workspaceScope, currentUserName, onToast, onClose, onS
       updatedAt: new Date().toISOString(),
     }
     setBusy(true)
-    if (await onSave(next)) { uploadedRef.current.clear(); onClose() } else setBusy(false)
+    if (await onSave(next)) {
+      uploadedRef.current.clear()
+      const cleanup = await deleteDocumentAttachments(removedRef.current, workspaceScope)
+      removedRef.current.clear()
+      if (cleanup.failed.length) onToast(`항목은 저장했지만 제외한 원본 ${cleanup.failed.length}개를 정리하지 못했습니다.`)
+      onClose()
+      return
+    }
+    const rollback = await deleteDocumentAttachments(uploadedRef.current, workspaceScope)
+    for (const id of rollback.deleted) uploadedRef.current.delete(id)
+    if (rollback.deleted.length) {
+      const deleted = new Set(rollback.deleted)
+      setAttachments((current) => current.filter((attachment) => !deleted.has(attachment.id)))
+    }
+    if (rollback.failed.length) onToast(`저장 실패 후 새 원본 ${rollback.failed.length}개를 정리하지 못했습니다.`)
+    setBusy(false)
   }
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && void cancel()}>
-    <section className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="ip-editor-title">
-      <header><div><span className="eyebrow">IP RIGHT</span><h2 id="ip-editor-title">{item ? '권리 · 인증 수정' : '권리 · 인증 등록'}</h2><p>명칭만 있으면 등록됩니다. 등록증·인증서 원본 파일을 함께 올려 두세요.</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={() => void cancel()}><X size={21} /></button></header>
-      <form onSubmit={submit}>
-        <div className="form-grid"><label className="form-field"><span>명칭 <em className="field-required">필수</em></span><input name="title" autoFocus defaultValue={item?.title ?? ''} required placeholder="예: 3D 시뮬레이션 렌더링 방법 특허" /></label><label className="form-field"><span>유형</span><select name="kind" defaultValue={item?.kind ?? '특허'}>{IP_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select></label></div>
-        <div className="form-grid"><label className="form-field"><span>출원 · 등록번호</span><input name="number" defaultValue={item?.number ?? ''} placeholder="예: 10-2026-0012345" /></label><label className="form-field"><span>권리자</span><input name="holder" defaultValue={item?.holder ?? ''} placeholder="예: 주식회사 3D뮤즈" /></label></div>
-        <div className="form-grid"><label className="form-field"><span>출원일</span><input name="filedAt" type="date" defaultValue={item?.filedAt ?? ''} /></label><label className="form-field"><span>등록일</span><input name="registeredAt" type="date" defaultValue={item?.registeredAt ?? ''} /></label></div>
-        <div className="form-grid"><label className="form-field"><span>만료 · 갱신일</span><input name="expiresAt" type="date" defaultValue={item?.expiresAt ?? ''} /></label><label className="form-field"><span>상태</span><select name="status" defaultValue={item?.status ?? '등록'}>{IP_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label></div>
-        <label className="form-field full"><span>담당자</span><input name="owner" defaultValue={item?.owner ?? currentUserName} /></label>
-        <label className="form-field full"><span>메모</span><textarea name="note" rows={2} defaultValue={item?.note ?? ''} placeholder="연차료 납부·갱신 절차 등" /></label>
-        <section className="it-upload"><div><strong>등록증 · 인증서 파일 <small>선택</small></strong></div>
-          <input ref={fileRef} className="sr-only" type="file" multiple onChange={async (event) => {
+  const dialogRef = useIpDialog(() => { void cancel() }, locked, () => item ? titleInputRef.current : uploadButtonRef.current)
+  useEffect(() => {
+    const focusTimer = window.setTimeout(() => (item ? titleInputRef.current : uploadButtonRef.current)?.focus(), 0)
+    return () => window.clearTimeout(focusTimer)
+  }, [item])
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (!locked && event.target === event.currentTarget) void cancel() }}>
+    <section ref={dialogRef} className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="ip-editor-title" aria-busy={locked}>
+      <header><div><span className="eyebrow">IP RIGHT</span><h2 id="ip-editor-title">{item ? '권리 · 인증 수정' : '권리 · 인증 등록'}</h2><p>명칭만 있으면 등록됩니다. 등록증·인증서 원본 파일을 함께 올려 두세요.</p></div><button className="icon-button" type="button" aria-label="닫기" disabled={locked} onClick={() => void cancel()}><X size={21} /></button></header>
+      <form ref={formRef} onSubmit={submit}>
+        <section className="it-upload"><div><strong>등록증 · 인증서 파일 <small>PDF·이미지는 AI 자동 입력</small></strong></div>
+          <input ref={fileRef} className="sr-only" type="file" multiple accept="application/pdf,image/jpeg,image/png,image/gif,image/webp" onChange={async (event) => {
             const files = Array.from(event.target.files ?? []); event.target.value = ''
             if (!files.length) return
             setUploading(true)
             try {
-              const added = await uploadDocumentAttachments(files, { workspaceScope, category: '지식재산', summary: '지식재산·인증 문서', tags: ['지식재산'] })
+              const added = await uploadDocumentAttachments(files, { workspaceScope, category: '지식재산·인증', summary: '지식재산·인증 문서', tags: ['지식재산', 'AI-판독대상'] })
               for (const file of added) uploadedRef.current.add(file.id)
               setAttachments((current) => [...current, ...added])
+              const sourceIndex = files.findIndex(canExtractDocumentFile)
+              if (sourceIndex >= 0 && added[sourceIndex]) void extract(added[sourceIndex])
             } catch (error) { onToast(error instanceof Error ? error.message : '파일을 업로드하지 못했습니다.') }
             finally { setUploading(false) }
           }} />
-          <button className="button secondary" type="button" disabled={uploading || busy} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '파일 추가'}</button>
+          <button ref={uploadButtonRef} className="button secondary" type="button" data-initial-focus={!item ? 'true' : undefined} disabled={locked} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '파일 추가'}</button>
         </section>
-        {attachments.length > 0 && <div className="it-file-list">{attachments.map((file) => <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}<button type="button" aria-label={`${file.name} 제외`} onClick={() => setAttachments((current) => current.filter((entry) => entry.id !== file.id))}><X size={13} /></button></span>)}</div>}
-        <footer><button type="button" className="button ghost" disabled={busy || uploading} onClick={() => void cancel()}>취소</button><button type="submit" className="button primary" disabled={busy || uploading}><Check size={18} /> {busy ? '저장 중…' : '저장'}</button></footer>
+        {attachments.length > 0 && <div className="it-file-list">{attachments.map((file) => <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}<button type="button" aria-label={`${file.name} 원본 보기`} disabled={locked} onClick={() => void download(file)}><Download size={13} /></button><button type="button" aria-label={`${file.name} 제외`} disabled={locked} onClick={() => void removeAttachment(file)}><X size={13} /></button></span>)}</div>}
+        <DocumentExtractionNotice state={extraction} disabled={locked} onRetry={extraction.sourceId ? () => { const source = attachments.find((attachment) => attachment.id === extraction.sourceId); if (source) void extract(source) } : undefined} />
+        <div className="form-grid"><label className="form-field"><span>명칭 <em className="field-required">필수</em></span><input ref={titleInputRef} name="title" data-initial-focus={item ? 'true' : undefined} defaultValue={item?.title ?? ''} required placeholder="예: 3D 시뮬레이션 렌더링 방법 특허" /></label><label className="form-field"><span>유형</span><select name="kind" defaultValue={item?.kind ?? ''} required><option value="" disabled>유형 선택</option>{IP_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select></label></div>
+        <div className="form-grid"><label className="form-field"><span>출원 · 등록번호</span><input name="number" defaultValue={item?.number ?? ''} placeholder="예: 10-2026-0012345" /></label><label className="form-field"><span>권리자</span><input name="holder" defaultValue={item?.holder ?? ''} placeholder="예: 주식회사 3D뮤즈" /></label></div>
+        <label className="form-field full"><span>발급 · 관할 기관</span><input name="issuer" defaultValue={item?.issuer ?? ''} placeholder="예: 특허청" /></label>
+        <div className="form-grid"><label className="form-field"><span>출원일</span><input name="filedAt" type="date" defaultValue={item?.filedAt ?? ''} /></label><label className="form-field"><span>등록일</span><input name="registeredAt" type="date" defaultValue={item?.registeredAt ?? ''} /></label></div>
+        <div className="form-grid"><label className="form-field"><span>만료 · 갱신일</span><input name="expiresAt" type="date" defaultValue={item?.expiresAt ?? ''} /></label><label className="form-field"><span>상태</span><select name="status" defaultValue={item?.status ?? '등록'}>{IP_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label></div>
+        <label className="form-field full"><span>담당자</span><input name="owner" defaultValue={item?.owner ?? currentUserName} /></label>
+        <label className="form-field full"><span>메모</span><textarea name="note" rows={2} defaultValue={item?.note ?? ''} placeholder="연차료 납부·갱신 절차 등" /></label>
+        <footer><button type="button" className="button ghost" disabled={locked} onClick={() => void cancel()}>{closing ? '정리 중…' : '취소'}</button><button type="submit" className="button primary" disabled={locked || extracting}><Check size={18} /> {busy ? '저장 중…' : extracting ? 'AI 읽는 중…' : '확인 후 저장'}</button></footer>
       </form>
     </section>
   </div>

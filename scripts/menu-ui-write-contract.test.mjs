@@ -38,6 +38,7 @@ const contracts = [
       [/: \[\.\.\.current, \{ id: `LINK-\$\{Date\.now\(\)\}`/, 'create updates the visible list'],
       [/aria-label=\{`\$\{link\.name\} 수정`\}[\s\S]*?setEditingId\(link\.id\)/, 'edit button wiring'],
       [/aria-label=\{`\$\{link\.name\} 삭제`\}[\s\S]*?current\.filter\(\(item\) => item\.id !== link\.id\)/, 'delete button wiring'],
+      [/className="text-button"[\s\S]*?onClick=\{onOpenLibrary\}[\s\S]*?자료실 열기/, 'company library action follows the shared dashboard tone'],
     ],
   },
   {
@@ -148,6 +149,9 @@ const contracts = [
       [/onClick=\{\(\) => setEditing\(record\)\}/, 'edit button wiring'],
       [/onClick=\{\(\) => void remove\(record\)\}/, 'delete button wiring'],
       [/onSave=\{save\}/, 'editor form wiring'],
+      [/requestDocumentExtraction\(attachment\.id, 'compliance'/, 'stored certificate content extraction'],
+      [/applyBlankFormValues\(formRef\.current, values\)/, 'AI draft fills only blank review fields'],
+      [/인증서 원본부터 올려 주세요/, 'file-first registration flow'],
     ],
   },
   {
@@ -176,10 +180,16 @@ const contracts = [
     screen: '지식재산·인증', persistenceId: 'ip-rights', source: ipRights, checks: [
       [/useWorkspaceState<IpRight\[]>\('ip-rights'/, 'shared refresh source'],
       [/const remove = async[\s\S]*?current\.filter\(\(item\) => item\.id !== right\.id\)[\s\S]*?if \(!result\.ok\)/, 'delete and failure handling'],
-      [/<form onSubmit=\{submit\}>/, 'create/update form wiring'],
+      [/<form ref=\{formRef\} onSubmit=\{submit\}>/, 'create/update form wiring'],
       [/onSave=\{async \(next\) => \{[\s\S]*?setRights\(\(current\) => current\.some[\s\S]*?: \[next, \.\.\.current\]/, 'create/update list synchronization'],
       [/onClick=\{\(\) => setEditor\(\{\}\)\}/, 'create button wiring'],
       [/onClick=\{\(\) => void remove\(right\)\}/, 'delete button wiring'],
+      [/requestDocumentExtraction\(attachment\.id, 'ip-right'/, 'stored patent content extraction'],
+      [/applyBlankFormValues\(formRef\.current, values\)/, 'AI draft fills only blank review fields'],
+      [/deleteDocumentAttachments\(removedRef\.current, workspaceScope\)/, 'detached originals are removed only after a successful save'],
+      [/if \(busy \|\| uploading \|\| closingRef\.current\) return/, 'modal cannot close while an upload or save is in flight'],
+      [/for \(const id of cleanup\.deleted\) uploadedRef\.current\.delete\(id\)/, 'partial cancel cleanup retries only failed originals'],
+      [/useIpDialog\(\(\) => \{ void cancel\(\) \}, locked, \(\) => item \? titleInputRef\.current : uploadButtonRef\.current\)/, 'dialog traps focus and restores it on close'],
     ],
   },
 ]

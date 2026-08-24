@@ -7,4 +7,5 @@
 .ip-summary strong { font-size: var(--font-22); letter-spacing: -.02em; }
 .ip-filter { margin-bottom: var(--space-12); }
 .ip-kind-mark { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-violet); background: var(--color-violet-soft); }
+.it-modal .document-extraction-notice { margin-top: var(--space-12); margin-bottom: var(--space-12); }
 html[data-theme='dark'] .ip-summary article { background: var(--surface); }

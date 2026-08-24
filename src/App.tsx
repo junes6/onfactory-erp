@@ -1891,7 +1891,7 @@ export default function App() {
       case 'people': return <PeopleOperationsPage initialTab={peopleInitialTab} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
       case 'approvals': return <ApprovalQueue workspaceScope={workspaceScope} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onPendingChange={setPendingProposals} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} industryType={account?.industryType ?? 'food_manufacturing'} onToast={setToast} />
-      case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} companyName={tenantName} onToast={setToast} />
+      case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} companyName={tenantName} onToast={setToast} />
       case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'it-deliverables':
       case 'it-contracts': return <ItServicesPage view={page as ItServicesView} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} onToast={setToast} />

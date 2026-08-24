@@ -39,6 +39,14 @@ import {
   tenantDocumentSignedUrl,
 } from './document-storage-service.mjs'
 import { createStorage } from './storage/index.mjs'
+import {
+  DOCUMENT_EXTRACTION_MIME_TYPES,
+  DOCUMENT_EXTRACTION_TARGETS,
+  DocumentExtractionError,
+  documentExtractionOutputConfig,
+  documentExtractionSystemPrompt,
+  normalizeDocumentExtraction,
+} from './document-extraction.mjs'
 import { buildTaxEvidenceArchive, TaxEvidenceExportError } from './tax-evidence-export.mjs'
 import {
   DEFAULT_LOCAL_DEMO_PASSWORD,
@@ -2080,6 +2088,136 @@ export function createApp(options = {}) {
       const status = error instanceof DocumentStorageError ? error.status : 500
       const code = error instanceof DocumentStorageError ? error.code : 'DOCUMENT_DOWNLOAD_FAILED'
       response.status(status).json({ error: { code, message: status === 410 ? '파일 원본을 찾을 수 없습니다. 관리자에게 복구를 요청해 주세요.' : '자료를 다운로드하지 못했습니다.' } })
+    }
+  })
+
+  app.post('/api/documents/:id/extract', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
+    if (!request.auth.tenantId || !documentStorage) {
+      response.status(503).json({ error: { code: 'DOCUMENT_STORAGE_UNAVAILABLE', message: '파일 저장소가 설정되지 않았습니다.' } })
+      return
+    }
+    const target = String(request.body?.target ?? '')
+    if (!DOCUMENT_EXTRACTION_TARGETS.has(target)) {
+      response.status(400).json({ error: { code: 'INVALID_DOCUMENT_EXTRACTION_TARGET', message: '판독할 문서 종류를 확인해 주세요.' } })
+      return
+    }
+    const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : []
+    const document = documents.find((item) => item.id === request.params.id)
+    if (!document || !canReadDocument(document, request.auth)) {
+      response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } })
+      return
+    }
+    const sourceMime = String(document.mime || '').toLowerCase()
+    if (!DOCUMENT_EXTRACTION_MIME_TYPES.has(sourceMime)) {
+      response.status(415).json({ error: { code: 'DOCUMENT_EXTRACTION_UNSUPPORTED', message: 'AI 자동 입력은 PDF, JPG, PNG, GIF, WEBP 원본만 지원합니다.' } })
+      return
+    }
+    if (!client) {
+      response.status(503).json({ error: { code: 'DOCUMENT_EXTRACTION_UNAVAILABLE', message: 'AI 문서 읽기 연결이 아직 설정되지 않았습니다. 원본 파일은 보관했습니다.' } })
+      return
+    }
+
+    let usageReservation = null
+    let usageActor = null
+    let providerSucceeded = false
+    const usageStartedAt = new Date()
+    try {
+      const attachmentResult = await resolveChatAttachments({
+        requested: [{ documentId: document.id }],
+        documents,
+        account: request.auth,
+        canReadDocument,
+        storage: documentStorage,
+      })
+      if (attachmentResult.contentDocuments !== 1) {
+        throw new DocumentExtractionError('DOCUMENT_EXTRACTION_UNSUPPORTED', '이 파일의 본문을 AI가 읽을 수 없습니다. 원본 파일은 보관했습니다.', 415)
+      }
+      const system = documentExtractionSystemPrompt(target)
+      const messages = attachBlocksToLatestUserMessage(
+        [{ role: 'user', content: '첨부파일 1건을 지정된 스키마에 맞춰 판독해 주세요.' }],
+        attachmentResult.blocks,
+      )
+      usageActor = { id: 'server:document-extraction', role: 'system', trusted: true, tenantId: request.auth.tenantId }
+      const count = typeof client.messages.countTokens === 'function'
+        ? await client.messages.countTokens({ model, system, messages })
+        : { input_tokens: Math.ceil(JSON.stringify(messages).length / 4) }
+      const reservationId = `document-extraction-res:${request.auth.tenantId}:${request.auth.id}:${randomBytes(12).toString('hex')}`
+      usageReservation = (await billingService.reserveUsage(usageActor, {
+        id: reservationId,
+        tenantId: request.auth.tenantId,
+        userId: request.auth.id,
+        feature: 'document-extraction',
+        model,
+        estimatedInputTokens: Number(count.input_tokens || 0),
+        estimatedOutputTokens: 1_200,
+        occurredAt: usageStartedAt.toISOString(),
+      })).reservation
+      const result = await client.messages.create({
+        model,
+        max_tokens: 1_200,
+        system,
+        messages,
+        output_config: documentExtractionOutputConfig(target),
+      })
+      providerSucceeded = true
+
+      let usageAccounting = 'recorded'
+      const usageEvent = {
+        id: `anthropic:${result.id || randomBytes(12).toString('hex')}`,
+        reservationId: usageReservation.id,
+        tenantId: request.auth.tenantId,
+        userId: request.auth.id,
+        feature: 'document-extraction',
+        model: usageReservation.model,
+        inputTokens: Number(result.usage?.input_tokens || 0),
+        outputTokens: Number(result.usage?.output_tokens || 0),
+        occurredAt: usageStartedAt.toISOString(),
+        durationMs: Date.now() - usageStartedAt.getTime(),
+        metadata: { extractionTarget: target, documentId: document.id, sourceMime, providerResponseModel: result.model || model },
+      }
+      try {
+        await billingService.recordUsageEvent(usageActor, usageEvent)
+      } catch (ledgerError) {
+        usageAccounting = 'reconciliation-pending'
+        try {
+          await billingService.recordReconciliationPending(usageActor, {
+            ...usageEvent,
+            usageEventId: usageEvent.id,
+            id: `reconciliation:${usageEvent.id}`,
+            lastError: ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
+          })
+        } catch (reconciliationError) {
+          usageAccounting = 'reconciliation-unavailable'
+          console.error('Document extraction usage reconciliation persistence failed after provider success', reconciliationError)
+        }
+      }
+
+      const draft = normalizeDocumentExtraction(extractText(result), target)
+      response.json({
+        sourceDocumentId: document.id,
+        target,
+        draft,
+        requiresReview: true,
+        model: result.model || model,
+        usage: result.usage,
+        usageAccounting,
+      })
+    } catch (error) {
+      if (!providerSucceeded && usageReservation && usageActor) {
+        try { await billingService.releaseUsageReservation(usageActor, { tenantId: request.auth.tenantId, reservationId: usageReservation.id }) }
+        catch { /* 예약은 만료 시 자동 정리된다. */ }
+      }
+      if (error instanceof DocumentExtractionError || error instanceof ChatAttachmentError) {
+        response.status(error.status).json({ error: { code: error.code, message: error.message } })
+        return
+      }
+      if (error instanceof BillingServiceError) {
+        response.status(error.status).json({ error: { code: error.code, message: error.message, details: error.details } })
+        return
+      }
+      const mapped = mapAnthropicError(error)
+      console.error(`[document-extraction] ${mapped.code}`, { status: Number(error?.status) || undefined, requestId: error?.request_id || undefined })
+      response.status(mapped.status).json({ error: { code: mapped.code, message: mapped.message } })
     }
   })
 

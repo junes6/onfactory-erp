@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
-  ArrowDown, ArrowUp, Check, ExternalLink, Globe2, LayoutDashboard,
+  ArrowDown, ArrowRight, ArrowUp, Check, ExternalLink, Globe2, LayoutDashboard,
   Link2, Pencil, Plus, Settings2, Trash2, X,
 } from 'lucide-react'
 import { quickLinksStorageKey, readQuickLinks, writeQuickLinks, type QuickLink } from '../utils/quickLinksStorage'
@@ -240,7 +240,7 @@ export function FrequentFilesWidget({ workspaceScope, onOpenLibrary, onToast }: 
     finally { setDownloadingId(null) }
   }
   return <section className="frequent-files-card dashboard-section-card">
-    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><FileText size={18} /></span><h2>자주 찾는 파일</h2></div><button type="button" onClick={onOpenLibrary}>자료실 열기</button></header>
+    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><FileText size={18} /></span><h2>자주 찾는 파일</h2></div><button className="text-button" type="button" onClick={onOpenLibrary}>자료실 열기 <ArrowRight size={16} /></button></header>
     <div className="frequent-files-body dashboard-section-body">
       {files === null && <p className="frequent-files-empty">자료를 불러오는 중…</p>}
       {files !== null && files.length === 0 && <div className="empty-state compact"><FolderSearch size={24} /><h3>아직 내려받은 자료가 없습니다</h3><p>기업 자료실에서 파일을 내려받으면 자주 쓰는 순서로 여기에 모입니다.</p></div>}
