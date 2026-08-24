@@ -65,6 +65,20 @@ const compliance = {
   certificateNo: 'SMOKE-001', issuedAt: '2026-08-21', expiresAt: '2099-08-21', owner: '김서원',
   status: '보완필요', checklist: ['문서 확인'], attachments: [], note: '생성 단계', updatedAt: '2026-08-21T00:00:00.000Z',
 }
+const companyAsset = {
+  id: 'SMOKE-ASSET', name: '스모크 자산', kind: '장비', serial: 'ASSET-001', acquiredAt: '2026-08-21',
+  price: 100000, status: '사용 중', owner: '김서원', location: '본사', note: '생성 단계', attachments: [],
+  updatedAt: '2026-08-21T00:00:00.000Z',
+}
+const taxEvent = {
+  id: 'SMOKE-TAX', kind: '부가가치세', title: '스모크 세무 일정', dueDate: '2099-01-25', amount: 0,
+  status: '예정', owner: '김서원', note: '생성 단계', attachments: [], updatedAt: '2026-08-21T00:00:00.000Z',
+}
+const ipRight = {
+  id: 'SMOKE-IP', kind: '특허', title: '스모크 특허', number: '10-2099-0000001', holder: '스모크 법인',
+  filedAt: '2098-01-01', registeredAt: '2099-01-01', expiresAt: '2099-12-31', status: '등록', owner: '김서원',
+  note: '생성 단계', attachments: [], updatedAt: '2026-08-21T00:00:00.000Z',
+}
 
 const workspaceCases = [
   { screen: '일정관리', key: 'calendar-events', created: [calendarEvent], updated: [{ ...calendarEvent, title: '스모크 일정 수정' }], empty: [] },
@@ -88,6 +102,9 @@ const workspaceCases = [
   { screen: '판매채널', key: 'sales-shipments', created: [salesShipment], updated: [{ ...salesShipment, recipient: '스모크 수취인 수정', trackingNo: '1234567890', courier: 'CJ대한통운', status: '송장등록' }], empty: [] },
   { screen: '인사·조직', key: 'leave-requests', created: [leaveRequest], updated: [{ ...leaveRequest, reason: '스모크 점검 수정' }], empty: [] },
   { screen: '식품안전·인증', key: 'compliance-records', created: [compliance], updated: [{ ...compliance, note: '수정 단계' }], empty: [] },
+  { screen: '세무·자산 · 자산대장', key: 'company-assets', created: [companyAsset], updated: [{ ...companyAsset, name: '스모크 자산 수정', note: '수정 단계' }], empty: [] },
+  { screen: '세무·자산 · 세무일정', key: 'tax-events', created: [taxEvent], updated: [{ ...taxEvent, title: '스모크 세무 일정 수정', status: '신고 완료' }], empty: [] },
+  { screen: '지식재산·인증', key: 'ip-rights', created: [ipRight], updated: [{ ...ipRight, title: '스모크 특허 수정', note: '수정 단계' }], empty: [] },
 ]
 const documentCase = { screen: '기업 자료실', persistenceId: 'documents-api' }
 
@@ -153,7 +170,7 @@ function verifyWorkspace(item, actual, expected) {
   else assert.deepEqual(actual, expected, `${item.screen} persisted payload`)
 }
 
-test('11 tenant menus create, survive a store/app restart, update, and delete', async (t) => {
+test('all tenant write surfaces create, survive a store/app restart, update, and delete', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'onfactory-menu-smoke-'))
   const storeFile = path.join(directory, 'workspace-state.json')
   const documentDirectory = path.join(directory, 'documents')
@@ -172,7 +189,7 @@ test('11 tenant menus create, survive a store/app restart, update, and delete', 
       const body = await upload.json()
       assert.equal(upload.status, 201, JSON.stringify(body))
       documentId = body.document.id
-      t.diagnostic(`CREATE 11/11 PASS · ${workspaceCases.map((item) => item.screen).join(', ')}, 기업 자료실`)
+      t.diagnostic(`CREATE ${workspaceCases.length + 1}/${workspaceCases.length + 1} PASS · ${workspaceCases.map((item) => item.screen).join(', ')}, 기업 자료실`)
     })
 
     await withRuntimeApp(storeFile, documentDirectory, async (origin) => {
@@ -185,14 +202,14 @@ test('11 tenant menus create, survive a store/app restart, update, and delete', 
       const download = await fetch(`${origin}/api/documents/${encodeURIComponent(documentId)}/download`, { headers: authHeaders(cookie, false) })
       assert.equal(download.status, 200)
       assert.equal(await download.text(), 'onfactory menu smoke')
-      t.diagnostic('RESTART/PERSIST 11/11 PASS · 생성 데이터와 자료 원본 유지')
+      t.diagnostic(`RESTART/PERSIST ${workspaceCases.length + 1}/${workspaceCases.length + 1} PASS · 생성 데이터와 자료 원본 유지`)
 
       for (const item of workspaceCases) await putWorkspace(origin, cookie, item, item.updated)
       const updateDocument = await fetch(`${origin}/api/documents/${encodeURIComponent(documentId)}`, {
         method: 'PATCH', headers: authHeaders(cookie), body: JSON.stringify({ name: '스모크 자료 수정.txt', summary: '수정 단계' }),
       })
       assert.equal(updateDocument.status, 200, await updateDocument.text())
-      t.diagnostic('UPDATE 11/11 PASS · 공장 토큰색 블록 및 창고 정보 포함')
+      t.diagnostic(`UPDATE ${workspaceCases.length + 1}/${workspaceCases.length + 1} PASS · 공장 토큰색 블록 및 창고 정보 포함`)
     })
 
     await withRuntimeApp(storeFile, documentDirectory, async (origin) => {
@@ -200,14 +217,14 @@ test('11 tenant menus create, survive a store/app restart, update, and delete', 
       for (const item of workspaceCases) verifyWorkspace(item, await readWorkspace(origin, cookie, item), item.updated)
       const documents = (await (await fetch(`${origin}/api/documents`, { headers: authHeaders(cookie, false) })).json()).documents
       assert.equal(documents.find((item) => item.id === documentId)?.name, '스모크 자료 수정.txt')
-      t.diagnostic('RESTART/UPDATE-PERSIST 11/11 PASS')
+      t.diagnostic(`RESTART/UPDATE-PERSIST ${workspaceCases.length + 1}/${workspaceCases.length + 1} PASS`)
 
       for (const item of workspaceCases) await putWorkspace(origin, cookie, item, item.empty)
       const removeDocument = await fetch(`${origin}/api/documents/${encodeURIComponent(documentId)}`, {
         method: 'DELETE', headers: authHeaders(cookie, false),
       })
       assert.equal(removeDocument.status, 200, await removeDocument.text())
-      t.diagnostic('DELETE 11/11 PASS · 본인 임시저장 일지 및 자료 원본 포함')
+      t.diagnostic(`DELETE ${workspaceCases.length + 1}/${workspaceCases.length + 1} PASS · 본인 임시저장 일지 및 자료 원본 포함`)
     })
 
     await withRuntimeApp(storeFile, documentDirectory, async (origin) => {
@@ -215,7 +232,7 @@ test('11 tenant menus create, survive a store/app restart, update, and delete', 
       for (const item of workspaceCases) verifyWorkspace(item, await readWorkspace(origin, cookie, item), item.empty)
       const documents = (await (await fetch(`${origin}/api/documents`, { headers: authHeaders(cookie, false) })).json()).documents
       assert.equal(documents.length, 0)
-      t.diagnostic('FINAL RESTART/EMPTY 11/11 PASS · 삭제 후 재등장 없음')
+      t.diagnostic(`FINAL RESTART/EMPTY ${workspaceCases.length + 1}/${workspaceCases.length + 1} PASS · 삭제 후 재등장 없음`)
     })
   } finally {
     await rm(directory, { recursive: true, force: true })
