@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { ArrowLeft, Building2, CalendarDays, Coins, Download, FileText, FolderKanban, Lock, MessageCircle, Paperclip, Pencil, Pin, Plus, Send, Settings2, Trash2, Upload, Users, X } from 'lucide-react'
+import { ArrowLeft, Building2, CalendarDays, Coins, Download, ExternalLink, FileText, FolderKanban, Lock, MessageCircle, Paperclip, Pencil, Pin, Plus, Send, Settings2, Tag, Trash2, Upload, Users, X } from 'lucide-react'
 import { formatDateLabel, formatDateTime } from '../utils/dateTime'
 import { downloadDocumentAttachment, uploadDocumentAttachments, type StoredDocumentAttachment } from '../utils/documentAttachments'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
@@ -16,6 +16,8 @@ type Project = {
   status: 'active' | 'archived'
   stage?: string
   client?: string
+  link?: string
+  category?: string
   startDate?: string
   endDate?: string
   amount?: number
@@ -92,7 +94,11 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
   useEffect(() => { void loadProjects() }, [loadProjects])
   useEffect(() => { if (selectedId) { setDetailTab('feed'); void loadDetail(selectedId) } }, [selectedId, loadDetail])
 
-  const visibleProjects = projects.filter((project) => filter === 'archived' ? project.status === 'archived' : project.status !== 'archived')
+  const [categoryFilter, setCategoryFilter] = useState('전체')
+  const categories = ['전체', ...new Set(projects.map((project) => project.category).filter((value): value is string => Boolean(value)))]
+  const visibleProjects = projects
+    .filter((project) => filter === 'archived' ? project.status === 'archived' : project.status !== 'archived')
+    .filter((project) => categoryFilter === '전체' || project.category === categoryFilter)
   const role = detail?.role ?? null
   const canPost = role === 'owner' || role === 'editor'
   const isOwner = role === 'owner'
@@ -181,7 +187,7 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
       <header className="page-header project-detail-header">
         <div>
           <button type="button" className="project-back" onClick={() => { setSelectedId(null); setDetail(null); void loadProjects(true) }}><ArrowLeft size={16} /> 프로젝트 목록</button>
-          <h1>{detail.name} {detail.stage && <StatusBadge className="status-pill" dot tone={stageTone(detail.stage)}>{detail.stage}</StatusBadge>}{detail.status === 'archived' && <StatusBadge className="status-pill" tone="neutral">보관됨</StatusBadge>}</h1>
+          <h1>{detail.name} {detail.category && <StatusBadge className="status-pill" tone="info">{detail.category}</StatusBadge>}{detail.stage && <StatusBadge className="status-pill" dot tone={stageTone(detail.stage)}>{detail.stage}</StatusBadge>}{detail.status === 'archived' && <StatusBadge className="status-pill" tone="neutral">보관됨</StatusBadge>}</h1>
           {detail.description && <p>{detail.description}</p>}
           <div className="project-meta">
             <span className="project-members" title={detail.members.map((member) => `${member.name} (${roleLabel[member.role]})`).join(', ')}><Users size={15} /> {detail.members.slice(0, 6).map((member) => <i key={member.id} className={`project-avatar role-${member.role}`}>{member.name.slice(0, 1)}</i>)}{detail.members.length > 6 && <em>+{detail.members.length - 6}</em>} {detail.members.length}명</span>
@@ -193,6 +199,7 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
           </div>
         </div>
         <div className="page-header-actions">
+          {detail.link && <a className="button secondary project-link-button" href={detail.link} target="_blank" rel="noreferrer noopener"><ExternalLink size={16} /> 프로젝트 링크 열기</a>}
           {isOwner && <button className="button secondary" type="button" onClick={() => setEditorOpen('settings')}><Settings2 size={17} /> 멤버·설정</button>}
           {isOwner && <button className="button ghost project-delete" type="button" onClick={() => void deleteProject()}><Trash2 size={16} /> 삭제</button>}
           {canPost && detail.status !== 'archived' && <button className="button primary" type="button" onClick={() => { setDetailTab('feed'); setComposerOpen(true) }}><Plus size={18} /> 글 · 파일 올리기</button>}
@@ -233,13 +240,14 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
     </header>
     <div className="project-toolbar">
       <div className="segmented" role="group" aria-label="프로젝트 상태"><button type="button" className={filter === 'active' ? 'active' : ''} aria-pressed={filter === 'active'} onClick={() => setFilter('active')}>진행 중 {projects.filter((p) => p.status !== 'archived').length}</button><button type="button" className={filter === 'archived' ? 'active' : ''} aria-pressed={filter === 'archived'} onClick={() => setFilter('archived')}>보관 {projects.filter((p) => p.status === 'archived').length}</button></div>
+      {categories.length > 1 && <div className="segmented" role="group" aria-label="프로젝트 구분">{categories.map((category) => <button type="button" key={category} className={categoryFilter === category ? 'active' : ''} aria-pressed={categoryFilter === category} onClick={() => setCategoryFilter(category)}>{category}</button>)}</div>}
       {canManage && <span className="project-toolbar-note">관리자는 모든 프로젝트를 볼 수 있습니다. 직원은 참여 중이거나 회사 전체 공개인 프로젝트만 봅니다.</span>}
     </div>
     {loading ? <div className="empty-state compact"><FolderKanban size={26} /><h3>프로젝트를 불러오는 중</h3></div>
       : visibleProjects.length === 0 ? <div className="empty-state"><FolderKanban size={30} /><h3>{filter === 'archived' ? '보관된 프로젝트가 없습니다' : '아직 프로젝트가 없습니다'}</h3><p>신제품 개발, 인증 갱신, 수주 건처럼 함께 일하는 단위로 만들고 멤버를 초대하세요.</p><button className="button primary" type="button" onClick={() => setEditorOpen('create')}><Plus size={18} /> 첫 프로젝트 만들기</button></div>
         : <div className="project-grid">
           {visibleProjects.map((project) => <button type="button" className={`project-card${project.status === 'archived' ? ' is-archived' : ''}`} key={project.id} onClick={() => setSelectedId(project.id)}>
-            <div className="project-card-head"><span className="project-card-icon"><FolderKanban size={20} /></span><span className="project-card-badges">{project.stage && <StatusBadge className="status-pill" dot tone={stageTone(project.stage)}>{project.stage}</StatusBadge>}{project.role && <StatusBadge className="status-pill" tone={roleTone[project.role]}>{roleLabel[project.role]}</StatusBadge>}</span></div>
+            <div className="project-card-head"><span className="project-card-icon"><FolderKanban size={20} /></span><span className="project-card-badges">{project.category && <StatusBadge className="status-pill" tone="info">{project.category}</StatusBadge>}{project.stage && <StatusBadge className="status-pill" dot tone={stageTone(project.stage)}>{project.stage}</StatusBadge>}{project.role && <StatusBadge className="status-pill" tone={roleTone[project.role]}>{roleLabel[project.role]}</StatusBadge>}</span></div>
             <strong>{project.name}</strong>
             <p>{[project.client, project.endDate ? `${formatDateLabel(project.endDate)}까지` : '', money(project.amount)].filter(Boolean).join(' · ') || project.description || '설명 없음'}</p>
             <div className="project-card-meta"><span><Users size={14} /> {project.members.length}명</span><span><MessageCircle size={14} /> 글 {project.postCount}</span><span><Paperclip size={14} /> 파일 {project.fileCount}</span></div>
@@ -257,6 +265,8 @@ function ProjectEditor({ project, directory, currentUserId, currentUserName, onC
   const [status, setStatus] = useState<'active' | 'archived'>(project?.status ?? 'active')
   const [stage, setStage] = useState(project?.stage ?? '')
   const [client, setClient] = useState(project?.client ?? '')
+  const [link, setLink] = useState(project?.link ?? '')
+  const [category, setCategory] = useState(project?.category ?? '')
   const [startDate, setStartDate] = useState(project?.startDate ?? '')
   const [endDate, setEndDate] = useState(project?.endDate ?? '')
   const [amount, setAmount] = useState(project?.amount ?? 0)
@@ -278,12 +288,16 @@ function ProjectEditor({ project, directory, currentUserId, currentUserName, onC
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className="modal-card project-editor" role="dialog" aria-modal="true" aria-labelledby="project-editor-title">
       <header><div><span className="eyebrow">{project ? 'PROJECT SETTINGS' : 'NEW PROJECT'}</span><h2 id="project-editor-title">{project ? '멤버 · 설정' : '새 프로젝트'}</h2><p>{project ? '멤버 권한·관리 정보·공개 범위를 바꿉니다.' : '이름만 정하면 시작됩니다. 멤버·관리 정보는 나중에도 바꿀 수 있습니다.'}</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
-      <form onSubmit={async (event: FormEvent) => { event.preventDefault(); if (name.trim().length < 2) return; setBusy(true); const ok = await onSave({ name: name.trim(), description: description.trim(), visibility, members, stage, client: client.trim(), startDate, endDate, amount, ...(project ? { status } : {}) }); setBusy(false); if (ok) onClose() }}>
+      <form onSubmit={async (event: FormEvent) => { event.preventDefault(); if (name.trim().length < 2) return; setBusy(true); const ok = await onSave({ name: name.trim(), description: description.trim(), visibility, members, stage, client: client.trim(), startDate, endDate, amount, link: link.trim(), category: category.trim(), ...(project ? { status } : {}) }); setBusy(false); if (ok) onClose() }}>
         <label className="form-field full"><span>프로젝트 이름 <em>필수</em></span><input value={name} onChange={(event) => setName(event.target.value)} autoFocus required minLength={2} maxLength={80} placeholder="예: 한국도로공사 시뮬레이션" /></label>
         <label className="form-field full"><span>설명 <em>선택</em></span><input value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} placeholder="무엇을 위한 프로젝트인지 한 줄로" /></label>
         <div className="form-grid">
+          <label className="form-field"><span>구분</span><input value={category} onChange={(event) => setCategory(event.target.value)} list="project-category-options" maxLength={20} placeholder="예: 웹, 앱, 시스템" /><datalist id="project-category-options"><option>웹</option><option>앱</option><option>시스템</option><option>디자인</option><option>유지보수</option><option>연구개발</option><option>인증</option><option>기타</option></datalist></label>
           <label className="form-field"><span>진행 단계</span><select value={stage} onChange={(event) => setStage(event.target.value)}><option value="">미지정</option>{PROJECT_STAGES.map((item) => <option key={item}>{item}</option>)}</select></label>
+        </div>
+        <div className="form-grid">
           <label className="form-field"><span>발주처 · 거래처</span><input value={client} onChange={(event) => setClient(event.target.value)} maxLength={80} placeholder="예: 한국도로공사" /></label>
+          <label className="form-field"><span>프로젝트 링크 <em>선택</em></span><input value={link} onChange={(event) => setLink(event.target.value)} maxLength={300} placeholder="예: https://github.com/..., 피그마·노션 주소" /></label>
         </div>
         <div className="form-grid">
           <label className="form-field"><span>시작일</span><input type="date" value={startDate} max={endDate || undefined} onChange={(event) => setStartDate(event.target.value)} /></label>

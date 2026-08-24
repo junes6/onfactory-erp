@@ -5,19 +5,21 @@ import {
   Database, Factory, FileClock, FileText, Headphones, Home, Layers3, ListChecks, LockKeyhole, Menu,
   NotebookPen, Package, Paperclip, PauseCircle, PlayCircle, Plus, Repeat2, Search, Settings2, ShieldCheck, ShoppingCart,
   Sparkles, Store, Trash2, Upload, Users, Warehouse, X, GripVertical, EyeOff, RotateCcw,
-  Briefcase, FileStack, FileSignature, FolderKanban,
+  Briefcase, FileStack, FileSignature, FolderKanban, Landmark, Award, ExternalLink,
 } from 'lucide-react'
 import AIChat from './components/AIChat'
 import { ChatBubbleIcon, NotificationBellIcon, OnFactoryMark } from './components/AppIcons'
 import { LoginPage, PasswordChangePage, ProfileEditor, SettingsDrawer, type AccentChoice, type EasyModeChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
 import { ProjectSpacesPage } from './components/ProjectSpaces'
+import { TaxAssetsPage } from './components/TaxAssets'
+import { IpRightsPage } from './components/IpRights'
 import { ProductManagement, SalesChannels } from './components/BusinessPages'
 import { BillingDashboard } from './components/BillingDashboard'
 import { CompanyLibrary } from './components/CompanyLibrary'
 import { DailyJournalPage, MessengerDrawer, SchedulePage } from './components/CollaborationSuite'
 import { ComplianceCenter } from './components/ComplianceCenter'
 import {
-  DashboardLayoutButton, QuickLinksWidget, defaultDashboardWidgets,
+  DashboardLayoutButton, FrequentFilesWidget, QuickLinksWidget, defaultDashboardWidgets,
   useDashboardPreferences, widgetClass, type DashboardWidgetPreference,
 } from './components/DashboardWorkspace'
 import { FactoryManagement } from './components/FactoryManagement'
@@ -37,7 +39,7 @@ import {
   type Tenant, type WorkEvidence, type WorkItem, type WorkRule,
 } from './domainData'
 
-type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
+type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'finance' | 'ip' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
 type PageId = TenantPage | PlatformSection | 'billing'
 type AppMode = 'tenant' | 'platform'
 type NavItem = { id: PageId; label: string; icon: typeof Sparkles; badge?: number }
@@ -48,7 +50,7 @@ type PlatformTicketSummary = { id: string; tenantId: string; tenant: string; tit
 type PlatformDirectoryState = { tenants: Tenant[]; supportTickets: PlatformTicketSummary[] }
 type SupportSessionRequest = { tenantId: string; ticketId: string; scope: string; duration: string; reason: string }
 
-const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'projects', 'products', 'inventory', 'factory', 'people', 'documents', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
+const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'projects', 'finance', 'ip', 'products', 'inventory', 'factory', 'people', 'documents', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
 const AUTH_SYNC_KEY = 'onfactory-auth-sync'
 const emptyWorkItems: WorkItem[] = []
 const emptyWorkRules: WorkRule[] = []
@@ -128,7 +130,7 @@ const pageTitles: Record<PageId, string> = {
   ai: 'AI 업무허브', schedule: '일정관리', tasks: '업무지시 · 결재', journal: '일일업무일지',
   products: '제품관리', inventory: '재고 · LOT', factory: '공장관리',
   sales: '판매채널', people: '인사 · 조직', documents: '기업 자료실', compliance: '식품안전 · 인증',
-  approvals: 'AI 제안 검토', projects: '프로젝트',
+  approvals: 'AI 제안 검토', projects: '프로젝트', finance: '세무 · 자산', ip: '지식재산 · 인증',
   'it-projects': '프로젝트', 'it-deliverables': '산출물', 'it-contracts': '계약 · 거래처',
   billing: '비용 · 포인트',
   platform: '플랫폼 운영 개요', tenants: '고객사 관리', support: 'CS 지원센터',
@@ -220,6 +222,7 @@ function SharedCalendarPreview({ onOpen, events }: { onOpen: () => void; events:
 const dashboardWidgetLabels: Record<DashboardWidgetPreference['id'], string> = {
   summary: '오늘 핵심 현황',
   ai: 'AI 업무 대화',
+  files: '자주 찾는 파일',
   schedule: '공유 일정',
   work: '다음 업무',
   links: '업무 바로가기',
@@ -355,6 +358,8 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
       content = <SharedCalendarPreview events={calendarEvents} onOpen={() => onNavigate('schedule')} />
     } else if (preference.id === 'links') {
       content = <QuickLinksWidget scope={`${companyName}:${currentUserId}`} onToast={onToast} />
+    } else if (preference.id === 'files') {
+      content = <FrequentFilesWidget workspaceScope={workspaceScope} onOpenLibrary={() => onNavigate('documents')} onToast={onToast} />
     } else if (preference.id === 'work') {
       content = <section className="my-work-card dashboard-section-card">
         <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><ListChecks size={18} /></span><h2>다음 업무</h2></div><button type="button" className="text-button" onClick={() => onNavigate('tasks')}>전체 보기 <ArrowRight size={16} /></button></header>
@@ -1301,11 +1306,10 @@ export default function App() {
   const workspaceScope = account?.tenantId && account.id ? `${account.tenantId}:${account.id}` : undefined
   const [pendingProposals, setPendingProposals] = useState(0)
   const [profileOpen, setProfileOpen] = useState(false)
-  const [consentReminder, setConsentReminder] = useState<{ needsReconsent: boolean; version: string } | null>(null)
   const [peopleInitialTab, setPeopleInitialTab] = useState<'members' | 'accounts' | 'performance'>('members')
   const isTenantAdmin = account?.role === 'tenant-admin' && Boolean(account.tenantId)
   useEffect(() => {
-    if (!isTenantAdmin || !workspaceScope) { setPendingProposals(0); setConsentReminder(null); return }
+    if (!isTenantAdmin || !workspaceScope) { setPendingProposals(0); return }
     let active = true
     const headers = { 'x-workspace-identity': workspaceScope }
     const loadPending = () => fetch('/api/proposals', { headers })
@@ -1313,10 +1317,6 @@ export default function App() {
       .then((body) => { if (active) setPendingProposals(Number(body.pendingCount ?? 0)) })
       .catch(() => {})
     void loadPending()
-    fetch('/api/tenant/consent', { headers })
-      .then(async (response) => response.ok ? response.json() as Promise<{ needsReconsent?: boolean; currentVersion?: string }> : null)
-      .then((body) => { if (active && body) setConsentReminder({ needsReconsent: Boolean(body.needsReconsent), version: String(body.currentVersion ?? '') }) })
-      .catch(() => {})
     const timer = window.setInterval(() => { void loadPending() }, 60_000)
     return () => { active = false; window.clearInterval(timer) }
   }, [isTenantAdmin, workspaceScope])
@@ -1624,6 +1624,8 @@ export default function App() {
     { id: 'sales', label: '판매채널', icon: Store },
     { id: 'people', label: '인사 · 조직', icon: Users },
     { id: 'documents', label: '기업 자료실', icon: FileText },
+    { id: 'finance', label: '세무 · 자산', icon: Landmark },
+    { id: 'ip', label: '지식재산 · 인증', icon: Award },
     { id: 'compliance', label: '식품안전 · 인증', icon: ShieldCheck },
     { id: 'it-deliverables', label: '산출물', icon: FileStack },
     { id: 'it-contracts', label: '계약 · 거래처', icon: FileSignature },
@@ -1880,13 +1882,15 @@ export default function App() {
       case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onCreate={() => setTaskDraft('')} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
+      case 'finance': return <TaxAssetsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} onToast={setToast} />
+      case 'ip': return <IpRightsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} onToast={setToast} />
       case 'products': return <ProductManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
       case 'inventory': return <InventoryPage onToast={setToast} canManage={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} />
       case 'factory': return <FactoryManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
       case 'sales': return <SalesChannels onToast={setToast} workspaceScope={workspaceScope} companyName={tenantName} canManage={account?.role === 'tenant-admin'} />
-      case 'people': return <PeopleOperationsPage initialTab={peopleInitialTab} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onConsentChanged={() => setConsentReminder((current) => current ? { ...current, needsReconsent: false } : current)} onToast={setToast} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
+      case 'people': return <PeopleOperationsPage initialTab={peopleInitialTab} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
       case 'approvals': return <ApprovalQueue workspaceScope={workspaceScope} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onPendingChange={setPendingProposals} />
-      case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} onToast={setToast} />
+      case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} industryType={account?.industryType ?? 'food_manufacturing'} onToast={setToast} />
       case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} companyName={tenantName} onToast={setToast} />
       case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'it-deliverables':
@@ -1961,7 +1965,7 @@ export default function App() {
             </div>
           </div>
         </header>
-        <main id="main-content" className="main-content" tabIndex={-1}>{mode === 'tenant' && consentReminder?.needsReconsent && page !== 'people' && <div className="consent-reminder" role="status"><ShieldCheck size={17} /><span><strong>약관 동의가 필요합니다.</strong> 운영사 데이터 접근·개인정보 처리위탁·AI 처리 3항(버전 {consentReminder.version})에 대한 동의 기록이 없거나 약관이 갱신되었습니다.</span><button type="button" onClick={() => { setPeopleInitialTab('accounts'); navigate('people') }}>동의 화면으로</button></div>}{renderPage()}</main>
+        <main id="main-content" className="main-content" tabIndex={-1}>{renderPage()}</main>
       </div>
 
       <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => setMessengerOpen(false)} onToast={setToast} onUnreadChange={setMessengerUnread} />

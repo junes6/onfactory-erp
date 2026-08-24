@@ -5,7 +5,7 @@
   --pc-text: var(--ink, var(--color-blue-deep));
   --pc-muted: var(--muted, var(--color-gray-600));
   --pc-line: var(--line, var(--color-blue-soft));
-  --pc-accent: var(--color-blue-deep);
+  --pc-accent: var(--forest-dark);
   --pc-accent-soft: var(--color-blue-soft);
   --pc-green: var(--color-success);
   --pc-green-soft: var(--color-success-soft);
@@ -217,31 +217,9 @@
   .pc-audit-records article { grid-template-columns: 1fr auto; }
   .pc-audit-records article > div { grid-column: 1 / -1; }
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .pc-root {
-    --pc-bg: var(--color-blue-deep);
-    --pc-panel: var(--color-blue-deep);
-    --pc-panel-soft: var(--color-blue-deep);
-    --pc-text: var(--color-blue-soft);
-    --pc-muted: var(--color-gray-200);
-    --pc-line: var(--color-blue-deep);
-    --pc-accent: var(--color-blue);
-    --pc-accent-soft: var(--color-blue-deep);
-    --pc-green: var(--color-success);
-    --pc-green-soft: var(--color-success-soft);
-    --pc-amber: var(--color-warning);
-    --pc-amber-soft: var(--color-warning);
-    --pc-red: var(--color-danger-soft);
-    --pc-red-soft: var(--color-danger);
-    --pc-blue: var(--color-blue);
-    --pc-blue-soft: var(--color-blue-deep);
-  }
-  :root:not([data-theme='light']) .pc-section-tab.active { color: var(--color-blue-soft); background: var(--color-blue-deep-fill); }
-  :root:not([data-theme='light']) .pc-button.primary { color: var(--color-blue-deep); background: var(--color-blue); }
-  :root:not([data-theme='light']) .pc-logo { color: var(--color-blue-deep); background: var(--color-blue); }
-  :root:not([data-theme='light']) .pc-health-track, :root:not([data-theme='light']) .pc-progress { background: var(--color-blue-deep-fill); }
-  :root:not([data-theme='light']) .pc-onboarding-draft, :root:not([data-theme='light']) .pc-form-note { color: var(--pc-text); background: var(--color-warning); }
-}
+/* (R9) 예전 prefers-color-scheme 다크 블록 삭제 — --color-blue-deep이 다크에서 밝은 청색으로 바뀌며
+   패널이 하늘색으로 떠 보이던 원인. 다크는 코어 토큰 반전(--canvas/--surface/--ink)으로만 처리한다. */
+
 @media (prefers-reduced-motion: reduce) {
   .pc-root * { transition: none !important; scroll-behavior: auto !important; }
 }
@@ -353,3 +331,5 @@
 html[data-theme='dark'] :is(.pc-finding-list li,.pc-assistant-form input,.pc-assistant-presets button,.pc-account-list li,.pc-assistant-message p) { background: var(--surface); }
 html[data-theme='dark'] .pc-assistant { background: var(--color-gray-50); }
 @media (max-width: 960px) { .pc-finding-list li { grid-template-columns: auto minmax(0, 1fr); } .pc-finding-actions { grid-column: 1 / -1; } }
+
+html[data-theme='dark'] .pc-briefing-chips em.is-info { color: var(--ink); }

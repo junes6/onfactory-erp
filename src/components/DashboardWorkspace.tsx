@@ -4,9 +4,11 @@ import {
   Link2, Pencil, Plus, Settings2, Trash2, X,
 } from 'lucide-react'
 import { quickLinksStorageKey, readQuickLinks, writeQuickLinks, type QuickLink } from '../utils/quickLinksStorage'
+import { downloadDocumentAttachment } from '../utils/documentAttachments'
+import { FileText, FolderSearch, Download } from 'lucide-react'
 import './DashboardWorkspace.css'
 
-export type DashboardWidgetId = 'summary' | 'ai' | 'schedule' | 'work' | 'links' | 'alert'
+export type DashboardWidgetId = 'summary' | 'ai' | 'schedule' | 'work' | 'links' | 'alert' | 'files'
 export type DashboardWidgetSize = 'half' | 'wide' | 'full'
 
 export type DashboardWidgetPreference = {
@@ -21,6 +23,7 @@ const widgetLabels: Record<DashboardWidgetId, { title: string; description: stri
   schedule: { title: '공유 일정', description: '오늘 일정과 월간 달력을 봅니다.' },
   work: { title: '다음 업무', description: '내가 수행하거나 결재할 업무입니다.' },
   links: { title: '업무 바로가기', description: '자주 쓰는 외부 사이트를 엽니다.' },
+  files: { title: '자주 찾는 파일', description: '자주 내려받는 회사 자료를 바로 엽니다.' },
   alert: { title: '중요 알림', description: '확인이 필요한 운영 문제입니다.' },
 }
 
@@ -29,6 +32,7 @@ export const defaultDashboardWidgets: DashboardWidgetPreference[] = [
   { id: 'ai', visible: true, size: 'wide' },
   { id: 'schedule', visible: true, size: 'half' },
   { id: 'links', visible: true, size: 'half' },
+  { id: 'files', visible: true, size: 'half' },
   { id: 'work', visible: true, size: 'half' },
   { id: 'alert', visible: true, size: 'half' },
 ]
@@ -206,4 +210,46 @@ export function QuickLinksWidget({ scope, onToast }: { scope: string; onToast: (
 
 export function widgetClass(preference: DashboardWidgetPreference) {
   return `dashboard-widget dashboard-widget-${preference.id} dashboard-widget-${preference.size}`
+}
+
+type FrequentFileRow = { id: string; name: string; category: string; size: number; accessCount?: number; lastAccessedAt?: string; uploadedAt?: string; updatedAt?: string }
+
+/** 자주 찾는 파일: 다운로드 횟수 기준 상위 자료. 기록이 없으면 최근 자료를 보여준다. */
+export function FrequentFilesWidget({ workspaceScope, onOpenLibrary, onToast }: { workspaceScope?: string; onOpenLibrary: () => void; onToast: (message: string) => void }) {
+  const [files, setFiles] = useState<FrequentFileRow[] | null>(null)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  useEffect(() => {
+    let active = true
+    fetch('/api/documents', { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+      .then(async (response) => response.ok ? response.json() as Promise<{ documents?: FrequentFileRow[] }> : { documents: [] })
+      .then((body) => {
+        if (!active) return
+        const rows = (body.documents ?? []).filter((row) => !row.category?.includes('개발운영지원'))
+        rows.sort((left, right) => (Number(right.accessCount) || 0) - (Number(left.accessCount) || 0)
+          || String(right.lastAccessedAt ?? right.updatedAt ?? right.uploadedAt ?? '').localeCompare(String(left.lastAccessedAt ?? left.updatedAt ?? left.uploadedAt ?? '')))
+        setFiles(rows.slice(0, 5))
+      })
+      .catch(() => { if (active) setFiles([]) })
+    return () => { active = false }
+  }, [workspaceScope])
+  const formatSize = (size: number) => !Number.isFinite(size) || size <= 0 ? '' : size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))}KB` : `${(size / 1024 / 1024).toFixed(1)}MB`
+  const open = async (row: FrequentFileRow) => {
+    setDownloadingId(row.id)
+    try { await downloadDocumentAttachment({ id: row.id, name: row.name, size: formatSize(row.size) }, workspaceScope) }
+    catch (error) { onToast(error instanceof Error ? error.message : '파일을 내려받지 못했습니다.') }
+    finally { setDownloadingId(null) }
+  }
+  return <section className="frequent-files-card dashboard-section-card">
+    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><FileText size={18} /></span><h2>자주 찾는 파일</h2></div><button type="button" onClick={onOpenLibrary}>자료실 열기</button></header>
+    <div className="frequent-files-body dashboard-section-body">
+      {files === null && <p className="frequent-files-empty">자료를 불러오는 중…</p>}
+      {files !== null && files.length === 0 && <div className="empty-state compact"><FolderSearch size={24} /><h3>아직 내려받은 자료가 없습니다</h3><p>기업 자료실에서 파일을 내려받으면 자주 쓰는 순서로 여기에 모입니다.</p></div>}
+      {files !== null && files.map((row) => <button type="button" className="frequent-file-row" key={row.id} disabled={downloadingId === row.id} onClick={() => void open(row)}>
+        <span className="frequent-file-icon"><FileText size={16} /></span>
+        <span className="frequent-file-name">{row.name}</span>
+        <span className="frequent-file-meta">{row.accessCount ? `${row.accessCount}회` : '새 자료'}{formatSize(row.size) ? ` · ${formatSize(row.size)}` : ''}</span>
+        <Download size={14} />
+      </button>)}
+    </div>
+  </section>
 }

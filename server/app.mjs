@@ -65,6 +65,7 @@ const WORKSPACE_STORE_KEYS = new Set([
   'sales-shipments', 'compliance-records', 'document-storage-settings', 'performance-settings', 'performance-reports',
   'it-projects', 'it-deliverables', 'it-contracts', 'ai-proposals', 'automation-policies',
   'it-clients', 'it-support-programs', 'project-spaces', 'project-posts',
+  'company-assets', 'tax-events', 'ip-rights',
 ])
 // 프로젝트 공간은 멤버십 기반이라 전용 라우트(/api/projects)로만 읽고 쓴다.
 const PROJECT_KEYS = new Set(['project-spaces', 'project-posts'])
@@ -77,7 +78,7 @@ const SENTINEL_TRIGGER_KEYS = new Set(['compliance-records', 'product-catalog', 
 const TENANT_MEMBER_READ_KEYS = new Set([
   'work-items', 'inventory-locations', 'messenger-conversations', 'calendar-events', 'daily-journals',
   'leave-requests', 'leave-management', 'factory-locations', 'factory-layouts', 'work-rules', 'product-catalog', 'inventory-movements', 'calendar-departments',
-  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts', 'it-clients', 'it-support-programs',
+  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts', 'it-clients', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights',
 ])
 const TENANT_MEMBER_WRITE_KEYS = new Set([
   'work-items', 'messenger-conversations', 'calendar-events', 'daily-journals', 'it-projects', 'it-deliverables',
@@ -1914,7 +1915,7 @@ export function createApp(options = {}) {
     const tenantStore = workspaceStore.tenants[tenantId] ?? {}
     const document = (Array.isArray(documentRecord(tenantId)?.data) ? documentRecord(tenantId).data : []).find((item) => item.id === id)
     return isFactoryDrawingDocument(document)
-      || ['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations', 'project-posts', 'it-contracts', 'it-deliverables', 'it-support-programs']
+      || ['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations', 'project-posts', 'it-contracts', 'it-deliverables', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights']
         .some((key) => linkedDocumentIds(tenantStore[key]?.data).includes(id))
   }
   const safeDownloadName = (value) => String(value || 'document').replace(/[\r\n"]/g, '_').slice(0, 180)
@@ -2057,6 +2058,16 @@ export function createApp(options = {}) {
     const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : []
     const document = documents.find((item) => item.id === request.params.id)
     if (!document || !canReadDocument(document, request.auth)) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없거나 열람 권한이 없습니다.' } }); return }
+    // '자주 찾는 파일' 집계: 다운로드 횟수·최근 사용 시각 (지연 커밋)
+    try {
+      const tenantStore = workspaceStore.tenants[request.auth.tenantId] ??= {}
+      tenantStore['company-documents'] = {
+        data: documents.map((item) => item.id === document.id ? { ...item, accessCount: (Number(item.accessCount) || 0) + 1, lastAccessedAt: new Date().toISOString() } : item),
+        updatedAt: new Date().toISOString(),
+        updatedBy: 'system:access-count',
+      }
+      scheduleAuditCommit()
+    } catch { /* 집계 실패는 다운로드를 막지 않는다 */ }
     try {
       const signedUrl = await tenantDocumentSignedUrl(documentStorage, document, request.auth.tenantId)
       if (signedUrl) { response.redirect(302, signedUrl); return }
@@ -3910,10 +3921,10 @@ export function createApp(options = {}) {
   app.post('/api/admin/accounts/invite', requireAuth, requireTenantAdmin, async (request, response) => {
     const email = String(request.body?.email ?? '').trim().toLowerCase()
     const requestedName = String(request.body?.name ?? '').trim()
-    const team = String(request.body?.team ?? '').trim()
-    const jobRole = String(request.body?.role ?? '').trim()
-    if (!/^\S+@\S+\.\S+$/.test(email) || requestedName.length < 2 || requestedName.length > 40 || !team || !jobRole) {
-      response.status(400).json({ error: { code: 'INVALID_INVITE', message: '이름(2~40자), 이메일, 소속과 직무 권한을 모두 입력해 주세요.' } })
+    const team = String(request.body?.team ?? '').trim() || '미지정'
+    const jobRole = String(request.body?.position ?? request.body?.role ?? '').trim().slice(0, 40) || '팀원'
+    if (!/^\S+@\S+\.\S+$/.test(email) || requestedName.length < 2 || requestedName.length > 40) {
+      response.status(400).json({ error: { code: 'INVALID_INVITE', message: '이름(2~40자)과 이메일을 입력해 주세요.' } })
       return
     }
     if (accounts.some((account) => account.email.toLowerCase() === email)) {
@@ -4399,6 +4410,11 @@ export function createApp(options = {}) {
     return members
   }
   const applyProjectInfo = (target, body) => {
+    if (body?.link !== undefined) {
+      const link = String(body.link).trim().slice(0, 300)
+      target.link = /^https?:\/\//.test(link) || link === '' ? link : `https://${link}`
+    }
+    if (body?.category !== undefined) target.category = String(body.category).trim().slice(0, 20)
     if (body?.stage !== undefined) target.stage = PROJECT_STAGES.has(body.stage) ? body.stage : ''
     if (body?.client !== undefined) target.client = String(body.client).trim().slice(0, 80)
     if (body?.startDate !== undefined) target.startDate = /^\d{4}-\d{2}-\d{2}$/.test(String(body.startDate)) ? String(body.startDate) : ''
@@ -4475,7 +4491,7 @@ export function createApp(options = {}) {
       ownerId: request.auth.id,
       ownerName: request.auth.name,
       members: normalizeProjectMembers(request.auth.tenantId, request.auth.id, request.auth.name, request.body?.members),
-      stage: '', client: '', startDate: '', endDate: '', amount: 0,
+      stage: '', client: '', startDate: '', endDate: '', amount: 0, link: '', category: '',
       createdAt: now,
       updatedAt: now,
     }
@@ -5264,7 +5280,7 @@ export function createApp(options = {}) {
       return
     }
     let nextData = request.body.data
-    if (['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations', 'it-deliverables', 'it-contracts'].includes(key) && !await canReferenceDocuments(nextData, request.auth)) {
+    if (['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations', 'it-deliverables', 'it-contracts', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights'].includes(key) && !await canReferenceDocuments(nextData, request.auth)) {
       response.status(400).json({ error: { code: 'INVALID_DOCUMENT_REFERENCE', message: '첨부파일을 찾을 수 없거나 현재 계정에 열람 권한이 없습니다. 파일을 다시 첨부해 주세요.' } })
       return
     }

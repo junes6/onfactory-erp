@@ -8,6 +8,8 @@ export type TenantRouteId =
   | 'journal'
   | 'projects'
   | 'people'
+  | 'finance'
+  | 'ip'
   | 'documents'
   // food_manufacturing 모듈
   | 'products'
@@ -44,7 +46,7 @@ export const serviceModules: readonly ServiceModule[] = [
     name: '온팩토리 코어 플랫폼',
     version: '1.1.0',
     industry: 'all',
-    routes: ['ai', 'schedule', 'tasks', 'approvals', 'journal', 'projects', 'people', 'documents'],
+    routes: ['ai', 'schedule', 'tasks', 'approvals', 'journal', 'projects', 'people', 'finance', 'ip', 'documents'],
     capabilities: ['ai-hub', 'calendar', 'workflow', 'approval-queue', 'journal', 'project-spaces', 'people', 'performance', 'documents', 'messenger', 'points'],
   },
   {

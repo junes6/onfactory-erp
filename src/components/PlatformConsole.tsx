@@ -552,7 +552,7 @@ function ControlBriefing({ briefing, loading, onRefresh, onEnterTenant, onSelect
       {findings.length > 6 && <button type="button" className="pc-link pc-finding-more" onClick={() => setShowAll((value) => !value)}>{showAll ? '접기' : `신호 ${findings.length - 6}건 더 보기`}</button>}
       <div className="pc-assistant">
         <div className="pc-assistant-thread">
-          {thread.length === 0 && <p className="pc-assistant-hint"><Bot size={15} /> 예: "지금 문제 있는 고객사는?", "햇살바다 상태 알려줘", "관리자 계정 현황"</p>}
+          {thread.length === 0 && <p className="pc-assistant-hint"><Bot size={15} /> 예: "지금 문제 있는 고객사는?", "(고객사 이름) 상태 알려줘", "관리자 계정 현황"</p>}
           {thread.map((message, index) => <div key={index} className={`pc-assistant-message ${message.role}`}>{message.role === 'assistant' && <Bot size={15} />}<p>{message.text}</p></div>)}
           {asking && <div className="pc-assistant-message assistant"><Bot size={15} /><p>분석 중…</p></div>}
         </div>

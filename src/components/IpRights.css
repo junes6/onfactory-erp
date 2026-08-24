@@ -1,0 +1,10 @@
+/* 지식재산 · 인증 워크스페이스 */
+.ip-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-12); margin-bottom: var(--space-12); }
+.ip-summary article { display: flex; align-items: center; gap: var(--space-12); padding: var(--space-12) var(--space-16); border: var(--dashboard-stroke) solid var(--color-card-line); border-radius: var(--radius-8); background: var(--color-surface); }
+.ip-summary article > span { width: 40px; height: 40px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-violet); background: var(--color-violet-soft); }
+.ip-summary article.is-warn > span { color: var(--color-warning-ink); background: var(--color-warning-soft); }
+.ip-summary small { display: block; color: var(--muted); font-size: var(--font-11); }
+.ip-summary strong { font-size: var(--font-22); letter-spacing: -.02em; }
+.ip-filter { margin-bottom: var(--space-12); }
+.ip-kind-mark { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-violet); background: var(--color-violet-soft); }
+html[data-theme='dark'] .ip-summary article { background: var(--surface); }

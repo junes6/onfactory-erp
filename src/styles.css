@@ -1456,24 +1456,7 @@ html[data-theme='dark'] .journal-feedback.red { border-color: var(--color-danger
 html[data-theme='dark'] .journal-feedback.blue { border-color: var(--color-blue); color: var(--color-blue); background: var(--color-blue-soft); }
 html[data-theme='dark'] .collab-button.danger { border-color: var(--color-danger); }
 html[data-theme='dark'] .collab-button.danger:hover { background: var(--color-danger-soft); }
-html[data-theme='dark'] .pc-root {
-  --pc-bg: var(--color-blue-deep);
-  --pc-panel: var(--color-blue-deep);
-  --pc-panel-soft: var(--color-blue-deep);
-  --pc-text: var(--color-blue-soft);
-  --pc-muted: var(--color-gray-200);
-  --pc-line: var(--color-blue-deep);
-  --pc-accent: var(--color-blue);
-  --pc-accent-soft: var(--color-blue-deep);
-  --pc-green: var(--color-success);
-  --pc-green-soft: var(--color-success-soft);
-  --pc-amber: var(--color-warning);
-  --pc-amber-soft: var(--color-warning);
-  --pc-red: var(--color-danger);
-  --pc-red-soft: var(--color-danger-soft);
-  --pc-blue: var(--color-blue);
-  --pc-blue-soft: var(--color-blue-soft);
-}
+/* (R9) 다크 .pc-root 토큰 덮어쓰기 삭제 — blue-deep이 다크에서 밝은 청색이라 콘솔이 하늘색으로 보이던 원인 */
 
 /* 2026-08 usability pass: compact dashboard summary and collision-free work flow */
 .dashboard-widget-summary .home-action-strip.compact {

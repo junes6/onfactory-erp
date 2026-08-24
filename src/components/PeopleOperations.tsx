@@ -14,7 +14,6 @@ type PeopleOperationsProps = {
   onToast: (message: string) => void
   canManage: boolean
   initialTab?: PeopleTab
-  onConsentChanged?: () => void
   onOpenTask?: (taskId: string) => void
   currentUserId?: string
   currentUserName: string
@@ -162,40 +161,9 @@ function StateBadge({ children, tone = 'neutral' }: { children: string; tone?: s
   return <span className={'people-state-badge ' + tone}><i />{children}</span>
 }
 
-type ConsentTermItem = { id: string; title: string; summary: string; body: string }
-type ConsentState = { consent: { version: string; agreedAt: string; agreedBy: { id: string; name: string; email: string }; items: Array<{ id: string; title: string; agreed: boolean }> } | null; currentVersion: string; needsReconsent: boolean; terms: { version: string; items: ConsentTermItem[] } }
-
-export function PeopleOperationsPage({ onToast, canManage, currentUserId, currentUserName, currentUserTeam, workspaceScope, initialTab, onConsentChanged, onOpenTask }: PeopleOperationsProps) {
+export function PeopleOperationsPage({ onToast, canManage, currentUserId, currentUserName, currentUserTeam, workspaceScope, initialTab, onOpenTask }: PeopleOperationsProps) {
   const [tab, setTab] = useState<PeopleTab>(initialTab && canManage ? initialTab : canManage ? 'members' : 'leave')
-  const [consentState, setConsentState] = useState<ConsentState | null>(null)
-  const [consentChecks, setConsentChecks] = useState<Record<string, boolean>>({})
-  const [consentBusy, setConsentBusy] = useState(false)
-  const [consentOpen, setConsentOpen] = useState<string | null>(null)
   useEffect(() => { if (initialTab && canManage) setTab(initialTab) }, [initialTab, canManage])
-  const loadConsent = () => fetch('/api/tenant/consent')
-    .then(async (response) => response.ok ? response.json() as Promise<ConsentState> : null)
-    .then((body) => { if (body) setConsentState(body) })
-    .catch(() => {})
-  useEffect(() => {
-    if (!canManage || tab !== 'accounts') return
-    void loadConsent()
-  }, [canManage, tab])
-  const submitConsent = async () => {
-    if (!consentState) return
-    const consents = Object.fromEntries(consentState.terms.items.map((item) => [item.id, consentChecks[item.id] === true]))
-    if (!Object.values(consents).every(Boolean)) { onToast('3개 항목 모두 확인하고 체크해야 동의가 저장됩니다.'); return }
-    setConsentBusy(true)
-    try {
-      const response = await fetch('/api/tenant/consent', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ consents }) })
-      const body = await response.json() as { error?: { message?: string } }
-      if (!response.ok) throw new Error(body.error?.message || '동의를 저장하지 못했습니다.')
-      onToast('약관 동의 내역을 저장했습니다.')
-      setConsentChecks({})
-      await loadConsent()
-      onConsentChanged?.()
-    } catch (reason) { onToast(reason instanceof Error ? reason.message : '동의를 저장하지 못했습니다.') }
-    finally { setConsentBusy(false) }
-  }
   const [leaves, setLeaves] = useWorkspaceState<LeaveRequest[]>('leave-requests', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isLeaveRequestList })
   const [leaveManagement, setLeaveManagement] = useWorkspaceState<LeaveManagementState>('leave-management', emptyLeaveManagement, { scope: workspaceScope, seedWhenEmpty: false, validate: isLeaveManagementState })
   const [managedAccounts, setManagedAccounts] = useState<AccountRequest[]>([])
@@ -638,7 +606,7 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       const response = await fetch('/api/admin/accounts/invite', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: String(form.get('name')), email, team: String(form.get('team')), role: String(form.get('role')) }),
+        body: JSON.stringify({ name: String(form.get('name')), email, position: String(form.get('position')) }),
       })
       const result = await response.json() as {
         account?: AccountRequest
@@ -754,24 +722,6 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
         {request.status === '승인대기' ? <div className="approval-actions"><button type="button" className="small-button reject" onClick={(event) => void decideAccount(request.id, '반려', event.currentTarget)}>반려</button><button type="button" className="small-button approve" onClick={(event) => void decideAccount(request.id, '활성', event.currentTarget)}><UserCheck size={16} /> 승인</button></div> : request.status === '활성' ? <div className="account-credential-actions"><span className="approval-result"><ShieldCheck size={17} />{request.onboardingStatus === '설정완료' ? '로그인 가능' : '초기 설정 대기'}</span><button type="button" className="small-button" disabled={credentialIssuingId === request.id} onClick={(event) => void reissueCredential(request, event.currentTarget)}><RefreshCw size={15} />{credentialIssuingId === request.id ? '발급 중…' : '비밀번호 재설정 발급'}</button></div> : <span className="approval-result"><ShieldCheck size={17} />접근 불가</span>}
       </article>)}</div>
       <div className="account-safety-note"><AlertTriangle size={19} /><div><strong>초기 비밀번호는 승인 또는 재발급 직후 한 번만 표시됩니다.</strong><p>72시간 후 만료되며 첫 로그인에서 새 비밀번호를 설정하기 전에는 업무 데이터에 접근할 수 없습니다.</p></div></div>
-      <section className="tenant-consent" aria-labelledby="tenant-consent-title">
-        <div className="people-subsection-head"><div><h3 id="tenant-consent-title">가입 동의 내역</h3><p>운영사 데이터 접근·개인정보 처리위탁·AI 처리 3항. 약관 버전이 바뀌면 다시 동의해야 합니다.</p></div>{consentState ? <strong className={consentState.needsReconsent ? 'is-warning' : 'is-ok'}>{consentState.needsReconsent ? (consentState.consent ? '재동의 필요' : '동의 기록 없음') : '동의 완료'}</strong> : <strong>불러오는 중</strong>}</div>
-        {consentState && <>
-          {consentState.consent && <p className="tenant-consent-meta">동의 버전 <strong>{consentState.consent.version}</strong>{consentState.needsReconsent ? <> → 현재 약관 버전 <strong>{consentState.currentVersion}</strong></> : null} · {formatDateTime(consentState.consent.agreedAt)} · 동의자 {consentState.consent.agreedBy.name}{consentState.consent.agreedBy.email ? ` (${consentState.consent.agreedBy.email})` : ''}</p>}
-          <ul className="tenant-consent-list">
-            {consentState.terms.items.map((item) => {
-              const agreed = consentState.consent?.items.find((entry) => entry.id === item.id)?.agreed === true && !consentState.needsReconsent
-              return <li key={item.id}>
-                {consentState.needsReconsent
-                  ? <label className="tenant-consent-check"><input type="checkbox" checked={consentChecks[item.id] === true} onChange={(event) => setConsentChecks((current) => ({ ...current, [item.id]: event.target.checked }))} /><span /></label>
-                  : <span className={`tenant-consent-mark${agreed ? ' is-agreed' : ''}`}>{agreed ? '✓' : '–'}</span>}
-                <div><strong>{item.title}</strong><p>{item.summary}</p><button type="button" className="tenant-consent-more" onClick={() => setConsentOpen((current) => current === item.id ? null : item.id)}>{consentOpen === item.id ? '약관 본문 접기' : '약관 본문 보기'}</button>{consentOpen === item.id && <pre className="tenant-consent-body">{item.body}</pre>}</div>
-              </li>
-            })}
-          </ul>
-          {consentState.needsReconsent && <div className="tenant-consent-actions"><button type="button" className="button primary" disabled={consentBusy} onClick={() => void submitConsent()}>{consentBusy ? '저장 중…' : '3항 모두 동의하고 저장'}</button><small>동의 일시·버전·동의자({currentUserName})가 고객사 레코드에 기록됩니다.</small></div>}
-        </>}
-      </section>
       <section className="operator-access-log" aria-labelledby="operator-access-log-title">
         <div className="people-subsection-head"><div><h3 id="operator-access-log-title">운영사(온팩토리) 접속 이력</h3><p>플랫폼 운영자가 우리 회사 워크스페이스에 접속·조회·변경한 모든 기록입니다.</p></div><strong>{operatorAccessLog.length}건</strong></div>
         {operatorAccessLog.length === 0
@@ -810,7 +760,7 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
           <footer><button type="button" className="button primary" onClick={closeModal}>전달 완료</button></footer>
         </div> : <form onSubmit={submitInvite}>
           <div className="form-grid"><label className="form-field"><span>이름</span><input name="name" type="text" placeholder="예: 이하늘" minLength={2} maxLength={40} data-autofocus required /></label><label className="form-field"><span>회사 이메일</span><input name="email" type="email" placeholder="name@company.co.kr" required /></label></div>
-          <div className="form-grid"><label className="form-field"><span>소속</span><select name="team"><option>생산 1팀</option><option>품질관리</option><option>물류팀</option><option>판매운영</option><option>경영지원</option></select></label><label className="form-field"><span>직무 권한</span><select name="role"><option>생산 작업자</option><option>품질 담당</option><option>재고 담당</option><option>판매 담당</option><option>일반 사용자</option></select></label></div>
+          <label className="form-field full"><span>직위 <em>선택</em></span><input name="position" type="text" placeholder="예: 대리, 팀장, 연구원" maxLength={40} /></label>
           <div className="modal-note secure"><ShieldCheck size={18} /><p><strong>승인 전에는 업무 데이터에 접근할 수 없습니다.</strong><span>승인 시 72시간 유효한 초기 비밀번호가 한 번 표시되고, 직원은 첫 로그인에서 직접 변경합니다.</span></p></div>
           <footer><button type="button" className="button ghost" onClick={closeModal}>취소</button><button type="submit" className="button primary" disabled={isInviting}><Send size={18} /> {isInviting ? '생성 중…' : '계정 생성'}</button></footer>
         </form>}

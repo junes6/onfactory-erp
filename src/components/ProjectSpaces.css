@@ -115,3 +115,7 @@ html[data-theme='dark'] :is(.project-card,.project-post,.project-post-actions bu
 .project-comment { padding: var(--space-4) var(--space-0); }
 html[data-theme='dark'] :is(.project-roster li,.project-roster select,.project-roster-add,.project-roster-remove,.project-post-form-title,.project-post-form-body,.project-file-download) { background: var(--surface); }
 html[data-theme='dark'] .project-roster li.is-member { background: var(--color-primary-soft); }
+
+/* R9: 프로젝트 링크·구분 */
+.project-link-button { text-decoration: none; }
+a.project-link-button { display: inline-flex; align-items: center; gap: var(--space-4); }

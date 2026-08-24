@@ -91,3 +91,13 @@ html[data-theme='dark'] .dashboard-link-form :is(input,select) { color: var(--in
 @media (max-width: 420px) {
   .dashboard-link-grid { grid-template-columns: 1fr; }
 }
+
+/* 자주 찾는 파일 위젯 */
+.frequent-files-body { display: flex; flex-direction: column; gap: var(--space-4); }
+.frequent-file-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-8); min-height: 46px; padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); text-align: left; cursor: pointer; }
+.frequent-file-row:hover:not(:disabled) { border-color: var(--color-primary); }
+.frequent-file-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-teal); background: var(--color-teal-soft); }
+.frequent-file-name { overflow: hidden; font-size: var(--font-13); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.frequent-file-meta { color: var(--muted); font-size: var(--font-11); white-space: nowrap; }
+.frequent-files-empty { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); }
+html[data-theme='dark'] .frequent-file-row { background: var(--surface); }

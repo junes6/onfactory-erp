@@ -31,6 +31,10 @@ export const WORKSPACE_TABLES = Object.freeze({
   'it-support-programs': 'it_support_programs',
   'project-spaces': 'project_spaces',
   'project-posts': 'project_posts',
+  // R9: 세무·자산, 지식재산
+  'company-assets': 'company_assets',
+  'tax-events': 'tax_events',
+  'ip-rights': 'ip_rights',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))
