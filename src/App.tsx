@@ -128,7 +128,7 @@ const pageTitles: Record<PageId, string> = {
   ai: 'AI 업무허브', schedule: '일정관리', tasks: '업무지시 · 결재', journal: '일일업무일지',
   products: '제품관리', inventory: '재고 · LOT', factory: '공장관리',
   sales: '판매채널', people: '인사 · 조직', documents: '기업 자료실', compliance: '식품안전 · 인증',
-  approvals: 'AI 제안 검토', projects: '프로젝트 공간',
+  approvals: 'AI 제안 검토', projects: '프로젝트',
   'it-projects': '프로젝트', 'it-deliverables': '산출물', 'it-contracts': '계약 · 거래처',
   billing: '비용 · 포인트',
   platform: '플랫폼 운영 개요', tenants: '고객사 관리', support: 'CS 지원센터',
@@ -1617,7 +1617,7 @@ export default function App() {
     { id: 'tasks', label: '업무지시 · 결재', icon: ListChecks, badge: scopedWorkItems.filter((x) => x.status !== '결재완료').length },
     { id: 'approvals', label: 'AI 제안 검토', icon: ClipboardCheck, badge: pendingProposals },
     { id: 'journal', label: '일일업무일지', icon: NotebookPen },
-    { id: 'projects', label: '프로젝트 공간', icon: FolderKanban },
+    { id: 'projects', label: '프로젝트', icon: FolderKanban },
     { id: 'products', label: '제품관리', icon: Package },
     { id: 'inventory', label: '재고 · LOT', icon: Boxes },
     { id: 'factory', label: '공장관리', icon: Factory },
@@ -1625,7 +1625,6 @@ export default function App() {
     { id: 'people', label: '인사 · 조직', icon: Users },
     { id: 'documents', label: '기업 자료실', icon: FileText },
     { id: 'compliance', label: '식품안전 · 인증', icon: ShieldCheck },
-    { id: 'it-projects', label: '프로젝트', icon: Briefcase },
     { id: 'it-deliverables', label: '산출물', icon: FileStack },
     { id: 'it-contracts', label: '계약 · 거래처', icon: FileSignature },
   ]
@@ -1889,7 +1888,7 @@ export default function App() {
       case 'approvals': return <ApprovalQueue workspaceScope={workspaceScope} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onPendingChange={setPendingProposals} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} onToast={setToast} />
       case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} companyName={tenantName} onToast={setToast} />
-      case 'it-projects':
+      case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'it-deliverables':
       case 'it-contracts': return <ItServicesPage view={page as ItServicesView} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} onToast={setToast} />
       default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyMode === 'easy'} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />

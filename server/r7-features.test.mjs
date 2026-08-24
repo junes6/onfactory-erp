@@ -182,3 +182,30 @@ test('platform control center: tenant accounts listing, briefing findings and ru
     assert.equal((await fetch(`${origin}/api/platform/briefing`, { headers: { cookie: member.cookie } })).status, 403)
   })
 })
+
+test('projects: management fields are stored and legacy it-projects migrate once for IT tenants', async () => {
+  const store = { version: 2, tenants: { 'TENANT-SUNSEA': {}, 'TENANT-POHANG': {}, 'TENANT-3DMUSE': { 'it-projects': { data: [{ id: 'ITP-1', name: '레거시 SI 구축', client: '한국도로공사', status: '진행 중', owner: '김서원', startDate: '2026-07-01', dueDate: '2026-12-31', amount: 50000000, note: '기존 IT 프로젝트', createdAt: '2026-07-01T00:00:00.000Z', updatedAt: '2026-07-01T00:00:00.000Z' }], updatedAt: '2026-07-01T00:00:00.000Z' } } }, platform: {}, accountApprovals: {}, accountCredentials: {}, invitedAccounts: [], passwordResetRequests: [] }
+  await withServer(createApp({ apiKey: '', initialWorkspaceStore: store, onWorkspaceStoreChange: () => {} }), async (origin) => {
+    // 관리 정보 저장
+    const admin = await login(origin, 'admin@sunsea.co.kr')
+    const created = await readJson(await fetch(`${origin}/api/projects`, { method: 'POST', headers: json(admin.cookie), body: JSON.stringify({ name: '신제품 출시', stage: '진행 중', client: '자사', startDate: '2026-09-01', endDate: '2026-11-30', amount: 1000000 }) }))
+    assert.equal(created.project?.stage, '진행 중', JSON.stringify(created))
+    assert.equal(created.project.client, '자사')
+    assert.equal(created.project.amount, 1000000)
+    const patched = await readJson(await fetch(`${origin}/api/projects/${created.project.id}`, { method: 'PATCH', headers: json(admin.cookie), body: JSON.stringify({ stage: '검수', amount: 2000000 }) }))
+    assert.equal(patched.project.stage, '검수')
+    assert.equal(patched.project.amount, 2000000)
+    // IT 테넌트: 레거시 it-projects가 프로젝트 공간으로 1회 이관
+    const itAdmin = await login(origin, 'admin@3dmuse.demo')
+    assert.equal(itAdmin.response.status, 200)
+    const first = await readJson(await fetch(`${origin}/api/projects`, { headers: json(itAdmin.cookie) }))
+    const migrated = first.projects.find((project) => project.legacyId === 'ITP-1')
+    assert.ok(migrated, JSON.stringify(first.projects))
+    assert.equal(migrated.name, '레거시 SI 구축')
+    assert.equal(migrated.stage, '진행 중')
+    assert.equal(migrated.client, '한국도로공사')
+    assert.equal(migrated.endDate, '2026-12-31')
+    const second = await readJson(await fetch(`${origin}/api/projects`, { headers: json(itAdmin.cookie) }))
+    assert.equal(second.projects.filter((project) => project.legacyId === 'ITP-1').length, 1, '두 번 이관되지 않는다')
+  })
+})

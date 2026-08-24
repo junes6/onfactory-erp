@@ -2852,3 +2852,10 @@ html[data-easy-mode='on'] .app-shell .icon-button { width: 48px; height: 48px; }
 /* R7-11: 다크 모드 로그인 안내 박스 — 포인트색 글자가 soft 배경에 묻히지 않도록 본문색 */
 html[data-theme='dark'] :is(.auth-demo-note,.auth-demo-note strong,.auth-install-banner,.auth-install-banner strong) { color: var(--ink); }
 html[data-theme='dark'] :is(.auth-demo-note,.auth-install-banner) { border-color: var(--color-primary); }
+/* R8-5: 쉬운 화면 — 페이지별 필터 칩·작은 버튼·요약 칩까지 44px 이상으로 통일 */
+html[data-easy-mode='on'] .app-shell :is(.journal-summary-chip,.journal-filter button,.compliance-toolbar button,.secondary-button,.text-action-button,.channel-health-check,.channel-health-card-button,.factory-layout-delete,.factory-canvas-controls button,.factory-canvas-controls__value,.warehouse-edit,.movement-delete,.library-filter button,.product-filter button,[role='tab']) { min-height: 44px; padding-inline: var(--space-12); font-size: var(--font-13); }
+html[data-easy-mode='on'] .app-shell .journal-summary-chip strong { font-size: var(--font-15); }
+/* 쉬운 화면: 표형 행(판매채널 상태 점검)은 핵심 열만 — 성공률·최근 동기화 등 보조 열 숨김 */
+html[data-easy-mode='on'] .channel-health-row { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto; }
+html[data-easy-mode='on'] .channel-health-row > :nth-child(3), html[data-easy-mode='on'] .channel-health-row > :nth-child(4), html[data-easy-mode='on'] .channel-health-row > :nth-child(5) { display: none; }
+html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-category-chips button,.shipment-filter-row button,.library-toolbar > div button) { min-height: 44px; padding-inline: var(--space-12); font-size: var(--font-13); }

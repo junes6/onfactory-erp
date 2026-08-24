@@ -58,30 +58,60 @@
 .project-attachment-chip small { color: var(--muted); }
 .project-attachment-chip button { width: 20px; height: 20px; display: grid; place-items: center; border: none; border-radius: var(--radius-8); color: var(--muted); background: transparent; cursor: pointer; }
 .project-attachment-add { display: inline-flex; align-items: center; gap: var(--space-4); min-height: 30px; padding: var(--space-0) var(--space-12); border: var(--hairline) dashed var(--line-strong); border-radius: var(--radius-8); color: var(--color-primary); background: transparent; font-size: var(--font-13); cursor: pointer; }
-.project-composer { margin-bottom: var(--space-16); padding: var(--space-16); }
-.project-composer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-8); }
-.project-composer-head strong { display: inline-flex; align-items: center; gap: var(--space-4); }
-.project-composer .form-field { margin-bottom: var(--space-8); }
-.project-composer footer { display: flex; justify-content: flex-end; gap: var(--space-8); margin-top: var(--space-12); }
+/* 컴팩트 작성기 — 제목·본문·파일·버튼이 한 카드 안에 붙어 있다 */
+.project-composer { margin-bottom: var(--space-12); padding: var(--space-12) var(--space-16); }
+.project-composer-head { display: flex; align-items: center; justify-content: space-between; min-height: 30px; margin-bottom: var(--space-4); }
+.project-composer-head strong { display: inline-flex; align-items: center; gap: var(--space-4); font-size: var(--font-13); }
+.project-post-form { display: flex; flex-direction: column; gap: var(--space-8); }
+.project-post-form-title { width: 100%; min-height: 42px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); font: inherit; font-size: var(--font-15); font-weight: var(--weight-medium); }
+.project-post-form-body { width: 100%; min-height: 84px; padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); font: inherit; font-size: var(--font-15); line-height: 1.6; resize: vertical; }
+.project-post-form-title:focus, .project-post-form-body:focus { border-color: var(--color-primary); outline: none; }
+.project-post-form-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-8); }
+.project-post-form-actions { display: flex; gap: var(--space-8); margin-left: auto; }
+.project-post.is-editing { padding: var(--space-12) var(--space-16); }
 .project-editor { width: min(640px, 100%); }
 .project-member-editor { margin-top: var(--space-12); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
 .project-member-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-8); font-size: var(--font-13); }
 .project-member-head strong { display: inline-flex; align-items: center; gap: var(--space-4); }
 .project-member-head span { color: var(--muted); }
-.project-member-list { display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-0); padding: var(--space-0); list-style: none; }
-.project-member-list li { display: flex; align-items: center; gap: var(--space-8); min-height: 40px; font-size: var(--font-13); }
-.project-member-list li > span { flex: 1; }
-.project-member-list li em { color: var(--muted); font-style: normal; }
-.project-member-list select { min-height: 34px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); font-size: var(--font-13); }
-.project-member-list li > button { width: 28px; height: 28px; display: grid; place-items: center; border: none; border-radius: var(--radius-8); color: var(--muted); background: transparent; cursor: pointer; }
-.project-member-search input { width: 100%; min-height: 40px; margin-top: var(--space-8); padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); font-size: var(--font-13); }
-.project-member-candidates { display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-4); }
-.project-member-candidates button { display: flex; align-items: center; gap: var(--space-8); min-height: 40px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); font-size: var(--font-13); text-align: left; cursor: pointer; }
-.project-member-candidates button span { flex: 1; }
-.project-member-candidates small { color: var(--muted); }
-.project-member-empty { display: block; padding: var(--space-8); color: var(--muted); font-size: var(--font-13); }
+/* 구성원 로스터: 회사 전체가 항상 보이고, 누르면 추가/제외 */
+.project-member-search input { width: 100%; min-height: 40px; margin: var(--space-8) var(--space-0); padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); font-size: var(--font-13); }
+.project-roster { display: flex; flex-direction: column; gap: var(--space-4); max-height: 300px; margin: var(--space-0); padding: var(--space-0); overflow-y: auto; list-style: none; }
+.project-roster li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-8); min-height: 48px; padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); font-size: var(--font-13); }
+.project-roster li.is-member { border-color: var(--color-primary); background: var(--color-primary-soft); }
+.project-roster li.is-owner-row { border-style: dashed; }
+.project-roster li > div { min-width: 0; }
+.project-roster li > div span { display: block; overflow: hidden; font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.project-roster li > div small { display: block; overflow: hidden; color: var(--muted); font-size: var(--font-11); text-overflow: ellipsis; white-space: nowrap; }
+.project-roster li em { color: var(--muted); font-style: normal; }
+.project-roster select { min-height: 34px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); font-size: var(--font-13); }
+.project-roster-add, .project-roster-remove { display: inline-flex; align-items: center; gap: var(--space-4); min-height: 34px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
+.project-roster-add { color: var(--color-primary); border-color: var(--color-primary); }
+.project-roster-remove { color: var(--muted); }
+.project-roster-empty { padding: var(--space-12); color: var(--muted); font-size: var(--font-13); text-align: center; }
+.project-member-hint { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-11); }
 html[data-theme='dark'] :is(.project-card,.project-post,.project-post-actions button,.project-comment-composer textarea,.project-member-list select,.project-member-search input,.project-member-candidates button) { background: var(--surface); }
 @media (max-width: 760px) {
   .project-post > header { flex-wrap: wrap; }
   .project-comment-composer-tools { flex-direction: column; align-items: stretch; }
 }
+
+/* R8: 상세 탭 + 파일 모아보기 + 헤더 카드 배지 */
+.project-detail-tabs { margin-bottom: var(--space-12); }
+.project-card-badges { display: flex; flex-wrap: wrap; gap: var(--space-4); justify-content: flex-end; }
+.project-files-panel { padding: var(--space-8); }
+.project-file-rows { display: flex; flex-direction: column; }
+.project-file-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-12); min-height: 56px; padding: var(--space-4) var(--space-12); border-bottom: var(--hairline) solid var(--line); }
+.project-file-row:last-child { border-bottom: none; }
+.project-file-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-teal); background: var(--color-teal-soft); }
+.project-file-row strong { display: block; overflow: hidden; font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
+.project-file-row small { display: block; overflow: hidden; color: var(--muted); font-size: var(--font-11); text-overflow: ellipsis; white-space: nowrap; }
+.project-file-download { display: inline-flex; align-items: center; gap: var(--space-4); min-height: 36px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--color-primary); background: var(--surface); font-size: var(--font-13); cursor: pointer; }
+.project-post { padding: var(--space-12) var(--space-16); }
+.project-post > header { align-items: center; }
+.project-post-body { margin-top: var(--space-8); }
+.project-post-files { margin-top: var(--space-8); }
+.project-comments { margin-top: var(--space-8); padding-top: var(--space-8); }
+.project-comment { padding: var(--space-4) var(--space-0); }
+html[data-theme='dark'] :is(.project-roster li,.project-roster select,.project-roster-add,.project-roster-remove,.project-post-form-title,.project-post-form-body,.project-file-download) { background: var(--surface); }
+html[data-theme='dark'] .project-roster li.is-member { background: var(--color-primary-soft); }

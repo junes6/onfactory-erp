@@ -62,7 +62,7 @@ export const serviceModules: readonly ServiceModule[] = [
     version: '0.1.0',
     industry: 'it_services',
     brandLabel: 'IT 서비스 워크스페이스',
-    routes: ['it-projects', 'it-deliverables', 'it-contracts'],
+    routes: ['it-deliverables', 'it-contracts'],
     capabilities: ['projects', 'deliverables', 'contracts'],
   },
 ] as const

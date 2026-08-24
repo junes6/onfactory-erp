@@ -69,6 +69,7 @@ const WORKSPACE_STORE_KEYS = new Set([
 // 프로젝트 공간은 멤버십 기반이라 전용 라우트(/api/projects)로만 읽고 쓴다.
 const PROJECT_KEYS = new Set(['project-spaces', 'project-posts'])
 const PROJECT_ROLES = new Set(['owner', 'editor', 'viewer'])
+const PROJECT_STAGES = new Set(['준비', '수주 검토', '수주 확정', '진행 중', '검수', '완료', '보류'])
 // 승인 큐·자동화 정책은 전용 라우트로만 바뀐다 (결정 diff가 원료이므로 generic PUT 금지).
 const PROPOSAL_ONLY_KEYS = new Set(['ai-proposals', 'automation-policies', 'project-spaces', 'project-posts'])
 // 이 키가 바뀌면 생존 센티널을 즉시 재평가한다.
@@ -4397,6 +4398,52 @@ export function createApp(options = {}) {
     }
     return members
   }
+  const applyProjectInfo = (target, body) => {
+    if (body?.stage !== undefined) target.stage = PROJECT_STAGES.has(body.stage) ? body.stage : ''
+    if (body?.client !== undefined) target.client = String(body.client).trim().slice(0, 80)
+    if (body?.startDate !== undefined) target.startDate = /^\d{4}-\d{2}-\d{2}$/.test(String(body.startDate)) ? String(body.startDate) : ''
+    if (body?.endDate !== undefined) target.endDate = /^\d{4}-\d{2}-\d{2}$/.test(String(body.endDate)) ? String(body.endDate) : ''
+    if (body?.amount !== undefined) target.amount = Math.max(0, Number(body.amount) || 0)
+  }
+  /** IT 모듈의 기존 '프로젝트'(it-projects)를 프로젝트 공간으로 1회 이관한다. legacyId로 중복 이관을 막는다. */
+  const importLegacyItProjects = (tenantId) => {
+    if (tenantIndustryType(tenantId) !== 'it_services') return
+    const legacy = Array.isArray(workspaceStore.tenants[tenantId]?.['it-projects']?.data) ? workspaceStore.tenants[tenantId]['it-projects'].data : []
+    if (!legacy.length) return
+    const spaces = projectSpacesOf(tenantId)
+    const known = new Set(spaces.map((space) => space?.legacyId).filter(Boolean))
+    const admins = accounts.filter((account) => account.tenantId === tenantId && account.role === 'tenant-admin' && account.approved)
+    const now = new Date().toISOString()
+    const additions = []
+    for (const item of legacy) {
+      if (!item?.id || known.has(item.id)) continue
+      const owner = accounts.find((account) => account.id === item.ownerId && account.tenantId === tenantId)
+        ?? uniqueTenantAccountByName(accounts, tenantId, String(item.owner ?? '')) ?? admins[0]
+      if (!owner) continue
+      additions.push({
+        id: `PRJ-${Date.now().toString(36).toUpperCase()}-${randomBytes(2).toString('hex').toUpperCase()}`,
+        legacyId: item.id,
+        name: String(item.name ?? '프로젝트').slice(0, 80),
+        description: String(item.note ?? '').slice(0, 500),
+        visibility: 'company',
+        status: ['완료', '보류'].includes(item.status) ? 'archived' : 'active',
+        stage: PROJECT_STAGES.has(item.status) ? item.status : '진행 중',
+        client: String(item.client ?? '').slice(0, 80),
+        startDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item.startDate)) ? item.startDate : '',
+        endDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item.dueDate)) ? item.dueDate : '',
+        amount: Math.max(0, Number(item.amount) || 0),
+        ownerId: owner.id,
+        ownerName: owner.name,
+        members: [{ id: owner.id, name: owner.name, role: 'owner' }],
+        createdAt: item.createdAt ?? now,
+        updatedAt: now,
+      })
+    }
+    if (additions.length) {
+      writeProjectData(tenantId, 'project-spaces', [...additions, ...spaces].slice(0, 500), 'system:it-projects-migration')
+      scheduleAuditCommit()
+    }
+  }
   const publicProject = (project, posts, auth) => {
     const projectPosts = posts.filter((post) => post.projectId === project.id)
     const lastPost = projectPosts.reduce((latest, post) => !latest || String(post.updatedAt ?? post.createdAt).localeCompare(String(latest.updatedAt ?? latest.createdAt)) > 0 ? post : latest, null)
@@ -4407,6 +4454,7 @@ export function createApp(options = {}) {
 
   app.get('/api/projects', ...projectGuards, (request, response) => {
     if (!requireTenant(request, response)) return
+    importLegacyItProjects(request.auth.tenantId)
     const posts = projectPostsOf(request.auth.tenantId)
     const projects = projectSpacesOf(request.auth.tenantId).filter((project) => projectRoleOf(project, request.auth)).map((project) => publicProject(project, posts, request.auth))
     projects.sort((left, right) => Number(right.status !== 'archived') - Number(left.status !== 'archived') || String(right.lastActivityAt).localeCompare(String(left.lastActivityAt)))
@@ -4427,9 +4475,11 @@ export function createApp(options = {}) {
       ownerId: request.auth.id,
       ownerName: request.auth.name,
       members: normalizeProjectMembers(request.auth.tenantId, request.auth.id, request.auth.name, request.body?.members),
+      stage: '', client: '', startDate: '', endDate: '', amount: 0,
       createdAt: now,
       updatedAt: now,
     }
+    applyProjectInfo(project, request.body)
     const previous = workspaceStore.tenants[request.auth.tenantId]?.['project-spaces']
     writeProjectData(request.auth.tenantId, 'project-spaces', [project, ...projectSpacesOf(request.auth.tenantId)].slice(0, 500), request.auth.id)
     try { await commitWorkspaceStore() } catch {
@@ -4451,6 +4501,7 @@ export function createApp(options = {}) {
     if (request.body?.visibility !== undefined) next.visibility = request.body.visibility === 'company' ? 'company' : 'members'
     if (request.body?.status !== undefined) next.status = request.body.status === 'archived' ? 'archived' : 'active'
     if (request.body?.members !== undefined) next.members = normalizeProjectMembers(request.auth.tenantId, project.ownerId, project.ownerName, request.body.members)
+    applyProjectInfo(next, request.body)
     const tenantStore = workspaceStore.tenants[request.auth.tenantId]
     const previousSpaces = tenantStore['project-spaces']; const previousDocuments = tenantStore['company-documents']
     writeProjectData(request.auth.tenantId, 'project-spaces', projects.map((item, itemIndex) => itemIndex === index ? next : item), request.auth.id)

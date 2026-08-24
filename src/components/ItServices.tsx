@@ -137,7 +137,19 @@ function dueLabel(dueDate: string) {
   return `${formatDateLabel(dueDate)} · ${days}일 남음`
 }
 
+type UnifiedProjectRef = { id: string; legacyId?: string; name: string }
+
 export function ItServicesPage({ view, workspaceScope, canManage, currentUserId, currentUserName, onToast }: Props) {
+  // 통합 프로젝트(프로젝트 공간) — 산출물의 프로젝트 연결에 사용한다. 기존 it-projects는 이름 해석용으로만 남긴다.
+  const [spaces, setSpaces] = useState<UnifiedProjectRef[]>([])
+  useEffect(() => {
+    let active = true
+    fetch('/api/projects', { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+      .then(async (response) => response.ok ? response.json() as Promise<{ projects?: UnifiedProjectRef[] }> : { projects: [] })
+      .then((body) => { if (active) setSpaces((body.projects ?? []).map((item) => ({ id: item.id, legacyId: item.legacyId, name: item.name }))) })
+      .catch(() => {})
+    return () => { active = false }
+  }, [workspaceScope])
   const [projects, setProjects] = useWorkspaceState<ItProject[]>('it-projects', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isProjects })
   const [deliverables, setDeliverables] = useWorkspaceState<ItDeliverable[]>('it-deliverables', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isDeliverables })
   const [contracts, setContracts] = useWorkspaceState<ItContract[]>('it-contracts', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isContracts })
@@ -148,6 +160,8 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
   const [projectFilter, setProjectFilter] = useState<string>('all')
 
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
+  const projectNameOf = (id: string) => spaces.find((space) => space.id === id || space.legacyId === id)?.name ?? projectById.get(id)?.name ?? '삭제된 프로젝트'
+  const deliverableProjectOptions = spaces.length ? spaces : projects.map((project) => ({ id: project.id, name: project.name }))
   const today = seoulDateInputValue()
 
   const removeProject = async (project: ItProject) => {
@@ -229,19 +243,19 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
     return <div className="content-page it-page">
       <header className="page-header"><div><span className="eyebrow">DELIVERABLES</span><h1>산출물</h1><p>프로젝트별 파일을 버전과 함께 보관합니다.</p></div><div className="page-header-actions"><button className="button primary" type="button" disabled={projects.length === 0} onClick={() => setEditor({ kind: 'deliverable' })}><Plus size={18} /> 산출물 등록</button></div></header>
       <section className="panel it-list-panel">
-        <div className="it-toolbar"><label><span>프로젝트</span><select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">전체 프로젝트</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><span className="it-toolbar-count">{visible.length}건</span></div>
+        <div className="it-toolbar"><label><span>프로젝트</span><select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">전체 프로젝트</option>{deliverableProjectOptions.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><span className="it-toolbar-count">{visible.length}건</span></div>
         {projects.length === 0
           ? <div className="empty-state"><FileStack size={30} /><h3>먼저 프로젝트를 등록하세요</h3><p>산출물은 프로젝트에 연결해 보관합니다.</p></div>
           : visible.length === 0
             ? <div className="empty-state"><FileStack size={30} /><h3>등록된 산출물이 없습니다</h3><p>설계서·소스 압축본·보고서 등을 버전과 함께 올려 두세요.</p></div>
             : <div className="it-rows" role="list">{visible.map((deliverable) => <article className="it-row" role="listitem" key={deliverable.id}>
               <span className="it-version">{deliverable.version}</span>
-              <div className="it-row-main"><strong>{deliverable.name}</strong><small>{projectById.get(deliverable.projectId)?.name ?? '삭제된 프로젝트'} · {deliverable.createdBy} · {formatDateLabel(deliverable.updatedAt.slice(0, 10))}</small></div>
+              <div className="it-row-main"><strong>{deliverable.name}</strong><small>{projectNameOf(deliverable.projectId)} · {deliverable.createdBy} · {formatDateLabel(deliverable.updatedAt.slice(0, 10))}</small></div>
               <div className="it-row-files">{deliverable.attachments.length === 0 ? <span className="it-row-meta">파일 없음</span> : deliverable.attachments.map((file) => <button type="button" key={file.id} onClick={() => void download(file)}><Download size={13} /> {file.name}</button>)}</div>
               <div className="it-row-actions"><button type="button" aria-label={`${deliverable.name} 수정`} onClick={() => setEditor({ kind: 'deliverable', item: deliverable })}><Pencil size={15} /></button>{(canManage || deliverable.createdBy === currentUserName) && <button type="button" aria-label={`${deliverable.name} 삭제`} onClick={() => void removeDeliverable(deliverable)}><Trash2 size={15} /></button>}</div>
             </article>)}</div>}
       </section>
-      {editor?.kind === 'deliverable' && <DeliverableEditor item={editor.item} projects={projects} defaultProjectId={projectFilter === 'all' ? projects[0]?.id ?? '' : projectFilter} workspaceScope={workspaceScope} currentUserName={currentUserName} onToast={onToast} onClose={() => setEditor(null)} onSave={async (next) => {
+      {editor?.kind === 'deliverable' && <DeliverableEditor item={editor.item} projects={deliverableProjectOptions} defaultProjectId={projectFilter === 'all' ? deliverableProjectOptions[0]?.id ?? '' : projectFilter} workspaceScope={workspaceScope} currentUserName={currentUserName} onToast={onToast} onClose={() => setEditor(null)} onSave={async (next) => {
         const result = await setDeliverables((current) => current.some((item) => item.id === next.id) ? current.map((item) => item.id === next.id ? next : item) : [next, ...current])
         if (!result.ok) { onToast(result.message ?? '산출물을 저장하지 못했습니다.'); return false }
         onToast(`${next.name} ${next.version} 산출물을 저장했습니다.`)
@@ -388,7 +402,7 @@ function ProjectEditor({ item, currentUserId, currentUserName, onClose, onSave }
   </div>
 }
 
-function DeliverableEditor({ item, projects, defaultProjectId, workspaceScope, currentUserName, onToast, onClose, onSave }: { item?: ItDeliverable; projects: ItProject[]; defaultProjectId: string; workspaceScope?: string; currentUserName: string; onToast: (message: string) => void; onClose: () => void; onSave: (next: ItDeliverable) => Promise<boolean> }) {
+function DeliverableEditor({ item, projects, defaultProjectId, workspaceScope, currentUserName, onToast, onClose, onSave }: { item?: ItDeliverable; projects: Array<{ id: string; name: string }>; defaultProjectId: string; workspaceScope?: string; currentUserName: string; onToast: (message: string) => void; onClose: () => void; onSave: (next: ItDeliverable) => Promise<boolean> }) {
   useEscape(onClose)
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)

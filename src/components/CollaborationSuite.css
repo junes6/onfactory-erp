@@ -1733,7 +1733,7 @@ html[data-theme='dark'] .journal-month-cell, html[data-theme='dark'] .journal-mo
 /* R7-2: 일정 등록 버튼을 달력 툴바로 — 툴바는 스크롤해도 상단에 고정 */
 .schedule-toolbar { position: sticky; top: var(--space-0); z-index: 5; flex-wrap: wrap; }
 .schedule-create-button { margin-left: auto; }
-.schedule-day-head > button.schedule-day-add { width: auto; min-height: 40px; display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-0) var(--space-12); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.schedule-day-head > button.schedule-day-add { width: auto; height: auto; min-height: 40px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-8) var(--space-12); font-size: var(--font-13); font-weight: var(--weight-medium); white-space: nowrap; }
 @media (max-width: 760px) { .schedule-create-button { width: 100%; margin-left: var(--space-0); } }
 
 /* R7-7: 파일 블록 */
