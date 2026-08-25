@@ -530,6 +530,26 @@ test('workspace data is tenant scoped and survives page-level reads', async () =
   })
 })
 
+test('cost and point dashboard is available only to the platform operator', async () => {
+  await withServer(createApp({ apiKey: '' }), async (origin) => {
+    const tenantAdmin = await login(origin, 'admin@sunsea.co.kr')
+    assert.equal(tenantAdmin.response.status, 200)
+    const tenantDashboard = await fetch(`${origin}/api/billing/dashboard?month=2026-08`, {
+      headers: { cookie: tenantAdmin.cookie },
+    })
+    assert.equal(tenantDashboard.status, 403)
+    assert.equal((await tenantDashboard.json()).error.code, 'PLATFORM_OPERATOR_REQUIRED')
+
+    const operator = await login(origin, 'operator@onfactory.co.kr', 'platform')
+    assert.equal(operator.response.status, 200)
+    const platformDashboard = await fetch(`${origin}/api/billing/dashboard?month=2026-08`, {
+      headers: { cookie: operator.cookie },
+    })
+    assert.equal(platformDashboard.status, 200)
+    assert.equal((await platformDashboard.json()).scope, 'platform')
+  })
+})
+
 test('workspace identity header rejects a stale tab after the session account changes', async () => {
   await withServer(createApp({ apiKey: '' }), async (origin) => {
     const sunseaAdmin = await login(origin, 'admin@sunsea.co.kr')

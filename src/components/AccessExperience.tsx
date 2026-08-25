@@ -135,11 +135,11 @@ export function LoginPage({ onLogin, initialError = '' }: LoginPageProps) {
   return (
     <main className="auth-shell">
       <section className="auth-brand-panel" aria-label="온팩토리 소개">
-        <div className="auth-brand"><OnFactoryMark size={48} /><div><strong>온팩토리</strong><span>FOOD OPERATIONS CLOUD</span></div></div>
+        <div className="auth-brand"><OnFactoryMark size={48} /><div><strong>온팩토리</strong><span>BUSINESS OPERATIONS CLOUD</span></div></div>
         <div className="auth-brand-copy">
-          <span className="auth-overline">ONE WORKSPACE</span>
-          <h1>공장의 오늘을<br />한눈에, 한 흐름으로.</h1>
-          <p>제품·주문·재고·일정·결재를 연결하고 AI가 필요한 순간에만 먼저 알려드립니다.</p>
+          <span className="auth-overline">ONE CONNECTED WORKSPACE</span>
+          <h1>회사의 오늘을<br />한눈에, 한 흐름으로.</h1>
+          <p>업무·프로젝트·일정·문서·결재를 한곳에 연결하고, 업종별 모듈과 AI가 필요한 순간에만 먼저 알려드립니다.</p>
         </div>
         <div className="auth-trust-row">
           <span><ShieldCheck size={18} /> 고객사별 데이터 분리</span>
@@ -239,7 +239,7 @@ export function PasswordChangePage({ name, email, onChange, onLogout }: Password
   }
   return <main className="auth-shell">
     <section className="auth-brand-panel" aria-label="온팩토리 보안 안내">
-      <div className="auth-brand"><OnFactoryMark size={48} /><div><strong>온팩토리</strong><span>FOOD OPERATIONS CLOUD</span></div></div>
+      <div className="auth-brand"><OnFactoryMark size={48} /><div><strong>온팩토리</strong><span>BUSINESS OPERATIONS CLOUD</span></div></div>
       <div className="auth-brand-copy"><span className="auth-overline">SECURE ONBOARDING</span><h1>처음 한 번,<br />안전하게 시작합니다.</h1><p>관리자가 발급한 초기 비밀번호는 제한된 시간만 유효하며 새 비밀번호 설정 후 즉시 폐기됩니다.</p></div>
       <div className="auth-trust-row"><span><ShieldCheck size={18} /> 첫 로그인 강제 변경</span><span><LockKeyhole size={18} /> 다른 세션 자동 만료</span></div>
     </section>

@@ -152,7 +152,7 @@ test('storage collection is immutable and idempotent once per Korea date', async
   )
 })
 
-test('tenant admins see only their own six-month gauge while platform operators finalize immutable closed months', async () => {
+test('billing dashboards are platform-only and operators finalize immutable closed months', async () => {
   const { service } = createFixture()
   await configureTenant(service, 'tenant-a', { includedPoints: 1_000, monthlyPrice: 25 })
   await service.recordUsageEvent(systemFor('tenant-a'), {
@@ -163,15 +163,15 @@ test('tenant admins see only their own six-month gauge while platform operators 
     tenantId: 'tenant-a', bytes: 2_000, objectCount: 8, measuredAt: '2026-07-31T03:00:00.000Z',
   })
 
-  const own = await service.getDashboard(adminFor('tenant-a'), { month: '2026-07' })
-  assert.equal(own.scope, 'tenant')
+  const own = await service.getDashboard(platform, { tenantId: 'tenant-a', month: '2026-07' })
+  assert.equal(own.scope, 'platform')
   assert.deepEqual(own.tenantIds, ['tenant-a'])
   assert.equal(own.series.length, 6)
   assert.equal(own.gauge.tenantId, 'tenant-a')
   assert.equal(own.details.tenants.length, 1)
 
   await assert.rejects(
-    service.getDashboard(adminFor('tenant-a'), { tenantId: 'tenant-b', month: '2026-07' }),
+    service.getDashboard(adminFor('tenant-a'), { tenantId: 'tenant-a', month: '2026-07' }),
     (error) => error?.code === 'BILLING_FORBIDDEN',
   )
   await assert.rejects(
@@ -219,7 +219,7 @@ test('invoice revenue separates base, point overage and storage overage from pro
   await service.recordDailyStorageSnapshot(systemFor('tenant-a'), {
     tenantId: 'tenant-a', bytes: 1_000_001_000, objectCount: 2, measuredAt: '2026-08-21T03:00:00.000Z',
   })
-  const dashboard = await service.getDashboard(adminFor('tenant-a'), { month: '2026-08' })
+  const dashboard = await service.getDashboard(platform, { tenantId: 'tenant-a', month: '2026-08' })
   assert.equal(dashboard.summary.baseRevenue, 100)
   assert.equal(dashboard.summary.pointOveragePoints, 10)
   assert.equal(dashboard.summary.pointOverageRevenue, 20)

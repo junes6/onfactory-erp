@@ -47,7 +47,7 @@ export const serviceModules: readonly ServiceModule[] = [
     version: '1.1.0',
     industry: 'all',
     routes: ['ai', 'schedule', 'tasks', 'approvals', 'journal', 'projects', 'people', 'finance', 'ip', 'documents'],
-    capabilities: ['ai-hub', 'calendar', 'workflow', 'approval-queue', 'journal', 'project-spaces', 'people', 'performance', 'documents', 'messenger', 'points'],
+    capabilities: ['ai-hub', 'calendar', 'workflow', 'approval-queue', 'journal', 'project-spaces', 'people', 'performance', 'documents', 'messenger'],
   },
   {
     id: 'food-manufacturing',
@@ -79,7 +79,7 @@ export function routesForIndustry(industryType: TenantIndustryType | string | nu
 }
 
 export function brandLabelForIndustry(industryType: TenantIndustryType | string | null | undefined): string {
-  return modulesForIndustry(industryType).find((module) => module.brandLabel)?.brandLabel ?? '식품제조 ERP'
+  return modulesForIndustry(industryType).find((module) => module.brandLabel)?.brandLabel ?? '운영 워크스페이스'
 }
 
 export function routesForModules(enabled: readonly ServiceModuleId[] = ['core', 'food-manufacturing']) {

@@ -22,6 +22,7 @@ const DASHBOARD_MONTH_COUNT = 6
 const USAGE_RESERVATION_TTL_MS = 15 * 60 * 1_000
 const LIMIT_ACTION_SET = new Set(BILLING_LIMIT_ACTIONS)
 const PLATFORM_ONLY_OPERATIONS = new Set([
+  'dashboard:read',
   'configuration:read',
   'model-rate:write',
   'plan:write',
@@ -138,11 +139,6 @@ export function authorizeBillingOperation(actorInput, operation, tenantId = unde
       throw new BillingServiceError('BILLING_FORBIDDEN', '서버 내부 수집 권한이 필요합니다.', 403)
     }
     return actor
-  }
-  if (operation === 'dashboard:read') {
-    if (actor.role === 'platform-operator' && !actor.tenantId) return actor
-    if (actor.role === 'tenant-admin' && actor.tenantId && actor.tenantId === tenantId) return actor
-    throw new BillingServiceError('BILLING_FORBIDDEN', '해당 고객사의 비용 정보를 조회할 권한이 없습니다.', 403)
   }
   throw new BillingServiceError('BILLING_UNKNOWN_OPERATION', '지원하지 않는 비용 관리 작업입니다.', 400)
 }
@@ -538,7 +534,7 @@ export function createMemoryBillingRepository(seed = {}) {
 }
 
 export const BILLING_HTTP_API_CONTRACT = Object.freeze({
-  dashboard: { method: 'GET', path: '/api/billing/dashboard', auth: 'platform-operator:any tenant | tenant-admin:own tenant' },
+  dashboard: { method: 'GET', path: '/api/billing/dashboard', auth: 'platform-operator' },
   configuration: { method: 'GET', path: '/api/billing/configuration', auth: 'platform-operator' },
   modelRate: { method: 'PUT', path: '/api/billing/model-rates/:model', auth: 'platform-operator' },
   plan: { method: 'PUT', path: '/api/billing/plans/:id', auth: 'platform-operator' },
@@ -930,18 +926,10 @@ export function createBillingService({ repository, clock = () => new Date(), idF
     },
 
     async getDashboard(actorInput, input = {}) {
-      const actor = assertActor(actorInput)
+      const actor = authorizeBillingOperation(actorInput, 'dashboard:read')
       const month = assertMonth(input.month ?? billingMonth(clock()))
-      let tenantIds
-      if (actor.role === 'tenant-admin') {
-        authorizeBillingOperation(actor, 'dashboard:read', actor.tenantId)
-        if (input.tenantId && input.tenantId !== actor.tenantId) authorizeBillingOperation(actor, 'dashboard:read', input.tenantId)
-        tenantIds = [actor.tenantId]
-      } else {
-        authorizeBillingOperation(actor, 'dashboard:read', input.tenantId)
-        const requested = input.tenantId ? [input.tenantId] : Array.isArray(input.tenantIds) ? input.tenantIds : await repository.listKnownTenantIds()
-        tenantIds = [...new Set(requested.map((value) => requiredText(value, 'tenantId', 120)))]
-      }
+      const requested = input.tenantId ? [input.tenantId] : Array.isArray(input.tenantIds) ? input.tenantIds : await repository.listKnownTenantIds()
+      const tenantIds = [...new Set(requested.map((value) => requiredText(value, 'tenantId', 120)))]
       const selectedTenantRows = await Promise.all(tenantIds.map(async (tenantId) => {
         const row = await tenantMonth(repository, tenantId, month, month < billingMonth(clock()))
         return { tenantId, ...row.summary, details: row.details, snapshot: row.snapshot ?? null }
@@ -960,7 +948,7 @@ export function createBillingService({ repository, clock = () => new Date(), idF
         summary: normalizeFinancialSummary(snapshot.summary),
       }))
       const dashboard = {
-        scope: actor.role === 'platform-operator' ? 'platform' : 'tenant',
+        scope: 'platform',
         month,
         tenantIds,
         cards: {
@@ -998,7 +986,7 @@ export function createBillingService({ repository, clock = () => new Date(), idF
         },
         monthlySnapshots: snapshots.sort((left, right) => right.billingMonth.localeCompare(left.billingMonth)),
       }
-      if (actor.role === 'platform-operator') dashboard.configuration = await readConfiguration(actor)
+      dashboard.configuration = await readConfiguration(actor)
       return dashboard
     },
   }

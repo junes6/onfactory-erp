@@ -10,7 +10,7 @@ import './BillingDashboard.css'
 
 const UNCONFIRMED_AMOUNT = 0
 
-export type BillingMode = 'platform' | 'tenant'
+export type BillingMode = 'platform'
 export type BillingLimitAction = 'warn' | 'block'
 export type BillingConfigurationStatus = 'confirmed' | 'unconfirmed' | 'unconfigured'
 
@@ -208,12 +208,9 @@ export function createBillingHttpApi(basePath = '/api/billing', workspaceScope?:
 }
 
 export interface BillingDashboardProps {
-  mode: BillingMode
-  tenantId?: string
-  tenantName?: string
+  mode: 'platform'
   tenantOptions?: BillingTenantOption[]
   initialMonth?: string
-  workspaceScope?: string
   api?: BillingDashboardApi
   onToast?: (message: string) => void
   onDataChanged?: () => void
@@ -328,39 +325,14 @@ function UsageGauge({ payload, tenantName }: { payload: BillingDashboardPayload;
   </section>
 }
 
-export function TenantPointGaugeCard({ tenantId, tenantName, workspaceScope, onOpen }: {
-  tenantId: string
-  tenantName: string
-  workspaceScope?: string
-  onOpen: () => void
-}) {
-  const api = useMemo(() => createBillingHttpApi('/api/billing', workspaceScope), [workspaceScope])
-  const [payload, setPayload] = useState<BillingDashboardPayload | null>(null)
-  const [failed, setFailed] = useState(false)
-  useEffect(() => {
-    let active = true
-    api.loadDashboard({ month: currentKoreaMonth(), tenantId })
-      .then((next) => { if (active) { setPayload(next); setFailed(false) } })
-      .catch(() => { if (active) setFailed(true) })
-    return () => { active = false }
-  }, [api, tenantId])
-  const gauge = payload?.gauge
-  const configured = gauge?.pointLimit !== null && gauge?.pointLimit !== undefined
-  const progress = Math.max(0, Math.min(100, gauge?.utilizationPercent ?? 0))
-  return <section className="tenant-point-card dashboard-section-card" aria-labelledby="tenant-point-card-title">
-    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><Gauge size={18} /></span><h2 id="tenant-point-card-title">AI 포인트</h2></div><button type="button" onClick={onOpen}>상세 보기</button></header>
-    <div className="tenant-point-card__body"><div><p>{failed ? '사용량을 불러오지 못했습니다.' : configured ? `${tenantName} · ${formatNumber(gauge?.pointsUsed ?? 0)} / ${formatNumber(gauge?.pointLimit ?? 0)} P` : '요금제와 한도가 아직 미확정입니다.'}</p></div><div className="tenant-point-card__meter"><strong>{configured ? `${formatNumber(gauge?.utilizationPercent ?? 0)}%` : '미확정'}</strong><progress max={100} value={progress} aria-label="이번 달 AI 포인트 사용률" /></div></div>
-  </section>
-}
-
-function SixMonthTrend({ series, mode }: { series: BillingSummary[]; mode: BillingMode }) {
+function SixMonthTrend({ series }: { series: BillingSummary[] }) {
   const maximum = Math.max(...series.map((item) => item.invoiceTotal), Number.EPSILON)
   return <section className="billing-panel" aria-labelledby="billing-trend-title">
     <header><div><span className="billing-section-kicker">6 MONTH TREND</span><h2 id="billing-trend-title">월별 비용·포인트</h2></div></header>
     <div className="billing-trend-list">
       {series.map((item) => <article key={item.month}>
         <time dateTime={item.month}>{item.month}</time>
-        <div><progress max={maximum} value={item.invoiceTotal} aria-label={`${item.month} ${mode === 'platform' ? '매출' : '청구액'} 비중`} /><small>{formatNumber(item.pointsUsed)} P</small></div>
+        <div><progress max={maximum} value={item.invoiceTotal} aria-label={`${item.month} 매출 비중`} /><small>{formatNumber(item.pointsUsed)} P</small></div>
         <strong>{formatMoney(item.invoiceTotal, item.currency)}</strong>
       </article>)}
     </div>
@@ -519,19 +491,15 @@ function PlatformConfiguration({ payload, tenantOptions, api, onSaved, onError }
 }
 
 export function BillingDashboard({
-  mode,
-  tenantId,
-  tenantName,
   tenantOptions = [],
   initialMonth = currentKoreaMonth(),
-  workspaceScope,
   api: providedApi,
   onToast,
   onDataChanged,
 }: BillingDashboardProps) {
-  const api = useMemo(() => providedApi ?? createBillingHttpApi('/api/billing', workspaceScope), [providedApi, workspaceScope])
+  const api = useMemo(() => providedApi ?? createBillingHttpApi('/api/billing'), [providedApi])
   const [month, setMonth] = useState(initialMonth)
-  const [selectedTenantId, setSelectedTenantId] = useState(mode === 'tenant' ? tenantId ?? '' : '')
+  const [selectedTenantId, setSelectedTenantId] = useState('')
   const [payload, setPayload] = useState<BillingDashboardPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -546,14 +514,13 @@ export function BillingDashboard({
   const refresh = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const next = await api.loadDashboard({ month, tenantId: mode === 'tenant' ? tenantId : selectedTenantId || undefined })
+      const next = await api.loadDashboard({ month, tenantId: selectedTenantId || undefined })
       setPayload(next)
     } catch (reason) { setError(reason instanceof Error ? reason.message : '비용·포인트 현황을 불러오지 못했습니다.') }
     finally { setLoading(false) }
-  }, [api, mode, month, selectedTenantId, tenantId])
+  }, [api, month, selectedTenantId])
 
   useEffect(() => { void refresh() }, [refresh])
-  useEffect(() => { if (mode === 'tenant') setSelectedTenantId(tenantId ?? '') }, [mode, tenantId])
 
   const notifyError = (reason: unknown) => {
     const message = reason instanceof Error ? reason.message : '저장하지 못했습니다.'
@@ -563,7 +530,7 @@ export function BillingDashboard({
     onToast?.(message); onDataChanged?.(); await refresh()
   }
   const finalize = async () => {
-    const target = mode === 'tenant' ? tenantId : selectedTenantId
+    const target = selectedTenantId
     if (!target) { notifyError(new Error('월 청구를 확정할 고객사를 선택해 주세요.')); return }
     setFinalizing(true)
     try { const result = await api.finalizeMonth({ tenantId: target, month }); await saved(result.created ? '월 청구 스냅샷을 확정했습니다.' : '이미 확정된 월 청구 스냅샷입니다.') }
@@ -571,16 +538,16 @@ export function BillingDashboard({
   }
 
   const configurationStatus = payload ? statusPresentation(payload.cards.configurationStatus) : statusPresentation('unconfigured')
-  const canFinalize = mode === 'platform' && Boolean(selectedTenantId) && month < currentKoreaMonth()
+  const canFinalize = Boolean(selectedTenantId) && month < currentKoreaMonth()
 
   return <div className="billing-root">
     <header className="billing-head">
-      <div><span className="billing-section-kicker">COST & POINTS</span><h1>비용·포인트 관리</h1><p>{mode === 'platform' ? 'AI 사용량과 저장공간을 고객사별로 정산하고 요율·한도를 관리합니다.' : '우리 회사의 이번 달 AI 포인트와 한도 상태를 확인합니다.'}</p></div>
+      <div><span className="billing-section-kicker">COST & POINTS</span><h1>비용·포인트 관리</h1><p>AI 사용량과 저장공간을 고객사별로 정산하고 요율·한도를 관리합니다.</p></div>
       <div className="billing-head__controls">
-        {mode === 'platform' && <label><span>고객사</span><select value={selectedTenantId} onChange={(event) => setSelectedTenantId(event.target.value)}><option value="">전체 고객사</option>{resolvedTenantOptions.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label>}
+        <label><span>고객사</span><select value={selectedTenantId} onChange={(event) => setSelectedTenantId(event.target.value)}><option value="">전체 고객사</option>{resolvedTenantOptions.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label>
         <label><span>조회 월</span><input type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></label>
         <button type="button" onClick={() => void refresh()} disabled={loading}><RefreshCw size={16} />새로고침</button>
-        {mode === 'platform' && <button type="button" className="billing-primary" onClick={() => void finalize()} disabled={!canFinalize || finalizing}><CalendarCheck2 size={16} />{finalizing ? '확정 중' : '선택 월 확정'}</button>}
+        <button type="button" className="billing-primary" onClick={() => void finalize()} disabled={!canFinalize || finalizing}><CalendarCheck2 size={16} />{finalizing ? '확정 중' : '선택 월 확정'}</button>
       </div>
     </header>
 
@@ -589,32 +556,30 @@ export function BillingDashboard({
 
     {payload && <>
       <section className="billing-metrics" aria-label="이번 달 비용 핵심 지표">
-        <MetricCard icon={Coins} label={mode === 'platform' ? '이번 달 매출' : '이번 달 청구액'} value={formatMoney(payload.cards.invoiceTotal, payload.cards.currency)} note="기본료·포인트 초과·저장 초과" tone="info" />
-        {mode === 'platform'
-          ? <><MetricCard icon={Bot} label="API 원가" value={formatMoney(payload.cards.apiCost, payload.cards.currency)} note={`${formatNumber(payload.cards.eventCount)}회 사용`} /><MetricCard icon={Activity} label="마진" value={formatMoney(payload.cards.margin, payload.cards.currency)} note="매출 - API 원가" tone={payload.cards.margin < 0 ? 'danger' : 'success'} /></>
-          : <MetricCard icon={Bot} label="포인트 초과금" value={formatMoney(payload.cards.pointOverageRevenue, payload.cards.currency)} note="포함 포인트 초과분" />}
+        <MetricCard icon={Coins} label="이번 달 매출" value={formatMoney(payload.cards.invoiceTotal, payload.cards.currency)} note="기본료·포인트 초과·저장 초과" tone="info" />
+        <MetricCard icon={Bot} label="API 원가" value={formatMoney(payload.cards.apiCost, payload.cards.currency)} note={`${formatNumber(payload.cards.eventCount)}회 사용`} /><MetricCard icon={Activity} label="마진" value={formatMoney(payload.cards.margin, payload.cards.currency)} note="매출 - API 원가" tone={payload.cards.margin < 0 ? 'danger' : 'success'} />
         <MetricCard icon={Gauge} label="사용 포인트" value={formatNumber(payload.cards.pointsUsed)} note={payload.cards.pointLimit === null ? '한도 미설정' : `한도 ${formatNumber(payload.cards.pointLimit)}`} tone={payload.cards.utilizationPercent !== null && payload.cards.utilizationPercent >= 100 ? 'danger' : 'warning'} />
         <MetricCard icon={Database} label="저장공간" value={formatBytes(payload.cards.storageBytes)} note={configurationStatus.label} tone={configurationStatus.tone} />
       </section>
 
-      <UsageGauge payload={payload} tenantName={tenantName ?? (payload.gauge ? tenantLabel(payload.gauge.tenantId, resolvedTenantOptions) : undefined)} />
+      <UsageGauge payload={payload} tenantName={payload.gauge ? tenantLabel(payload.gauge.tenantId, resolvedTenantOptions) : undefined} />
 
       <section className="billing-overview-grid">
-        <SixMonthTrend series={payload.series} mode={mode} />
+        <SixMonthTrend series={payload.series} />
         <section className="billing-panel billing-cost-summary">
           <header><div><span className="billing-section-kicker">MONTH SUMMARY</span><h2>비용 구성</h2></div><StatusBadge tone={configurationStatus.tone}>{configurationStatus.label}</StatusBadge></header>
-          <dl><div><dt>요금제 기본료</dt><dd>{formatMoney(payload.summary.baseRevenue, payload.summary.currency)}</dd></div><div><dt>포인트 초과금</dt><dd>{formatMoney(payload.summary.pointOverageRevenue, payload.summary.currency)}</dd></div><div><dt>저장공간 초과금</dt><dd>{formatMoney(payload.summary.storageOverageRevenue, payload.summary.currency)}</dd></div><div><dt>{mode === 'platform' ? '매출' : '청구 합계'}</dt><dd>{formatMoney(payload.summary.invoiceTotal, payload.summary.currency)}</dd></div>{mode === 'platform' && <><div><dt>API 원가</dt><dd>{formatMoney(payload.summary.apiCost, payload.summary.currency)}</dd></div><div><dt>마진</dt><dd>{formatMoney(payload.summary.margin, payload.summary.currency)}</dd></div></>}</dl>
+          <dl><div><dt>요금제 기본료</dt><dd>{formatMoney(payload.summary.baseRevenue, payload.summary.currency)}</dd></div><div><dt>포인트 초과금</dt><dd>{formatMoney(payload.summary.pointOverageRevenue, payload.summary.currency)}</dd></div><div><dt>저장공간 초과금</dt><dd>{formatMoney(payload.summary.storageOverageRevenue, payload.summary.currency)}</dd></div><div><dt>매출</dt><dd>{formatMoney(payload.summary.invoiceTotal, payload.summary.currency)}</dd></div><div><dt>API 원가</dt><dd>{formatMoney(payload.summary.apiCost, payload.summary.currency)}</dd></div><div><dt>마진</dt><dd>{formatMoney(payload.summary.margin, payload.summary.currency)}</dd></div></dl>
           <p><Activity size={16} />입력 {formatNumber(payload.summary.inputTokens)} · 출력 {formatNumber(payload.summary.outputTokens)} 토큰</p>
         </section>
       </section>
 
-      {mode === 'platform' && <TenantTable rows={payload.details.tenants} options={resolvedTenantOptions} />}
+      <TenantTable rows={payload.details.tenants} options={resolvedTenantOptions} />
       <section className="billing-breakdown-grid">
-        <BreakdownTable title="모델별 사용량" rows={payload.details.models} currency={payload.summary.currency} showApiCost={mode === 'platform'} />
-        <BreakdownTable title="기능별 사용량" rows={payload.details.features} currency={payload.summary.currency} showApiCost={mode === 'platform'} />
+        <BreakdownTable title="모델별 사용량" rows={payload.details.models} currency={payload.summary.currency} showApiCost />
+        <BreakdownTable title="기능별 사용량" rows={payload.details.features} currency={payload.summary.currency} showApiCost />
       </section>
       <SnapshotList snapshots={payload.monthlySnapshots} options={resolvedTenantOptions} />
-      {mode === 'platform' && <PlatformConfiguration payload={payload} tenantOptions={resolvedTenantOptions} api={api} onSaved={saved} onError={notifyError} />}
+      <PlatformConfiguration payload={payload} tenantOptions={resolvedTenantOptions} api={api} onSaved={saved} onError={notifyError} />
     </>}
   </div>
 }

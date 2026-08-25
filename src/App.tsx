@@ -1688,7 +1688,7 @@ export default function App() {
       setMobileNav(false)
       return
     }
-    if (mode === 'tenant' && nextPage !== 'billing' && !industryRoutes.has(nextPage) && !['platform', 'tenants', 'support', 'integrations', 'audit'].includes(nextPage)) {
+    if (mode === 'tenant' && !industryRoutes.has(nextPage)) {
       setToast('이 회사의 업종 모듈에 없는 메뉴입니다.')
       setMobileNav(false)
       return
@@ -1700,7 +1700,11 @@ export default function App() {
   }
   const enterPlatform = () => {
     if (account?.role !== 'platform-operator') { setToast('통합 관리자는 온팩토리 운영자 계정으로만 접근할 수 있습니다.'); return }
-    setMode('platform'); navigate('platform')
+    setMode('platform')
+    setPage('platform')
+    setMobileNav(false)
+    setQuery('')
+    window.scrollTo({ top: 0, behavior: 'auto' })
   }
   // 운영자 모드: 콘솔의 [접속]으로 고객사 워크스페이스 전체를 관리자 권한으로 사용한다.
   const enterTenant = async (tenantId: string) => {

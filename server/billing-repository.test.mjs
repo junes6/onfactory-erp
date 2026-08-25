@@ -91,7 +91,7 @@ test('D1 repository persists configuration, reservations and usage across servic
   })
 
   const restartedService = createBillingService({ repository: createD1BillingRepository(binding), clock: fixedClock })
-  const dashboard = await restartedService.getDashboard({ id: 'admin-a', role: 'tenant-admin', tenantId: 'tenant-a' }, { month: '2026-08' })
+  const dashboard = await restartedService.getDashboard(platform, { tenantId: 'tenant-a', month: '2026-08' })
   assert.equal(dashboard.cards.eventCount, 1)
   assert.equal(dashboard.cards.pointsUsed, 18)
   assert.equal(dashboard.gauge.pointLimit, 100)
@@ -149,7 +149,7 @@ test('Postgres repository persists rated usage and normalizes timestamps after a
   const restartedService = createBillingService({ repository: createPostgresBillingRepository(pool), clock: fixedClock })
   const retry = await restartedService.recordUsageEvent(system, usageInput)
   assert.equal(retry.duplicate, true)
-  const dashboard = await restartedService.getDashboard({ id: 'admin-a', role: 'tenant-admin', tenantId: 'tenant-a' }, { month: '2026-08' })
+  const dashboard = await restartedService.getDashboard(platform, { tenantId: 'tenant-a', month: '2026-08' })
   assert.equal(dashboard.cards.eventCount, 1)
   assert.equal(dashboard.cards.pointsUsed, 20)
   assert.equal((await pool.query('SELECT status FROM billing_usage_reservations WHERE id=$1', ['pg-reservation'])).rows[0].status, 'committed')

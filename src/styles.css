@@ -2343,8 +2343,7 @@ html[data-theme='dark'] .workflow-detail-stepper :is(i,li > span) { background: 
 
 /* v3 dashboard cards: every block has the same visible boundary and header. */
 .ai-home-page .dashboard-widget-grid { gap: var(--dashboard-spacing); }
-.ai-home-page :is(.dashboard-section-card,.ai-chat),
-.ai-home-page > .tenant-point-card {
+.ai-home-page :is(.dashboard-section-card,.ai-chat) {
   overflow: hidden;
   padding: var(--space-0);
   border: var(--dashboard-stroke) solid var(--color-card-line);
@@ -2352,7 +2351,6 @@ html[data-theme='dark'] .workflow-detail-stepper :is(i,li > span) { background: 
   background: var(--surface);
   box-shadow: var(--shadow-none);
 }
-.ai-home-page > .tenant-point-card { margin-top: var(--dashboard-spacing); }
 .dashboard-section-header {
   min-height: 56px;
   display: flex;

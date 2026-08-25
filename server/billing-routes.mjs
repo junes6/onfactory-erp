@@ -22,15 +22,12 @@ export function registerBillingRoutes(app, {
   service,
   requireAuth,
   requirePlatformOperator,
-  requireMatchingWorkspaceIdentity,
   listPlatformTenantIds = async () => [],
 } = {}) {
   if (!app || !service || typeof requireAuth !== 'function' || typeof requirePlatformOperator !== 'function') {
     throw new TypeError('billing routes require app, service and auth middleware')
   }
-  const tenantIdentity = typeof requireMatchingWorkspaceIdentity === 'function' ? requireMatchingWorkspaceIdentity : (_request, _response, next) => next()
-
-  app.get('/api/billing/dashboard', requireAuth, tenantIdentity, billingRoute(async (request, response) => {
+  app.get('/api/billing/dashboard', requireAuth, requirePlatformOperator, billingRoute(async (request, response) => {
     const tenantId = String(request.query?.tenantId ?? '').trim() || undefined
     const month = String(request.query?.month ?? '').trim() || undefined
     const tenantIds = request.auth?.role === 'platform-operator' && !tenantId ? await listPlatformTenantIds(request) : undefined
@@ -59,4 +56,3 @@ export function registerBillingRoutes(app, {
 }
 
 export default registerBillingRoutes
-
