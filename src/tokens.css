@@ -175,8 +175,8 @@ html[data-accent='rose'] { --color-primary: var(--color-rose); }
 html[data-accent='navy'] { --color-primary: var(--color-blue-deep); }
 
 /* =====================================================================
-   v5: 쉬운 화면 모드 — 모든 타입 토큰을 한 단계 키워 나이가 많은 사용자도
-   읽기 쉽게 한다. 세부 규칙은 styles.css의 data-easy-mode 블록 참조.
+   v5: 쉬운 화면 모드 — 전용 AI 홈에서만 타입 토큰을 한 단계 키운다.
+   업무 워크스페이스는 data-easy-mode=off로 원래 정보 밀도를 유지한다.
    ===================================================================== */
 html[data-easy-mode='on'] {
   --font-22: 27px;

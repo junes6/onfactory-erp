@@ -1382,6 +1382,7 @@ export default function App() {
   const [fontSize, setFontSize] = useState<FontChoice>(() => (window.localStorage.getItem('onfactory-font') as FontChoice | null) ?? 'standard')
   const [accent, setAccent] = useState<AccentChoice>(() => (window.localStorage.getItem('onfactory-accent') as AccentChoice | null) ?? 'blue')
   const [easyMode, setEasyMode] = useState<EasyModeChoice>(() => (window.localStorage.getItem('onfactory-easy-mode') as EasyModeChoice | null) ?? 'standard')
+  const easyHomeActive = mode === 'tenant' && page === 'ai' && easyMode === 'easy'
 
   useEffect(() => {
     const resize = () => setIsMobile(window.innerWidth <= 1024)
@@ -1562,7 +1563,10 @@ export default function App() {
       document.documentElement.dataset.theme = resolvedTheme
       document.documentElement.dataset.fontSize = fontSize
       document.documentElement.dataset.accent = accent
-      document.documentElement.dataset.easyMode = easyMode === 'easy' ? 'on' : 'off'
+      // 쉬운 화면은 정보 구조가 따로 설계된 AI 업무허브에서만 활성화한다.
+      // 다른 업무 화면의 글자·버튼·그리드를 일괄 확대하면 기능과 맥락이
+      // 화면 아래로 밀리므로 기본 배치를 그대로 유지한다.
+      document.documentElement.dataset.easyMode = easyHomeActive ? 'on' : 'off'
     }
     applyPreferences()
     media.addEventListener('change', applyPreferences)
@@ -1571,7 +1575,7 @@ export default function App() {
     window.localStorage.setItem('onfactory-accent', accent)
     window.localStorage.setItem('onfactory-easy-mode', easyMode)
     return () => media.removeEventListener('change', applyPreferences)
-  }, [theme, fontSize, accent, easyMode])
+  }, [theme, fontSize, accent, easyMode, easyHomeActive])
 
   useEffect(() => {
     if (authStatus === 'signed-in' && mode === 'platform' && account?.role !== 'platform-operator') {
@@ -1879,7 +1883,7 @@ export default function App() {
       return <PlatformConsole section={page as PlatformSection} focusId={platformFocusId} refreshToken={platformRefreshToken} onSectionChange={(section) => navigate(section)} onReturnTenant={requestTenantSupportAccess} onRequestSupport={setSupportTenant} onEnterTenant={(tenantId) => void enterTenant(tenantId)} onDataChanged={() => setPlatformRefreshToken((current) => current + 1)} onToast={setToast} />
     }
     if (account?.role === 'tenant-member' && !tenantMemberPages.has(page)) {
-      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyMode === 'easy'} industryType={account?.industryType ?? 'food_manufacturing'} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
+      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
     switch (page) {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
@@ -1899,7 +1903,7 @@ export default function App() {
       case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'it-deliverables':
       case 'it-contracts': return <ItServicesPage view={page as ItServicesView} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} onToast={setToast} />
-      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyMode === 'easy'} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
+      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
   }
 

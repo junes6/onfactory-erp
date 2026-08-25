@@ -88,3 +88,14 @@ test('factory editor keeps the canvas and inspector visible together on desktop'
   assert.match(css, /@media \(max-width:\s*1120px\)[\s\S]*?\.factory-workspace\s*\{\s*grid-template-columns:\s*1fr/)
   assert.doesNotMatch(css, /\.factory-(?:map-frame|layout-viewport|layout-editor)[^}]*72vh/)
 })
+
+test('easy screen is isolated to the AI home and never enlarges workspaces', () => {
+  const app = read('src/App.tsx')
+  const settings = read('src/components/AccessExperience.tsx')
+
+  assert.match(app, /const easyHomeActive = mode === 'tenant' && page === 'ai' && easyMode === 'easy'/)
+  assert.match(app, /document\.documentElement\.dataset\.easyMode = easyHomeActive \? 'on' : 'off'/)
+  assert.equal(app.match(/easyMode=\{easyHomeActive\}/g)?.length, 2)
+  assert.doesNotMatch(app, /easyMode=\{easyMode === 'easy'\}/)
+  assert.match(settings, /메인 화면만 큰 바로가기와 지금 할 일 중심으로 단순화합니다\. 다른 업무 화면은 기본 배치를 유지합니다\./)
+})

@@ -329,7 +329,7 @@ export function SettingsDrawer({ open, onClose, profileName, profileRole, compan
         </div>
       </section>
       <section className="setting-section">
-        <div className="setting-section-title"><Accessibility size={19} /><div><h3>쉬운 화면</h3><p>모든 화면을 한 줄 구성·큰 글자·큰 버튼으로 바꾸고 부가 정보는 숨깁니다.</p></div></div>
+        <div className="setting-section-title"><Accessibility size={19} /><div><h3>쉬운 화면</h3><p>메인 화면만 큰 바로가기와 지금 할 일 중심으로 단순화합니다. 다른 업무 화면은 기본 배치를 유지합니다.</p></div></div>
         <div className="setting-segmented" role="group" aria-label="쉬운 화면 모드">
           <button type="button" aria-pressed={easyMode === 'standard'} onClick={() => onEasyModeChange('standard')}>기본 화면</button>
           <button type="button" aria-pressed={easyMode === 'easy'} onClick={() => onEasyModeChange('easy')}>쉬운 화면</button>
