@@ -81,6 +81,7 @@ test('factory editor keeps the canvas and inspector visible together on desktop'
   assert.match(component, /addBlock\('벽'\)/)
   assert.match(component, /addBlock\('문'\)/)
   assert.match(component, /className="is-primary" onClick=\{\(\) => void addBlock\(\)\}/)
+  assert.match(component, /오른쪽 패널에서 이름·용도·색상·위치·크기·품목·재고와 상세 위치를 한 화면에서 바로 편집합니다/)
   assert.match(component, /const updateBlock = [\s\S]*?setLayouts\(\(current\) => \{[\s\S]*?const blocks = current\[factory\.id\] \?\? \[\][\s\S]*?const currentBlock = blocks\.find[\s\S]*?normalizeBlockGeometry\(\{ \.\.\.currentBlock, \.\.\.patch \}\)/)
   assert.match(component, /const queueGesturePersist = [\s\S]*?onChange\(id, \{\}, true\)[\s\S]*?220/)
   assert.equal(component.match(/onLostPointerCapture=\{stop(?:Pointer|Resize)\}/g)?.length, 2)

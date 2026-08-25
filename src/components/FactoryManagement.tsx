@@ -1348,7 +1348,7 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
 
       <section className="factory-layout-panel" aria-labelledby="factory-layout-title">
         <div className="factory-layout-panel__head">
-          <div><span>SHARED FLOOR EDITOR</span><h2 id="factory-layout-title">공장 블록 배치 편집기</h2><p id="factory-layout-help">블록 드래그 이동 · 모서리 크기 조절 · 배경 드래그 이동 · 휠 확대/축소(페이지는 움직이지 않음). 키보드는 방향키, Alt+방향키, +/−/0을 지원합니다.</p></div>
+          <div><span>SHARED FLOOR EDITOR</span><h2 id="factory-layout-title">공장 블록 배치 편집기</h2><p id="factory-layout-help">블록 드래그 이동 · 모서리 크기 조절 · 배경 드래그 이동 · 휠 확대/축소. 블록을 선택하면 오른쪽 패널에서 이름·용도·색상·위치·크기·품목·재고와 상세 위치를 한 화면에서 바로 편집합니다.</p></div>
           <div className="factory-layout-actions" role="group" aria-label="배치 편집 도구">
             {drawing?.kind === 'image' && <button type="button" className={showBackground ? 'is-active' : ''} aria-pressed={showBackground} onClick={() => setShowBackground((value) => !value)}><FileImage size={16} />배경 도면</button>}
             {canManage && <button type="button" className={editMode ? 'is-active' : ''} aria-pressed={editMode} onClick={() => setEditMode((value) => !value)}><MousePointer2 size={16} />{editMode ? '편집 종료' : '배치 편집'}</button>}
@@ -1364,7 +1364,7 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
               <LayoutEditor factory={factory} blocks={factoryBlocks} selectedId={selectedBlockId} editable={canManage && editMode} drawing={drawing} showBackground={showBackground} onSelect={selectBlock} onChange={updateBlock} />
             </div>
             <div className="factory-legend" aria-label="배치도 범례">
-              <strong><Palette size={14} /> 블록 색·이름은 아래 속성 패널에서 변경</strong>
+              <strong><Palette size={14} /> 블록 색·이름·재고는 오른쪽 편집 패널에서 변경</strong>
               <span><BrickWall size={14} /> 벽·출입구 추가로 공간 구획 표시</span>
               <span><Move size={14} /> 블록·배경 드래그 이동</span>
               <span><Layers3 size={14} /> 모서리·Alt+방향키 크기 조정</span>
