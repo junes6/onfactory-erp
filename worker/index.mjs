@@ -11,6 +11,10 @@ import { createD1BillingRepository } from '../server/billing-repository.mjs'
 import { createBillingService } from '../server/billing-service.mjs'
 import { performanceMaintenanceErrors, runPerformanceMonthlyMaintenance } from '../server/performance-maintenance.mjs'
 import { createLocalStorage } from '../server/storage/local.mjs'
+import {
+  applyHostedAccountCredentialRecovery,
+  HostedAccountRecoveryConfigurationError,
+} from './account-credential-recovery.mjs'
 
 const STATE_ID = 'onfactory'
 const REQUEST_LOCK_ID = 'onfactory-api'
@@ -519,7 +523,8 @@ export function createSitesWorker(dependencies = {}) {
         const sessions = new Map(snapshot.sessions)
         const beforePayload = serializeRuntimeState(workspaceStore, sessions)
         const beforeWorkspaceStore = structuredClone(workspaceStore)
-        let workspaceDirty = false
+        const accountRecovery = applyHostedAccountCredentialRecovery(workspaceStore, sessions, runtimeEnv)
+        let workspaceDirty = accountRecovery.changed
         const billingService = dependencies.billingService
           ?? createBillingService({ repository: createD1BillingRepository(runtimeEnv.DB) })
         const app = createApplication({
@@ -572,7 +577,7 @@ export function createSitesWorker(dependencies = {}) {
         }
         return response
       } catch (error) {
-        if (error instanceof RuntimeConfigurationError) {
+        if (error instanceof RuntimeConfigurationError || error instanceof HostedAccountRecoveryConfigurationError) {
           return Response.json(
             { error: { code: 'SERVER_CONFIGURATION_ERROR', message: '배포 인증 secret이 설정되지 않아 API를 안전하게 중단했습니다.' } },
             { status: 503 },

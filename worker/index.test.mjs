@@ -6,6 +6,8 @@ import test from 'node:test'
 
 async function loadWorkerModule() {
   const sourcePath = new URL('./index.mjs', import.meta.url)
+  const recoverySource = readFileSync(new URL('./account-credential-recovery.mjs', import.meta.url), 'utf8')
+  const recoveryUrl = `data:text/javascript;base64,${Buffer.from(recoverySource).toString('base64')}`
   let source = readFileSync(sourcePath, 'utf8')
   source = source
     .replace("import { env as cloudflareEnv } from 'cloudflare:workers'", 'const cloudflareEnv = {}')
@@ -17,8 +19,10 @@ async function loadWorkerModule() {
     .replace(/import \{ createBillingService \} from '[^']+'/, 'const createBillingService = () => ({ reconcilePendingUsageBatch: async () => {}, recordDailyStorageSnapshot: async () => {}, createMonthlySnapshot: async () => {} })')
     .replace(/import \{ performanceMaintenanceErrors, runPerformanceMonthlyMaintenance \} from '[^']+'/, 'const performanceMaintenanceErrors = (results) => (results ?? []).filter((result) => result?.error).map((result) => result.error); const runPerformanceMonthlyMaintenance = async () => []')
     .replace(/import \{ createLocalStorage \} from '[^']+'/, 'const createLocalStorage = () => { const values = new Map(); return { backend: "local", put: async (key, body) => { values.set(key, Buffer.from(body)); return {} }, get: async (key) => { if (values.has(key)) return values.get(key); const error = new Error("missing"); error.code = "STORAGE_NOT_FOUND"; throw error }, delete: async (key) => values.delete(key), getSignedUrl: async () => null } }')
+    .replace(/import \{\s*applyHostedAccountCredentialRecovery,\s*HostedAccountRecoveryConfigurationError,?\s*\} from '\.\/account-credential-recovery\.mjs'/, `import { applyHostedAccountCredentialRecovery, HostedAccountRecoveryConfigurationError } from '${recoveryUrl}'`)
   assert.equal(source.includes("from 'cloudflare:workers'"), false)
   assert.equal(source.includes("from '../server/app.mjs'"), false)
+  assert.equal(source.includes("from './account-credential-recovery.mjs'"), false)
   const url = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
   return import(url)
 }
@@ -543,6 +547,97 @@ test('hosted worker fails closed without a secure seed secret and never exposes 
     assert.equal(capturedOptions.exposePasswordResetTokens, false)
     assert.equal(capturedOptions.requireSeedPasswordChange, true)
     assert.equal(capturedOptions.seedPassword, 'Hosted-Seed!2026')
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true })
+  }
+})
+
+test('hosted account recovery is CAS-persisted with session revocation and the same version is a no-op', async () => {
+  const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), 'onfactory-sites-account-recovery-'))
+  try {
+    const database = new FakeD1()
+    const bucket = new FakeR2()
+    const mock = createMockExpress(temporaryDirectory)
+    mock.documentDirectory = temporaryDirectory
+    const seed = makeSeed('recovery-seed')
+    seed.platform.auditEvents = [{ id: 'AUD-KEEP', event: '기존 감사' }]
+    seed.accountCredentials = {
+      'USR-ONFACTORY-OPS': { passwordHash: 'old-operator', mustChangePassword: false },
+      'USR-3DMUSE-ADMIN': { passwordHash: 'old-muse', mustChangePassword: false },
+      'USR-SUNSEA-ADMIN': { passwordHash: 'keep-sunsea', mustChangePassword: false },
+    }
+    seed.passwordResetRequests = [
+      { id: 'RESET-OPS', accountId: 'USR-ONFACTORY-OPS', status: 'pending' },
+      { id: 'RESET-OTHER', accountId: 'USR-SUNSEA-ADMIN', status: 'pending' },
+    ]
+    database.appState = {
+      id: 'onfactory',
+      revision: 7,
+      payload: JSON.stringify({
+        workspaceStore: seed,
+        sessions: [
+          ['session-operator', { accountId: 'USR-ONFACTORY-OPS', expiresAt: Date.now() + 60_000 }],
+          ['session-other', { accountId: 'USR-SUNSEA-ADMIN', expiresAt: Date.now() + 60_000 }],
+        ],
+      }),
+    }
+    const recoveryEnv = {
+      DB: database,
+      FILES: bucket,
+      ERP_SEED_PASSWORD: 'Hosted-Seed!2026-Z',
+      ERP_ACCOUNT_RECOVERY_VERSION: '2026-08-25-v1',
+      ERP_OPERATOR_RECOVERY_PASSWORD: 'Operator-Recover!2026-A',
+      ERP_3DMUSE_RECOVERY_PASSWORD: 'Muse-Recover!2026-B',
+    }
+    const worker = workerOptions(createSitesWorker, database, bucket, mock, seed, { env: recoveryEnv })
+
+    const first = await worker.fetch(new Request('https://erp.test/api/test/read'))
+    assert.equal(first.status, 200)
+    assert.equal(database.appState.revision, 8)
+    const persisted = database.payload()
+    assert.equal(persisted.workspaceStore.platform.accountCredentialRecovery.version, '2026-08-25-v1')
+    assert.equal(persisted.workspaceStore.accountCredentials['USR-ONFACTORY-OPS'].mustChangePassword, true)
+    assert.equal(persisted.workspaceStore.accountCredentials['USR-3DMUSE-ADMIN'].mustChangePassword, true)
+    assert.equal(persisted.workspaceStore.accountCredentials['USR-SUNSEA-ADMIN'].passwordHash, 'keep-sunsea')
+    assert.deepEqual(persisted.sessions.map(([token]) => token), ['session-other'])
+    assert.equal(persisted.workspaceStore.passwordResetRequests.find((item) => item.id === 'RESET-OPS').status, 'revoked')
+    assert.equal(persisted.workspaceStore.passwordResetRequests.find((item) => item.id === 'RESET-OTHER').status, 'pending')
+    assert.equal(JSON.stringify(persisted).includes('Operator-Recover!2026-A'), false)
+    assert.equal(JSON.stringify(persisted).includes('Muse-Recover!2026-B'), false)
+
+    const second = await worker.fetch(new Request('https://erp.test/api/test/read'))
+    assert.equal(second.status, 200)
+    assert.equal(database.appState.revision, 8)
+    assert.deepEqual(database.payload(), persisted)
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true })
+  }
+})
+
+test('hosted account recovery configuration errors fail closed without mutating D1 state', async () => {
+  const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), 'onfactory-sites-account-recovery-invalid-'))
+  try {
+    const database = new FakeD1()
+    const bucket = new FakeR2()
+    const mock = createMockExpress(temporaryDirectory)
+    mock.documentDirectory = temporaryDirectory
+    const seed = makeSeed('invalid-recovery-seed')
+    const worker = workerOptions(createSitesWorker, database, bucket, mock, seed, {
+      env: {
+        DB: database,
+        FILES: bucket,
+        ERP_SEED_PASSWORD: 'Hosted-Seed!2026-Z',
+        ERP_ACCOUNT_RECOVERY_VERSION: '2026-08-25-v1',
+        ERP_OPERATOR_RECOVERY_PASSWORD: 'missing-other-secret!2026-A',
+      },
+    })
+
+    const response = await worker.fetch(new Request('https://erp.test/api/test/read'))
+    assert.equal(response.status, 503)
+    assert.equal((await response.json()).error.code, 'SERVER_CONFIGURATION_ERROR')
+    assert.equal(database.appState.revision, 1)
+    assert.equal(database.payload().workspaceStore.platform.accountCredentialRecovery, undefined)
+    assert.deepEqual(database.payload().sessions, [])
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true })
   }
