@@ -81,6 +81,9 @@ test('factory editor keeps the canvas and inspector visible together on desktop'
   assert.match(component, /addBlock\('벽'\)/)
   assert.match(component, /addBlock\('문'\)/)
   assert.match(component, /className="is-primary" onClick=\{\(\) => void addBlock\(\)\}/)
+  assert.match(component, /const updateBlock = [\s\S]*?setLayouts\(\(current\) => \{[\s\S]*?const blocks = current\[factory\.id\] \?\? \[\][\s\S]*?const currentBlock = blocks\.find[\s\S]*?normalizeBlockGeometry\(\{ \.\.\.currentBlock, \.\.\.patch \}\)/)
+  assert.match(component, /const queueGesturePersist = [\s\S]*?onChange\(id, \{\}, true\)[\s\S]*?220/)
+  assert.equal(component.match(/onLostPointerCapture=\{stop(?:Pointer|Resize)\}/g)?.length, 2)
 
   assert.match(css, /\.factory-workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+370px[^}]*min-height:\s*700px/)
   assert.match(css, /\.factory-layout-viewport\s*\{[^}]*min-height:\s*610px/)

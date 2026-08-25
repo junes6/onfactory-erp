@@ -342,11 +342,24 @@ function LayoutEditor({ factory, blocks, selectedId, editable, drawing, showBack
     return () => node.removeEventListener('wheel', stopPageScroll)
   }, [])
   const gestureRef = useRef<BlockGesture | null>(null)
+  const gesturePersistTimerRef = useRef<number | null>(null)
   const panRef = useRef<{ pointerId: number; startX: number; startY: number; x: number; y: number } | null>(null)
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [isPanning, setIsPanning] = useState(false)
   const [interactionMessage, setInteractionMessage] = useState('배경을 드래그해 이동하고 마우스 휠로 확대·축소할 수 있습니다.')
+
+  const queueGesturePersist = (id: string) => {
+    if (gesturePersistTimerRef.current !== null) window.clearTimeout(gesturePersistTimerRef.current)
+    gesturePersistTimerRef.current = window.setTimeout(() => {
+      gesturePersistTimerRef.current = null
+      onChange(id, {}, true)
+    }, 220)
+  }
+
+  useEffect(() => () => {
+    if (gesturePersistTimerRef.current !== null) window.clearTimeout(gesturePersistTimerRef.current)
+  }, [])
 
   const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(value * 10) / 10))
   const moveBlock = (block: LayoutBlock, x: number, y: number) => onChange(block.id, {
@@ -404,12 +417,15 @@ function LayoutEditor({ factory, blocks, selectedId, editable, drawing, showBack
     const nextX = clamp(gesture.original.x + ((event.clientX - gesture.startX) / (bounds.width * zoom)) * 100, 0, 100 - block.width)
     const nextY = clamp(gesture.original.y + ((event.clientY - gesture.startY) / (bounds.height * zoom)) * 100, 0, 100 - block.height)
     onChange(block.id, { x: nextX, y: nextY }, false)
+    queueGesturePersist(block.id)
   }
 
   const stopPointer = (event: ReactPointerEvent<HTMLButtonElement>) => {
     const gesture = gestureRef.current
     if (!gesture || gesture.kind !== 'move' || gesture.pointerId !== event.pointerId) return
     gestureRef.current = null
+    if (gesturePersistTimerRef.current !== null) window.clearTimeout(gesturePersistTimerRef.current)
+    gesturePersistTimerRef.current = null
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     onChange(gesture.id, {}, true)
     setInteractionMessage('블록 위치를 공유 저장했습니다.')
@@ -448,12 +464,15 @@ function LayoutEditor({ factory, blocks, selectedId, editable, drawing, showBack
       height = original.height + original.y - y
     }
     onChange(block.id, { x, y, width, height }, false)
+    queueGesturePersist(block.id)
   }
 
   const stopResize = (event: ReactPointerEvent<HTMLSpanElement>) => {
     const gesture = gestureRef.current
     if (!gesture || gesture.kind !== 'resize' || gesture.pointerId !== event.pointerId) return
     gestureRef.current = null
+    if (gesturePersistTimerRef.current !== null) window.clearTimeout(gesturePersistTimerRef.current)
+    gesturePersistTimerRef.current = null
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     onChange(gesture.id, {}, true)
     setInteractionMessage('블록 크기를 공유 저장했습니다.')
@@ -554,6 +573,7 @@ function LayoutEditor({ factory, blocks, selectedId, editable, drawing, showBack
         onPointerMove={(event) => onPointerMove(event, block)}
         onPointerUp={stopPointer}
         onPointerCancel={stopPointer}
+        onLostPointerCapture={stopPointer}
         onKeyDown={(event) => onKeyDown(event, block)}
         key={block.id}
       >
@@ -572,6 +592,7 @@ function LayoutEditor({ factory, blocks, selectedId, editable, drawing, showBack
           onPointerMove={(event) => resizeBlock(event, block)}
           onPointerUp={stopResize}
           onPointerCancel={stopResize}
+          onLostPointerCapture={stopResize}
           key={corner}
         />)}
       </button>
@@ -1160,20 +1181,28 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
   }
 
   const updateBlock = (id: string, patch: Partial<LayoutBlock>, persist = true) => {
-    const currentBlock = factoryBlocks.find((block) => block.id === id)
-    if (!currentBlock) return
-    const candidate = normalizeBlockGeometry({ ...currentBlock, ...patch })
-    // 벽·문은 공간을 두르는 구조물이므로 블록과 자유롭게 겹칠 수 있다.
-    const hasCollision = !isStructureBlock(candidate)
-      && factoryBlocks.some((block) => block.id !== id && !isStructureBlock(block) && blocksOverlap(candidate, block))
-    if (hasCollision) {
-      if (persist && Object.keys(patch).length > 0) onToast('다른 블록과 겹칠 수 없습니다. 빈 공간으로 이동하거나 크기를 줄여 주세요.')
-      return
-    }
-    void setLayouts((current) => ({
-      ...current,
-      [factory.id]: (current[factory.id] ?? []).map((block) => block.id === id ? candidate : block),
-    }), { persist }).then((result) => {
+    let hasCollision = false
+    void setLayouts((current) => {
+      // 빠른 pointermove 직후 pointerup이 오면 React 렌더보다 공유 상태가
+      // 한 박자 앞설 수 있다. 화면 클로저가 아니라 setter의 최신 current를
+      // 기준으로 최종 위치·크기를 만들고 저장해야 마지막 제스처가 보존된다.
+      const blocks = current[factory.id] ?? []
+      const currentBlock = blocks.find((block) => block.id === id)
+      if (!currentBlock) return current
+      const candidate = normalizeBlockGeometry({ ...currentBlock, ...patch })
+      // 벽·문은 공간을 두르는 구조물이므로 블록과 자유롭게 겹칠 수 있다.
+      hasCollision = !isStructureBlock(candidate)
+        && blocks.some((block) => block.id !== id && !isStructureBlock(block) && blocksOverlap(candidate, block))
+      if (hasCollision) return current
+      return {
+        ...current,
+        [factory.id]: blocks.map((block) => block.id === id ? candidate : block),
+      }
+    }, { persist }).then((result) => {
+      if (hasCollision && persist && Object.keys(patch).length > 0) {
+        onToast('다른 블록과 겹칠 수 없습니다. 빈 공간으로 이동하거나 크기를 줄여 주세요.')
+        return
+      }
       if (persist && !result.ok && result.message) onToast(result.message)
     })
   }
