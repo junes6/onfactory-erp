@@ -71,3 +71,20 @@ test('dark mode uses one readable semantic token system across every workspace',
   ].map(read).join('\n')
   assert.doesNotMatch(css, /(?:^|[;{]\s*)color\s*:\s*var\(--(?:[\w-]+-soft|surface)\)/m)
 })
+
+test('factory editor keeps the canvas and inspector visible together on desktop', () => {
+  const component = read('src/components/FactoryManagement.tsx')
+  const css = read('src/components/FactoryManagement.css')
+
+  assert.match(component, /aria-label=\{`\$\{factory\.name\} 블록 배치 편집기`\}/)
+  assert.match(component, /블록 드래그 이동 · 모서리 크기 조절 · 배경 드래그 이동 · 휠 확대\/축소/)
+  assert.match(component, /addBlock\('벽'\)/)
+  assert.match(component, /addBlock\('문'\)/)
+  assert.match(component, /className="is-primary" onClick=\{\(\) => void addBlock\(\)\}/)
+
+  assert.match(css, /\.factory-workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+370px[^}]*min-height:\s*700px/)
+  assert.match(css, /\.factory-layout-viewport\s*\{[^}]*min-height:\s*610px/)
+  assert.match(css, /\.factory-layout-sidebar\s*\{[^}]*max-height:\s*760px[^}]*overflow-y:\s*auto/)
+  assert.match(css, /@media \(max-width:\s*1120px\)[\s\S]*?\.factory-workspace\s*\{\s*grid-template-columns:\s*1fr/)
+  assert.doesNotMatch(css, /\.factory-(?:map-frame|layout-viewport|layout-editor)[^}]*72vh/)
+})

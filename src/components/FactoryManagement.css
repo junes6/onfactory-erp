@@ -188,10 +188,11 @@
 .factory-layout-actions button.is-active { border-color: var(--color-blue-deep); color: var(--factory-forest); background: var(--color-blue-soft); }
 .factory-layout-actions button.is-primary { border-color: var(--factory-forest-dark); color: var(--color-white); background: var(--factory-forest-dark); }
 
-/* R6-7/8: 배치 편집기는 전폭으로 넓게, 블록 속성 편집기는 그 아래 — 휠 확대/축소와 페이지 스크롤이 섞이지 않는다. */
-.factory-workspace { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; min-height: 0; }
+/* 캔버스와 속성 편집기를 한 화면에서 함께 사용한다. 넓은 화면에서
+   속성 패널이 캔버스 아래로 밀리면 편집 기능 자체가 사라진 것처럼 보인다. */
+.factory-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 370px; align-items: start; min-height: 700px; }
 .factory-map-column { min-width: 0; padding: var(--space-16); background: var(--color-blue-soft); }
-.factory-map-frame { min-height: max(640px, 72vh); overflow: hidden; border: var(--hairline) solid var(--color-blue-soft); border-radius: var(--radius-8); background: var(--color-blue-soft); box-shadow: var(--shadow-none); }
+.factory-map-frame { min-height: 610px; overflow: hidden; border: var(--hairline) solid var(--color-blue-soft); border-radius: var(--radius-8); background: var(--color-blue-soft); box-shadow: var(--shadow-none); }
 
 .factory-plan {
   position: relative; min-height: 610px; display: grid;
@@ -200,10 +201,10 @@
   background-image: linear-gradient(var(--color-overlay-subtle) 1px, transparent 1px), linear-gradient(90deg, var(--color-overlay-subtle) 1px, transparent 1px);
   background-size: 26px 26px;
 }
-.factory-layout-viewport { position: relative; width: 100%; min-height: max(640px, 72vh); overflow: hidden; cursor: grab; touch-action: none; isolation: isolate; }
+.factory-layout-viewport { position: relative; width: 100%; min-height: 610px; overflow: hidden; cursor: grab; touch-action: none; isolation: isolate; }
 .factory-layout-viewport.is-panning { cursor: grabbing; }
 .factory-layout-editor {
-  position: absolute; inset: 0; display: block; min-height: max(640px, 72vh); padding: var(--space-0); overflow: hidden; touch-action: none; isolation: isolate;
+  position: absolute; inset: 0; display: block; min-height: 610px; padding: var(--space-0); overflow: hidden; touch-action: none; isolation: isolate;
   transform-origin: 0 0; will-change: transform;
 }
 .factory-layout-editor.is-editing { cursor: crosshair; }
@@ -315,9 +316,8 @@
 .factory-legend__status--good { background: var(--color-success); }
 .factory-legend__status--warning { background: var(--color-warning); }
 
-.factory-zone-detail { min-width: 0; min-height: 0; padding: var(--card-inset); border-top: var(--hairline) solid var(--factory-line); background: var(--color-surface); }
-.factory-layout-sidebar { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 2.2fr); align-items: start; gap: var(--space-24); max-height: none; overflow: visible; }
-@media (max-width: 960px) { .factory-layout-sidebar { grid-template-columns: minmax(0, 1fr); } }
+.factory-zone-detail { min-width: 0; min-height: 700px; padding: var(--card-inset); border-left: var(--hairline) solid var(--factory-line); background: var(--color-surface); }
+.factory-layout-sidebar { max-height: 760px; overflow-y: auto; }
 .factory-layout-purpose { min-height: 28px; display: inline-flex; align-items: center; padding: var(--space-4) var(--space-8); border-radius: var(--radius-8); color: var(--color-blue-deep); background: var(--color-blue-soft); font-size: var(--font-11); font-weight: var(--weight-medium); white-space: nowrap; }
 .factory-layout-inspector { padding: var(--space-12) var(--space-0) var(--space-16); border-bottom: var(--hairline) solid var(--factory-line); }
 .factory-layout-inspector__status { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); margin-bottom: var(--space-12); padding: var(--space-8) var(--space-8); border-radius: var(--radius-8); color: var(--color-blue-deep); background: var(--color-blue-soft); }

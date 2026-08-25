@@ -1286,9 +1286,6 @@ html[data-theme='dark'] {
 .channel-setup-footer > div { display: flex; align-items: center; gap: var(--space-8); }
 .danger-text-button { min-height: 40px; display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-0) var(--space-8); border: none; color: var(--color-danger); background: transparent; font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
 
-/* Minimum factory legibility */
-html body .factory-page :where(span,small,strong,em,p,button,input,select,textarea,label,time) { font-size: var(--font-15); }
-
 /* User-selected type size */
 
 
