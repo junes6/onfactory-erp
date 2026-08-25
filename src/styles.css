@@ -2739,6 +2739,47 @@ html[data-easy-mode='on'] .global-search { display: none; }
 .warehouse-code { color: var(--muted); }
 .warehouse-card[class*='warehouse-type-'] .progress-track span { background: var(--warehouse-accent); }
 
+/* P4: 기본은 4열 컴팩트 창고, 크게 보기는 기존 LOT 상세를 유지한다. */
+.warehouse-grid.is-compact { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-12); }
+.warehouse-grid.is-large { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-12); }
+.warehouse-grid.is-compact .warehouse-card.warehouse-inventory-block { min-width: 0; padding: var(--space-12); }
+.warehouse-grid.is-compact .warehouse-card-top { min-height: 32px; }
+.warehouse-grid.is-compact .warehouse-icon { width: 32px; height: 32px; }
+.warehouse-grid.is-compact .warehouse-card-heading { gap: var(--space-8); margin-top: var(--space-8); }
+.warehouse-grid.is-compact .warehouse-card-heading h2 { font-size: var(--font-15); letter-spacing: -.02em; }
+.warehouse-grid.is-compact .warehouse-card-heading > strong { max-width: 48%; padding: var(--space-4) var(--space-8); font-size: var(--font-11); }
+.warehouse-grid.is-compact .warehouse-utilization { margin: var(--space-8) var(--space-0); }
+.warehouse-quick-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); margin-bottom: var(--space-8); }
+.warehouse-quick-actions button { min-width: 0; min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-4); padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--forest); background: var(--surface); font-size: var(--font-11); font-weight: var(--weight-medium); cursor: pointer; }
+.warehouse-quick-actions button:last-child { color: var(--color-danger); }
+.warehouse-quick-actions button:hover { background: var(--canvas); }
+.warehouse-recent-block { min-width: 0; border-top: var(--hairline) solid var(--line); }
+.warehouse-recent-block > header { min-height: 32px; display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); }
+.warehouse-recent-block > header strong { font-size: var(--font-13); }
+.warehouse-recent-block > header span { color: var(--muted); font-size: var(--font-11); }
+.warehouse-recent-block > p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-11); line-height: 1.45; }
+.warehouse-recent-block ul { display: grid; margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.warehouse-recent-block li { min-width: 0; min-height: 42px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-4); border-top: var(--hairline) solid var(--line); }
+.warehouse-recent-block li > div { min-width: 0; }
+.warehouse-recent-block li > div strong,
+.warehouse-recent-block li > div small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.warehouse-recent-block li > div strong { font-size: var(--font-13); }
+.warehouse-recent-block li > div small { color: var(--muted); font-size: var(--font-11); }
+.warehouse-recent-block li > b { font-size: var(--font-13); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.movement-mini-direction { min-width: 32px; padding: var(--space-4); border-radius: var(--radius-8); color: var(--muted); background: var(--color-gray-50); font-size: var(--font-11); font-weight: var(--weight-medium); text-align: center; }
+.movement-mini-direction.is-in { color: var(--color-success); background: var(--color-success-soft); }
+.movement-mini-direction.is-out { color: var(--color-danger); background: var(--color-danger-soft); }
+.movement-mini-direction.is-adjust { color: var(--color-warning-ink); background: var(--color-warning-soft); }
+
+@media (max-width: 1180px) {
+  .warehouse-grid.is-compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  .warehouse-grid.is-compact,
+  .warehouse-grid.is-large { grid-template-columns: 1fr; }
+}
+
 /* R6-11: 다크 모드 — 사이드바·브랜드·칩 계열 보정 */
 html[data-theme='dark'] .warehouse-card.warehouse-inventory-block[class*='warehouse-type-'] { background: linear-gradient(180deg, var(--warehouse-tint), var(--surface) 40%); }
 html[data-theme='dark'] .notification-list > button.is-unread { background: var(--color-primary-soft); }

@@ -936,6 +936,8 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
   const [movements, setMovements] = useWorkspaceState<InventoryMovement[]>('inventory-movements', [], { scope: workspaceScope, seedWhenEmpty: false })
   const [editing, setEditing] = useState<WarehouseLocation | 'new' | null>(null)
   const [movementOpen, setMovementOpen] = useState(false)
+  const [movementPreset, setMovementPreset] = useState<{ warehouseId: string; direction: '입고' | '출고' } | null>(null)
+  const [warehouseView, setWarehouseView] = useState<'compact' | 'large'>('compact')
   const [showAllMovements, setShowAllMovements] = useState(false)
   const [expandedWarehouseIds, setExpandedWarehouseIds] = useState<Set<string>>(() => new Set())
   const defaultMovementTime = seoulDateTimeInputValue()
@@ -981,11 +983,21 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
   useEffect(() => {
     if (!editing && !movementOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { setEditing(null); setMovementOpen(false) }
+      if (event.key === 'Escape') { setEditing(null); setMovementOpen(false); setMovementPreset(null) }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [editing, movementOpen])
+
+  const openWarehouseMovement = (warehouseId?: string, direction: '입고' | '출고' = '입고') => {
+    setMovementPreset(warehouseId ? { warehouseId, direction } : null)
+    setMovementOpen(true)
+  }
+
+  const closeWarehouseMovement = () => {
+    setMovementOpen(false)
+    setMovementPreset(null)
+  }
 
   const saveWarehouse = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -1028,7 +1040,7 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
 
   const saveMovement = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!canManage) { setMovementOpen(false); onToast('입출고 등록은 고객사 관리자만 할 수 있습니다.'); return }
+    if (!canManage) { closeWarehouseMovement(); onToast('입출고 등록은 고객사 관리자만 할 수 있습니다.'); return }
     const form = new FormData(event.currentTarget)
     const direction = String(form.get('direction') || '입고') as InventoryMovement['direction']
     const product = String(form.get('product') || '').trim()
@@ -1078,7 +1090,7 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
     }
     const result = await setMovements((current) => [movement, ...current])
     if (!result.ok) { if (evidenceId) void fetch(`/api/documents/${encodeURIComponent(evidenceId)}`, { method: 'DELETE', headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined }); return }
-    setMovementOpen(false)
+    closeWarehouseMovement()
     onToast(`${product} ${quantity}${unit} ${direction} 내역을 등록했습니다.`)
   }
 
@@ -1095,8 +1107,8 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
 
   return (
     <div className="content-page">
-      <PageHeader eyebrow="INVENTORY & LOT" title="재고 · LOT" description="창고 환경과 유통기한, 출고 가능 수량을 제품 흐름에 맞춰 관리합니다." action={canManage ? <><button className="button ghost" type="button" onClick={() => setMovementOpen(true)}><Boxes size={18} /> 입출고 등록</button><button className="button primary" type="button" onClick={() => setEditing('new')}><Plus size={18} /> 창고 등록</button></> : <StatusBadge className="status-pill" tone="neutral">조회 전용</StatusBadge>} />
-      <section className="warehouse-grid">
+      <PageHeader eyebrow="INVENTORY & LOT" title="재고 · LOT" description="창고 환경과 유통기한, 출고 가능 수량을 제품 흐름에 맞춰 관리합니다." action={<><button className="button ghost" type="button" aria-pressed={warehouseView === 'large'} onClick={() => setWarehouseView((view) => view === 'compact' ? 'large' : 'compact')}><Layers3 size={18} /> {warehouseView === 'compact' ? '크게 보기' : '컴팩트 보기'}</button>{canManage ? <><button className="button ghost" type="button" onClick={() => openWarehouseMovement()}><Boxes size={18} /> 입출고 등록</button><button className="button primary" type="button" onClick={() => setEditing('new')}><Plus size={18} /> 창고 등록</button></> : <StatusBadge className="status-pill" tone="neutral">조회 전용</StatusBadge>}</>} />
+      <section className={`warehouse-grid is-${warehouseView}`}>
         {locations.length === 0 && <div className="empty-state"><Warehouse size={30} /><h3>아직 등록된 항목이 없습니다</h3><p>첫 창고를 등록하면 보관 조건과 공간 사용률을 이곳에서 관리할 수 있습니다.</p>{canManage && <button className="button primary" type="button" onClick={() => setEditing('new')}><Plus size={17} /> 첫 창고 등록</button>}</div>}
         {locations.map((location) => {
           const lots = lotsByWarehouse[location.id] ?? []
@@ -1109,12 +1121,14 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
           const stockSummary = stockTotals.length > 0 ? stockTotals.join(' · ') : unresolvedCount > 0 ? '현재고 확인 필요' : '재고 원장 미등록'
           const expanded = expandedWarehouseIds.has(location.id)
           const visibleLots = expanded ? lots : lots.slice(0, 4)
+          const recentMovements = [...movements].filter((movement) => movement.warehouseId === location.id).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)).slice(0, 2)
           const typeClass = location.type === '냉장' ? 'chilled' : location.type === '냉동' ? 'frozen' : location.type === '포장재' ? 'packaging' : 'ambient'
           return <article className={`warehouse-card warehouse-inventory-block warehouse-type-${typeClass}`} key={location.id}>
             <div className="warehouse-card-top"><span className="warehouse-icon"><Warehouse size={21} /></span><div><StatusBadge className="status-pill" dot tone={location.alert === '이상 없음' ? 'success' : 'warning'}>{location.condition}</StatusBadge>{canManage && <button type="button" className="warehouse-edit" onClick={() => setEditing(location)}>변경</button>}</div></div>
             <div className="warehouse-card-heading"><div><h2>{location.name}</h2><span className="warehouse-code"><b className="warehouse-type-chip">{location.type}</b> {location.id}</span></div><strong className={unresolvedCount > 0 ? 'needs-reconcile' : ''}>{stockSummary}{unresolvedCount > 0 && stockTotals.length > 0 ? ` · 미확정 ${unresolvedCount}` : ''}</strong></div>
             <div className="warehouse-utilization"><div className="progress-head"><span>공간 사용률</span><strong>{location.utilization}%</strong></div><div className="progress-track"><span style={{ width: location.utilization + '%' }} /></div></div>
-            <section className="warehouse-lot-block" aria-label={`${location.name} 품목 및 LOT 수량`}>
+            {canManage && <div className="warehouse-quick-actions"><button type="button" onClick={() => openWarehouseMovement(location.id, '입고')}><ArrowDownToLine size={15} /> 재고 추가</button><button type="button" onClick={() => openWarehouseMovement(location.id, '출고')}><ArrowUpFromLine size={15} /> 재고 차감</button></div>}
+            {warehouseView === 'compact' ? <section className="warehouse-recent-block" aria-label={`${location.name} 최근 입출고`}><header><strong>최근 입출고</strong><span>{recentMovements.length}건</span></header>{recentMovements.length === 0 ? <p>아직 입출고 내역이 없습니다.</p> : <ul>{recentMovements.map((movement) => <li key={movement.id}><span className={`movement-mini-direction is-${movement.direction === '입고' ? 'in' : movement.direction === '출고' ? 'out' : 'adjust'}`}>{movement.direction}</span><div><strong>{movement.product}</strong><small>{movement.lot} · {formatDateTime(movement.occurredAt)}</small></div><b>{movement.direction === '출고' ? '−' : movement.direction === '입고' ? '+' : ''}{movement.quantity.toLocaleString('ko-KR', { maximumFractionDigits: 3 })}{movement.unit}</b></li>)}</ul>}</section> : <><section className="warehouse-lot-block" aria-label={`${location.name} 품목 및 LOT 수량`}>
               <header><div><strong>품목 · LOT 현재고</strong><small>입고·출고 누계, 재고조정 시 실사 수량으로 확정</small></div><span>{lots.length} LOT</span></header>
               {lots.length === 0 ? <div className="warehouse-lot-empty"><Package size={18} /><span>이 창고에 등록된 LOT 원장이 없습니다.</span></div> : <div className="warehouse-lot-list">{visibleLots.map((lot) => <article key={lot.key}>
                 <span className="warehouse-lot-icon"><Package size={17} /></span>
@@ -1125,25 +1139,25 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
               </article>)}</div>}
               {lots.length > 4 && <button className="warehouse-lot-more" type="button" aria-expanded={expanded} onClick={() => setExpandedWarehouseIds((current) => { const next = new Set(current); if (next.has(location.id)) next.delete(location.id); else next.add(location.id); return next })}>{expanded ? 'LOT 목록 접기' : `전체 ${lots.length}개 LOT 보기`} <ChevronDown size={16} /></button>}
             </section>
-            <div className={`warehouse-alert${location.alert === '이상 없음' ? ' is-normal' : ''}`}><AlertTriangle size={15} /> <span>{location.alert}</span></div>
+            <div className={`warehouse-alert${location.alert === '이상 없음' ? ' is-normal' : ''}`}><AlertTriangle size={15} /> <span>{location.alert}</span></div></>}
           </article>
         })}
       </section>
       <section className="panel table-panel inventory-movement-panel">
-        <div className="panel-heading"><div><h2>{showAllMovements ? '전체 입출고 원장' : '최근 입출고'}</h2><p>LOT별 수량, 등록 사유와 증빙자료를 확인합니다.</p></div><div className="inventory-panel-actions">{movements.length > 8 && <button type="button" className="small-button" aria-pressed={showAllMovements} onClick={() => setShowAllMovements((value) => !value)}>{showAllMovements ? '최근 8건만' : `전체 ${movements.length}건`}</button>}{canManage && <button type="button" className="small-button" onClick={() => setMovementOpen(true)}><Plus size={16} /> 내역 등록</button>}</div></div>
+        <div className="panel-heading"><div><h2>{showAllMovements ? '전체 입출고 원장' : '최근 입출고'}</h2><p>LOT별 수량, 등록 사유와 증빙자료를 확인합니다.</p></div><div className="inventory-panel-actions">{movements.length > 8 && <button type="button" className="small-button" aria-pressed={showAllMovements} onClick={() => setShowAllMovements((value) => !value)}>{showAllMovements ? '최근 8건만' : `전체 ${movements.length}건`}</button>}{canManage && <button type="button" className="small-button" onClick={() => openWarehouseMovement()}><Plus size={16} /> 내역 등록</button>}</div></div>
         {movements.length === 0 ? <div className="empty-state compact"><Boxes size={28} /><h3>등록된 입출고가 없습니다</h3><p>첫 입고, 출고 또는 재고조정 내역을 등록해 보세요.</p></div> : <div className="responsive-table"><table><thead><tr><th>구분 · 품목</th><th>LOT</th><th>수량</th><th>창고</th><th>일시 · 사유</th><th>증빙</th>{canManage && <th>관리</th>}</tr></thead><tbody>{(showAllMovements ? movements : movements.slice(0, 8)).map((movement) => <tr key={movement.id}><td><div className={'movement-direction ' + movement.direction}>{movement.direction === '입고' ? <ArrowDownToLine size={17} /> : <ArrowUpFromLine size={17} />}<span><strong>{movement.product}</strong><small>{movement.id}</small></span></div></td><td><strong>{movement.lot}</strong></td><td><strong>{movement.quantity.toLocaleString()}{movement.unit}</strong></td><td>{locations.find((location) => location.id === movement.warehouseId)?.name ?? movement.warehouseId}</td><td><strong>{formatDateTime(movement.occurredAt)}</strong><span>{movement.reason}</span></td><td>{movement.evidence ? movement.evidenceId ? <button type="button" className="movement-evidence download" onClick={async () => { if (!await downloadStoredDocument(movement.evidenceId!, movement.evidence!, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={15} /> {movement.evidence}</button> : <span className="movement-evidence"><Paperclip size={15} /> {movement.evidence}</span> : '—'}</td>{canManage && <td><button type="button" className="movement-delete" onClick={() => void removeMovement(movement)}>삭제</button></td>}</tr>)}</tbody></table></div>}
       </section>
-      {movementOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setMovementOpen(false)}>
+      {movementOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeWarehouseMovement()}>
         <section ref={movementDialogRef} className="modal-card inventory-movement-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-movement-title">
-          <header><div><span className="eyebrow">STOCK MOVEMENT</span><h2 id="inventory-movement-title">입출고 등록</h2><p>LOT와 수량, 이동 사유를 남겨 재고 변동 이력을 관리합니다.</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={() => setMovementOpen(false)}><X size={21} /></button></header>
+          <header><div><span className="eyebrow">STOCK MOVEMENT</span><h2 id="inventory-movement-title">{movementPreset ? `${movementPreset.direction === '입고' ? '재고 추가' : '재고 차감'} · ${locations.find((location) => location.id === movementPreset.warehouseId)?.name ?? '선택 창고'}` : '입출고 등록'}</h2><p>LOT와 수량, 이동 사유를 남겨 재고 변동 이력을 관리합니다.</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={closeWarehouseMovement}><X size={21} /></button></header>
           <form onSubmit={saveMovement}>
-            <div className="form-grid"><label className="form-field"><span>구분</span><select name="direction" defaultValue="입고"><option>입고</option><option>출고</option><option>재고조정</option></select></label><label className="form-field"><span>처리 일시</span><input name="occurredAt" type="datetime-local" defaultValue={defaultMovementTime} /></label></div>
+            <div className="form-grid"><label className="form-field"><span>구분</span><select name="direction" defaultValue={movementPreset?.direction ?? '입고'}><option>입고</option><option>출고</option><option>재고조정</option></select></label><label className="form-field"><span>처리 일시</span><input name="occurredAt" type="datetime-local" defaultValue={defaultMovementTime} /></label></div>
             <p className="inventory-ledger-note"><Database size={16} /><span><strong>현재고 계산 기준</strong> 입고·출고는 확정 현재고에 더하고 빼며, 재고조정은 입력 수량을 해당 LOT의 실사 현재고로 확정합니다. 기존 출고만 있는 LOT은 먼저 재고조정을 등록해 주세요.</span></p>
             <div className="form-grid"><label className="form-field"><span>품목명</span><input name="product" autoFocus data-autofocus placeholder="예: 완제품 A 400g" required /></label><label className="form-field"><span>LOT 번호</span><input name="lot" placeholder="LOT-YYYYMMDD-01" required /></label></div>
-            <div className="form-grid three"><label className="form-field"><span>수량</span><input name="quantity" type="number" min="0" step="0.001" required /></label><label className="form-field"><span>단위</span><select name="unit" defaultValue="EA"><option>EA</option><option>BOX</option><option>KG</option><option>G</option><option>ROLL</option></select></label><label className="form-field"><span>창고</span><select name="warehouseId" required defaultValue={locations[0]?.id ?? ''}><option value="" disabled>창고 선택</option>{locations.map((location) => <option value={location.id} key={location.id}>{location.name}</option>)}</select></label></div>
+            <div className="form-grid three"><label className="form-field"><span>수량</span><input name="quantity" type="number" min="0" step="0.001" required /></label><label className="form-field"><span>단위</span><select name="unit" defaultValue="EA"><option>EA</option><option>BOX</option><option>KG</option><option>G</option><option>ROLL</option></select></label><label className="form-field"><span>창고</span><select name="warehouseId" required defaultValue={movementPreset?.warehouseId ?? locations[0]?.id ?? ''}><option value="" disabled>창고 선택</option>{locations.map((location) => <option value={location.id} key={location.id}>{location.name}</option>)}</select></label></div>
             <label className="form-field full"><span>처리 사유</span><textarea name="reason" rows={3} placeholder="예: 온라인 주문 출고" required /></label>
             <label className="form-field full"><span>증빙자료 (선택)</span><input name="evidence" type="file" accept="image/*,.pdf,.xlsx,.xls,.csv" /><small>파일 원본을 고객사 자료 저장소에 보관하고 입출고 이력에서 다시 다운로드할 수 있습니다.</small></label>
-            <footer><button type="button" className="button ghost" onClick={() => setMovementOpen(false)}>취소</button><button type="submit" className="button primary"><Check size={18} /> 입출고 저장</button></footer>
+            <footer><button type="button" className="button ghost" onClick={closeWarehouseMovement}>취소</button><button type="submit" className="button primary"><Check size={18} /> 입출고 저장</button></footer>
           </form>
         </section>
       </div>}
