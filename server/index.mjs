@@ -35,6 +35,9 @@ const app = createApp({
   seedDemoAccounts: runtimeStore.adapter.kind === 'json',
   skipStartupMigrations: runtimeStore.adapter.kind === 'postgres',
   billingService,
+  kstartupServiceKey: process.env.KSTARTUP_SERVICE_KEY?.trim() || '',
+  bizinfoCertKey: process.env.BIZINFO_CERT_KEY?.trim() || '',
+  bizinfoCommercialUseApproved: process.env.BIZINFO_COMMERCIAL_USE_APPROVED?.trim().toLowerCase() === 'true',
   storeStatus: {
     kind: runtimeStore.adapter.kind,
     readOnly: Boolean(runtimeStore.adapter.readOnly),

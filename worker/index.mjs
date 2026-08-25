@@ -50,6 +50,15 @@ const RATE_LIMIT_TABLE_SQL = `
     updated_at TEXT NOT NULL
   )
 `
+const SUPPORT_PROGRAM_CACHE_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS support_program_feed_cache (
+    source TEXT PRIMARY KEY NOT NULL,
+    payload_json TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    last_error_code TEXT
+  )
+`
 
 const AUTH_RATE_LIMITS = {
   '/api/auth/login': { identityLimit: 10, addressLimit: 50, windowMs: 15 * 60_000 },
@@ -137,11 +146,46 @@ async function ensureRuntimeTables(runtimeEnv) {
   await runtimeEnv.DB.prepare(STATE_TABLE_SQL).run()
   await runtimeEnv.DB.prepare(REQUEST_LOCK_TABLE_SQL).run()
   await runtimeEnv.DB.prepare(RATE_LIMIT_TABLE_SQL).run()
+  await runtimeEnv.DB.prepare(SUPPORT_PROGRAM_CACHE_TABLE_SQL).run()
   await runtimeEnv.DB.prepare('CREATE INDEX IF NOT EXISTS idx_api_rate_limits_expires_at ON api_rate_limits (expires_at)').run()
   await runtimeEnv.DB.prepare(`
     INSERT OR IGNORE INTO request_locks (id, owner, expires_at, updated_at)
     VALUES (?, NULL, 0, ?)
   `).bind(REQUEST_LOCK_ID, new Date().toISOString()).run()
+}
+
+export function createD1SupportProgramCache(database) {
+  return {
+    async get(source) {
+      const row = await database.prepare('SELECT payload_json, fetched_at, expires_at, last_error_code FROM support_program_feed_cache WHERE source = ?').bind(source).first()
+      if (!row) return null
+      try {
+        const items = JSON.parse(String(row.payload_json))
+        return Array.isArray(items) ? {
+          items,
+          fetchedAt: String(row.fetched_at),
+          expiresAt: Number(row.expires_at) || 0,
+          lastErrorCode: row.last_error_code ? String(row.last_error_code) : null,
+        } : null
+      } catch {
+        return null
+      }
+    },
+    async put(source, record) {
+      await database.prepare(`
+        INSERT INTO support_program_feed_cache (source, payload_json, fetched_at, expires_at, last_error_code)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(source) DO UPDATE SET
+          payload_json = excluded.payload_json,
+          fetched_at = excluded.fetched_at,
+          expires_at = excluded.expires_at,
+          last_error_code = excluded.last_error_code
+      `).bind(source, JSON.stringify(record.items), record.fetchedAt, record.expiresAt, record.lastErrorCode ?? null).run()
+    },
+    async markError(source, errorCode) {
+      await database.prepare('UPDATE support_program_feed_cache SET last_error_code = ? WHERE source = ?').bind(errorCode, source).run()
+    },
+  }
 }
 
 async function acquireRequestLock(runtimeEnv, options = {}) {
@@ -539,6 +583,10 @@ export function createSitesWorker(dependencies = {}) {
           requireSeedPasswordChange: true,
           exposePasswordResetTokens: false,
           billingService,
+          kstartupServiceKey: runtimeEnv.KSTARTUP_SERVICE_KEY,
+          bizinfoCertKey: runtimeEnv.BIZINFO_CERT_KEY,
+          bizinfoCommercialUseApproved: String(runtimeEnv.BIZINFO_COMMERCIAL_USE_APPROVED ?? '').toLowerCase() === 'true',
+          supportProgramCache: createD1SupportProgramCache(runtimeEnv.DB),
           onWorkspaceStoreChange: () => { workspaceDirty = true },
         })
         expressServer = app.listen(expressPort)

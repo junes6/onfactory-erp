@@ -8,7 +8,7 @@ import { downloadDocumentAttachment } from '../utils/documentAttachments'
 import { FileText, FolderSearch, Download } from 'lucide-react'
 import './DashboardWorkspace.css'
 
-export type DashboardWidgetId = 'summary' | 'ai' | 'schedule' | 'work' | 'links' | 'alert' | 'files'
+export type DashboardWidgetId = 'summary' | 'ai' | 'schedule' | 'work' | 'links' | 'alert' | 'files' | 'support'
 export type DashboardWidgetSize = 'half' | 'wide' | 'full'
 
 export type DashboardWidgetPreference = {
@@ -24,6 +24,7 @@ const widgetLabels: Record<DashboardWidgetId, { title: string; description: stri
   work: { title: '다음 업무', description: '내가 수행하거나 결재할 업무입니다.' },
   links: { title: '업무 바로가기', description: '자주 쓰는 외부 사이트를 엽니다.' },
   files: { title: '자주 찾는 파일', description: '자주 내려받는 회사 자료를 바로 엽니다.' },
+  support: { title: '정부 지원사업', description: 'K-Startup·기업마당의 공식 모집 공고를 봅니다.' },
   alert: { title: '중요 알림', description: '확인이 필요한 운영 문제입니다.' },
 }
 
@@ -32,6 +33,7 @@ export const defaultDashboardWidgets: DashboardWidgetPreference[] = [
   { id: 'ai', visible: true, size: 'wide' },
   { id: 'schedule', visible: true, size: 'half' },
   { id: 'links', visible: true, size: 'half' },
+  { id: 'support', visible: true, size: 'wide' },
   { id: 'files', visible: true, size: 'half' },
   { id: 'work', visible: true, size: 'half' },
   { id: 'alert', visible: true, size: 'half' },

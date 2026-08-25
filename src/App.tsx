@@ -27,6 +27,7 @@ import './components/InventoryEnhancements.css'
 import { PeopleOperationsPage } from './components/PeopleOperations'
 import { ItServicesPage, type ItServicesView } from './components/ItServices'
 import { ApprovalQueue } from './components/ApprovalQueue'
+import { SupportProgramsWidget } from './components/SupportProgramsWidget'
 import { brandLabelForIndustry, routesForIndustry } from './modules/registry'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
@@ -227,6 +228,7 @@ const dashboardWidgetLabels: Record<DashboardWidgetPreference['id'], string> = {
   work: '다음 업무',
   links: '업무 바로가기',
   alert: '중요 알림',
+  support: '정부 지원사업',
 }
 
 type DashboardDropTarget = {
@@ -360,6 +362,8 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
       content = <QuickLinksWidget scope={`${companyName}:${currentUserId}`} onToast={onToast} />
     } else if (preference.id === 'files') {
       content = <FrequentFilesWidget workspaceScope={workspaceScope} onOpenLibrary={() => onNavigate('documents')} onToast={onToast} />
+    } else if (preference.id === 'support') {
+      content = <SupportProgramsWidget workspaceScope={workspaceScope} />
     } else if (preference.id === 'work') {
       content = <section className="my-work-card dashboard-section-card">
         <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><ListChecks size={18} /></span><h2>다음 업무</h2></div><button type="button" className="text-button" onClick={() => onNavigate('tasks')}>전체 보기 <ArrowRight size={16} /></button></header>

@@ -275,10 +275,10 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
     const days = Math.ceil((Date.parse(target) - Date.parse(today)) / 86_400_000)
     return { label: program.status === '준비' || program.status === '신청' ? (days < 0 ? `접수 마감 ${Math.abs(days)}일 지남` : `접수 마감 D-${days}`) : (days < 0 ? '사업 종료' : `종료 D-${days}`), urgent: days >= 0 && days <= 7 }
   }
-  const contractTabs = <div className="segmented it-subtabs" role="tablist" aria-label="계약·거래처·지원사업">
+  const contractTabs = <div className="segmented it-subtabs" role="tablist" aria-label="계약·거래처·지원사업 신청관리">
     <button type="button" role="tab" aria-selected={contractTab === 'contracts'} className={contractTab === 'contracts' ? 'active' : ''} onClick={() => setContractTab('contracts')}><FileSignature size={15} /> 계약 {contracts.length}</button>
     <button type="button" role="tab" aria-selected={contractTab === 'clients'} className={contractTab === 'clients' ? 'active' : ''} onClick={() => setContractTab('clients')}><Building2 size={15} /> 거래처 {clients.length}</button>
-    <button type="button" role="tab" aria-selected={contractTab === 'programs'} className={contractTab === 'programs' ? 'active' : ''} onClick={() => setContractTab('programs')}><Landmark size={15} /> 지원사업 {programs.length}</button>
+    <button type="button" role="tab" aria-selected={contractTab === 'programs'} className={contractTab === 'programs' ? 'active' : ''} onClick={() => setContractTab('programs')}><Landmark size={15} /> 지원사업 신청관리 {programs.length}</button>
   </div>
   if (contractTab === 'clients') {
     return <div className="content-page it-page">
@@ -305,7 +305,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
   }
   if (contractTab === 'programs') {
     return <div className="content-page it-page">
-      <header className="page-header"><div><span className="eyebrow">SUPPORT PROGRAMS</span><h1>계약 · 거래처</h1><p>정부·지자체·기관 지원사업을 준비부터 신청·선정·진행·완료까지 한 곳에서 관리합니다. 접수 마감 7일 전부터 강조됩니다.</p></div><div className="page-header-actions">{canManage && <button className="button primary" type="button" onClick={() => setEditor({ kind: 'program' })}><Plus size={18} /> 지원사업 등록</button>}</div></header>
+      <header className="page-header"><div><span className="eyebrow">SUPPORT PROGRAMS</span><h1>지원사업 신청관리</h1><p>메인에서 발견한 공고를 준비부터 신청·선정·진행·완료까지 관리합니다. 접수 마감 7일 전부터 강조됩니다.</p></div><div className="page-header-actions">{canManage && <button className="button primary" type="button" onClick={() => setEditor({ kind: 'program' })}><Plus size={18} /> 지원사업 등록</button>}</div></header>
       {contractTabs}
       <section className="panel it-list-panel">
         {sortedPrograms.length === 0

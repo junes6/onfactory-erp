@@ -22,6 +22,8 @@ import { registerAttendanceRoutes } from './attendance-routes.mjs'
 import { BillingServiceError, createBillingService, createMemoryBillingRepository } from './billing-service.mjs'
 import { attachBlocksToLatestUserMessage, ChatAttachmentError, normalizeChatAttachmentRequest, resolveChatAttachments } from './chat-attachments.mjs'
 import { registerPerformanceRoutes } from './performance-routes.mjs'
+import { registerSupportProgramRoutes } from './support-program-routes.mjs'
+import { createSupportProgramService } from './support-program-service.mjs'
 import {
   APPROVAL_WINDOW_DAYS, AUTOMATION_POLICIES_KEY, PROPOSALS_KEY, approvalStatistics, diffProposalPayload,
   evaluateSentinel, proposeDocumentClassification, proposeTaskFromMessage,
@@ -5613,6 +5615,19 @@ export function createApp(options = {}) {
     accounts,
     commitWorkspaceStore,
     ...(typeof options.attendanceClock === 'function' ? { clock: options.attendanceClock } : {}),
+  })
+
+  const supportProgramService = options.supportProgramService ?? createSupportProgramService({
+    kstartupServiceKey: options.kstartupServiceKey,
+    bizinfoCertKey: options.bizinfoCertKey,
+    bizinfoCommercialUseApproved: options.bizinfoCommercialUseApproved === true,
+    cache: options.supportProgramCache,
+  })
+  registerSupportProgramRoutes({
+    app,
+    requireAuth,
+    requireMatchingWorkspaceIdentity,
+    service: supportProgramService,
   })
 
   registerPerformanceRoutes({
