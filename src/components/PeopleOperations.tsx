@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { PerformanceReports } from './PerformanceReports'
+import { AttendancePanel } from './AttendancePanel'
 import { BarChart3 } from 'lucide-react'
 import { formatDateLabel, formatDateTime, seoulDateInputValue } from '../utils/dateTime'
 import './PeopleOperations.css'
@@ -20,7 +21,7 @@ type PeopleOperationsProps = {
   currentUserTeam: string
   workspaceScope?: string
 }
-type PeopleTab = 'members' | 'leave' | 'leave-admin' | 'accounts' | 'performance'
+type PeopleTab = 'members' | 'attendance' | 'leave' | 'leave-admin' | 'accounts' | 'performance'
 type LeaveStatus = '결재대기' | '승인' | '반려'
 type AccountStatus = '승인대기' | '활성' | '반려'
 
@@ -651,7 +652,8 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
 
     <div className="people-tabs" role="tablist" aria-label="인사 관리 메뉴">
       {canManage && <button type="button" role="tab" aria-selected={tab === 'members'} onClick={() => setTab('members')}><Users size={18} /> 구성원</button>}
-      <button type="button" role="tab" aria-selected={tab === 'leave'} onClick={() => setTab('leave')}><CalendarDays size={18} /> 휴가 · 근태 {pendingLeaves > 0 && <em>{pendingLeaves}</em>}</button>
+      <button type="button" role="tab" aria-selected={tab === 'attendance'} onClick={() => setTab('attendance')}><Clock3 size={18} /> 출퇴근 관리</button>
+      <button type="button" role="tab" aria-selected={tab === 'leave'} onClick={() => setTab('leave')}><CalendarDays size={18} /> 휴가 {pendingLeaves > 0 && <em>{pendingLeaves}</em>}</button>
       {canManage && <button type="button" role="tab" aria-selected={tab === 'leave-admin'} onClick={() => setTab('leave-admin')}><Settings2 size={18} /> 휴가 정책 · 원장</button>}
       {canManage && <button type="button" role="tab" aria-selected={tab === 'accounts'} onClick={() => setTab('accounts')}><KeyRound size={18} /> 계정 · 권한 {pendingAccounts > 0 && <em>{pendingAccounts}</em>}</button>}
       <button type="button" role="tab" aria-selected={tab === 'performance'} onClick={() => setTab('performance')}><BarChart3 size={18} /> {canManage ? '직원 성과' : '내 성과'}</button>
@@ -668,6 +670,8 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
         <button className="small-button" type="button" onClick={(event) => openModal('profile', event.currentTarget, person)}>프로필</button>
       </article>)}</div>
     </section>}
+
+    {tab === 'attendance' && <section className="people-content-card" role="tabpanel"><AttendancePanel canManage={canManage} currentUserId={currentUserId} currentUserName={currentUserName} currentUserTeam={currentUserTeam} workspaceScope={workspaceScope} onToast={onToast} /></section>}
 
     {tab === 'leave' && <section className="people-content-card" role="tabpanel">
       <header><div><h2>{canManage ? '휴가 신청 · 결재' : '내 휴가 신청'}</h2><p>{canManage ? '승인되면 공유 일정과 근무 상태에 자동 반영됩니다.' : '내 신청 내역만 표시되며, 승인 상태가 변경되면 즉시 확인할 수 있습니다.'}</p></div><button className="button primary" type="button" onClick={(event) => openModal('leave', event.currentTarget)}><Plus size={17} /> 휴가 신청</button></header>

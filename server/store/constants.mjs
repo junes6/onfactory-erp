@@ -19,6 +19,7 @@ export const WORKSPACE_TABLES = Object.freeze({
   'document-storage-settings': 'document_storage_settings',
   'performance-settings': 'performance_settings',
   'performance-reports': 'performance_report_snapshots',
+  'attendance-records': 'attendance_records',
   // it_services 업종 모듈
   'it-projects': 'it_projects',
   'it-deliverables': 'it_deliverables',
@@ -46,6 +47,7 @@ export const WORKSPACE_SHAPES = Object.freeze({
   'leave-management': 'singleton',
   'document-storage-settings': 'singleton',
   'performance-settings': 'singleton',
+  'attendance-records': 'singleton',
 })
 
 export const ARRAY_WORKSPACE_KEYS = new Set(
