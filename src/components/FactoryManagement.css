@@ -460,7 +460,7 @@ html[data-theme='dark'] .factory-overview__details,
 html[data-theme='dark'] .factory-summary--compact article { background: var(--color-gray-50); }
 html[data-theme='dark'] .factory-identity__live,
 html[data-theme='dark'] .factory-layout-inspector__status { color: var(--ink); background: var(--color-gray-50); }
-html[data-theme='dark'] .factory-layout-delete { border-color: var(--color-danger); color: var(--color-danger-soft); background: var(--color-danger); }
+html[data-theme='dark'] .factory-layout-delete { border-color: var(--color-danger); color: var(--color-white); background: var(--color-danger); }
 html[data-theme='dark'] .factory-file-card__pdf { background: var(--color-gray-50); }
 
 @media (max-width: 1320px) {

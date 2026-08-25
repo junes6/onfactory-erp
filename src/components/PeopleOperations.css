@@ -262,7 +262,7 @@ html[data-theme='dark'] .leave-ledger-list article > span.plus,
 html[data-theme='dark'] .leave-balance-list article > em { color: var(--ink); background: var(--color-gray-50); }
 
 html[data-theme='dark'] .people-sync-status { border-color: var(--line); background: var(--color-gray-50); }
-html[data-theme='dark'] .people-sync-status em { color: var(--color-warning-soft); background: var(--color-warning); }
+html[data-theme='dark'] .people-sync-status em { color: var(--color-white); background: var(--color-warning); }
 html[data-theme='dark'] .leave-duration-preview { border-color: var(--line); background: var(--color-gray-50); }
 
 @media (max-width: 1200px) {

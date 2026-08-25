@@ -9,7 +9,6 @@
   background: var(--color-page);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --lime: var(--color-warning-soft);
 }
 
 * { box-sizing: border-box; }
@@ -1444,11 +1443,11 @@ html[data-theme='dark'] .messenger-message.mine .messenger-bubble-row p { color:
 html[data-theme='dark'] .collab-status-chip { color: var(--muted); background: var(--color-gray-50); }
 html[data-theme='dark'] .collab-status-chip.green { color: var(--color-success-ink); background: var(--color-success-soft); }
 html[data-theme='dark'] .collab-status-chip.blue { color: var(--color-blue); background: var(--color-blue-soft); }
-html[data-theme='dark'] .collab-status-chip.amber { color: var(--color-warning-soft); background: var(--amber-soft); }
+html[data-theme='dark'] .collab-status-chip.amber { color: var(--color-warning-ink); background: var(--amber-soft); }
 html[data-theme='dark'] .collab-status-chip.red { color: var(--color-danger); background: var(--color-danger-soft); }
 html[data-theme='dark'] .calendar-event { border-left-color: var(--forest); color: var(--ink); background: var(--color-gray-50); }
 html[data-theme='dark'] .calendar-event.department { border-left-color: var(--color-blue); color: var(--ink); background: var(--color-blue-soft); }
-html[data-theme='dark'] .calendar-event.personal { border-left-color: var(--amber); color: var(--color-warning-soft); background: var(--amber-soft); }
+html[data-theme='dark'] .calendar-event.personal { border-left-color: var(--amber); color: var(--color-warning-ink); background: var(--amber-soft); }
 html[data-theme='dark'] .schedule-day-summary { color: var(--ink); background: var(--forest-soft); }
 html[data-theme='dark'] .schedule-day-summary span { color: var(--muted); }
 html[data-theme='dark'] .journal-feedback { border-color: var(--line); color: var(--ink); background: var(--color-gray-50); }
@@ -1953,7 +1952,7 @@ html[data-theme='dark'] .warehouse-lot-block { background: color-mix(in srgb, va
 .work-now-stepper li.done,
 .work-now-stepper li.current { color: var(--forest); }
 .work-now-stepper li.done i,
-.work-now-stepper li.current i { border-color: var(--forest); color: var(--surface); background: var(--forest); }
+.work-now-stepper li.current i { border-color: var(--forest); color: var(--color-white); background: var(--forest); }
 .work-now-stepper li.done::after { background: var(--forest); }
 .workflow-task-card.task-focused .workflow-record strong time { margin-left: var(--space-4); color: var(--muted); font-size: var(--font-13); font-weight: var(--weight-medium); }
 .workflow-task-card.task-focused .workflow-record p { white-space: normal; }
@@ -2152,7 +2151,7 @@ html[data-theme='dark'] .work-now-stepper i { background: var(--surface); }
 .workflow-row-list time small { color: var(--muted); font-size: var(--font-13); }
 .workflow-row-list time strong { margin-top: var(--space-0); font-size: var(--font-13); font-weight: var(--weight-medium); }
 .workflow-row-list time.is-overdue strong { color: var(--color-danger); }
-.workflow-row-action { min-width: 58px; min-height: 36px; justify-self: end; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-8); color: var(--surface); background: var(--forest); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; white-space: nowrap; }
+.workflow-row-action { min-width: 58px; min-height: 36px; justify-self: end; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-8); color: var(--color-white); background: var(--forest); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; white-space: nowrap; }
 .workflow-list-empty { min-height: 56px; display: flex; align-items: center; gap: var(--space-8); padding: var(--space-8) var(--space-12); color: var(--muted); font-size: var(--font-13); }
 .workflow-empty-state { min-height: 360px; }
 .workflow-detail-pane { min-width: 0; max-height: min(720px,calc(100vh - 230px)); overflow-y: auto; padding: var(--space-16); background: var(--surface); }
@@ -2189,7 +2188,7 @@ html[data-theme='dark'] .work-now-stepper i { background: var(--surface); }
 .workflow-detail-stepper i { position: relative; z-index: 1; width: 20px; height: 20px; display: grid; place-items: center; flex: 0 0 auto; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-8); background: var(--surface); font-style: normal; font-size: var(--font-13); }
 .workflow-detail-stepper li > span { position: relative; z-index: 1; width: 100%; overflow: visible; padding-inline: var(--space-4); background: var(--surface); line-height: 1.25; text-overflow: clip; white-space: normal; }
 .workflow-detail-stepper :is(.done,.current) { color: var(--forest); }
-.workflow-detail-stepper :is(.done,.current) i { color: var(--surface); border-color: var(--forest); background: var(--forest); }
+.workflow-detail-stepper :is(.done,.current) i { color: var(--color-white); border-color: var(--forest); background: var(--forest); }
 .workflow-detail-stepper .done::after { background: var(--forest); }
 .workflow-detail-history { padding: var(--space-12) var(--space-0); border-bottom: var(--hairline) solid var(--line); }
 .workflow-detail-history > summary { display: flex; align-items: center; gap: var(--space-8); color: var(--ink); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; list-style: none; }

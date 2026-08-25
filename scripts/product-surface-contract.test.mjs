@@ -4,6 +4,16 @@ import test from 'node:test'
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
 
+function contrastRatio(left, right) {
+  const luminance = (hex) => {
+    const channels = hex.match(/[0-9a-f]{2}/gi).map((part) => Number.parseInt(part, 16) / 255)
+      .map((value) => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
+    return .2126 * channels[0] + .7152 * channels[1] + .0722 * channels[2]
+  }
+  const values = [luminance(left), luminance(right)]
+  return (Math.max(...values) + .05) / (Math.min(...values) + .05)
+}
+
 test('shared access copy stays industry-neutral across login and password onboarding', () => {
   const source = read('src/components/AccessExperience.tsx')
   assert.equal(source.includes('FOOD OPERATIONS CLOUD'), false)
@@ -36,4 +46,28 @@ test('cost and point dashboard route is guarded by the existing platform operato
   const service = read('server/billing-service.mjs')
   assert.match(service, /'dashboard:read',[\s\S]*?'configuration:read'/)
   assert.match(service, /dashboard:\s*\{[^}]*auth:\s*'platform-operator'/)
+})
+
+test('dark mode uses one readable semantic token system across every workspace', () => {
+  const tokens = read('src/tokens.css')
+  const dark = tokens.match(/html\[data-theme='dark'\]\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.ok(dark, 'dark token block must exist')
+  const color = (name) => dark.match(new RegExp(`${name}\\s*:\\s*(#[0-9A-Fa-f]{6})`))?.[1]
+  const page = color('--color-page')
+  const surface = color('--color-surface')
+  const ink = color('--color-ink')
+  const muted = color('--color-gray-600')
+  const line = color('--color-card-line')
+  assert.ok(page && surface && ink && muted && line, 'dark semantic colors must be fixed color tokens')
+  assert.ok(contrastRatio(ink, surface) >= 7, 'dark body text must reach enhanced contrast')
+  assert.ok(contrastRatio(muted, surface) >= 4.5, 'dark secondary text must remain readable')
+  assert.ok(contrastRatio(line, surface) >= 1.6, 'dark card boundaries must remain visible')
+  assert.notEqual(page.toLowerCase(), surface.toLowerCase())
+
+  const css = [
+    'src/styles.css',
+    'src/components/FactoryManagement.css',
+    'src/components/PeopleOperations.css',
+  ].map(read).join('\n')
+  assert.doesNotMatch(css, /(?:^|[;{]\s*)color\s*:\s*var\(--(?:[\w-]+-soft|surface)\)/m)
 })

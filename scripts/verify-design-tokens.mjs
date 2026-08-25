@@ -14,7 +14,7 @@ const allowedPalette = new Set([
   '#dee1e8',
   '#2563eb', '#7c4dff', '#0e8c8c', '#c9366c',
   // 다크 모드 중립 토큰
-  '#0f141b', '#0e1a26', '#9dbbe0', '#9a5b00', '#157a5b', '#f2b35c', '#3fc394', '#4f8fc0', '#3b82f6', '#1a2029', '#e9ecf2', '#222935', '#333c4a', '#7e8898', '#a9b2c0', '#cfd6e0', '#2a323e',
+  '#0f141b', '#0e1a26', '#9dbbe0', '#9a5b00', '#157a5b', '#f2b35c', '#3fc394', '#4f8fc0', '#3b82f6', '#1a2029', '#e9ecf2', '#222935', '#333c4a', '#3b4655', '#7e8898', '#a9b2c0', '#cfd6e0',
 ])
 const fontTokens = new Set(['var(--font-22)', 'var(--font-15)', 'var(--font-13)', 'var(--font-11)'])
 const weightTokens = new Set(['var(--weight-regular)', 'var(--weight-medium)'])
@@ -27,6 +27,8 @@ const tsxNamedColorAttributePattern = /(?:fill|stroke)=["'](?:white|black|red|gr
 const tsxNamedInlineStylePattern = /style\s*=\s*\{\{[^}]*\b(?:color|backgroundColor|background|borderColor|fill|stroke)\s*:\s*["'](?:white|black|red|green|blue|orange|yellow|gray|grey|purple|pink|teal|navy|maroon|silver)["']/i
 const tsxInlineTypePattern = /\b(?:fontSize|fontWeight)\s*(?::|=)\s*\{?\s*["']?\d/i
 const tsxEmbeddedTypePattern = /font-(?:size|weight)\s*:\s*(?!var\()/i
+const semanticAliasPattern = /--(?:ink|muted|subtle|forest|forest-dark|forest-soft|lime|line|line-strong|surface|canvas|blue|blue-soft|amber|amber-soft|red|red-soft|danger|danger-soft)\s*:/g
+const unsafeForegroundPattern = /(?:^|[;{]\s*)color\s*:\s*var\(--(?:[\w-]+-soft|surface)\)/gm
 
 function walk(directory, extension) {
   const files = []
@@ -263,6 +265,12 @@ function verifyCss(file, source) {
   const errors = []
   const clean = stripComments(source)
   const isTokens = path.resolve(file) === path.resolve(tokenFile)
+  if (!isTokens) {
+    for (const match of clean.matchAll(semanticAliasPattern)) errors.push([match.index, `semantic alias는 tokens.css에서만 정의할 수 있습니다: ${match[0]}`])
+  }
+  for (const match of clean.matchAll(unsafeForegroundPattern)) {
+    errors.push([match.index, `전경에 배경용 토큰을 사용할 수 없습니다: ${match[0].trim()}`])
+  }
   for (const match of clean.matchAll(hexPattern)) {
     if (!isTokens || !allowedPalette.has(match[0].toLowerCase())) errors.push([match.index, `허용되지 않은 색상 ${match[0]}`])
   }
@@ -303,9 +311,48 @@ function verifyTokenContract(source) {
     '--weight-regular: 400', '--weight-medium: 500', '--color-page: #F3F5F9', '--color-surface: #FFFFFF',
     '--card-inset: 20px', '--radius-12: 12px', '--radius-8: var(--radius-12)', '--hairline: .5px', '--shadow-none: none',
     '--dashboard-spacing: 20px', '--dashboard-stroke: 1px', '--color-card-line: #DEE1E8',
+    "html[data-theme='dark']", '--color-page: #0F141B', '--color-surface: #1A2029', '--color-ink: #E9ECF2',
+    '--color-gray-600: #A9B2C0', '--color-card-line: #3B4655',
     '--space-4: 4px', '--space-8: 8px', '--space-12: 12px', '--space-16: 16px', '--space-24: 24px', '--space-32: 32px',
   ]
   return required.filter((contract) => !source.includes(contract)).map((contract) => `src/tokens.css:1 필수 토큰 누락: ${contract}`)
+}
+
+function relativeLuminance(color) {
+  const parsed = parseHex(color)
+  if (!parsed) return null
+  const channel = (value) => {
+    const normalized = value / 255
+    return normalized <= .04045 ? normalized / 12.92 : ((normalized + .055) / 1.055) ** 2.4
+  }
+  return .2126 * channel(parsed.r) + .7152 * channel(parsed.g) + .0722 * channel(parsed.b)
+}
+
+function contrastRatio(left, right) {
+  const first = relativeLuminance(left)
+  const second = relativeLuminance(right)
+  if (first === null || second === null) return 0
+  return (Math.max(first, second) + .05) / (Math.min(first, second) + .05)
+}
+
+function verifyDarkThemeContract(source) {
+  const errors = []
+  const block = source.match(/html\[data-theme='dark'\]\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
+  if (!block) return ['src/tokens.css:1 다크 모드 코어 토큰 블록이 없습니다.']
+  const value = (name) => block.match(new RegExp(`${name}\\s*:\\s*(#[0-9A-Fa-f]{6})`))?.[1]
+  const surface = value('--color-surface')
+  const page = value('--color-page')
+  const ink = value('--color-ink')
+  const muted = value('--color-gray-600')
+  const cardLine = value('--color-card-line')
+  for (const [name, token] of Object.entries({ surface, page, ink, muted, cardLine })) {
+    if (!token) errors.push(`src/tokens.css:1 다크 모드 ${name} 고정 색 토큰이 없습니다.`)
+  }
+  if (ink && surface && contrastRatio(ink, surface) < 7) errors.push('src/tokens.css:1 다크 본문/카드 대비는 7:1 이상이어야 합니다.')
+  if (muted && surface && contrastRatio(muted, surface) < 4.5) errors.push('src/tokens.css:1 다크 보조문자/카드 대비는 4.5:1 이상이어야 합니다.')
+  if (cardLine && surface && contrastRatio(cardLine, surface) < 1.6) errors.push('src/tokens.css:1 다크 카드 경계/카드 대비는 1.6:1 이상이어야 합니다.')
+  if (page && surface && contrastRatio(page, surface) < 1.1) errors.push('src/tokens.css:1 다크 페이지와 카드 표면을 시각적으로 구분해야 합니다.')
+  return errors
 }
 
 function reportTsx() {
@@ -350,6 +397,7 @@ if (fixMode) {
 
 const errors = [
   ...verifyTokenContract(readFileSync(tokenFile, 'utf8')),
+  ...verifyDarkThemeContract(readFileSync(tokenFile, 'utf8')),
   ...cssFiles.flatMap((file) => verifyCss(file, readFileSync(file, 'utf8'))),
 ]
 const tsxFindings = reportTsx()

@@ -132,7 +132,7 @@ html[data-theme='dark'] {
   --color-gray-400: #7E8898;
   --color-gray-600: #A9B2C0;
   --color-gray-800: #CFD6E0;
-  --color-card-line: #2A323E;
+  --color-card-line: #3B4655;
   /* 다크 모드: 남색 글자는 배경에 묻히므로 밝은 강청색으로 — 배경 용도는 --color-blue-deep-fill이 #16324F를 유지한다. */
   --color-blue-deep: #9DBBE0;
   --forest-dark: var(--color-primary);
