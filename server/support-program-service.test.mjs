@@ -5,6 +5,7 @@ import {
   createMemorySupportProgramCache,
   createSupportProgramService,
   normalizeBizinfoPrograms,
+  normalizeKStartupHtmlPrograms,
   normalizeKStartupPrograms,
 } from './support-program-service.mjs'
 
@@ -24,11 +25,11 @@ test('K-Startup official feed accepts current and legacy payload shapes and sani
   }
 })
 
-test('Bizinfo aliases normalize without allowing an off-domain detail URL', () => {
-  const [item] = normalizeBizinfoPrograms({ jsonArray: [{
+test('Bizinfo official nested item shape normalizes without allowing an off-domain detail URL', () => {
+  const [item] = normalizeBizinfoPrograms({ jsonArray: { item: [{
     seq: 'B-1', title: '수출 바우처', author: '중소벤처기업부', description: '<script>bad()</script>지원 내용',
     reqstDt: '2026-08-20 ~ 2026-09-10', link: 'https://malicious.example/collect',
-  }] })
+  }] } })
   assert.equal(item.title, '수출 바우처')
   assert.equal(item.endsOn, '2026-09-10')
   assert.equal(item.detailUrl, 'https://www.bizinfo.go.kr/sii/siia/selectSIIA200View.do')
@@ -36,15 +37,37 @@ test('Bizinfo aliases normalize without allowing an off-domain detail URL', () =
   assert.doesNotMatch(item.summary, /bad\(\)/)
 })
 
-test('unconfigured sources perform zero network calls and return honest official fallbacks', async () => {
+test('K-Startup public summary exposes real official titles without a key while Bizinfo stays unconfigured', async () => {
   let calls = 0
-  const service = createSupportProgramService({ fetchImpl: async () => { calls += 1; throw new Error('must not call') }, cache: createMemorySupportProgramCache() })
+  const html = `<div class="public_box public_box01"><a href="/web/contents/bizpbanc-ongoing.do?schM=view&pbancSn=178987">2026 공식 창업교육 참가자 모집</a></div>`
+  const service = createSupportProgramService({
+    fetchImpl: async (url) => {
+      calls += 1
+      assert.match(String(url), /mainSection0\.do/)
+      return { ok: true, text: async () => html }
+    },
+    cache: createMemorySupportProgramCache(),
+    clock: () => new Date('2026-08-26T00:00:00.000Z'),
+  })
   const result = await service.list()
-  assert.equal(calls, 0)
-  assert.deepEqual(result.items, [])
-  assert.equal(result.sources.kstartup.state, 'unconfigured')
+  const repeated = await service.list()
+  assert.equal(calls, 1)
+  assert.equal(result.items[0].title, '2026 공식 창업교육 참가자 모집')
+  assert.equal(repeated.items.length, 1)
+  assert.equal(result.sources.kstartup.state, 'public')
   assert.equal(result.sources.bizinfo.state, 'unconfigured')
   assert.equal(result.officialLinks.length, 2)
+})
+
+test('K-Startup public summary parser reads official direct links and rejects waiting pages', () => {
+  const html = `<div class="public_box public_box02"><a href="/web/contents/bizpbanc-ongoing.do?schM=view&pbancSn=178283">[제64차] IR 참여기업 모집</a><span class="deadline">오늘마감</span></div>`
+  const [item] = normalizeKStartupHtmlPrograms(html, new Date('2026-08-26T00:00:00.000Z'))
+  assert.equal(item.id, 'kstartup:178283')
+  assert.equal(item.title, '[제64차] IR 참여기업 모집')
+  assert.equal(item.endsOn, '2026-08-26')
+  assert.equal(item.feedMode, 'public-html')
+  assert.match(item.detailUrl, /^https:\/\/www\.k-startup\.go\.kr\/web\/contents\//)
+  assert.deepEqual(normalizeKStartupHtmlPrograms('<div class="public_box01">서비스 접속 대기</div>'), [])
 })
 
 test('configured K-Startup uses one cached request while Bizinfo remains permission gated', async () => {
@@ -85,4 +108,34 @@ test('an upstream outage serves a recent cached feed as stale without leaking th
   assert.equal(result.sources.kstartup.state, 'stale')
   assert.equal(result.items[0].title, '캐시 공고')
   assert.doesNotMatch(JSON.stringify(result), /network detail|hidden/)
+})
+
+test('Bizinfo HTTP 200 auth errors never become a live empty cache', async () => {
+  const service = createSupportProgramService({
+    bizinfoCertKey: 'bad-key', bizinfoCommercialUseApproved: true,
+    cache: createMemorySupportProgramCache(),
+    fetchImpl: async (url) => {
+      if (String(url).includes('bizinfo')) return { ok: true, json: async () => ({ reqErr: '인증키를 입력해주세요.' }) }
+      return { ok: true, text: async () => '<div class="public_box01"><a href="/web/contents/bizpbanc-ongoing.do?pbancSn=1">공식 공고</a></div>' }
+    },
+  })
+  const result = await service.list({ source: 'bizinfo' })
+  assert.deepEqual(result.items, [])
+  assert.equal(result.sources.bizinfo.state, 'error')
+})
+
+test('revoked Bizinfo permission hides a previously approved cache immediately', async () => {
+  const cache = createMemorySupportProgramCache()
+  await cache.put('bizinfo', {
+    items: [{ id: 'bizinfo:cached', source: 'bizinfo', sourceLabel: '기업마당', title: '허가 시 캐시', agency: '', operator: '', category: '', target: '', region: '', summary: '', startsOn: null, endsOn: '2026-09-30', periodRaw: null, publishedAt: null, detailUrl: 'https://www.bizinfo.go.kr/sii/siia/selectSIIA200View.do', feedMode: 'api' }],
+    fetchedAt: '2026-08-26T00:00:00.000Z', expiresAt: Date.parse('2026-08-26T01:00:00.000Z'), lastErrorCode: null,
+  })
+  const service = createSupportProgramService({
+    bizinfoCertKey: 'configured', bizinfoCommercialUseApproved: false, cache,
+    clock: () => new Date('2026-08-26T00:10:00.000Z'),
+    fetchImpl: async () => { throw new Error('permission gate must run before fetch') },
+  })
+  const result = await service.list({ source: 'bizinfo' })
+  assert.deepEqual(result.items, [])
+  assert.equal(result.sources.bizinfo.state, 'permission-required')
 })

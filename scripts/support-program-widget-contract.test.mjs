@@ -15,12 +15,14 @@ test('every tenant receives an editable government-support widget without distur
   assert.match(app, /<SupportProgramsWidget workspaceScope=\{workspaceScope\}/)
 })
 
-test('the widget exposes honest live, stale and unconfigured states with official new-window links', () => {
+test('the widget exposes compact official titles plus honest public, stale and unconfigured states', () => {
   assert.match(widget, /공공데이터 연동 전입니다/)
   assert.match(widget, /마지막 동기화 자료입니다/)
   assert.match(widget, /target="_blank" rel="noreferrer noopener"/)
   assert.match(widget, /K-Startup 모집중 공고/)
   assert.match(widget, /기업마당 지원사업 공고/)
+  assert.match(widget, /K-Startup 공식 페이지에서 모집 공고 제목을 간단히 가져왔습니다/)
+  assert.match(widget, /program\.title/)
   assert.doesNotMatch(widget, /샘플|추천 사업/)
 })
 

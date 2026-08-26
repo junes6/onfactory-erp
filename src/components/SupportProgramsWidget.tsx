@@ -21,7 +21,7 @@ type SupportProgram = {
   detailUrl: string
 }
 
-type SourceState = { state: 'live' | 'stale' | 'unconfigured' | 'permission-required' | 'error' | 'not-requested'; syncedAt: string | null }
+type SourceState = { state: 'live' | 'public' | 'stale' | 'unconfigured' | 'permission-required' | 'error' | 'not-requested'; syncedAt: string | null }
 type SupportProgramsResponse = {
   items: SupportProgram[]
   syncedAt: string | null
@@ -74,7 +74,7 @@ export function SupportProgramsWidget({ workspaceScope }: { workspaceScope?: str
     return () => controller.abort()
   }, [reloadKey, workspaceScope])
 
-  const connected = feed && Object.values(feed.sources).some((source) => source.state === 'live' || source.state === 'stale')
+  const connected = feed && Object.values(feed.sources).some((source) => ['live', 'public', 'stale'].includes(source.state))
 
   return <section className="support-program-widget dashboard-section-card" aria-labelledby="support-program-title">
     <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><BriefcaseBusiness size={18} /></span><h2 id="support-program-title">정부 지원사업 공고</h2></div><button className="text-button" type="button" disabled={loading} onClick={() => setReloadKey((value) => value + 1)}><RefreshCw size={15} /> 새로고침</button></header>
@@ -88,6 +88,8 @@ export function SupportProgramsWidget({ workspaceScope }: { workspaceScope?: str
         <span className="support-deadline"><CalendarClock size={14} /> {deadlineLabel(program.endsOn)}</span>
         <ExternalLink size={14} />
       </a>)}</div>}
+      {!loading && feed?.sources.kstartup.state === 'public' && <p className="support-program-source-note">K-Startup 공식 페이지에서 모집 공고 제목을 간단히 가져왔습니다.</p>}
+      {!loading && feed?.sources.bizinfo.state === 'permission-required' && <p className="support-program-source-note">기업마당은 이용 허가 확인 후 공고 제목까지 연동됩니다.</p>}
       {!loading && feed && feed.items.length === 0 && <div className="support-program-state"><BriefcaseBusiness size={20} /><strong>{connected ? '현재 표시할 모집 공고가 없습니다' : '공공데이터 연동 전입니다'}</strong><span>{connected ? '공식 사이트에서 전체 공고를 확인해 주세요.' : '연동키 설정 전에도 공식 모집 페이지는 바로 열 수 있습니다.'}</span></div>}
       {!loading && feed?.syncedAt && <p className="support-program-synced">마지막 동기화 {syncLabel(feed.syncedAt)}</p>}
       {!loading && <div className="support-official-links">{(feed?.officialLinks ?? [

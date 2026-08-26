@@ -18,6 +18,7 @@
 .support-program-state.is-error > svg { color: var(--color-danger); }
 .support-program-stale { margin: var(--space-0); padding: var(--space-8); border-radius: var(--radius-8); color: var(--color-warning-ink); background: var(--color-warning-soft); font-size: var(--font-11); line-height: 1.5; }
 .support-program-synced { margin: var(--space-0); color: var(--muted); font-size: var(--font-11); text-align: right; }
+.support-program-source-note { margin: var(--space-0); color: var(--muted); font-size: var(--font-11); line-height: 1.5; }
 .support-official-links { display: flex; flex-wrap: wrap; gap: var(--space-8); padding-top: var(--space-8); border-top: var(--hairline) solid var(--line); }
 .support-official-links a { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--color-primary); font-size: var(--font-11); font-weight: var(--weight-medium); text-decoration: none; }
 
