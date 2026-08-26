@@ -8,7 +8,7 @@ import { downloadDocumentAttachment } from '../utils/documentAttachments'
 import { FileText, FolderSearch, Download } from 'lucide-react'
 import './DashboardWorkspace.css'
 
-export type DashboardWidgetId = 'summary' | 'ai' | 'schedule' | 'work' | 'links' | 'alert' | 'files' | 'support'
+export type DashboardWidgetId = 'summary' | 'ai' | 'schedule' | 'todo' | 'work' | 'links' | 'alert' | 'files' | 'support'
 export type DashboardWidgetSize = 'half' | 'wide' | 'full'
 
 export type DashboardWidgetPreference = {
@@ -21,6 +21,7 @@ const widgetLabels: Record<DashboardWidgetId, { title: string; description: stri
   summary: { title: '오늘 핵심 현황', description: '주문·확인 업무·AI 알림을 한 줄로 봅니다.' },
   ai: { title: 'AI 업무 대화', description: '질문과 업무 지시를 처리합니다.' },
   schedule: { title: '공유 일정', description: '오늘 일정과 월간 달력을 봅니다.' },
+  todo: { title: '내 To-do', description: '직접 계획하고 AI가 배정 업무를 자동 정리합니다.' },
   work: { title: '다음 업무', description: '내가 수행하거나 결재할 업무입니다.' },
   links: { title: '업무 바로가기', description: '자주 쓰는 외부 사이트를 엽니다.' },
   files: { title: '자주 찾는 파일', description: '자주 내려받는 회사 자료를 바로 엽니다.' },
@@ -32,6 +33,7 @@ export const defaultDashboardWidgets: DashboardWidgetPreference[] = [
   { id: 'summary', visible: true, size: 'full' },
   { id: 'ai', visible: true, size: 'wide' },
   { id: 'schedule', visible: true, size: 'half' },
+  { id: 'todo', visible: true, size: 'half' },
   { id: 'links', visible: true, size: 'half' },
   { id: 'support', visible: true, size: 'wide' },
   { id: 'files', visible: true, size: 'half' },
@@ -67,7 +69,7 @@ export function useDashboardPreferences(scope: string) {
     try {
       const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? 'null')
       const normalized = normalizePreferences(parsed)
-      if (Number(window.localStorage.getItem(versionKey) ?? 0) < 2) {
+      if (Number(window.localStorage.getItem(versionKey) ?? 0) < 3) {
         const summary = normalized.find((item) => item.id === 'summary')
         return summary ? [summary, ...normalized.filter((item) => item.id !== 'summary')] : normalized
       }
@@ -80,7 +82,7 @@ export function useDashboardPreferences(scope: string) {
   useEffect(() => {
     try {
       window.localStorage.setItem(storageKey, JSON.stringify(preferences))
-      window.localStorage.setItem(versionKey, '2')
+      window.localStorage.setItem(versionKey, '3')
     } catch { /* personal preference storage is optional */ }
   }, [preferences, storageKey, versionKey])
 

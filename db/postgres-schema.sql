@@ -328,6 +328,12 @@ CREATE TABLE IF NOT EXISTS attendance_records (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
   created_by TEXT, PRIMARY KEY (org_id, id)
 );
+CREATE TABLE IF NOT EXISTS personal_todos (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
 
 -- it_services 업종 모듈 (프로젝트 · 산출물 · 계약/거래처)
 CREATE TABLE IF NOT EXISTS it_projects (
@@ -495,6 +501,7 @@ CREATE INDEX IF NOT EXISTS idx_messenger_active ON messenger_conversations (org_
 CREATE INDEX IF NOT EXISTS idx_messenger_messages_active ON messenger_messages (org_id, conversation_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_documents_active ON items (org_id, position) WHERE deleted_at IS NULL AND item_type = 'company-document';
 CREATE INDEX IF NOT EXISTS idx_attendance_records_active ON attendance_records (org_id, position) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_personal_todos_active ON personal_todos (org_id, (payload->>'ownerId'), position) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON auth_sessions (expires_at) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_outbox_pending ON events (status, available_at, created_at);
 

@@ -20,6 +20,7 @@ export const WORKSPACE_TABLES = Object.freeze({
   'performance-settings': 'performance_settings',
   'performance-reports': 'performance_report_snapshots',
   'attendance-records': 'attendance_records',
+  'personal-todos': 'personal_todos',
   // it_services 업종 모듈
   'it-projects': 'it_projects',
   'it-deliverables': 'it_deliverables',

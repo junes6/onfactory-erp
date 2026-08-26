@@ -19,6 +19,7 @@ import express from 'express'
 
 import { registerBillingRoutes } from './billing-routes.mjs'
 import { registerAttendanceRoutes } from './attendance-routes.mjs'
+import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
 import { BillingServiceError, createBillingService, createMemoryBillingRepository } from './billing-service.mjs'
 import { attachBlocksToLatestUserMessage, ChatAttachmentError, normalizeChatAttachmentRequest, resolveChatAttachments } from './chat-attachments.mjs'
 import { registerPerformanceRoutes } from './performance-routes.mjs'
@@ -78,7 +79,7 @@ const WORKSPACE_STORE_KEYS = new Set([
   'it-projects', 'it-deliverables', 'it-contracts', 'ai-proposals', 'automation-policies',
   'it-clients', 'it-support-programs', 'project-spaces', 'project-posts',
   'company-assets', 'tax-events', 'ip-rights',
-  'attendance-records',
+  'attendance-records', 'personal-todos',
 ])
 // 프로젝트 공간은 멤버십 기반이라 전용 라우트(/api/projects)로만 읽고 쓴다.
 const PROJECT_KEYS = new Set(['project-spaces', 'project-posts'])
@@ -5374,6 +5375,10 @@ export function createApp(options = {}) {
       response.status(403).json({ error: { code: 'ATTENDANCE_ROUTE_REQUIRED', message: '출퇴근 기록은 출퇴근 관리 전용 기능에서만 조회할 수 있습니다.' } })
       return
     }
+    if (key === 'personal-todos') {
+      response.status(403).json({ error: { code: 'PERSONAL_TODO_ROUTE_REQUIRED', message: '개인 할 일은 내 할 일 전용 기능에서만 조회할 수 있습니다.' } })
+      return
+    }
     if (request.auth.role === 'tenant-member' && !TENANT_MEMBER_READ_KEYS.has(key)) {
       response.status(403).json({ error: { code: 'STORE_READ_FORBIDDEN', message: '현재 직무 권한으로 이 데이터를 볼 수 없습니다.' } })
       return
@@ -5438,6 +5443,10 @@ export function createApp(options = {}) {
     }
     if (key === 'attendance-records') {
       response.status(403).json({ error: { code: 'ATTENDANCE_ROUTE_REQUIRED', message: '출퇴근 기록은 출근·퇴근 전용 기능에서만 변경할 수 있습니다.' } })
+      return
+    }
+    if (key === 'personal-todos') {
+      response.status(403).json({ error: { code: 'PERSONAL_TODO_ROUTE_REQUIRED', message: '개인 할 일은 내 할 일 전용 기능에서만 변경할 수 있습니다.' } })
       return
     }
     if (!Object.prototype.hasOwnProperty.call(request.body ?? {}, 'data')) {
@@ -5615,6 +5624,16 @@ export function createApp(options = {}) {
     accounts,
     commitWorkspaceStore,
     ...(typeof options.attendanceClock === 'function' ? { clock: options.attendanceClock } : {}),
+  })
+
+  registerPersonalTodoRoutes({
+    app,
+    requireAuth,
+    requireMatchingWorkspaceIdentity,
+    workspaceStore,
+    accounts,
+    commitWorkspaceStore,
+    ...(typeof options.personalTodoClock === 'function' ? { clock: options.personalTodoClock } : {}),
   })
 
   const supportProgramService = options.supportProgramService ?? createSupportProgramService({

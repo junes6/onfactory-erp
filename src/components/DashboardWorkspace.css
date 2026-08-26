@@ -6,6 +6,7 @@
 .dashboard-widget-full { grid-column: 1 / -1; }
 .dashboard-widget-ai .ai-chat { height: 570px; }
 .dashboard-widget-schedule .home-calendar-card,
+.dashboard-widget-todo .personal-todo-widget,
 .dashboard-widget-work .my-work-card,
 .dashboard-widget-links .dashboard-quick-links { height: 100%; min-height: 286px; }
 .dashboard-widget-alert { align-self: stretch; }

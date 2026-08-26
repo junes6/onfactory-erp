@@ -28,6 +28,7 @@ import { PeopleOperationsPage } from './components/PeopleOperations'
 import { ItServicesPage, type ItServicesView } from './components/ItServices'
 import { ApprovalQueue } from './components/ApprovalQueue'
 import { SupportProgramsWidget } from './components/SupportProgramsWidget'
+import { PersonalTodoWidget } from './components/PersonalTodoWidget'
 import { brandLabelForIndustry, routesForIndustry } from './modules/registry'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
@@ -225,6 +226,7 @@ const dashboardWidgetLabels: Record<DashboardWidgetPreference['id'], string> = {
   ai: 'AI 업무 대화',
   files: '자주 찾는 파일',
   schedule: '공유 일정',
+  todo: '내 To-do',
   work: '다음 업무',
   links: '업무 바로가기',
   alert: '중요 알림',
@@ -358,6 +360,8 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
       content = <AIChat companyName={companyName} canCreateTask={canAssignTasks} canViewCommercial={canAssignTasks} operatingDataAvailable={operatingDataAvailable} workspaceScope={workspaceScope} industryType={industryType} onCreateTask={(text) => onCreateTask(text)} context={aiContext} />
     } else if (preference.id === 'schedule') {
       content = <SharedCalendarPreview events={calendarEvents} onOpen={() => onNavigate('schedule')} />
+    } else if (preference.id === 'todo') {
+      content = <PersonalTodoWidget workspaceScope={workspaceScope} onNavigate={onNavigate} onToast={onToast} />
     } else if (preference.id === 'links') {
       content = <QuickLinksWidget scope={`${companyName}:${currentUserId}`} onToast={onToast} />
     } else if (preference.id === 'files') {
@@ -470,6 +474,7 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
         <button type="button" className="tile-violet" onClick={() => onNavigate('journal')}><NotebookPen size={30} /><strong>업무일지</strong><span>오늘 일지 쓰기</span></button>
         <button type="button" className="tile-green" onClick={() => onNavigate('people')}><Users size={30} /><strong>휴가 · 인사</strong><span>휴가 신청하기</span></button>
       </div>
+      <PersonalTodoWidget workspaceScope={workspaceScope} onNavigate={onNavigate} onToast={onToast} />
       <section className="easy-work-list" aria-label="지금 처리할 업무">
         <h2>지금 처리할 업무</h2>
         {myWork.length === 0
