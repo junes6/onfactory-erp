@@ -29,7 +29,7 @@ import { ItServicesPage, type ItServicesView } from './components/ItServices'
 import { ApprovalQueue } from './components/ApprovalQueue'
 import { SupportProgramsWidget } from './components/SupportProgramsWidget'
 import { PersonalTodoWidget } from './components/PersonalTodoWidget'
-import { brandLabelForIndustry, routesForIndustry } from './modules/registry'
+import { brandLabelForIndustry, navigationForIndustry, routeLabel, routesForIndustry, type TenantRouteId } from './modules/registry'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
 import { WorkspaceNavigationEditButton, WorkspaceNavigationEditor, usePersonalNavigation } from './components/WorkspaceNavigation'
@@ -128,12 +128,7 @@ type DashboardCalendarEvent = {
   location: string
 }
 
-const pageTitles: Record<PageId, string> = {
-  ai: 'AI 업무허브', schedule: '일정관리', tasks: '업무지시 · 결재', journal: '일일업무일지',
-  products: '제품관리', inventory: '재고 · LOT', factory: '공장관리',
-  sales: '판매채널', people: '인사 · 조직', documents: '기업 자료실', compliance: '식품안전 · 인증',
-  approvals: 'AI 제안 검토', projects: '프로젝트', finance: '세무 · 자산', ip: '지식재산 · 인증',
-  'it-projects': '프로젝트', 'it-deliverables': '산출물', 'it-contracts': '계약 · 거래처',
+const platformPageTitles: Record<PlatformSection | 'billing', string> = {
   billing: '비용 · 포인트',
   platform: '플랫폼 운영 개요', tenants: '고객사 관리', support: 'CS 지원센터',
   integrations: '연동 상태', audit: '지원 세션 · 감사로그',
@@ -1638,28 +1633,14 @@ export default function App() {
       ? { title: nextSharedEvent.title, detail: `${formatWorkDue(`${nextSharedEvent.date}T${nextSharedEvent.start}:00`)} · ${nextSharedEvent.location || '장소 미정'}`, page: 'schedule' as PageId }
       : { title: '첫 공유 일정을 등록해 보세요', detail: `${tenantName} 구성원에게 일정을 공유할 수 있습니다.`, page: 'schedule' as PageId }
   const workAssignees: WorkAssignee[] = directoryAssignees
-  const tenantNavAll: NavItem[] = [
-    { id: 'ai', label: 'AI 업무허브', icon: Sparkles },
-    { id: 'schedule', label: '일정관리', icon: CalendarDays },
-    { id: 'tasks', label: '업무지시 · 결재', icon: ListChecks, badge: scopedWorkItems.filter((x) => x.status !== '결재완료').length },
-    { id: 'approvals', label: 'AI 제안 검토', icon: ClipboardCheck, badge: pendingProposals },
-    { id: 'journal', label: '일일업무일지', icon: NotebookPen },
-    { id: 'projects', label: '프로젝트', icon: FolderKanban },
-    { id: 'products', label: '제품관리', icon: Package },
-    { id: 'inventory', label: '재고 · LOT', icon: Boxes },
-    { id: 'factory', label: '공장관리', icon: Factory },
-    { id: 'sales', label: '판매채널', icon: Store },
-    { id: 'people', label: '인사 · 조직', icon: Users },
-    { id: 'documents', label: '기업 자료실', icon: FileText },
-    { id: 'finance', label: '세무 · 자산', icon: Landmark },
-    { id: 'ip', label: '지식재산 · 인증', icon: Award },
-    { id: 'compliance', label: '식품안전 · 인증', icon: ShieldCheck },
-    { id: 'it-deliverables', label: '산출물', icon: FileStack },
-    { id: 'it-contracts', label: '계약 · 거래처', icon: FileSignature },
-  ]
-  // 메뉴 = 공통 코어 + 업종 모듈(레지스트리). 식품제조 메뉴는 IT 테넌트에 보이지 않는다.
   const industryRoutes = new Set<string>(routesForIndustry(account?.industryType))
-  const tenantNavByIndustry = tenantNavAll.filter((item) => industryRoutes.has(item.id))
+  // 메뉴 라벨·아이콘·업종 경로는 레지스트리만이 결정한다. App은 실데이터 배지만 결합한다.
+  const tenantNavByIndustry: NavItem[] = navigationForIndustry(account?.industryType).map((item) => ({
+    ...item,
+    badge: item.id === 'tasks'
+      ? scopedWorkItems.filter((workItem) => workItem.status !== '결재완료').length
+      : item.id === 'approvals' ? pendingProposals : undefined,
+  }))
   const tenantNav = account?.role === 'tenant-member' ? tenantNavByIndustry.filter((item) => tenantMemberPages.has(item.id)) : tenantNavByIndustry
   const tenantNavSource = tenantNav.map(({ id, label }) => ({ id, label }))
   const [tenantNavPreferences, setTenantNavPreferences] = usePersonalNavigation(tenantNavSource, `${account?.tenantId ?? 'tenant'}:${account?.id ?? 'anonymous'}`)
@@ -1966,7 +1947,7 @@ export default function App() {
 
       <div className="app-body">
         <header className="topbar">
-          <div className="topbar-left"><button className="menu-button" type="button" aria-label="메뉴 열기" aria-controls="main-navigation" aria-expanded={mobileNav} onClick={() => setMobileNav(true)}><Menu size={22} /></button><div className="breadcrumb"><span>{mode === 'platform' ? '온팩토리 운영자' : tenantName}</span><strong>{pageTitles[page]}</strong></div></div>
+          <div className="topbar-left"><button className="menu-button" type="button" aria-label="메뉴 열기" aria-controls="main-navigation" aria-expanded={mobileNav} onClick={() => setMobileNav(true)}><Menu size={22} /></button><div className="breadcrumb"><span>{mode === 'platform' ? '온팩토리 운영자' : tenantName}</span><strong>{mode === 'platform' ? platformPageTitles[page as PlatformSection | 'billing'] : routeLabel(page as TenantRouteId)}</strong></div></div>
           <div className="topbar-actions">
             <div className="global-search">
               <Search size={19} />

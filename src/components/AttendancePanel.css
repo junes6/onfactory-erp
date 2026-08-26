@@ -47,8 +47,34 @@
   .attendance-today-times { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .attendance-today-times .unified-status-badge { grid-column: 1 / -1; justify-self: start; }
   .attendance-filters { align-items: stretch; flex-direction: column; }
-  .attendance-table { overflow-x: auto; }
-  .attendance-table-row { min-width: 720px; }
+  .attendance-table { display: grid; gap: var(--space-8); overflow: visible; border: 0; }
+  .attendance-table-header { position: absolute; width: 1px; height: 1px; padding: var(--space-0); overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  .attendance-table-row:not(.attendance-table-header) {
+    min-height: 0;
+    grid-template-areas:
+      "employee date status"
+      "check-in check-out total";
+    grid-template-columns: minmax(0, 1.25fr) minmax(84px, 1fr) auto;
+    gap: var(--space-12) var(--space-8);
+    align-items: center;
+    padding: var(--space-12);
+    border: var(--hairline) solid var(--line);
+    border-radius: var(--radius-8);
+  }
+  .attendance-employee-cell { grid-area: employee; }
+  .attendance-date-cell { grid-area: date; color: var(--muted); font-size: var(--font-11); }
+  .attendance-status-cell { grid-area: status; justify-self: end; }
+  .attendance-check-in-cell { grid-area: check-in; }
+  .attendance-check-out-cell { grid-area: check-out; }
+  .attendance-total-cell { grid-area: total; }
+  .attendance-time-cell {
+    display: grid;
+    gap: var(--space-4);
+    min-width: 0;
+    padding-top: var(--space-8);
+    border-top: var(--hairline) solid var(--line);
+    font-variant-numeric: tabular-nums;
+  }
+  .attendance-time-cell::before { content: attr(data-label); color: var(--muted); font-size: var(--font-11); }
   .attendance-policy { grid-template-columns: 1fr; align-items: stretch; }
 }
-

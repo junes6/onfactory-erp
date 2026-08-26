@@ -6,6 +6,7 @@ import { attendanceDurationMinutes, attendanceStatus, formatAttendanceDuration }
 
 const peopleSource = await readFile(new URL('../src/components/PeopleOperations.tsx', import.meta.url), 'utf8')
 const panelSource = await readFile(new URL('../src/components/AttendancePanel.tsx', import.meta.url), 'utf8')
+const panelStyles = await readFile(new URL('../src/components/AttendancePanel.css', import.meta.url), 'utf8')
 const utilitySource = await readFile(new URL('../src/utils/attendance.ts', import.meta.url), 'utf8')
 
 test('attendance status and duration use ISO timestamps and the frozen daily start policy', () => {
@@ -31,4 +32,17 @@ test('People Operations exposes employee clock actions, admin policy, and accoun
   assert.match(panelSource, /\/api\/attendance\/\$\{action\}/)
   assert.match(panelSource, /\/api\/attendance\/settings/)
   assert.doesNotMatch(panelSource, /record\.employeeName === currentUserName/)
+})
+
+test('mobile attendance records use compact cards without horizontal table overflow', () => {
+  assert.match(panelSource, /className="attendance-employee-cell"/)
+  assert.match(panelSource, /className="attendance-date-cell"/)
+  assert.match(panelSource, /data-label="출근"/)
+  assert.match(panelSource, /data-label="퇴근"/)
+  assert.match(panelSource, /data-label="총시간"/)
+  assert.match(panelStyles, /@media \(max-width: 720px\)/)
+  assert.match(panelStyles, /"employee date status"\s*"check-in check-out total"/)
+  assert.match(panelStyles, /\.attendance-time-cell::before/)
+  assert.doesNotMatch(panelStyles, /min-width:\s*720px/)
+  assert.doesNotMatch(panelStyles, /\.attendance-table\s*\{[^}]*overflow-x:\s*auto/)
 })

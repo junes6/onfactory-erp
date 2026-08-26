@@ -25,12 +25,12 @@ test('shared access copy stays industry-neutral across login and password onboar
 
 test('tenant workspaces cannot navigate to or render cost and point surfaces', () => {
   const app = read('src/App.tsx')
-  const tenantNavigation = app.match(/const tenantNavAll:[\s\S]*?\/\/ 메뉴 =/)?.[0] ?? ''
-  assert.ok(tenantNavigation, 'tenant navigation block must remain discoverable')
+  const registry = read('src/modules/registry.ts')
+  const tenantNavigation = registry.match(/const routeNavigation:[\s\S]*?\n\}/)?.[0] ?? ''
+  assert.ok(tenantNavigation, 'registry-backed tenant navigation block must remain discoverable')
   assert.doesNotMatch(tenantNavigation, /billing|비용\s*·\s*포인트|포인트 사용량|AI 포인트/)
   assert.doesNotMatch(app, /nextPage !== 'billing'/)
 
-  const registry = read('src/modules/registry.ts')
   const coreModule = registry.match(/id: 'core',[\s\S]*?\n\s*},/)?.[0] ?? ''
   assert.ok(coreModule, 'core module block must remain discoverable')
   assert.doesNotMatch(coreModule, /['"]points['"]|billing/)

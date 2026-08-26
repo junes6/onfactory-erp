@@ -160,7 +160,14 @@ export function AttendancePanel({
       <div className="attendance-table-row attendance-table-header" role="row"><span role="columnheader">직원</span><span role="columnheader">근무일</span><span role="columnheader">출근</span><span role="columnheader">퇴근</span><span role="columnheader">총시간</span><span role="columnheader">상태</span></div>
       {visibleRecords.map((record) => {
         const status = attendanceStatus(record, clockTick)
-        return <article className="attendance-table-row" role="row" key={record.id}><span role="cell"><strong>{record.employeeName}</strong><small>{record.team || '소속 미지정'}</small></span><span role="cell">{record.workDate}</span><span role="cell">{timeLabel(record.clockInAt)}</span><span role="cell">{timeLabel(record.clockOutAt)}</span><span role="cell">{formatAttendanceDuration(attendanceDurationMinutes(record, clockTick))}</span><span role="cell"><StatusBadge tone={statusTone(status)} dot>{status}</StatusBadge></span></article>
+        return <article className="attendance-table-row" role="row" key={record.id}>
+          <span className="attendance-employee-cell" role="cell"><strong>{record.employeeName}</strong><small>{record.team || '소속 미지정'}</small></span>
+          <span className="attendance-date-cell" role="cell" aria-label={`근무일 ${record.workDate}`}>{record.workDate}</span>
+          <span className="attendance-time-cell attendance-check-in-cell" role="cell" data-label="출근" aria-label={`출근 ${timeLabel(record.clockInAt)}`}>{timeLabel(record.clockInAt)}</span>
+          <span className="attendance-time-cell attendance-check-out-cell" role="cell" data-label="퇴근" aria-label={`퇴근 ${timeLabel(record.clockOutAt)}`}>{timeLabel(record.clockOutAt)}</span>
+          <span className="attendance-time-cell attendance-total-cell" role="cell" data-label="총시간" aria-label={`총시간 ${formatAttendanceDuration(attendanceDurationMinutes(record, clockTick))}`}>{formatAttendanceDuration(attendanceDurationMinutes(record, clockTick))}</span>
+          <span className="attendance-status-cell" role="cell" aria-label={`근태 상태 ${status}`}><StatusBadge tone={statusTone(status)} dot>{status}</StatusBadge></span>
+        </article>
       })}
     </div>}
 
@@ -171,4 +178,3 @@ export function AttendancePanel({
     </div>}
   </section>
 }
-
