@@ -247,7 +247,7 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
   easyMode?: boolean
   industryType?: string
   onAdvanceTask: (item: WorkItem) => void
-  onCreateTask: (text?: string) => void
+  onCreateTask: (text?: string, completionCriteria?: string) => void
   onNavigate: (page: PageId) => void
   onOpenAlerts: () => void
   onToast: (message: string) => void
@@ -1181,11 +1181,11 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
   )
 }
 
-function TaskModal({ initialText, requesterName, requesterId, assignees, workspaceScope, onClose, onSave }: {
-  initialText: string; requesterName: string; requesterId: string; assignees: WorkAssignee[]; workspaceScope?: string; onClose: () => void; onSave: (item: WorkItem) => Promise<boolean>
+function TaskModal({ initialText, initialDescription = '', requesterName, requesterId, assignees, workspaceScope, onClose, onSave }: {
+  initialText: string; initialDescription?: string; requesterName: string; requesterId: string; assignees: WorkAssignee[]; workspaceScope?: string; onClose: () => void; onSave: (item: WorkItem) => Promise<boolean>
 }) {
   const [title, setTitle] = useState(initialText)
-  const [description, setDescription] = useState('')
+  const [description, setDescription] = useState(initialDescription)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -1253,7 +1253,7 @@ function TaskModal({ initialText, requesterName, requesterId, assignees, workspa
             <label className="form-field"><span>누가 <em>필수</em></span><select name="ownerId" defaultValue={assignees.find((item) => item.id === requesterId)?.id ?? assignees[0]?.id ?? ''} required><option value="" disabled>직원 선택</option>{assignees.map((assignee) => <option value={assignee.id} key={assignee.id}>{assignee.name}</option>)}</select></label>
             <label className="form-field"><span>언제까지 <em>필수</em></span><input name="due" type="datetime-local" defaultValue={`${seoulDateInputValue()}T18:00`} required /></label>
           </div>
-          <details className="task-optional-fields">
+          <details className="task-optional-fields" open={Boolean(initialDescription)}>
             <summary><ChevronDown size={17} /> 선택 항목 <span>우선순위 · 완료 기준 · 첨부</span></summary>
             <div className="task-optional-fields-body">
               <label className="form-field"><span>우선순위</span><select name="priority" defaultValue="보통"><option>긴급</option><option>높음</option><option>보통</option></select></label>
@@ -1387,7 +1387,7 @@ export default function App() {
     seedWhenEmpty: false,
   })
   const [directoryAssignees, setDirectoryAssignees] = useState<WorkAssignee[]>([])
-  const [taskDraft, setTaskDraft] = useState<string | null>(null)
+  const [taskDraft, setTaskDraft] = useState<{ title: string; completionCriteria: string } | null>(null)
   const [supportTenant, setSupportTenant] = useState<Tenant | null>(null)
   const [platformFocusId, setPlatformFocusId] = useState<string>()
   const [workFocusId, setWorkFocusId] = useState<string>()
@@ -1887,11 +1887,11 @@ export default function App() {
       return <PlatformConsole section={page as PlatformSection} focusId={platformFocusId} refreshToken={platformRefreshToken} onSectionChange={(section) => navigate(section)} onReturnTenant={requestTenantSupportAccess} onRequestSupport={setSupportTenant} onEnterTenant={(tenantId) => void enterTenant(tenantId)} onDataChanged={() => setPlatformRefreshToken((current) => current + 1)} onToast={setToast} />
     }
     if (account?.role === 'tenant-member' && !tenantMemberPages.has(page)) {
-      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
+      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
     switch (page) {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
-      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onCreate={() => setTaskDraft('')} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} />
+      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'finance': return <TaxAssetsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} onToast={setToast} />
@@ -1907,7 +1907,7 @@ export default function App() {
       case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'it-deliverables':
       case 'it-contracts': return <ItServicesPage view={page as ItServicesView} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} onToast={setToast} />
-      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals} onAdvanceTask={advanceTask} onCreateTask={(text = '') => setTaskDraft(text)} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
+      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
   }
 
@@ -1984,7 +1984,7 @@ export default function App() {
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? '온팩토리'} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
       {profileOpen && account && <ProfileEditor account={account} onClose={() => setProfileOpen(false)} onToast={setToast} onSaved={(next) => { setAccount((current) => current ? { ...current, ...next } as AuthAccount : current) }} />}
       <WorkspaceNavigationEditor open={navEditorOpen} source={tenantNavSource} preferences={tenantNavPreferences} onChange={setTenantNavPreferences} onClose={() => setNavEditorOpen(false)} />
-      {taskDraft !== null && <TaskModal initialText={taskDraft} requesterName={account?.name ?? '사용자'} requesterId={account?.id ?? ''} assignees={workAssignees} workspaceScope={workspaceScope} onClose={() => setTaskDraft(null)} onSave={saveTask} />}
+      {taskDraft !== null && <TaskModal initialText={taskDraft.title} initialDescription={taskDraft.completionCriteria} requesterName={account?.name ?? '사용자'} requesterId={account?.id ?? ''} assignees={workAssignees} workspaceScope={workspaceScope} onClose={() => setTaskDraft(null)} onSave={saveTask} />}
       {supportTenant && <SupportSessionModal tenant={supportTenant} tickets={platformTickets} onClose={() => setSupportTenant(null)} onCreate={createPlatformSupportSession} />}
       {toast && <div className="toast" role="status"><CheckCircle2 size={19} /><span>{toast}</span><button type="button" aria-label="알림 닫기" onClick={() => setToast('')}><X size={16} /></button></div>}
     </div>

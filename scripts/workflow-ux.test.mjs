@@ -49,7 +49,8 @@ test('최신 보완 사유와 완료 기준은 상세 드로어에서만 조건�
 
 test('새 업무 지시는 필수 3칸과 접힌 선택 항목으로 구성한다', () => {
   for (const label of ['무엇을', '누가', '언제까지']) assert.match(taskModalSource, new RegExp(`${label} <em>필수</em>`))
-  assert.match(taskModalSource, /<details className="task-optional-fields">/)
+  assert.match(taskModalSource, /initialDescription = ''/)
+  assert.match(taskModalSource, /<details className="task-optional-fields" open=\{Boolean\(initialDescription\)\}>/)
   assert.match(stylesSource, /\.task-optional-fields:not\(\[open\]\) > \.task-optional-fields-body \{ display: none; \}/)
   for (const label of ['우선순위', '완료 기준', '사진·파일']) assert.match(taskModalSource, new RegExp(label))
   assert.doesNotMatch(taskModalSource, /담당자가 업무 내용을 확인하고 완료 결과를 남깁니다/)

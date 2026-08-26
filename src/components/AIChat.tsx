@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertCircle, ArrowUp, CheckCircle2, ClipboardPlus, FileText, LoaderCircle, Paperclip, Sparkles, X } from 'lucide-react'
 import { assistantExperienceForIndustry } from '../modules/registry'
+import { aiTaskDraftFromAnswer } from '../utils/aiTaskDraft'
 import { formatDateTime } from '../utils/dateTime'
 
 export type ChatAttachmentMeta = {
@@ -31,7 +32,7 @@ type SelectedAttachment = ChatAttachmentMeta & {
 type AIChatProps = {
   compact?: boolean
   companyName: string
-  onCreateTask: (instruction: string) => void
+  onCreateTask: (instruction: string, completionCriteria?: string) => void
   canCreateTask?: boolean
   canViewCommercial?: boolean
   operatingDataAvailable?: boolean
@@ -267,7 +268,10 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
                   {message.attachments.map((file) => <li key={file.documentId}><FileText size={14} /><span>{file.name}</span><small>{fileSizeLabel(file.size)}</small></li>)}
                 </ul> : null}
                 {canCreateTask && message.role === 'assistant' && index > 0 && message.sourcePrompt && (
-                  <button type="button" className="message-action" onClick={() => onCreateTask(message.sourcePrompt!)}>
+                  <button type="button" className="message-action" onClick={() => {
+                    const draft = aiTaskDraftFromAnswer(message.content, message.sourcePrompt)
+                    onCreateTask(draft.title, draft.completionCriteria)
+                  }}>
                     <ClipboardPlus size={14} /> 이 내용으로 업무 만들기
                   </button>
                 )}
