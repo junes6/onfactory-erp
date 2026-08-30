@@ -78,7 +78,7 @@ const WORKSPACE_STORE_KEYS = new Set([
   'sales-shipments', 'compliance-records', 'document-storage-settings', 'performance-settings', 'performance-reports',
   'it-projects', 'it-deliverables', 'it-contracts', 'ai-proposals', 'automation-policies',
   'it-clients', 'it-support-programs', 'project-spaces', 'project-posts',
-  'company-assets', 'tax-events', 'ip-rights',
+  'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries',
   'attendance-records', 'personal-todos',
 ])
 // 프로젝트 공간은 멤버십 기반이라 전용 라우트(/api/projects)로만 읽고 쓴다.
@@ -92,7 +92,7 @@ const SENTINEL_TRIGGER_KEYS = new Set(['compliance-records', 'product-catalog', 
 const TENANT_MEMBER_READ_KEYS = new Set([
   'work-items', 'inventory-locations', 'messenger-conversations', 'calendar-events', 'daily-journals',
   'leave-requests', 'leave-management', 'factory-locations', 'factory-layouts', 'work-rules', 'product-catalog', 'inventory-movements', 'calendar-departments',
-  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts', 'it-clients', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights',
+  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts', 'it-clients', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries',
 ])
 const TENANT_MEMBER_WRITE_KEYS = new Set([
   'work-items', 'messenger-conversations', 'calendar-events', 'daily-journals', 'it-projects', 'it-deliverables',
@@ -2226,25 +2226,79 @@ export function createApp(options = {}) {
     }
   })
 
-  app.get('/api/tax/evidence-export', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
+  const TAX_DELIVERY_KEY = 'tax-deliveries'
+  const MAX_TAX_DELIVERY_HISTORY = 200
+  const taxDeliveries = (tenantId) => {
+    const stored = workspaceStore.tenants[tenantId]?.[TAX_DELIVERY_KEY]?.data
+    return Array.isArray(stored) ? stored : []
+  }
+
+  app.get('/api/tax/deliveries', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+    if (!request.auth.tenantId) { response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } }); return }
+    response.json({ deliveries: taxDeliveries(request.auth.tenantId) })
+  })
+
+  // 기간을 한 번 고르면 압축본과 목록표를 만들고, 같은 트랜잭션에서 전달 이력을 남긴다.
+  app.post('/api/tax/evidence-export', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
     if (!request.auth.tenantId || !documentStorage) {
       response.status(503).json({ error: { code: 'DOCUMENT_STORAGE_UNAVAILABLE', message: '파일 저장소가 설정되지 않았습니다.' } })
       return
     }
-    const year = Number(request.query.year)
     const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : []
+    const requestedAt = new Date().toISOString()
+    const note = String(request.body?.note ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 200)
+    const recipient = String(request.body?.recipient ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 120)
+    // 화면에서 고른 기간 이름은 표시용이다. 실제 대상은 항상 from/to로 다시 계산한다.
+    const chosenLabel = String(request.body?.label ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 60)
     try {
       const result = await buildTaxEvidenceArchive({
-        year,
+        year: request.body?.year,
+        from: request.body?.from,
+        to: request.body?.to,
         documents,
         getDocument: (document) => getTenantDocument(documentStorage, document, request.auth.tenantId),
+        label: chosenLabel,
+        preparedAt: requestedAt,
+        preparedBy: request.auth.name,
       })
+      const delivery = {
+        id: `TAXD-${Date.now()}-${randomBytes(4).toString('hex')}`,
+        periodStart: result.period.from,
+        periodEnd: result.period.to,
+        periodLabel: result.periodLabel,
+        fileCount: result.fileCount,
+        totalBytes: result.totalBytes,
+        buckets: result.buckets,
+        archiveChecksum: result.archiveChecksum,
+        recipient,
+        note,
+        deliveredAt: requestedAt,
+        deliveredById: request.auth.id,
+        deliveredByName: request.auth.name,
+        ...(request.auth.operatorMode ? { operatorId: request.auth.operatorMode.operatorId, operatorName: request.auth.operatorMode.operatorName } : {}),
+      }
+      const tenantStore = workspaceStore.tenants[request.auth.tenantId] ??= {}
+      tenantStore[TAX_DELIVERY_KEY] = {
+        data: [delivery, ...taxDeliveries(request.auth.tenantId)].slice(0, MAX_TAX_DELIVERY_HISTORY),
+        updatedAt: requestedAt,
+        updatedBy: request.auth.id,
+      }
+      try { await commitWorkspaceStore() }
+      catch (persistError) {
+        tenantStore[TAX_DELIVERY_KEY] = { data: taxDeliveries(request.auth.tenantId).filter((item) => item.id !== delivery.id), updatedAt: requestedAt, updatedBy: request.auth.id }
+        console.error('[tax-evidence-export] delivery log persistence failed', persistError)
+        response.status(500).json({ error: { code: 'TAX_DELIVERY_LOG_FAILED', message: '전달 이력을 기록하지 못해 묶음을 내려보내지 않았습니다. 잠시 후 다시 시도해 주세요.' } })
+        return
+      }
+      const archiveName = `${result.period.from}_${result.period.to}_세무사_전달자료.zip`
       response.setHeader('content-type', 'application/zip')
-      response.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`${year}_세무사_전달자료.zip`)}`)
+      response.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(archiveName)}`)
       response.setHeader('cache-control', 'private, no-store')
       response.setHeader('x-content-type-options', 'nosniff')
       response.setHeader('x-tax-evidence-files', String(result.fileCount))
       response.setHeader('x-tax-evidence-bytes', String(result.totalBytes))
+      response.setHeader('x-tax-delivery-id', delivery.id)
+      response.setHeader('x-tax-period', `${result.period.from}/${result.period.to}`)
       response.send(result.archive)
     } catch (error) {
       if (error instanceof TaxEvidenceExportError) {
@@ -5447,6 +5501,10 @@ export function createApp(options = {}) {
     }
     if (key === 'personal-todos') {
       response.status(403).json({ error: { code: 'PERSONAL_TODO_ROUTE_REQUIRED', message: '개인 할 일은 내 할 일 전용 기능에서만 변경할 수 있습니다.' } })
+      return
+    }
+    if (key === 'tax-deliveries') {
+      response.status(403).json({ error: { code: 'TAX_DELIVERY_LOG_READONLY', message: '세무사 전달 이력은 전달을 실행할 때만 기록됩니다. 직접 수정할 수 없습니다.' } })
       return
     }
     if (!Object.prototype.hasOwnProperty.call(request.body ?? {}, 'data')) {

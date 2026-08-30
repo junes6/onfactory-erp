@@ -37,6 +37,8 @@ export const WORKSPACE_TABLES = Object.freeze({
   'company-assets': 'company_assets',
   'tax-events': 'tax_events',
   'ip-rights': 'ip_rights',
+  // P11: 세무사 전달 이력 (서버 전용 기록)
+  'tax-deliveries': 'tax_deliveries',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

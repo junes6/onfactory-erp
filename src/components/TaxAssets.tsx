@@ -37,7 +37,7 @@ const isAssets = (value: unknown): value is CompanyAsset[] => Array.isArray(valu
 function money(value: number) { return value ? `${Math.round(value).toLocaleString('ko-KR')}원` : '—' }
 function assetTone(status: AssetStatus): StatusBadgeTone { return status === '사용 중' ? 'success' : status === '수리 중' ? 'warning' : status === '폐기' ? 'danger' : 'neutral' }
 
-export function TaxAssetsPage({ workspaceScope, canManage, currentUserId, currentUserName, onToast }: { workspaceScope?: string; canManage: boolean; currentUserId: string; currentUserName: string; onToast: (message: string) => void }) {
+export function TaxAssetsPage({ workspaceScope, canManage, currentUserId, currentUserName, industryType, onToast }: { workspaceScope?: string; canManage: boolean; currentUserId: string; currentUserName: string; industryType?: string; onToast: (message: string) => void }) {
   const [assets, setAssets] = useWorkspaceState<CompanyAsset[]>('company-assets', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isAssets })
   const [tab, setTab] = useState<'tax' | 'assets'>('tax')
   const [editingAsset, setEditingAsset] = useState<CompanyAsset | 'new' | null>(null)
@@ -67,7 +67,7 @@ export function TaxAssetsPage({ workspaceScope, canManage, currentUserId, curren
       <button type="button" role="tab" aria-selected={tab === 'assets'} className={tab === 'assets' ? 'active' : ''} onClick={() => setTab('assets')}><Boxes size={15} /> 자산 대장 {assets.length}</button>
     </div>
 
-    {tab === 'tax' ? <TaxWorkspace workspaceScope={workspaceScope} canManage={canManage} currentUserId={currentUserId} currentUserName={currentUserName} onToast={onToast} /> : <>
+    {tab === 'tax' ? <TaxWorkspace workspaceScope={workspaceScope} canManage={canManage} currentUserId={currentUserId} currentUserName={currentUserName} industryType={industryType} onToast={onToast} /> : <>
       <section className="tax-summary" aria-label="자산 요약">
         <article><span><Boxes size={18} /></span><div><small>사용 중인 자산</small><strong>{activeAssets.length}개</strong></div></article>
         <article><span><Coins size={18} /></span><div><small>자산 취득가 합계</small><strong>{money(assetTotal)}</strong></div></article>

@@ -167,12 +167,14 @@ const contracts = [
   {
     screen: '세무·자산 · 세무일정', persistenceId: 'tax-events', source: taxWorkspace, checks: [
       [/useWorkspaceState<TaxRecord\[]>\('tax-events'/, 'shared refresh source'],
-      [/buildProvidedTaxSchedule\(profile, year\)/, 'company profile generates the schedule'],
+      [/buildProvidedTaxSchedule\(profile, year, industryType\)/, 'company profile and industry generate the schedule'],
+      [/const profile = savedProfile \?\? defaultTaxProfile\(\)/, 'a tenant that registered nothing still gets a schedule'],
       [/recordType: 'profile'/, 'profile record persistence'],
       [/recordType: 'schedule'/, 'provided schedule progress persistence'],
       [/setRecords\(\(current\) => current\.some[\s\S]*?current\.map[\s\S]*?: \[next, \.\.\.current\]/, 'create/update list synchronization'],
-      [/tags: \['tax-evidence', `tax-year:\$\{year\}`, `tax-bucket:\$\{uploadBucket\}`\]/, 'annual evidence tags'],
-      [/`\/api\/tax\/evidence-export\?year=\$\{year\}`/, 'annual accountant archive download'],
+      [/tags: \['tax-evidence', `tax-year:\$\{evidenceDate\.slice\(0, 4\)\}`, `tax-bucket:\$\{uploadBucket\}`, `tax-date:\$\{evidenceDate\}`\]/, 'evidence carries its own date'],
+      [/'\/api\/tax\/evidence-export'[\s\S]*?method: 'POST'[\s\S]*?from: selectedPeriod\.from, to: selectedPeriod\.to/, 'one period choice builds the accountant archive'],
+      [/'\/api\/tax\/deliveries'/, 'delivery history is read back from the server'],
       [/국세청 원문/, 'official source link'],
     ],
   },
@@ -226,9 +228,16 @@ test('all UI contracts stay paired to the same persistence target exercised by l
 
 test('tax workspace provides schedules and evidence instead of asking users to register statutory dates', () => {
   assert.doesNotMatch(taxAssets, /세무 일정 등록|첫 세무 일정 등록/)
-  assert.match(taxWorkspace, /회사 세무 조건을 한 번 설정/)
+  // 조건 설정을 요구하는 관문 화면 없이, 기본값으로 계산한 남은 일정이 먼저 보여야 한다.
+  assert.doesNotMatch(taxWorkspace, /회사 세무 조건을 한 번 설정/)
+  assert.match(taxWorkspace, /usingDefaultProfile/)
+  assert.match(taxWorkspace, /const remaining = provided\.filter\(\(schedule\) => schedule\.dueDate >= today\)/)
+  assert.match(taxWorkspace, /schedule\.preparation\.map/)
   assert.match(taxWorkspace, /증빙 파일함/)
-  assert.match(taxWorkspace, /세무사 전달 묶음 받기/)
+  assert.match(taxWorkspace, /세무사에게 전달/)
+  assert.match(taxWorkspace, /세무사 전달 이력/)
+  assert.match(serverApp, /app\.post\('\/api\/tax\/evidence-export'[\s\S]*?tenantStore\[TAX_DELIVERY_KEY\] = \{/)
+  assert.match(serverApp, /TAX_DELIVERY_LOG_READONLY/)
 })
 
 test('dedicated workspace writes synchronize the next generic write version', () => {
