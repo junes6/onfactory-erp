@@ -64,6 +64,17 @@ import {
   resolveLenses,
 } from './document-lenses.mjs'
 import {
+  ingestTokenMatches,
+  normalizeIngestBatch,
+  normalizeOpportunitySettings,
+  opportunityProposal,
+  opportunityRecord,
+  OpportunityIngestError,
+  OPPORTUNITIES_KEY,
+  OPPORTUNITY_SETTINGS_KEY,
+  MAX_OPPORTUNITIES,
+} from './opportunity-ingest.mjs'
+import {
   DEFAULT_LOCAL_DEMO_PASSWORD,
   DEMO_ACCOUNT_DEFINITIONS,
   LEGACY_ID_BY_NAME,
@@ -90,7 +101,7 @@ const WORKSPACE_STORE_KEYS = new Set([
   'sales-shipments', 'compliance-records', 'document-storage-settings', 'performance-settings', 'performance-reports',
   'it-projects', 'it-deliverables', 'it-contracts', 'ai-proposals', 'automation-policies',
   'it-clients', 'it-support-programs', 'project-spaces', 'project-posts',
-  'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses',
+  'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses', 'opportunities', 'opportunity-settings',
   'attendance-records', 'personal-todos',
 ])
 // 프로젝트 공간은 멤버십 기반이라 전용 라우트(/api/projects)로만 읽고 쓴다.
@@ -104,7 +115,7 @@ const SENTINEL_TRIGGER_KEYS = new Set(['compliance-records', 'product-catalog', 
 const TENANT_MEMBER_READ_KEYS = new Set([
   'work-items', 'inventory-locations', 'messenger-conversations', 'calendar-events', 'daily-journals',
   'leave-requests', 'leave-management', 'factory-locations', 'factory-layouts', 'work-rules', 'product-catalog', 'inventory-movements', 'calendar-departments',
-  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts', 'it-clients', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses',
+  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts', 'it-clients', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses', 'opportunities', 'opportunity-settings',
 ])
 const TENANT_MEMBER_WRITE_KEYS = new Set([
   'work-items', 'messenger-conversations', 'calendar-events', 'daily-journals', 'it-projects', 'it-deliverables',
@@ -2911,6 +2922,112 @@ export function createApp(options = {}) {
       return
     }
     response.status(201).json({ queued, skipped: prepared.length - queued, pendingCount: proposalsOf(request.auth.tenantId).filter((item) => item.status === 'pending').length })
+  })
+
+  // ------------------------------------------------------------------
+  // 외부 기회 신호(입찰·지원사업). 수집·판정 엔진은 이 저장소 밖의 워커가 담당한다.
+  // 여기서는 워커가 밀어넣은 결과를 검증해 저장하고, 임계값을 넘은 건만 승인 큐에 올린다.
+  // ------------------------------------------------------------------
+  const opportunityIngestToken = String((options.env ?? process.env).OPPORTUNITY_INGEST_TOKEN ?? '').trim()
+  const opportunitiesOf = (tenantId) => {
+    const record = workspaceStore.tenants[tenantId]?.[OPPORTUNITIES_KEY]
+    return Array.isArray(record?.data) ? record.data : []
+  }
+  const opportunitySettingsOf = (tenantId) => normalizeOpportunitySettings(
+    workspaceStore.tenants[tenantId]?.[OPPORTUNITY_SETTINGS_KEY]?.data,
+    tenantIndustryType(tenantId),
+  )
+
+  app.get('/api/opportunities', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+    if (!request.auth.tenantId) { response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } }); return }
+    const opportunities = opportunitiesOf(request.auth.tenantId)
+    response.json({
+      opportunities,
+      settings: opportunitySettingsOf(request.auth.tenantId),
+      queuedCount: opportunities.filter((item) => item?.status === 'queued').length,
+      ingestConfigured: Boolean(opportunityIngestToken),
+      canManage: request.auth.role === 'tenant-admin',
+    })
+  })
+
+  app.put('/api/opportunities/settings', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId] ??= {}
+    const previous = tenantStore[OPPORTUNITY_SETTINGS_KEY]
+    const settings = normalizeOpportunitySettings({
+      ...request.body?.settings,
+      updatedAt: new Date().toISOString(),
+      updatedBy: request.auth.name,
+    }, tenantIndustryType(request.auth.tenantId))
+    tenantStore[OPPORTUNITY_SETTINGS_KEY] = { data: settings, updatedAt: settings.updatedAt, updatedBy: request.auth.id }
+    try { await commitWorkspaceStore() }
+    catch {
+      if (previous) tenantStore[OPPORTUNITY_SETTINGS_KEY] = previous; else delete tenantStore[OPPORTUNITY_SETTINGS_KEY]
+      response.status(500).json({ error: { code: 'OPPORTUNITY_SETTINGS_WRITE_FAILED', message: '기회 감시 설정을 저장하지 못했습니다.' } })
+      return
+    }
+    response.json({ settings })
+  })
+
+  // 서버 간 통신 전용. 사용자 세션이 아니라 배포 시 발급한 토큰으로만 인증한다.
+  app.post('/api/opportunities/ingest', async (request, response) => {
+    if (!opportunityIngestToken) {
+      response.status(503).json({ error: { code: 'INGEST_NOT_CONFIGURED', message: '인제스트 토큰(OPPORTUNITY_INGEST_TOKEN)이 설정되지 않았습니다.' } })
+      return
+    }
+    const header = String(request.get('authorization') ?? '')
+    const provided = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : String(request.get('x-ingest-token') ?? '').trim()
+    if (!ingestTokenMatches(opportunityIngestToken, provided)) {
+      response.status(401).json({ error: { code: 'INGEST_UNAUTHORIZED', message: '인제스트 토큰이 올바르지 않습니다.' } })
+      return
+    }
+    let items
+    try { items = normalizeIngestBatch(request.body) }
+    catch (error) {
+      if (error instanceof OpportunityIngestError) { response.status(error.status).json({ error: { code: error.code, message: error.message } }); return }
+      throw error
+    }
+
+    const now = new Date().toISOString()
+    const knownTenants = new Set(workspaceStore.platform.tenants.map((tenant) => tenant?.id))
+    const snapshot = new Map()
+    const result = { accepted: 0, queued: 0, belowThreshold: 0, duplicate: 0, unknownTenant: 0 }
+    for (const item of items) {
+      if (!knownTenants.has(item.tenantId)) { result.unknownTenant += 1; continue }
+      const tenantStore = workspaceStore.tenants[item.tenantId] ??= {}
+      if (!snapshot.has(item.tenantId)) {
+        snapshot.set(item.tenantId, { opportunities: tenantStore[OPPORTUNITIES_KEY], proposals: tenantStore[PROPOSALS_KEY], policies: tenantStore[AUTOMATION_POLICIES_KEY] })
+      }
+      const settings = opportunitySettingsOf(item.tenantId)
+      const record = opportunityRecord(item, settings, now)
+      const existing = opportunitiesOf(item.tenantId)
+      if (existing.some((entry) => entry?.key === record.key)) { result.duplicate += 1; continue }
+      tenantStore[OPPORTUNITIES_KEY] = {
+        data: [record, ...existing].slice(0, MAX_OPPORTUNITIES),
+        updatedAt: now,
+        updatedBy: 'opportunity-ingest',
+      }
+      result.accepted += 1
+      if (record.status === 'queued') {
+        enqueueProposal(item.tenantId, opportunityProposal(record, { now, proposalId: newProposalId() }))
+        result.queued += 1
+      } else {
+        result.belowThreshold += 1
+      }
+    }
+
+    if (!result.accepted) { response.status(result.unknownTenant && !result.duplicate ? 404 : 200).json(result); return }
+    try { await commitWorkspaceStore() }
+    catch {
+      for (const [tenantId, previous] of snapshot) {
+        const tenantStore = workspaceStore.tenants[tenantId]
+        if (previous.opportunities) tenantStore[OPPORTUNITIES_KEY] = previous.opportunities; else delete tenantStore[OPPORTUNITIES_KEY]
+        if (previous.proposals) tenantStore[PROPOSALS_KEY] = previous.proposals; else delete tenantStore[PROPOSALS_KEY]
+        if (previous.policies) tenantStore[AUTOMATION_POLICIES_KEY] = previous.policies; else delete tenantStore[AUTOMATION_POLICIES_KEY]
+      }
+      response.status(500).json({ error: { code: 'OPPORTUNITY_WRITE_FAILED', message: '기회 신호를 저장하지 못했습니다.' } })
+      return
+    }
+    response.status(201).json(result)
   })
 
   // ------------------------------------------------------------------
@@ -5728,6 +5845,10 @@ export function createApp(options = {}) {
     }
     if (key === 'personal-todos') {
       response.status(403).json({ error: { code: 'PERSONAL_TODO_ROUTE_REQUIRED', message: '개인 할 일은 내 할 일 전용 기능에서만 변경할 수 있습니다.' } })
+      return
+    }
+    if (key === 'opportunities' || key === 'opportunity-settings') {
+      response.status(403).json({ error: { code: 'OPPORTUNITY_ROUTE_REQUIRED', message: '외부 기회 신호는 인제스트 API와 감시 설정 화면에서만 변경할 수 있습니다.' } })
       return
     }
     if (key === 'tax-deliveries') {

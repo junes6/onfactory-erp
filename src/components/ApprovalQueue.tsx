@@ -4,6 +4,7 @@ import { formatDateTime } from '../utils/dateTime'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ApprovalQueue.css'
 import { Button, IconButton } from './ui/Button'
+import { OpportunityWatch } from './OpportunityWatch'
 
 type ProposalKind = 'document-classification' | 'task-from-message' | 'sentinel-task' | 'lens-task' | 'opportunity'
 type ProposalStatus = 'pending' | 'approved' | 'edited' | 'rejected' | 'expired'
@@ -185,6 +186,8 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
               })}
             </div>}
     </section>
+
+    <OpportunityWatch workspaceScope={workspaceScope} onToast={onToast} />
 
     {editing && <ProposalEditDialog proposal={editing} busy={busyId === editing.id} onClose={() => setEditing(null)} onSubmit={(payload) => void decide(editing, 'edit', payload)} />}
   </div>

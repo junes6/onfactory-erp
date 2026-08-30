@@ -1,0 +1,21 @@
+/* 외부 기회 감시 — 승인 큐 화면 안의 보조 블록 (별도 화면을 만들지 않는다) */
+.opportunity-watch { display: grid; gap: var(--space-8); margin-top: var(--space-16); padding: var(--space-12) var(--card-inset); border: var(--dashboard-stroke) solid var(--color-card-line); border-radius: var(--radius-8); background: var(--color-surface); }
+.opportunity-watch > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-8); }
+.opportunity-watch h2 { display: flex; align-items: center; gap: var(--space-4); margin: var(--space-0); font-size: var(--font-13); }
+.opportunity-watch h2 svg { color: var(--color-primary); }
+.opportunity-watch > header p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-11); line-height: 1.6; }
+.opportunity-below summary { color: var(--color-primary); font-size: var(--font-13); cursor: pointer; }
+.opportunity-below ul { display: grid; gap: var(--space-8); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
+.opportunity-below li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); padding-top: var(--space-8); border-top: var(--hairline) solid var(--line); }
+.opportunity-below li > div:first-child { min-width: 0; display: grid; gap: var(--space-4); }
+.opportunity-below strong { overflow: hidden; font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
+.opportunity-below small { color: var(--muted); font-size: var(--font-11); }
+.opportunity-below p { margin: var(--space-0); color: var(--subtle); font-size: var(--font-11); line-height: 1.5; }
+.opportunity-below-side { display: flex; align-items: center; gap: var(--space-8); }
+.opportunity-settings-modal { width: min(560px, 100%); }
+.opportunity-settings-modal form > footer { display: flex; justify-content: flex-end; gap: var(--space-8); }
+
+@media (max-width: 760px) {
+  .opportunity-below li { grid-template-columns: minmax(0, 1fr); }
+  .opportunity-below-side { justify-content: flex-start; }
+}

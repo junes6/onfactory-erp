@@ -41,6 +41,9 @@ export const WORKSPACE_TABLES = Object.freeze({
   'tax-deliveries': 'tax_deliveries',
   // R11-B: 파일 렌즈 정의 (코어 lenses 테이블 재사용)
   'document-lenses': 'lenses',
+  // R11-G: 외부 기회 신호 (인제스트 결과 + 테넌트 감시 설정)
+  'opportunities': 'opportunities',
+  'opportunity-settings': 'opportunity_settings',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))
@@ -53,6 +56,7 @@ export const WORKSPACE_SHAPES = Object.freeze({
   'document-storage-settings': 'singleton',
   'performance-settings': 'singleton',
   'attendance-records': 'singleton',
+  'opportunity-settings': 'singleton',
 })
 
 export const ARRAY_WORKSPACE_KEYS = new Set(
