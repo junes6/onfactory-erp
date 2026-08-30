@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Accessibility, ArrowLeft, Briefcase, Check, ChevronRight, Download, Eye, EyeOff, KeyRound, Laptop, LockKeyhole, LogIn, Mail, Moon, Palette, Phone, Save, ShieldCheck, Smartphone, Sun, Type, UserPen, X } from 'lucide-react'
 import { OnFactoryMark } from './AppIcons'
+import { Button, IconButton } from './ui/Button'
 
 export type ThemeChoice = 'light' | 'dark' | 'system'
 export type FontChoice = 'standard' | 'large' | 'extra'
@@ -300,7 +301,7 @@ export function SettingsDrawer({ open, onClose, profileName, profileRole, compan
   return <>
     <button className="drawer-scrim" type="button" aria-label="개인 설정 닫기" onClick={onClose} />
     <aside ref={drawerRef} className="settings-drawer" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <header><div><span className="eyebrow">PERSONAL SETTINGS</span><h2 id="settings-title">내 화면 설정</h2></div><button className="icon-button" type="button" aria-label="설정 닫기" onClick={onClose}><X size={21} /></button></header>
+      <header><div><span className="eyebrow">PERSONAL SETTINGS</span><h2 id="settings-title">내 화면 설정</h2></div><IconButton tone="ghost" type="button" aria-label="설정 닫기" onClick={onClose}><X size={21} /></IconButton></header>
       <div className="settings-profile"><span>{profileName.slice(0, 1)}</span><div><strong>{profileName}</strong><p>{profileRole} · {companyName}</p></div>{onEditProfile && <button type="button" className="settings-profile-edit" onClick={onEditProfile}><UserPen size={16} /> 프로필 수정</button>}</div>
       <section className="setting-section">
         <div className="setting-section-title"><Sun size={19} /><div><h3>화면 테마</h3><p>눈에 편한 화면을 선택하세요.</p></div></div>
@@ -384,7 +385,7 @@ export function ProfileEditor({ account, onClose, onSaved, onToast }: { account:
   }
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className="modal-card profile-editor" role="dialog" aria-modal="true" aria-labelledby="profile-editor-title">
-      <header><div><span className="eyebrow">MY PROFILE</span><h2 id="profile-editor-title">내 프로필</h2><p>{account.email}{account.tenantName ? ` · ${account.tenantName}` : ''}</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
+      <header><div><span className="eyebrow">MY PROFILE</span><h2 id="profile-editor-title">내 프로필</h2><p>{account.email}{account.tenantName ? ` · ${account.tenantName}` : ''}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
       <form onSubmit={saveProfile}>
         <div className="profile-editor-identity"><span className="profile-editor-avatar">{name.trim().slice(0, 1) || account.name.slice(0, 1)}</span><div><strong>{name.trim() || account.name}</strong><small>{[jobRole.trim(), team.trim()].filter(Boolean).join(' · ') || (operator ? '플랫폼 운영자' : '직책·부서 미입력')}</small></div></div>
         <div className="form-grid">
@@ -398,7 +399,7 @@ export function ProfileEditor({ account, onClose, onSaved, onToast }: { account:
         <label className="form-field full"><span>한 줄 소개 <em>선택</em></span><input value={bio} onChange={(event) => setBio(event.target.value)} maxLength={200} placeholder="담당 업무나 연락 가능한 시간을 적어 두면 동료가 찾기 쉽습니다." /></label>
         <p className="profile-editor-note">이메일과 역할(관리자·직원)은 회사 관리자가 관리합니다. 이름·부서·직책은 업무지시·일지·메신저에 바로 반영됩니다.</p>
         {error && <div className="auth-inline-error" role="alert">{error}</div>}
-        <footer><button type="button" className="button ghost" onClick={onClose} disabled={busy}>닫기</button><button type="submit" className="button primary" disabled={busy || name.trim().length < 2}><Save size={17} /> {busy ? '저장 중…' : '프로필 저장'}</button></footer>
+        <footer><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>닫기</Button><Button tone="primary" type="submit" disabled={busy || name.trim().length < 2}><Save size={17} /> {busy ? '저장 중…' : '프로필 저장'}</Button></footer>
       </form>
       <section className="profile-password" aria-labelledby="profile-password-title">
         <h3 id="profile-password-title"><KeyRound size={16} /> 비밀번호 변경</h3>
@@ -407,7 +408,7 @@ export function ProfileEditor({ account, onClose, onSaved, onToast }: { account:
           <label className="form-field"><span>새 비밀번호</span><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" placeholder="10자 이상, 대/소문자·숫자·특수문자" /></label>
           <label className="form-field"><span>새 비밀번호 확인</span><input type="password" value={newPasswordConfirm} onChange={(event) => setNewPasswordConfirm(event.target.value)} autoComplete="new-password" /></label>
         </div>
-        <div className="profile-password-actions"><button type="button" className="button secondary" disabled={passwordBusy || !currentPassword || newPassword.length < 10 || !newPasswordConfirm} onClick={() => void changePassword()}><KeyRound size={16} /> {passwordBusy ? '변경 중…' : '비밀번호 변경'}</button></div>
+        <div className="profile-password-actions"><Button tone="secondary" type="button" disabled={passwordBusy || !currentPassword || newPassword.length < 10 || !newPasswordConfirm} onClick={() => void changePassword()}><KeyRound size={16} /> {passwordBusy ? '변경 중…' : '비밀번호 변경'}</Button></div>
       </section>
     </section>
   </div>

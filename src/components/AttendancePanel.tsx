@@ -12,6 +12,7 @@ import {
 } from '../utils/attendance'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './AttendancePanel.css'
+import { Button } from './ui/Button'
 
 type AttendancePanelProps = {
   canManage: boolean
@@ -134,14 +135,14 @@ export function AttendancePanel({
   return <section className="attendance-panel" aria-labelledby="attendance-title">
     <header className="attendance-panel-head">
       <div><h2 id="attendance-title">출퇴근 관리</h2><p>{canManage ? '직원별 출퇴근과 근무시간을 날짜별로 확인합니다.' : '내 출근·퇴근을 직접 기록하고 월 근무시간을 확인합니다.'}</p></div>
-      <button className="button ghost" type="button" disabled={loading} onClick={() => { setLoading(true); void loadAttendance().catch((error) => onToast(error instanceof Error ? error.message : '새로고침하지 못했습니다.')).finally(() => setLoading(false)) }}><RefreshCw size={17} /> 새로고침</button>
+      <Button tone="ghost" type="button" disabled={loading} onClick={() => { setLoading(true); void loadAttendance().catch((error) => onToast(error instanceof Error ? error.message : '새로고침하지 못했습니다.')).finally(() => setLoading(false)) }}><RefreshCw size={17} /> 새로고침</Button>
     </header>
 
     <div className="attendance-today-card">
       <div className="attendance-identity"><span><Clock3 size={22} /></span><div><small>{today} · {currentUserTeam}</small><strong>{currentUserName}님의 오늘 근태</strong><p>기준 출근 {state.policy.standardStartTime}</p></div></div>
       <div className="attendance-today-times"><div><small>출근</small><strong>{timeLabel(currentRecord?.clockInAt ?? null)}</strong></div><div><small>퇴근</small><strong>{timeLabel(currentRecord?.clockOutAt ?? null)}</strong></div><div><small>총 근무</small><strong>{currentRecord ? formatAttendanceDuration(attendanceDurationMinutes(currentRecord, clockTick)) : '0분'}</strong></div>{summaryStatus && <StatusBadge tone={statusTone(summaryStatus)} dot>{summaryStatus}</StatusBadge>}</div>
       <div className="attendance-actions">
-        {!canClock ? <p>운영자 모드에서는 직원 출퇴근을 대신 기록하지 않습니다.</p> : openRecord ? <button className="button primary" type="button" disabled={saving !== null} onClick={() => void runAction('clock-out')}><LogOut size={18} /> {saving === 'clock-out' ? '저장 중…' : '퇴근하기'}</button> : todayRecord ? <span className="attendance-complete"><CalendarDays size={17} /> 오늘 출퇴근 완료</span> : <button className="button primary" type="button" disabled={saving !== null} onClick={() => void runAction('clock-in')}><LogIn size={18} /> {saving === 'clock-in' ? '저장 중…' : '출근하기'}</button>}
+        {!canClock ? <p>운영자 모드에서는 직원 출퇴근을 대신 기록하지 않습니다.</p> : openRecord ? <Button tone="primary" type="button" disabled={saving !== null} onClick={() => void runAction('clock-out')}><LogOut size={18} /> {saving === 'clock-out' ? '저장 중…' : '퇴근하기'}</Button> : todayRecord ? <span className="attendance-complete"><CalendarDays size={17} /> 오늘 출퇴근 완료</span> : <Button tone="primary" type="button" disabled={saving !== null} onClick={() => void runAction('clock-in')}><LogIn size={18} /> {saving === 'clock-in' ? '저장 중…' : '출근하기'}</Button>}
       </div>
     </div>
 
@@ -174,7 +175,7 @@ export function AttendancePanel({
     {canManage && <div className="attendance-policy">
       <div><strong>회사 기준 출근 시각</strong><p>이 시각 이후 출근하면 해당 날짜가 지각으로 표시됩니다. 변경 전 기록은 당시 기준을 유지합니다.</p></div>
       <label><span>기준 시각</span><input type="time" value={standardStartTime} onChange={(event) => setStandardStartTime(event.target.value)} /></label>
-      <button className="button ghost" type="button" disabled={saving !== null || standardStartTime === state.policy.standardStartTime} onClick={() => void saveSettings()}><Save size={17} /> {saving === 'settings' ? '저장 중…' : '기준 저장'}</button>
+      <Button tone="ghost" type="button" disabled={saving !== null || standardStartTime === state.policy.standardStartTime} onClick={() => void saveSettings()}><Save size={17} /> {saving === 'settings' ? '저장 중…' : '기준 저장'}</Button>
     </div>}
   </section>
 }

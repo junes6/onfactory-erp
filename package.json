@@ -22,9 +22,10 @@
     "db:seed": "node scripts/seed-demo.mjs",
     "verify:architecture": "node scripts/verify-architecture.mjs",
     "verify:design": "node scripts/verify-design-tokens.mjs",
-    "verify": "pnpm verify:architecture && pnpm verify:design",
+    "verify": "pnpm verify:architecture && pnpm verify:design && pnpm verify:button",
     "backup:data": "node server/backup-data.mjs",
-    "restore:data": "node server/restore-data.mjs"
+    "restore:data": "node server/restore-data.mjs",
+    "verify:button": "node scripts/verify-button-tone.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

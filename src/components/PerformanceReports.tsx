@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BarChart3, CalendarRange, CheckCircle2, Clock3, FileCheck2, Gauge, LockKeyhole, RefreshCw, Settings2, Sparkles, TrendingUp, UserRoundCheck, X } from 'lucide-react'
 
 import { formatDateTime, formatYearMonthLabel, seoulDateInputValue } from '../utils/dateTime'
-import './PerformanceReports.css'
+import './PerformanceReports.css'import { Button, IconButton } from './ui/Button'
+
 
 type MetricKey = 'completedTasks' | 'dueCompliance' | 'revisionRate' | 'averageCycleHours' | 'journalSubmission' | 'approvalResponseHours'
 
@@ -238,8 +239,8 @@ export function PerformanceReports({ workspaceScope, canManage, onToast, onOpenT
     <header className="performance-header">
       <div><span className="eyebrow">PEOPLE INSIGHT</span><h1>{canManage ? '직원 성과' : '내 성과'}</h1><p>{canManage ? '기존 업무·결재·업무일지 기록만으로 기간별 흐름을 확인합니다.' : '관리자가 공개한 내 업무·결재·업무일지 기반 리포트만 확인합니다.'}</p></div>
       {canManage && <div className="performance-actions">
-        <button className="button secondary" type="button" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /> 지표 설정</button>
-        <button className="button primary" type="button" disabled={saving} onClick={() => void generate()}><RefreshCw size={17} /> {saving ? '생성 중' : '수동 재생성'}</button>
+        <Button tone="secondary" type="button" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /> 지표 설정</Button>
+        <Button tone="primary" type="button" disabled={saving} onClick={() => void generate()}><RefreshCw size={17} /> {saving ? '생성 중' : '수동 재생성'}</Button>
       </div>}
     </header>
 
@@ -255,7 +256,7 @@ export function PerformanceReports({ workspaceScope, canManage, onToast, onOpenT
 
     {loading ? <div className="performance-empty"><RefreshCw className="spin" size={24} /><strong>성과 기록을 계산하고 있습니다</strong></div>
       : privateReport ? <div className="performance-empty performance-private"><LockKeyhole size={28} /><strong>내 성과 리포트는 현재 비공개입니다</strong><p>관리자가 직원 공개를 켜면 이곳에서 본인 리포트만 확인할 수 있습니다.</p></div>
-      : error ? <div className="performance-empty"><strong>{error}</strong><button className="button secondary" type="button" onClick={() => void loadReports()}>다시 시도</button></div>
+      : error ? <div className="performance-empty"><strong>{error}</strong><Button tone="secondary" type="button" onClick={() => void loadReports()}>다시 시도</Button></div>
         : reports.length === 0 ? <div className="performance-empty"><BarChart3 size={28} /><strong>이 기간에 산출할 기록이 없습니다</strong><p>업무 완료와 일지 제출 기록이 쌓이면 자동으로 생성됩니다.{canManage ? ' 업무지시·결재와 일일업무일지를 사용하면 다음 조회부터 리포트가 채워집니다.' : ''}</p></div>
           : <>
           {activeReports.length > 0 && <section className="performance-summary-strip" aria-label={`${periodLabel} 성과 요약`}>
@@ -309,13 +310,13 @@ export function PerformanceReports({ workspaceScope, canManage, onToast, onOpenT
 
     {canManage && settingsOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSettings() }}>
       <section ref={settingsDialogRef} className="modal-card performance-settings" role="dialog" aria-modal="true" aria-labelledby="performance-settings-title" tabIndex={-1}>
-        <header><div><span className="eyebrow">SCORING POLICY</span><h2 id="performance-settings-title">성과 지표 설정</h2></div><button className="icon-button" type="button" aria-label="성과 설정 닫기" onClick={closeSettings}><X size={19} /></button></header>
+        <header><div><span className="eyebrow">SCORING POLICY</span><h2 id="performance-settings-title">성과 지표 설정</h2></div><IconButton tone="ghost" type="button" aria-label="성과 설정 닫기" onClick={closeSettings}><X size={19} /></IconButton></header>
         <p>각 지표의 가중치 합계는 100%여야 합니다. 변경 후 과거 월별 스냅샷은 바뀌지 않습니다.</p>
         <div className="performance-weight-list">
           {metricDefinitions.map((metric) => <label key={metric.key}><span>{metric.label}</span><div><input type="number" min="0" max="100" value={settingsDraft.weights[metric.key]} onChange={(event) => setSettingsDraft((current) => ({ ...current, weights: { ...current.weights, [metric.key]: Number(event.target.value) } }))} /><span>%</span></div></label>)}
         </div>
         <label className="performance-visibility"><input type="checkbox" checked={settingsDraft.employeeVisible} onChange={(event) => setSettingsDraft((current) => ({ ...current, employeeVisible: event.target.checked }))} /><span><strong>직원 본인에게 공개</strong><small>활성화해도 각 직원은 자기 리포트만 볼 수 있습니다. 기본값은 비공개입니다.</small></span></label>
-        <footer><span>현재 합계 <strong>{Object.values(settingsDraft.weights).reduce((sum, value) => sum + Number(value || 0), 0)}%</strong></span><div><button className="button secondary" type="button" onClick={closeSettings}>취소</button><button className="button primary" type="button" disabled={saving} onClick={() => void saveSettings()}>설정 저장</button></div></footer>
+        <footer><span>현재 합계 <strong>{Object.values(settingsDraft.weights).reduce((sum, value) => sum + Number(value || 0), 0)}%</strong></span><div><Button tone="secondary" type="button" onClick={closeSettings}>취소</Button><Button tone="primary" type="button" disabled={saving} onClick={() => void saveSettings()}>설정 저장</Button></div></footer>
       </section>
     </div>}
   </div>

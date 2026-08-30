@@ -50,7 +50,8 @@ import {
   type StoredDocumentAttachment,
   uploadDocumentAttachments,
 } from '../utils/documentAttachments'
-import './CollaborationSuite.css'
+import './CollaborationSuite.css'import { Button } from './ui/Button'
+
 
 type ToastHandler = (message: string) => void
 
@@ -537,13 +538,12 @@ export function MessengerDrawer({
         <div className="messenger-layout">
           <aside className="messenger-sidebar" aria-label="대화 목록">
             <div className="messenger-sidebar-tools">
-              <button
-                className="collab-button primary full"
+              <Button tone="primary" full
                 type="button"
                 onClick={() => { setListMode('people'); setQuery('') }}
               >
                 <UserPlus size={18} /> 새 대화
-              </button>
+              </Button>
               <label className="collab-search messenger-search">
                 <Search size={18} aria-hidden="true" />
                 <span className="sr-only">대화 또는 직원 검색</span>
@@ -753,8 +753,8 @@ function ConversationActionDialog({
         <footer className="collab-dialog-footer">
           <span />
           <div>
-            <button className="collab-button secondary" type="button" onClick={onClose} disabled={pending}>취소</button>
-            <button className={deleting ? 'collab-button danger' : 'collab-button primary'} type="button" data-autofocus onClick={onConfirm} disabled={pending}>{pending ? '처리 중…' : deleting ? '삭제 확정' : '나가기'}</button>
+            <Button tone="ghost" type="button" onClick={onClose} disabled={pending}>취소</Button>
+            <Button tone={deleting ? 'danger' : 'primary'} type="button" data-autofocus onClick={onConfirm} disabled={pending}>{pending ? '처리 중…' : deleting ? '삭제 확정' : '나가기'}</Button>
           </div>
         </footer>
       </div>
@@ -987,7 +987,7 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
             </button>
           ))}
         </div>
-        <div className="schedule-create-group"><span className="schedule-selected-hint">{selectedDate === scheduleToday ? '오늘' : selectedDate.slice(5).replace('-', '/')} 선택됨</span><button className="collab-button primary schedule-create-button" type="button" onClick={() => openCreate()}><Plus size={18} /> 일정 등록</button></div>
+        <div className="schedule-create-group"><span className="schedule-selected-hint">{selectedDate === scheduleToday ? '오늘' : selectedDate.slice(5).replace('-', '/')} 선택됨</span><Button tone="primary" className="schedule-create-button" type="button" onClick={() => openCreate()}><Plus size={18} /> 일정 등록</Button></div>
       </section>
 
       <div className="schedule-workspace">
@@ -1061,7 +1061,7 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
                 <CalendarDays size={32} />
                 <strong>등록된 일정이 없습니다</strong>
                 <span>선택한 날짜에 새 일정을 추가해 보세요.</span>
-                <button className="collab-button secondary" type="button" onClick={() => openCreate(selectedDate)}><Plus size={17} /> 일정 추가</button>
+                <Button tone="ghost" type="button" onClick={() => openCreate(selectedDate)}><Plus size={17} /> 일정 추가</Button>
               </div>
             )}
           </div>
@@ -1194,8 +1194,8 @@ function ScheduleEventDialog({
             <label className="collab-field wide"><span>메모</span><textarea rows={3} value={draft.note} disabled={!canEdit} onChange={(event) => update('note', event.target.value)} placeholder="참석자가 알아야 할 내용을 입력하세요." /></label>
           </div>
           <footer className="collab-dialog-footer">
-            {editing && canEdit ? <button className="collab-button danger" type="button" disabled={submitting} onClick={() => { if (submitting) return; setSubmitting(true); void onDelete().finally(() => setSubmitting(false)) }}><Trash2 size={17} /> 삭제</button> : <span />}
-            <div><button className="collab-button secondary" type="button" onClick={onClose} disabled={submitting}>{canEdit ? '취소' : '닫기'}</button>{canEdit && <button className="collab-button primary" type="submit" disabled={submitting}><Check size={18} /> {submitting ? '저장 중…' : editing ? '수정 저장' : '일정 등록'}</button>}</div>
+            {editing && canEdit ? <Button tone="danger" type="button" disabled={submitting} onClick={() => { if (submitting) return; setSubmitting(true); void onDelete().finally(() => setSubmitting(false)) }}><Trash2 size={17} /> 삭제</Button> : <span />}
+            <div><Button tone="ghost" type="button" onClick={onClose} disabled={submitting}>{canEdit ? '취소' : '닫기'}</Button>{canEdit && <Button tone="primary" type="submit" disabled={submitting}><Check size={18} /> {submitting ? '저장 중…' : editing ? '수정 저장' : '일정 등록'}</Button>}</div>
           </footer>
         </form>
       </div>
@@ -1387,10 +1387,10 @@ function JournalReviewDialog({
           <footer className="collab-dialog-footer">
             <span />
             <div>
-              <button className="collab-button secondary" type="button" onClick={onClose} disabled={submitting}>취소</button>
-              <button className={isReject ? 'collab-button danger' : 'collab-button primary'} type="submit" disabled={!valid || submitting}>
+              <Button tone="ghost" type="button" onClick={onClose} disabled={submitting}>취소</Button>
+              <Button tone={isReject ? 'danger' : 'primary'} type="submit" disabled={!valid || submitting}>
                 {isReject ? <X size={18} /> : <Check size={18} />} {submitting ? '처리 중…' : decision + ' 확정'}
-              </button>
+              </Button>
             </div>
           </footer>
         </form>
@@ -2175,7 +2175,7 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
                 </button>
               ))}
             </div>
-            <button className="collab-button primary" type="button" onClick={() => void createJournal()} disabled={attachmentBusy || journalSaving}><Plus size={18} /> 새 일지</button>
+            <Button tone="primary" type="button" onClick={() => void createJournal()} disabled={attachmentBusy || journalSaving}><Plus size={18} /> 새 일지</Button>
           </div>
         )}
       />
@@ -2279,8 +2279,8 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
               <p>{editor.author} · {editor.department} · 결재자 {editor.approver}</p>
             </div>
             <div className="journal-editor-header-actions">
-              {canModifyJournal && !canEdit && <button className="collab-button secondary compact" type="button" onClick={() => setJournalEditorMode('edit')}><Edit3 size={17} /> 수정하기</button>}
-              <button className="collab-button secondary compact" type="button" onClick={() => void returnToJournalList()} disabled={attachmentBusy || journalSaving}><ArrowLeft size={17} /> 목록으로</button>
+              {canModifyJournal && !canEdit && <Button tone="ghost" size="sm" type="button" onClick={() => setJournalEditorMode('edit')}><Edit3 size={17} /> 수정하기</Button>}
+              <Button tone="ghost" size="sm" type="button" onClick={() => void returnToJournalList()} disabled={attachmentBusy || journalSaving}><ArrowLeft size={17} /> 목록으로</Button>
             </div>
           </header>
 
@@ -2331,7 +2331,7 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
             <section className="journal-entry-section" aria-labelledby="journal-completed-title">
               <div className="journal-entry-section-head">
                 <div><strong id="journal-completed-title">1. 오늘 한 일 <em>필수</em></strong><span>한 일을 블록으로 쌓으세요. Enter로 다음 블록이 추가됩니다.</span></div>
-                {canEdit && <button className="collab-button secondary compact" type="button" onClick={() => void generateTodayDraft()} disabled={aiDraftBusy || journalSaving}><WandSparkles size={17} /> {aiDraftBusy ? '초안 만드는 중…' : '오늘 기록으로 초안 만들기'}</button>}
+                {canEdit && <Button tone="ghost" size="sm" type="button" onClick={() => void generateTodayDraft()} disabled={aiDraftBusy || journalSaving}><WandSparkles size={17} /> {aiDraftBusy ? '초안 만드는 중…' : '오늘 기록으로 초안 만들기'}</Button>}
               </div>
               {canEdit ? renderBlockEditor('completed', completedBlocks, '완료한 업무를 결과 중심으로 입력', '한 일 추가', 1) : (
                 <div className="journal-entry-readonly">
@@ -2399,7 +2399,7 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
                     {commentAttachments.map((attachment) => <span key={attachment.id}><Paperclip size={13} /> {attachment.name}<button type="button" aria-label={attachment.name + ' 제외'} onClick={() => setCommentAttachments((current) => current.filter((item) => item.id !== attachment.id))}><X size={12} /></button></span>)}
                     <button type="button" className="journal-comment-attach" disabled={commentBusy || commentUploading} onClick={() => commentFileRef.current?.click()}><Upload size={14} /> {commentUploading ? '업로드 중…' : '파일'}</button>
                   </div>
-                  <button type="submit" className="collab-button primary compact" disabled={commentBusy || commentUploading || (!commentText.trim() && commentAttachments.length === 0)}><Send size={15} /> {commentBusy ? '남기는 중…' : '댓글 남기기'}</button>
+                  <Button tone="primary" size="sm" type="submit" disabled={commentBusy || commentUploading || (!commentText.trim() && commentAttachments.length === 0)}><Send size={15} /> {commentBusy ? '남기는 중…' : '댓글 남기기'}</Button>
                 </div>
               </form>
             </section>}
@@ -2410,22 +2410,22 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
               <>
                 <span>{autoSaveMessage}</span>
                 <div>
-                  {editor.status === '임시저장' && <button className="collab-button danger" type="button" onClick={() => void deleteJournalDraft()} disabled={journalSaving || attachmentBusy}><Trash2 size={18} /> 초안 삭제</button>}
-                  <button className="collab-button secondary" type="button" onClick={saveDraft} disabled={journalSaving || attachmentBusy}><Save size={18} /> {journalSaving ? '저장 중…' : '임시저장'}</button>
-                  <button className="collab-button primary" type="button" onClick={() => void requestApproval()} disabled={journalSaving || attachmentBusy}><Send size={18} /> {journalSaving ? '저장 중…' : editor.status === '반려' ? '보완 후 재결재 요청' : '결재요청'}</button>
+                  {editor.status === '임시저장' && <Button tone="danger" type="button" onClick={() => void deleteJournalDraft()} disabled={journalSaving || attachmentBusy}><Trash2 size={18} /> 초안 삭제</Button>}
+                  <Button tone="ghost" type="button" onClick={saveDraft} disabled={journalSaving || attachmentBusy}><Save size={18} /> {journalSaving ? '저장 중…' : '임시저장'}</Button>
+                  <Button tone="primary" type="button" onClick={() => void requestApproval()} disabled={journalSaving || attachmentBusy}><Send size={18} /> {journalSaving ? '저장 중…' : editor.status === '반려' ? '보완 후 재결재 요청' : '결재요청'}</Button>
                 </div>
               </>
             ) : canModifyJournal ? (
               <>
                 <span>현재 조회 화면입니다. 내용을 변경하려면 수정하기를 선택하세요.</span>
-                <button className="collab-button primary" type="button" onClick={() => setJournalEditorMode('edit')}><Edit3 size={18} /> 수정하기</button>
+                <Button tone="primary" type="button" onClick={() => setJournalEditorMode('edit')}><Edit3 size={18} /> 수정하기</Button>
               </>
             ) : editor.status === '결재요청' && canManage ? (
               <>
                 <span>관리자 결재 처리</span>
                 <div>
-                  <button className="collab-button danger" type="button" onClick={() => setReviewDecision('반려')}><X size={18} /> 코멘트 후 반려</button>
-                  <button className="collab-button primary" type="button" onClick={() => setReviewDecision('승인')}><Check size={18} /> 코멘트 후 승인</button>
+                  <Button tone="danger" type="button" onClick={() => setReviewDecision('반려')}><X size={18} /> 코멘트 후 반려</Button>
+                  <Button tone="primary" type="button" onClick={() => setReviewDecision('승인')}><Check size={18} /> 코멘트 후 승인</Button>
                 </div>
               </>
             ) : (

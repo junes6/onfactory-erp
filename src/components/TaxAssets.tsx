@@ -12,6 +12,7 @@ import {
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import { TaxWorkspace } from './TaxWorkspace'
 import './TaxAssets.css'
+import { Button, IconButton } from './ui/Button'
 
 type AssetKind = '비품' | '장비' | '차량' | '소프트웨어' | '부동산' | '기타'
 type AssetStatus = '사용 중' | '수리 중' | '보관' | '폐기'
@@ -60,7 +61,7 @@ export function TaxAssetsPage({ workspaceScope, canManage, currentUserId, curren
   return <div className="content-page tax-page">
     <header className="page-header">
       <div><span className="eyebrow">TAX & ASSETS</span><h1>세무 · 자산</h1><p>회사에 적용되는 세무 일정을 확인하고, 당해연도 증빙과 회사 자산을 실제 파일로 보관합니다.</p></div>
-      <div className="page-header-actions">{tab === 'assets' && canManage && <button className="button primary" type="button" onClick={() => setEditingAsset('new')}><Plus size={18} /> 자산 등록</button>}</div>
+      <div className="page-header-actions">{tab === 'assets' && canManage && <Button tone="primary" type="button" onClick={() => setEditingAsset('new')}><Plus size={18} /> 자산 등록</Button>}</div>
     </header>
     <div className="segmented tax-tabs" role="tablist" aria-label="세무·자산 보기">
       <button type="button" role="tab" aria-selected={tab === 'tax'} className={tab === 'tax' ? 'active' : ''} onClick={() => setTab('tax')}><Landmark size={15} /> 세무 일정 · 증빙</button>
@@ -74,7 +75,7 @@ export function TaxAssetsPage({ workspaceScope, canManage, currentUserId, curren
       </section>
       <section className="panel it-list-panel">
         {sortedAssets.length === 0
-          ? <div className="empty-state"><Boxes size={30} /><h3>아직 등록된 자산이 없습니다</h3><p>장비·차량·소프트웨어 등 회사 자산과 구매 증빙을 함께 관리할 수 있습니다.</p>{canManage && <button className="button primary" type="button" onClick={() => setEditingAsset('new')}><Plus size={18} /> 첫 자산 등록</button>}</div>
+          ? <div className="empty-state"><Boxes size={30} /><h3>아직 등록된 자산이 없습니다</h3><p>장비·차량·소프트웨어 등 회사 자산과 구매 증빙을 함께 관리할 수 있습니다.</p>{canManage && <Button tone="primary" type="button" onClick={() => setEditingAsset('new')}><Plus size={18} /> 첫 자산 등록</Button>}</div>
           : <div className="it-rows" role="list">{sortedAssets.map((asset) => <article className="it-row" role="listitem" key={asset.id}>
             <StatusBadge className="status-pill" dot tone={assetTone(asset.status)}>{asset.status}</StatusBadge>
             <div className="it-row-main"><strong>{asset.name}</strong><small>{asset.kind}{asset.serial ? ` · ${asset.serial}` : ''}{asset.acquiredAt ? ` · 취득 ${formatDateLabel(asset.acquiredAt)}` : ''}{asset.owner ? ` · 담당 ${asset.owner}` : ''}{asset.location ? ` · ${asset.location}` : ''}</small></div>
@@ -116,7 +117,7 @@ function useAssetUpload(workspaceScope: string | undefined, onToast: (message: s
     if (uploadedRef.current.size) await deleteDocumentAttachments([...uploadedRef.current], workspaceScope)
     onClose()
   }
-  const section = <><section className="it-upload"><div><strong>구매 증빙 · 보증서 <small>선택</small></strong></div><input ref={fileRef} className="sr-only" type="file" multiple onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void onFiles(files) }} /><button className="button secondary" type="button" disabled={uploading} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '파일 추가'}</button></section>{attachments.length > 0 && <div className="it-file-list">{attachments.map((file) => <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}<button type="button" aria-label={`${file.name} 제외`} onClick={() => void remove(file)}><X size={13} /></button></span>)}</div>}</>
+  const section = <><section className="it-upload"><div><strong>구매 증빙 · 보증서 <small>선택</small></strong></div><input ref={fileRef} className="sr-only" type="file" multiple onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void onFiles(files) }} /><Button tone="secondary" type="button" disabled={uploading} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '파일 추가'}</Button></section>{attachments.length > 0 && <div className="it-file-list">{attachments.map((file) => <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}<button type="button" aria-label={`${file.name} 제외`} onClick={() => void remove(file)}><X size={13} /></button></span>)}</div>}</>
   return { attachments, uploading, section, cancel, clearTracked: () => uploadedRef.current.clear() }
 }
 
@@ -132,11 +133,11 @@ function AssetEditor({ item, workspaceScope, currentUserName, onToast, onClose, 
     setBusy(true)
     if (await onSave(next)) { upload.clearTracked(); onClose() } else setBusy(false)
   }
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && void upload.cancel(onClose)}><section className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="asset-editor-title"><header><div><span className="eyebrow">COMPANY ASSET</span><h2 id="asset-editor-title">{item ? '자산 수정' : '자산 등록'}</h2><p>자산명만 있으면 등록됩니다. 구매 영수증·보증서를 함께 보관하세요.</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={() => void upload.cancel(onClose)}><X size={21} /></button></header><form onSubmit={submit}>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && void upload.cancel(onClose)}><section className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="asset-editor-title"><header><div><span className="eyebrow">COMPANY ASSET</span><h2 id="asset-editor-title">{item ? '자산 수정' : '자산 등록'}</h2><p>자산명만 있으면 등록됩니다. 구매 영수증·보증서를 함께 보관하세요.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={() => void upload.cancel(onClose)}><X size={21} /></IconButton></header><form onSubmit={submit}>
     <div className="form-grid"><label className="form-field"><span>자산명 <em className="field-required">필수</em></span><input name="name" autoFocus defaultValue={item?.name ?? ''} required placeholder="예: 렌더링 워크스테이션" /></label><label className="form-field"><span>종류</span><select name="kind" defaultValue={item?.kind ?? '장비'}>{ASSET_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select></label></div>
     <div className="form-grid"><label className="form-field"><span>시리얼 · 관리번호</span><input name="serial" defaultValue={item?.serial ?? ''} placeholder="예: WS-2026-01" /></label><label className="form-field"><span>취득일</span><input name="acquiredAt" type="date" defaultValue={item?.acquiredAt ?? ''} /></label></div>
     <div className="form-grid"><label className="form-field"><span>취득가 (원)</span><input name="price" type="number" min="0" step="10000" defaultValue={item?.price ?? 0} /></label><label className="form-field"><span>상태</span><select name="status" defaultValue={item?.status ?? '사용 중'}>{ASSET_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label></div>
     <div className="form-grid"><label className="form-field"><span>담당자</span><input name="owner" defaultValue={item?.owner ?? currentUserName} /></label><label className="form-field"><span>위치</span><input name="location" defaultValue={item?.location ?? ''} placeholder="예: 본사 3층" /></label></div>
-    <label className="form-field full"><span>메모</span><textarea name="note" rows={2} defaultValue={item?.note ?? ''} placeholder="보증 기간·계약 정보" /></label>{upload.section}<footer><button type="button" className="button ghost" disabled={busy || upload.uploading} onClick={() => void upload.cancel(onClose)}>취소</button><button type="submit" className="button primary" disabled={busy || upload.uploading}><Check size={18} /> {busy ? '저장 중…' : '저장'}</button></footer>
+    <label className="form-field full"><span>메모</span><textarea name="note" rows={2} defaultValue={item?.note ?? ''} placeholder="보증 기간·계약 정보" /></label>{upload.section}<footer><Button tone="ghost" type="button" disabled={busy || upload.uploading} onClick={() => void upload.cancel(onClose)}>취소</Button><Button tone="primary" type="submit" disabled={busy || upload.uploading}><Check size={18} /> {busy ? '저장 중…' : '저장'}</Button></footer>
   </form></section></div>
 }

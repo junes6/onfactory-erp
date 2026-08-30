@@ -13,6 +13,7 @@ import { applyApprovedValues, canExtractDocumentFile, DOCUMENT_EXTRACTION_FIELDS
 import { DocumentExtractionReview, type DocumentExtractionState } from './DocumentExtractionReview'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ItServices.css'
+import { Button, IconButton } from './ui/Button'
 
 export type ItServicesView = 'it-projects' | 'it-deliverables' | 'it-contracts'
 
@@ -213,7 +214,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
     const overdue = active.filter((project) => project.dueDate && project.dueDate < today)
     const sorted = [...projects].sort((left, right) => (left.dueDate || '9999').localeCompare(right.dueDate || '9999'))
     return <div className="content-page it-page">
-      <header className="page-header"><div><span className="eyebrow">IT PROJECTS</span><h1>프로젝트</h1><p>수주부터 완료까지 상태·마감·담당을 한 줄로 관리합니다.</p></div><div className="page-header-actions"><button className="button primary" type="button" onClick={() => setEditor({ kind: 'project' })}><Plus size={18} /> 프로젝트 등록</button></div></header>
+      <header className="page-header"><div><span className="eyebrow">IT PROJECTS</span><h1>프로젝트</h1><p>수주부터 완료까지 상태·마감·담당을 한 줄로 관리합니다.</p></div><div className="page-header-actions"><Button tone="primary" type="button" onClick={() => setEditor({ kind: 'project' })}><Plus size={18} /> 프로젝트 등록</Button></div></header>
       <section className="it-summary-strip" aria-label="프로젝트 요약">
         <article><span className="tone-blue"><Briefcase size={18} /></span><div><small>진행 중</small><strong>{active.length}건</strong></div></article>
         <article className={dueSoon.length ? 'is-warn' : ''}><span className="tone-warn"><Briefcase size={18} /></span><div><small>7일 내 마감</small><strong>{dueSoon.length}건</strong></div></article>
@@ -222,7 +223,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
       </section>
       <section className="panel it-list-panel">
         {sorted.length === 0
-          ? <div className="empty-state"><Briefcase size={30} /><h3>아직 등록된 프로젝트가 없습니다</h3><p>첫 프로젝트를 등록하면 마감과 담당이 여기에 한 줄씩 표시됩니다.</p><button className="button primary" type="button" onClick={() => setEditor({ kind: 'project' })}><Plus size={17} /> 첫 프로젝트 등록</button></div>
+          ? <div className="empty-state"><Briefcase size={30} /><h3>아직 등록된 프로젝트가 없습니다</h3><p>첫 프로젝트를 등록하면 마감과 담당이 여기에 한 줄씩 표시됩니다.</p><Button tone="primary" type="button" onClick={() => setEditor({ kind: 'project' })}><Plus size={17} /> 첫 프로젝트 등록</Button></div>
           : <div className="it-rows" role="list">{sorted.map((project) => <article className={`it-row${project.dueDate && project.dueDate < today && !['완료', '보류'].includes(project.status) ? ' is-overdue' : ''}`} role="listitem" key={project.id}>
             <StatusBadge className="status-pill" dot tone={projectTone(project.status)}>{project.status}</StatusBadge>
             <div className="it-row-main"><strong>{project.name}</strong><small>{project.client || '거래처 미지정'} · 담당 {project.owner || '미지정'}</small></div>
@@ -244,7 +245,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
   if (view === 'it-deliverables') {
     const visible = deliverables.filter((item) => projectFilter === 'all' || item.projectId === projectFilter).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
     return <div className="content-page it-page">
-      <header className="page-header"><div><span className="eyebrow">DELIVERABLES</span><h1>산출물</h1><p>프로젝트별 파일을 버전과 함께 보관합니다.</p></div><div className="page-header-actions"><button className="button primary" type="button" disabled={projects.length === 0} onClick={() => setEditor({ kind: 'deliverable' })}><Plus size={18} /> 산출물 등록</button></div></header>
+      <header className="page-header"><div><span className="eyebrow">DELIVERABLES</span><h1>산출물</h1><p>프로젝트별 파일을 버전과 함께 보관합니다.</p></div><div className="page-header-actions"><Button tone="primary" type="button" disabled={projects.length === 0} onClick={() => setEditor({ kind: 'deliverable' })}><Plus size={18} /> 산출물 등록</Button></div></header>
       <section className="panel it-list-panel">
         <div className="it-toolbar"><label><span>프로젝트</span><select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">전체 프로젝트</option>{deliverableProjectOptions.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><span className="it-toolbar-count">{visible.length}건</span></div>
         {projects.length === 0
@@ -285,11 +286,11 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
   </div>
   if (contractTab === 'clients') {
     return <div className="content-page it-page">
-      <header className="page-header"><div><span className="eyebrow">CLIENTS</span><h1>계약 · 거래처</h1><p>거래처 정보는 계약 없이도 먼저 등록해 둘 수 있습니다. 계약을 만들 때 거래처를 골라 연결하세요.</p></div><div className="page-header-actions">{canManage && <button className="button primary" type="button" onClick={() => setEditor({ kind: 'client' })}><Plus size={18} /> 거래처 등록</button>}</div></header>
+      <header className="page-header"><div><span className="eyebrow">CLIENTS</span><h1>계약 · 거래처</h1><p>거래처 정보는 계약 없이도 먼저 등록해 둘 수 있습니다. 계약을 만들 때 거래처를 골라 연결하세요.</p></div><div className="page-header-actions">{canManage && <Button tone="primary" type="button" onClick={() => setEditor({ kind: 'client' })}><Plus size={18} /> 거래처 등록</Button>}</div></header>
       {contractTabs}
       <section className="panel it-list-panel">
         {sortedClients.length === 0
-          ? <div className="empty-state"><Building2 size={30} /><h3>등록된 거래처가 없습니다</h3><p>회사명·담당자·연락처만으로 먼저 등록하고, 계약은 나중에 연결하세요.</p>{canManage && <button className="button primary" type="button" onClick={() => setEditor({ kind: 'client' })}><Plus size={18} /> 첫 거래처 등록</button>}</div>
+          ? <div className="empty-state"><Building2 size={30} /><h3>등록된 거래처가 없습니다</h3><p>회사명·담당자·연락처만으로 먼저 등록하고, 계약은 나중에 연결하세요.</p>{canManage && <Button tone="primary" type="button" onClick={() => setEditor({ kind: 'client' })}><Plus size={18} /> 첫 거래처 등록</Button>}</div>
           : <div className="it-rows" role="list">{sortedClients.map((client) => <article className="it-row" role="listitem" key={client.id}>
             <span className="it-client-mark"><Building2 size={17} /></span>
             <div className="it-row-main"><strong>{client.name}</strong><small>{[client.industry, client.businessNo ? `사업자 ${client.businessNo}` : '', client.address].filter(Boolean).join(' · ') || '상세 정보 미입력'}</small></div>
@@ -308,11 +309,11 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
   }
   if (contractTab === 'programs') {
     return <div className="content-page it-page">
-      <header className="page-header"><div><span className="eyebrow">SUPPORT PROGRAMS</span><h1>지원사업 신청관리</h1><p>메인에서 발견한 공고를 준비부터 신청·선정·진행·완료까지 관리합니다. 접수 마감 7일 전부터 강조됩니다.</p></div><div className="page-header-actions">{canManage && <button className="button primary" type="button" onClick={() => setEditor({ kind: 'program' })}><Plus size={18} /> 지원사업 등록</button>}</div></header>
+      <header className="page-header"><div><span className="eyebrow">SUPPORT PROGRAMS</span><h1>지원사업 신청관리</h1><p>메인에서 발견한 공고를 준비부터 신청·선정·진행·완료까지 관리합니다. 접수 마감 7일 전부터 강조됩니다.</p></div><div className="page-header-actions">{canManage && <Button tone="primary" type="button" onClick={() => setEditor({ kind: 'program' })}><Plus size={18} /> 지원사업 등록</Button>}</div></header>
       {contractTabs}
       <section className="panel it-list-panel">
         {sortedPrograms.length === 0
-          ? <div className="empty-state"><Landmark size={30} /><h3>등록된 지원사업이 없습니다</h3><p>사업명·주관기관·접수 기간을 등록하면 마감 일정을 놓치지 않게 표시합니다.</p>{canManage && <button className="button primary" type="button" onClick={() => setEditor({ kind: 'program' })}><Plus size={18} /> 첫 지원사업 등록</button>}</div>
+          ? <div className="empty-state"><Landmark size={30} /><h3>등록된 지원사업이 없습니다</h3><p>사업명·주관기관·접수 기간을 등록하면 마감 일정을 놓치지 않게 표시합니다.</p>{canManage && <Button tone="primary" type="button" onClick={() => setEditor({ kind: 'program' })}><Plus size={18} /> 첫 지원사업 등록</Button>}</div>
           : <div className="it-rows" role="list">{sortedPrograms.map((program) => { const due = programDue(program); return <article className="it-row" role="listitem" key={program.id}>
             <StatusBadge className="status-pill" dot tone={programTone(program.status)}>{program.status}</StatusBadge>
             <div className="it-row-main"><strong>{program.title}</strong><small>{program.agency || '주관기관 미입력'}{program.owner ? ` · 담당 ${program.owner}` : ''}{program.applyStart || program.applyEnd ? ` · 접수 ${program.applyStart ? formatDateLabel(program.applyStart) : '?'} ~ ${program.applyEnd ? formatDateLabel(program.applyEnd) : '?'}` : ''}{program.startDate || program.endDate ? ` · 사업 ${program.startDate ? formatDateLabel(program.startDate) : '?'} ~ ${program.endDate ? formatDateLabel(program.endDate) : '?'}` : ''}</small></div>
@@ -331,11 +332,11 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
     </div>
   }
   return <div className="content-page it-page">
-    <header className="page-header"><div><span className="eyebrow">CONTRACTS</span><h1>계약 · 거래처</h1><p>계약 기간·금액·문서를 거래처별로 관리합니다. 만료 60일 전부터 갱신 준비로 표시됩니다. 거래처 정보와 지원사업은 탭에서 따로 관리합니다.</p></div><div className="page-header-actions">{canManage ? <button className="button primary" type="button" onClick={() => setEditor({ kind: 'contract' })}><Plus size={18} /> 계약 등록</button> : <StatusBadge className="status-pill" tone="neutral">조회 전용</StatusBadge>}</div></header>
+    <header className="page-header"><div><span className="eyebrow">CONTRACTS</span><h1>계약 · 거래처</h1><p>계약 기간·금액·문서를 거래처별로 관리합니다. 만료 60일 전부터 갱신 준비로 표시됩니다. 거래처 정보와 지원사업은 탭에서 따로 관리합니다.</p></div><div className="page-header-actions">{canManage ? <Button tone="primary" type="button" onClick={() => setEditor({ kind: 'contract' })}><Plus size={18} /> 계약 등록</Button> : <StatusBadge className="status-pill" tone="neutral">조회 전용</StatusBadge>}</div></header>
     {contractTabs}
     <section className="panel it-list-panel">
       {sortedContracts.length === 0
-        ? <div className="empty-state"><FileSignature size={30} /><h3>등록된 계약이 없습니다</h3><p>거래처·기간·금액과 계약서 파일을 등록하세요.</p>{canManage && <button className="button primary" type="button" onClick={() => setEditor({ kind: 'contract' })}><Plus size={17} /> 첫 계약 등록</button>}</div>
+        ? <div className="empty-state"><FileSignature size={30} /><h3>등록된 계약이 없습니다</h3><p>거래처·기간·금액과 계약서 파일을 등록하세요.</p>{canManage && <Button tone="primary" type="button" onClick={() => setEditor({ kind: 'contract' })}><Plus size={17} /> 첫 계약 등록</Button>}</div>
         : <div className="it-rows" role="list">{sortedContracts.map((contract) => { const status = contractStatus(contract); return <article className="it-row" role="listitem" key={contract.id}>
           <StatusBadge className="status-pill" dot tone={status.tone}>{status.label}</StatusBadge>
           <div className="it-row-main"><strong>{contract.title}</strong><small>{contract.client}{contract.number ? ` · ${contract.number}` : ''} · {contract.startDate ? formatDateLabel(contract.startDate) : '시작 미정'} ~ {contract.endDate ? formatDateLabel(contract.endDate) : '종료 미정'}</small></div>
@@ -392,14 +393,14 @@ function ProjectEditor({ item, currentUserId, currentUserName, onClose, onSave }
   }
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="it-project-title">
-      <header><div><span className="eyebrow">PROJECT</span><h2 id="it-project-title">{item ? '프로젝트 수정' : '프로젝트 등록'}</h2><p>이름만 입력해도 등록됩니다. 나머지는 나중에 채워도 됩니다.</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
+      <header><div><span className="eyebrow">PROJECT</span><h2 id="it-project-title">{item ? '프로젝트 수정' : '프로젝트 등록'}</h2><p>이름만 입력해도 등록됩니다. 나머지는 나중에 채워도 됩니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
       <form onSubmit={submit}>
         <label className="form-field full"><span>프로젝트명 <em className="field-required">필수</em></span><input name="name" autoFocus defaultValue={item?.name ?? ''} required placeholder="예: 3D 전시 콘텐츠 제작" /></label>
         <div className="form-grid"><label className="form-field"><span>거래처</span><input name="client" defaultValue={item?.client ?? ''} placeholder="예: ○○박물관" /></label><label className="form-field"><span>상태</span><select name="status" defaultValue={item?.status ?? '수주 검토'}>{projectStatuses.map((status) => <option key={status}>{status}</option>)}</select></label></div>
         <div className="form-grid"><label className="form-field"><span>시작일</span><input name="startDate" type="date" defaultValue={item?.startDate ?? seoulDateInputValue()} /></label><label className="form-field"><span>마감일</span><input name="dueDate" type="date" defaultValue={item?.dueDate ?? ''} /></label></div>
         <div className="form-grid"><label className="form-field"><span>담당자</span><input name="owner" defaultValue={item?.owner ?? currentUserName} /></label><label className="form-field"><span>계약 금액 (원)</span><input name="amount" type="number" min="0" step="1000" defaultValue={item?.amount ?? 0} /></label></div>
         <label className="form-field full"><span>메모</span><textarea name="note" rows={3} defaultValue={item?.note ?? ''} placeholder="범위·특이사항" /></label>
-        <footer><button type="button" className="button ghost" disabled={busy} onClick={onClose}>취소</button><button type="submit" className="button primary" disabled={busy}><Check size={18} /> {busy ? '저장 중…' : '저장'}</button></footer>
+        <footer><Button tone="ghost" type="button" disabled={busy} onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={busy}><Check size={18} /> {busy ? '저장 중…' : '저장'}</Button></footer>
       </form>
     </section>
   </div>
@@ -438,7 +439,7 @@ function DeliverableEditor({ item, projects, defaultProjectId, workspaceScope, c
   }
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && void cancel()}>
     <section className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="it-deliverable-title">
-      <header><div><span className="eyebrow">DELIVERABLE</span><h2 id="it-deliverable-title">{item ? '산출물 수정' : '산출물 등록'}</h2><p>프로젝트와 버전을 정하고 파일을 올립니다.</p></div><button className="icon-button" type="button" aria-label="닫기" disabled={busy || uploading} onClick={() => void cancel()}><X size={21} /></button></header>
+      <header><div><span className="eyebrow">DELIVERABLE</span><h2 id="it-deliverable-title">{item ? '산출물 수정' : '산출물 등록'}</h2><p>프로젝트와 버전을 정하고 파일을 올립니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" disabled={busy || uploading} onClick={() => void cancel()}><X size={21} /></IconButton></header>
       <form onSubmit={submit}>
         <div className="form-grid"><label className="form-field"><span>프로젝트 <em className="field-required">필수</em></span><select name="projectId" defaultValue={item?.projectId ?? defaultProjectId} required>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><label className="form-field"><span>버전</span><input name="version" defaultValue={item?.version ?? 'v1.0'} placeholder="v1.0" /></label></div>
         <label className="form-field full"><span>산출물명 <em className="field-required">필수</em></span><input name="name" autoFocus defaultValue={item?.name ?? ''} required placeholder="예: 화면 설계서" /></label>
@@ -453,9 +454,9 @@ function DeliverableEditor({ item, projects, defaultProjectId, workspaceScope, c
             setAttachments((current) => [...current, ...added])
           } catch (error) { onToast(error instanceof Error ? error.message : '파일을 업로드하지 못했습니다.') }
           finally { setUploading(false) }
-        }} /><button className="button secondary" type="button" disabled={uploading || busy} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '파일 추가'}</button></section>
+        }} /><Button tone="secondary" type="button" disabled={uploading || busy} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '파일 추가'}</Button></section>
         {attachments.length > 0 && <div className="it-file-list">{attachments.map((file) => <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}<button type="button" aria-label={`${file.name} 제외`} onClick={() => setAttachments((current) => current.filter((entry) => entry.id !== file.id))}><X size={14} /></button></span>)}</div>}
-        <footer><button type="button" className="button ghost" disabled={busy || uploading} onClick={() => void cancel()}>취소</button><button type="submit" className="button primary" disabled={busy || uploading}><Check size={18} /> {busy ? '저장 중…' : '저장'}</button></footer>
+        <footer><Button tone="ghost" type="button" disabled={busy || uploading} onClick={() => void cancel()}>취소</Button><Button tone="primary" type="submit" disabled={busy || uploading}><Check size={18} /> {busy ? '저장 중…' : '저장'}</Button></footer>
       </form>
     </section>
   </div>
@@ -528,7 +529,7 @@ function ContractEditor({ item, clients, workspaceScope, onToast, onClose, onSav
   }
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && void cancel()}>
     <section className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="it-contract-title">
-      <header><div><span className="eyebrow">CONTRACT</span><h2 id="it-contract-title">{item ? '계약 수정' : '계약 등록'}</h2><p>{item ? '계약서를 다시 올리면 값을 새로 읽어 드립니다.' : '계약서 파일을 올리면 계약명·거래처·기간·금액을 읽어 확인 화면에 보여 드립니다.'}</p></div><button className="icon-button" type="button" aria-label="닫기" disabled={busy || uploading} onClick={() => void cancel()}><X size={21} /></button></header>
+      <header><div><span className="eyebrow">CONTRACT</span><h2 id="it-contract-title">{item ? '계약 수정' : '계약 등록'}</h2><p>{item ? '계약서를 다시 올리면 값을 새로 읽어 드립니다.' : '계약서 파일을 올리면 계약명·거래처·기간·금액을 읽어 확인 화면에 보여 드립니다.'}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" disabled={busy || uploading} onClick={() => void cancel()}><X size={21} /></IconButton></header>
       <form ref={formRef} onSubmit={submit}>
         <section className="it-upload"><div><strong>계약서 파일 <small>PDF·이미지는 AI 자동 입력</small></strong></div><input ref={fileRef} className="sr-only" type="file" multiple accept="application/pdf,image/jpeg,image/png,image/gif,image/webp" onChange={async (event) => {
           const files = Array.from(event.target.files ?? []); event.target.value = ''
@@ -542,7 +543,7 @@ function ContractEditor({ item, clients, workspaceScope, onToast, onClose, onSav
             if (sourceIndex >= 0 && added[sourceIndex]) void extract(added[sourceIndex])
           } catch (error) { onToast(error instanceof Error ? error.message : '문서를 업로드하지 못했습니다.') }
           finally { setUploading(false) }
-        }} /><button className="button secondary" type="button" data-initial-focus={!item ? 'true' : undefined} disabled={uploading || busy} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '계약서 올리기'}</button></section>
+        }} /><Button tone="secondary" type="button" data-initial-focus={!item ? 'true' : undefined} disabled={uploading || busy} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '계약서 올리기'}</Button></section>
         {attachments.length > 0 && <div className="it-file-list">{attachments.map((file) => <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}<button type="button" aria-label={`${file.name} 제외`} onClick={() => setAttachments((current) => current.filter((entry) => entry.id !== file.id))}><X size={14} /></button></span>)}</div>}
         <DocumentExtractionReview
           kind="contract"
@@ -553,14 +554,14 @@ function ContractEditor({ item, clients, workspaceScope, onToast, onClose, onSav
           onRetry={extraction.status !== 'review' && extraction.sourceId ? () => { const source = attachments.find((attachment) => attachment.id === extraction.sourceId); if (source) void extract(source) } : undefined}
         />
         {!showForm
-          ? <section className="it-manual-entry"><p>파일이 없거나 AI 없이 등록하려면 직접 입력할 수 있습니다.</p><div><button type="button" className="button ghost" disabled={busy || uploading} onClick={() => void cancel()}>취소</button><button type="button" className="button secondary" disabled={busy || uploading || extracting} onClick={() => setShowForm(true)}>파일 없이 직접 입력</button></div></section>
+          ? <section className="it-manual-entry"><p>파일이 없거나 AI 없이 등록하려면 직접 입력할 수 있습니다.</p><div><Button tone="ghost" type="button" disabled={busy || uploading} onClick={() => void cancel()}>취소</Button><Button tone="secondary" type="button" disabled={busy || uploading || extracting} onClick={() => setShowForm(true)}>파일 없이 직접 입력</Button></div></section>
           : <>
         <div className="form-grid"><label className="form-field"><span>거래처 <em className="field-required">필수</em></span><input name="client" list="it-client-options" autoFocus defaultValue={approved.client ?? item?.client ?? ''} required placeholder={clients.length ? '등록된 거래처에서 고르거나 직접 입력' : '예: ○○주식회사'} /><datalist id="it-client-options">{clients.map((client) => <option key={client.id} value={client.name}>{[client.contactName, client.phone].filter(Boolean).join(' · ')}</option>)}</datalist></label><label className="form-field"><span>계약명 <em className="field-required">필수</em></span><input name="title" defaultValue={approved.title ?? item?.title ?? ''} required placeholder="예: 유지보수 연간 계약" /></label></div>
         <label className="form-field full"><span>계약번호</span><input name="number" defaultValue={approved.number ?? item?.number ?? ''} placeholder="예: 2026-CT-014" /></label>
         <div className="form-grid"><label className="form-field"><span>계약 시작일</span><input name="startDate" type="date" defaultValue={approved.startDate ?? item?.startDate ?? seoulDateInputValue()} /></label><label className="form-field"><span>계약 종료일</span><input name="endDate" type="date" defaultValue={approved.endDate ?? item?.endDate ?? ''} /></label></div>
         <label className="form-field full"><span>계약 금액 (원)</span><input name="amount" type="number" min="0" step="1000" defaultValue={approved.amount ?? item?.amount ?? 0} /></label>
         <label className="form-field full"><span>메모</span><textarea name="note" rows={2} defaultValue={item?.note ?? ''} placeholder="결제 조건·특약" /></label>
-        <footer><button type="button" className="button ghost" disabled={busy || uploading} onClick={() => void cancel()}>취소</button><button type="submit" className="button primary" disabled={busy || uploading || extracting}><Check size={18} /> {busy ? '저장 중…' : extracting ? 'AI 읽는 중…' : '확인 후 저장'}</button></footer>
+        <footer><Button tone="ghost" type="button" disabled={busy || uploading} onClick={() => void cancel()}>취소</Button><Button tone="primary" type="submit" disabled={busy || uploading || extracting}><Check size={18} /> {busy ? '저장 중…' : extracting ? 'AI 읽는 중…' : '확인 후 저장'}</Button></footer>
           </>}
       </form>
     </section>
@@ -601,14 +602,14 @@ function ClientEditor({ item, onClose, onSave }: { item?: ItClient; onClose: () 
   }
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="it-client-title">
-      <header><div><span className="eyebrow">CLIENT</span><h2 id="it-client-title">{item ? '거래처 수정' : '거래처 등록'}</h2><p>회사명만 있으면 등록됩니다. 나머지는 알게 될 때 채우세요.</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
+      <header><div><span className="eyebrow">CLIENT</span><h2 id="it-client-title">{item ? '거래처 수정' : '거래처 등록'}</h2><p>회사명만 있으면 등록됩니다. 나머지는 알게 될 때 채우세요.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
       <form onSubmit={submit}>
         <div className="form-grid"><label className="form-field"><span>회사명 <em className="field-required">필수</em></span><input name="name" autoFocus defaultValue={item?.name ?? ''} required placeholder="예: ○○주식회사" /></label><label className="form-field"><span>사업자등록번호</span><input name="businessNo" defaultValue={item?.businessNo ?? ''} placeholder="000-00-00000" /></label></div>
         <div className="form-grid"><label className="form-field"><span>담당자</span><input name="contactName" defaultValue={item?.contactName ?? ''} placeholder="이름 · 직책" /></label><label className="form-field"><span>연락처</span><input name="phone" defaultValue={item?.phone ?? ''} placeholder="010-0000-0000" /></label></div>
         <div className="form-grid"><label className="form-field"><span>이메일</span><input name="email" type="email" defaultValue={item?.email ?? ''} placeholder="contact@company.co.kr" /></label><label className="form-field"><span>업종 · 분야</span><input name="industry" defaultValue={item?.industry ?? ''} placeholder="예: 제조 · 유통" /></label></div>
         <label className="form-field full"><span>주소</span><input name="address" defaultValue={item?.address ?? ''} placeholder="도로명 주소" /></label>
         <label className="form-field full"><span>메모</span><textarea name="note" rows={2} defaultValue={item?.note ?? ''} placeholder="거래 이력·특이사항" /></label>
-        <footer><button type="button" className="button ghost" disabled={busy} onClick={onClose}>취소</button><button type="submit" className="button primary" disabled={busy}><Check size={18} /> {busy ? '저장 중…' : '저장'}</button></footer>
+        <footer><Button tone="ghost" type="button" disabled={busy} onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={busy}><Check size={18} /> {busy ? '저장 중…' : '저장'}</Button></footer>
       </form>
     </section>
   </div>
@@ -651,7 +652,7 @@ function ProgramEditor({ item, workspaceScope, currentUserName, onToast, onClose
   }
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && void cancel()}>
     <section className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="it-program-title">
-      <header><div><span className="eyebrow">SUPPORT PROGRAM</span><h2 id="it-program-title">{item ? '지원사업 수정' : '지원사업 등록'}</h2><p>사업명만 있으면 등록됩니다. 접수·사업 기간을 넣으면 마감을 알려 드립니다.</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={() => void cancel()}><X size={21} /></button></header>
+      <header><div><span className="eyebrow">SUPPORT PROGRAM</span><h2 id="it-program-title">{item ? '지원사업 수정' : '지원사업 등록'}</h2><p>사업명만 있으면 등록됩니다. 접수·사업 기간을 넣으면 마감을 알려 드립니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={() => void cancel()}><X size={21} /></IconButton></header>
       <form onSubmit={submit}>
         <div className="form-grid"><label className="form-field"><span>사업명 <em className="field-required">필수</em></span><input name="title" autoFocus defaultValue={item?.title ?? ''} required placeholder="예: 2026 스마트공장 구축 지원" /></label><label className="form-field"><span>주관기관</span><input name="agency" defaultValue={item?.agency ?? ''} placeholder="예: 중소벤처기업부 · 테크노파크" /></label></div>
         <div className="form-grid"><label className="form-field"><span>진행 상태</span><select name="status" defaultValue={item?.status ?? '준비'}>{SUPPORT_PROGRAM_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label><label className="form-field"><span>지원 금액 (원)</span><input name="amount" type="number" min="0" step="10000" defaultValue={item?.amount ?? 0} /></label></div>
@@ -669,9 +670,9 @@ function ProgramEditor({ item, workspaceScope, currentUserName, onToast, onClose
             setAttachments((current) => [...current, ...added])
           } catch (error) { onToast(error instanceof Error ? error.message : '문서를 업로드하지 못했습니다.') }
           finally { setUploading(false) }
-        }} /><button className="button secondary" type="button" disabled={uploading || busy} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '문서 추가'}</button></section>
+        }} /><Button tone="secondary" type="button" disabled={uploading || busy} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '문서 추가'}</Button></section>
         {attachments.length > 0 && <div className="it-file-list">{attachments.map((file) => <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}<button type="button" aria-label={`${file.name} 제외`} onClick={() => setAttachments((current) => current.filter((entry) => entry.id !== file.id))}><X size={13} /></button></span>)}</div>}
-        <footer><button type="button" className="button ghost" disabled={busy || uploading} onClick={() => void cancel()}>취소</button><button type="submit" className="button primary" disabled={busy || uploading}><Check size={18} /> {busy ? '저장 중…' : '저장'}</button></footer>
+        <footer><Button tone="ghost" type="button" disabled={busy || uploading} onClick={() => void cancel()}>취소</Button><Button tone="primary" type="submit" disabled={busy || uploading}><Check size={18} /> {busy ? '저장 중…' : '저장'}</Button></footer>
       </form>
     </section>
   </div>

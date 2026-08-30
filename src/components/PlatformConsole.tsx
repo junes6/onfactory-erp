@@ -33,6 +33,7 @@ import { formatDateTime } from '../utils/dateTime'
 import { Bot, Radar, Sparkles, Users } from 'lucide-react'
 import { StatusBadge } from './StatusBadge'
 import './PlatformConsole.css'
+import { Button, IconButton } from './ui/Button'
 
 export type PlatformSection = 'platform' | 'tenants' | 'support' | 'integrations' | 'audit'
 
@@ -213,10 +214,6 @@ const sectionMeta: Record<PlatformSection, { label: string; title: string; descr
 
 function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: Tone }) {
   return <StatusBadge className="pc-badge" tone={tone}>{children}</StatusBadge>
-}
-
-function Button({ children, onClick, primary = false, small = false, disabled = false, title }: { children: ReactNode; onClick: () => void; primary?: boolean; small?: boolean; disabled?: boolean; title?: string }) {
-  return <button type="button" className={`pc-button${primary ? ' primary' : ''}${small ? ' small' : ''}`} onClick={onClick} disabled={disabled} title={title}>{children}</button>
 }
 
 function toneForService(value: string): Tone {
@@ -407,7 +404,7 @@ function PlatformDialog({
   return <div className="pc-modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section ref={dialogRef} className={`pc-modal${dialog.kind === 'audit-record' ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby="pc-modal-title" tabIndex={-1}>
       <header className="pc-modal-head"><div><span className="pc-modal-kicker">{header[0]}</span><h2 id="pc-modal-title">{header[1]}</h2><p>{header[2]}</p></div><button type="button" className="pc-modal-close" aria-label="닫기" onClick={onClose}><X size={19} /></button></header>
-      {dialog.kind === 'onboarding' && (provisioned ? <div className="pc-modal-body"><div className="pc-safe-note"><ShieldCheck size={18} /><span><strong>{provisioned.tenant.name}</strong> 테넌트와 관리자 계정이 생성되었습니다.</span></div><div className="pc-detail-grid"><DetailStat label="테넌트 ID" value={provisioned.tenant.id} /><DetailStat label="관리자 이메일" value={provisioned.tenant.adminEmail ?? '—'} /><DetailStat label="초기 비밀번호" value={<span className="pc-code">{provisioned.onboarding.temporaryPassword}</span>} /><DetailStat label="만료 시각" value={formatDateTime(provisioned.onboarding.expiresAt)} /></div><div className="pc-form-note"><AlertTriangle size={17} /><span>초기 비밀번호는 다시 표시되지 않습니다. 관리자에게 안전하게 전달하고 첫 로그인에서 새 비밀번호로 변경하게 하세요.</span></div><div className="pc-modal-actions"><Button primary onClick={onClose}>확인</Button></div></div> : <form className="pc-modal-body" onSubmit={submitOnboarding}>
+      {dialog.kind === 'onboarding' && (provisioned ? <div className="pc-modal-body"><div className="pc-safe-note"><ShieldCheck size={18} /><span><strong>{provisioned.tenant.name}</strong> 테넌트와 관리자 계정이 생성되었습니다.</span></div><div className="pc-detail-grid"><DetailStat label="테넌트 ID" value={provisioned.tenant.id} /><DetailStat label="관리자 이메일" value={provisioned.tenant.adminEmail ?? '—'} /><DetailStat label="초기 비밀번호" value={<span className="pc-code">{provisioned.onboarding.temporaryPassword}</span>} /><DetailStat label="만료 시각" value={formatDateTime(provisioned.onboarding.expiresAt)} /></div><div className="pc-form-note"><AlertTriangle size={17} /><span>초기 비밀번호는 다시 표시되지 않습니다. 관리자에게 안전하게 전달하고 첫 로그인에서 새 비밀번호로 변경하게 하세요.</span></div><div className="pc-modal-actions"><Button tone="primary" type="button" onClick={onClose}>확인</Button></div></div> : <form className="pc-modal-body" onSubmit={submitOnboarding}>
         <div className="pc-form-grid"><label className="pc-field"><span>고객사명</span><input name="companyName" data-autofocus required minLength={2} maxLength={80} placeholder="예: 동해식품" /></label><label className="pc-field"><span>업종 구분</span><select name="industryType" defaultValue="food_manufacturing"><option value="food_manufacturing">식품제조 (제품·재고·공장·판매·식품안전)</option><option value="it_services">IT 서비스 (프로젝트·산출물·계약)</option></select></label><label className="pc-field"><span>업종 설명</span><input name="industry" required maxLength={120} placeholder="예: 수산가공 · 온라인 유통" /></label><label className="pc-field"><span>요금제</span><select name="plan"><option>Growth</option><option>Enterprise</option><option>Starter</option></select></label><label className="pc-field"><span>목표 오픈일</span><input name="targetDate" type="date" required /></label><label className="pc-field"><span>최초 관리자 이름</span><input name="adminName" required minLength={2} maxLength={40} placeholder="예: 홍길동" /></label><label className="pc-field"><span>최초 관리자 이메일</span><input name="adminEmail" type="email" required placeholder="admin@company.co.kr" /></label></div>
         <fieldset className="pc-consent"><legend>필수 동의 3항 {consentTerms ? <small>약관 버전 {consentTerms.version}</small> : null}</legend>
           {(consentTerms?.items ?? [{ id: 'dataAccess' as const, title: '운영사의 데이터 접근·활용 범위', summary: '' }, { id: 'privacyOutsourcing' as const, title: '개인정보 처리위탁', summary: '' }, { id: 'aiProcessing' as const, title: 'AI 처리 사실', summary: '' }]).map((item) => <label key={item.id} className="pc-consent-item"><input type="checkbox" name={`consent-${item.id}`} required /><span><strong>{item.title}</strong>{item.summary && <small>{item.summary}</small>}</span></label>)}
@@ -415,18 +412,18 @@ function PlatformDialog({
         </fieldset>
         <div className="pc-form-note"><ShieldCheck size={17} /><span>고객사별 격리 저장소와 승인된 최초 관리자 계정을 생성합니다. 초기 비밀번호는 72시간 후 만료됩니다.</span></div>
         {error && <div className="pc-form-note"><AlertTriangle size={17} /><span>{error}</span></div>}
-        <div className="pc-modal-actions"><Button onClick={onClose} disabled={busy}>취소</Button><button type="submit" className="pc-button primary" disabled={busy}><Plus size={15} /> {busy ? '생성 중…' : '고객사 · 관리자 생성'}</button></div>
+        <div className="pc-modal-actions"><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>취소</Button><Button tone="primary" type="submit" disabled={busy}><Plus size={15} /> {busy ? '생성 중…' : '고객사 · 관리자 생성'}</Button></div>
       </form>)}
       {dialog.kind === 'new-ticket' && <form className="pc-modal-body" onSubmit={submitTicket}>
         <div className="pc-form-grid"><label className="pc-field"><span>고객사</span><select name="tenantId" defaultValue={scope === 'all' ? tenants[0]?.id : scope} data-autofocus>{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label><label className="pc-field"><span>우선순위</span><select name="priority"><option>P3</option><option>P2</option><option>P1</option></select></label><label className="pc-field full"><span>제목</span><input name="title" required minLength={4} placeholder="문의 또는 장애 현상을 요약하세요." /></label><label className="pc-field full"><span>상세 내용</span><textarea name="description" required placeholder="재현 절차, 발생 시각, 영향 범위를 입력하세요." /></label><label className="pc-field"><span>담당자</span><select name="owner"><option>이민지</option><option>박하늘</option><option>김도윤</option><option>미배정</option></select></label><label className="pc-field"><span>증빙 파일</span><input name="evidence" type="file" accept="image/*,.pdf,.txt,.csv" /></label></div>
         <div className="pc-form-note"><ShieldCheck size={17} /><span>증빙은 플랫폼 운영자 전용 저장소에 최대 10MB까지 보관되며 고객사 계정에서는 열람할 수 없습니다.</span></div>
         {error && <div className="pc-form-note"><AlertTriangle size={17} /><span>{error}</span></div>}
-        <div className="pc-modal-actions"><Button onClick={onClose} disabled={busy}>취소</Button><button type="submit" className="pc-button primary" disabled={busy}><Plus size={15} /> {busy ? '등록 중…' : 'CS 등록'}</button></div>
+        <div className="pc-modal-actions"><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>취소</Button><Button tone="primary" type="submit" disabled={busy}><Plus size={15} /> {busy ? '등록 중…' : 'CS 등록'}</Button></div>
       </form>}
-      {dialog.kind === 'timeline' && <div className="pc-modal-body"><div className="pc-detail-grid"><DetailStat label="고객사" value={dialog.ticket.tenant} /><DetailStat label="현재 상태" value={dialog.ticket.status} /><DetailStat label="담당" value={dialog.ticket.owner} /><DetailStat label="SLA" value={dialog.ticket.sla} /></div>{dialog.ticket.evidence && <button type="button" className="pc-button" onClick={() => void downloadEvidence(dialog.ticket).catch((reason) => onToast(reason instanceof Error ? reason.message : 'CS 증빙을 다운로드하지 못했습니다.'))}><FileClock size={16} /> 증빙 다운로드 · {dialog.ticket.evidence.name}</button>}<div className="pc-timeline">{timeline.map((item) => <article key={item.id}><i /><div><strong>{item.at} · {item.title}</strong><span>{item.detail} · {item.actor}</span></div></article>)}</div><div className="pc-modal-actions"><Button primary onClick={onClose}>확인</Button></div></div>}
-      {dialog.kind === 'audit-record' && <div className="pc-modal-body"><div className="pc-safe-note"><ShieldCheck size={16} /> 고객사 원문이나 인증 토큰 없이 운영 메타데이터만 표시합니다.</div><div className="pc-audit-records">{auditRecords.map((event) => <article key={event.id}><span className="pc-code">{event.at}</span><div><strong>{event.event}</strong><span>{event.actor} · {event.scope} · 참조 {event.reference}</span></div><Badge tone={toneForService(event.result)}>{event.result}</Badge></article>)}</div><div className="pc-modal-actions"><Button primary onClick={onClose}>닫기</Button></div></div>}
-      {(dialog.kind === 'owner-notice' || dialog.kind === 'reconnect') && <form className="pc-modal-body" onSubmit={submitAction}><label className="pc-field"><span>전달 대상</span><input readOnly value={dialog.kind === 'owner-notice' ? `${dialog.ticket.owner} · ${dialog.ticket.id}` : `${tenants.find((tenant) => tenant.id === dialog.item.tenantId)?.name ?? ''} 관리자 · ${dialog.item.name}`} /></label><label className="pc-field"><span>전달 내용</span><textarea name="message" data-autofocus required defaultValue={dialog.kind === 'owner-notice' ? `${dialog.ticket.title} 건의 현재 상태(${dialog.ticket.status})를 확인하고 다음 조치를 기록해 주세요.` : `${dialog.item.name} 인증 상태(${dialog.item.status})를 확인하고 판매자센터에서 권한을 다시 승인해 주세요.`} /></label><div className="pc-form-note"><ShieldCheck size={17} /><span>운영자 신원·대상·내용·참조 건을 공유 저장소와 감사로그에 함께 기록합니다.</span></div>{error && <div className="pc-form-note"><AlertTriangle size={17} /><span>{error}</span></div>}<div className="pc-modal-actions"><Button onClick={onClose} disabled={busy}>취소</Button><button type="submit" className="pc-button primary" disabled={busy}>{busy ? '저장 중…' : '운영 액션 저장'}</button></div></form>}
-      {dialog.kind === 'diagnostic' && <div className="pc-modal-body">{dialog.item ? <><div className="pc-detail-grid"><DetailStat label="상태" value={dialog.item.status} /><DetailStat label="최근 동기화" value={dialog.item.lastSync} /><DetailStat label="성공률" value={dialog.item.successRate} /><DetailStat label="화면 진단" value={dialog.item.result} /></div><div className="pc-form-note"><AlertTriangle size={17} /><span>현재 저장된 운영 메타데이터입니다. 외부 API의 최신 토큰 유효성 검사는 채널 커넥터에서 수행해야 합니다.</span></div></> : <><div className="pc-detail-grid"><DetailStat label="표시 연동" value={`${integrations.length}개`} /><DetailStat label="정상" value={`${integrations.filter((item) => item.status === '정상').length}개`} /><DetailStat label="점검 필요" value={`${integrations.filter((item) => item.status !== '정상').length}개`} /><DetailStat label="점검 시각" value={formatDateTime(new Date())} /></div></>}<div className="pc-modal-actions"><Button primary onClick={onClose}>확인</Button></div></div>}
+      {dialog.kind === 'timeline' && <div className="pc-modal-body"><div className="pc-detail-grid"><DetailStat label="고객사" value={dialog.ticket.tenant} /><DetailStat label="현재 상태" value={dialog.ticket.status} /><DetailStat label="담당" value={dialog.ticket.owner} /><DetailStat label="SLA" value={dialog.ticket.sla} /></div>{dialog.ticket.evidence && <Button tone="ghost" type="button" onClick={() => void downloadEvidence(dialog.ticket).catch((reason) => onToast(reason instanceof Error ? reason.message : 'CS 증빙을 다운로드하지 못했습니다.'))}><FileClock size={16} /> 증빙 다운로드 · {dialog.ticket.evidence.name}</Button>}<div className="pc-timeline">{timeline.map((item) => <article key={item.id}><i /><div><strong>{item.at} · {item.title}</strong><span>{item.detail} · {item.actor}</span></div></article>)}</div><div className="pc-modal-actions"><Button tone="primary" type="button" onClick={onClose}>확인</Button></div></div>}
+      {dialog.kind === 'audit-record' && <div className="pc-modal-body"><div className="pc-safe-note"><ShieldCheck size={16} /> 고객사 원문이나 인증 토큰 없이 운영 메타데이터만 표시합니다.</div><div className="pc-audit-records">{auditRecords.map((event) => <article key={event.id}><span className="pc-code">{event.at}</span><div><strong>{event.event}</strong><span>{event.actor} · {event.scope} · 참조 {event.reference}</span></div><Badge tone={toneForService(event.result)}>{event.result}</Badge></article>)}</div><div className="pc-modal-actions"><Button tone="primary" type="button" onClick={onClose}>닫기</Button></div></div>}
+      {(dialog.kind === 'owner-notice' || dialog.kind === 'reconnect') && <form className="pc-modal-body" onSubmit={submitAction}><label className="pc-field"><span>전달 대상</span><input readOnly value={dialog.kind === 'owner-notice' ? `${dialog.ticket.owner} · ${dialog.ticket.id}` : `${tenants.find((tenant) => tenant.id === dialog.item.tenantId)?.name ?? ''} 관리자 · ${dialog.item.name}`} /></label><label className="pc-field"><span>전달 내용</span><textarea name="message" data-autofocus required defaultValue={dialog.kind === 'owner-notice' ? `${dialog.ticket.title} 건의 현재 상태(${dialog.ticket.status})를 확인하고 다음 조치를 기록해 주세요.` : `${dialog.item.name} 인증 상태(${dialog.item.status})를 확인하고 판매자센터에서 권한을 다시 승인해 주세요.`} /></label><div className="pc-form-note"><ShieldCheck size={17} /><span>운영자 신원·대상·내용·참조 건을 공유 저장소와 감사로그에 함께 기록합니다.</span></div>{error && <div className="pc-form-note"><AlertTriangle size={17} /><span>{error}</span></div>}<div className="pc-modal-actions"><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>취소</Button><Button tone="primary" type="submit" disabled={busy}>{busy ? '저장 중…' : '운영 액션 저장'}</Button></div></form>}
+      {dialog.kind === 'diagnostic' && <div className="pc-modal-body">{dialog.item ? <><div className="pc-detail-grid"><DetailStat label="상태" value={dialog.item.status} /><DetailStat label="최근 동기화" value={dialog.item.lastSync} /><DetailStat label="성공률" value={dialog.item.successRate} /><DetailStat label="화면 진단" value={dialog.item.result} /></div><div className="pc-form-note"><AlertTriangle size={17} /><span>현재 저장된 운영 메타데이터입니다. 외부 API의 최신 토큰 유효성 검사는 채널 커넥터에서 수행해야 합니다.</span></div></> : <><div className="pc-detail-grid"><DetailStat label="표시 연동" value={`${integrations.length}개`} /><DetailStat label="정상" value={`${integrations.filter((item) => item.status === '정상').length}개`} /><DetailStat label="점검 필요" value={`${integrations.filter((item) => item.status !== '정상').length}개`} /><DetailStat label="점검 시각" value={formatDateTime(new Date())} /></div></>}<div className="pc-modal-actions"><Button tone="primary" type="button" onClick={onClose}>확인</Button></div></div>}
     </section>
   </div>
 }
@@ -538,14 +535,14 @@ function ControlBriefing({ briefing, loading, onRefresh, onEnterTenant, onSelect
   }
   const findings = briefing?.findings ?? []
   const visible = showAll ? findings : findings.slice(0, 6)
-  return <Panel title="AI 운영 브리핑" subtitle={briefing ? `${formatDateTime(briefing.generatedAt)} 기준 · ${briefing.mode === 'ai' ? 'AI 모델 + 규칙' : '규칙 기반 (모델 키 미설정)'}` : '실시간 신호 수집 중'} tools={<button type="button" className="pc-button ghost" onClick={onRefresh} disabled={loading}><RefreshCw size={14} /> 새로 고침</button>}>
+  return <Panel title="AI 운영 브리핑" subtitle={briefing ? `${formatDateTime(briefing.generatedAt)} 기준 · ${briefing.mode === 'ai' ? 'AI 모델 + 규칙' : '규칙 기반 (모델 키 미설정)'}` : '실시간 신호 수집 중'} tools={<Button tone="quiet" type="button" onClick={onRefresh} disabled={loading}><RefreshCw size={14} /> 새로 고침</Button>}>
     <div className="pc-briefing">
       <div className="pc-briefing-head"><span className="pc-briefing-icon"><Sparkles size={18} /></span><div><strong>{briefing?.headline ?? '브리핑을 준비하고 있습니다.'}</strong>{briefing && <span className="pc-briefing-chips"><em>고객사 {briefing.summary.tenants}</em><em>24시간 활동 {briefing.summary.active24h}</em><em>멤버 {briefing.summary.members}</em><em className={briefing.summary.openTickets ? 'is-warn' : ''}>열린 CS {briefing.summary.openTickets}</em><em className={briefing.summary.pendingProposals ? 'is-info' : ''}>AI 제안 대기 {briefing.summary.pendingProposals}</em><em className={briefing.summary.sentinelAlerts ? 'is-warn' : ''}>센티널 {briefing.summary.sentinelAlerts}</em><em className={briefing.summary.consentMissing ? 'is-warn' : ''}>약관 미동의 {briefing.summary.consentMissing}</em></span>}</div></div>
       <ol className="pc-finding-list">
         {visible.map((finding) => <li key={finding.id} className={`severity-${finding.severity}`}>
           <Badge tone={severityTone(finding.severity)}>{severityLabel(finding.severity)}</Badge>
           <div><strong><button type="button" className="pc-link" onClick={() => onSelectTenant(finding.tenantId)}>{finding.tenantName}</button> · {finding.title}</strong><span>{finding.detail}</span><small>권장: {finding.action}</small></div>
-          <div className="pc-finding-actions"><Button small onClick={() => { onSelectTenant(finding.tenantId); if (/티켓/.test(finding.title)) onSectionChange('support') }}>상세</Button><Button small primary onClick={() => onEnterTenant(finding.tenantId)}><ArrowRight size={13} /> 접속</Button></div>
+          <div className="pc-finding-actions"><Button tone="ghost" size="sm" type="button" onClick={() => { onSelectTenant(finding.tenantId); if (/티켓/.test(finding.title)) onSectionChange('support') }}>상세</Button><Button tone="primary" size="sm" type="button" onClick={() => onEnterTenant(finding.tenantId)}><ArrowRight size={13} /> 접속</Button></div>
         </li>)}
         {briefing && findings.length === 0 && <li className="severity-info"><Badge tone="success">정상</Badge><div><strong>우선 조치할 신호가 없습니다.</strong><span>모든 고객사가 정상 범위에서 운영 중입니다.</span></div></li>}
       </ol>
@@ -558,7 +555,7 @@ function ControlBriefing({ briefing, loading, onRefresh, onEnterTenant, onSelect
         </div>
         <form className="pc-assistant-form" onSubmit={(event) => { event.preventDefault(); void ask(question) }}>
           <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="관제 데이터에 대해 물어보세요" aria-label="AI 관제 질문" disabled={asking} />
-          <button type="submit" className="pc-button primary" disabled={asking || !question.trim()}><Send size={14} /> 질문</button>
+          <Button tone="primary" type="submit" disabled={asking || !question.trim()}><Send size={14} /> 질문</Button>
         </form>
         <div className="pc-assistant-presets">{['지금 문제 있는 고객사는?', '관리자 계정 현황', '약관 동의 현황', '열린 티켓 정리'].map((preset) => <button key={preset} type="button" onClick={() => void ask(preset)} disabled={asking}>{preset}</button>)}</div>
       </div>
@@ -582,7 +579,7 @@ function TenantControlTable({ tenants, selectedTenantId, onSelectTenant, onEnter
         <td className={tenant.metrics.openTickets ? 'is-warn' : ''}>{tenant.metrics.openTickets}건</td>
         <td>{tenant.metrics.pendingProposals ?? 0}건{tenant.metrics.sentinelAlerts ? <small className="pc-cell-sub is-warn">센티널 {tenant.metrics.sentinelAlerts}</small> : null}</td>
         <td>{tenant.consentCurrent ? <Badge tone="success">동의</Badge> : <Badge tone="warning">재동의</Badge>}</td>
-        <td><Button primary small onClick={() => onEnterTenant(tenant.id)}><ArrowRight size={13} /> 접속</Button></td>
+        <td><Button tone="primary" size="sm" type="button" onClick={() => onEnterTenant(tenant.id)}><ArrowRight size={13} /> 접속</Button></td>
       </tr> })}
     </tbody>
   </table></div>
@@ -616,7 +613,7 @@ function TenantCard({ tenant, selected, onSelect, onEnter }: { tenant: Tenant; s
           <div><dt>관리자</dt><dd>{tenant.admins?.[0] ? `${tenant.admins[0].name}${tenant.admins.length > 1 ? ` 외 ${tenant.admins.length - 1}` : ''}` : '없음'}</dd></div>
         </dl>
       </button>
-      <div className="pc-tenant-card-actions"><span className={`pc-signal-text ${signal.tone}`}>{signal.label}</span><Button primary small onClick={onEnter}><ArrowRight size={14} /> 접속</Button></div>
+      <div className="pc-tenant-card-actions"><span className={`pc-signal-text ${signal.tone}`}>{signal.label}</span><Button tone="primary" size="sm" type="button" onClick={onEnter}><ArrowRight size={14} /> 접속</Button></div>
     </article>
   )
 }
@@ -674,9 +671,9 @@ function TenantDetail({ tenant, onSectionChange, onRequestSupport, onScope, onEn
           </div>
         </div>
         <div className="pc-detail-actions">
-          <Button onClick={() => { onScope(tenant.id); onSectionChange('support') }}><LifeBuoy size={15} /> 관련 CS 보기</Button>
-          <Button onClick={() => onRequestSupport(tenant)}><LockKeyhole size={15} /> 지원 세션 요청</Button>
-          <Button primary onClick={() => onEnterTenant(tenant.id)}><ArrowRight size={15} /> 워크스페이스 접속</Button>
+          <Button tone="ghost" type="button" onClick={() => { onScope(tenant.id); onSectionChange('support') }}><LifeBuoy size={15} /> 관련 CS 보기</Button>
+          <Button tone="ghost" type="button" onClick={() => onRequestSupport(tenant)}><LockKeyhole size={15} /> 지원 세션 요청</Button>
+          <Button tone="primary" type="button" onClick={() => onEnterTenant(tenant.id)}><ArrowRight size={15} /> 워크스페이스 접속</Button>
         </div>
       </div>
     </aside>
@@ -699,10 +696,10 @@ function Overview({ scope, scopedTenants, scopedTickets, scopedIntegrations, sel
     <div className="pc-workspace pc-control-center">
       <div className="pc-overview-stack">
         <ControlBriefing briefing={briefing} loading={briefingLoading} onRefresh={() => void loadBriefing()} onEnterTenant={props.onEnterTenant} onSelectTenant={onSelectTenant} onSectionChange={props.onSectionChange} />
-        <Panel title="고객사 관제 보드" subtitle="실제 스토어 집계 · 30초마다 자동 갱신 · 행을 누르면 오른쪽에 상세·계정 목록" tools={<button type="button" className="pc-button ghost" onClick={() => props.onSectionChange('tenants')}><Radar size={14} /> 고객사 관리 <ArrowRight size={14} /></button>} footer={`${scopedTenants.length}개 고객사 · 범위: ${scope === 'all' ? '전체' : selectedTenant?.name ?? ''}`}>
+        <Panel title="고객사 관제 보드" subtitle="실제 스토어 집계 · 30초마다 자동 갱신 · 행을 누르면 오른쪽에 상세·계정 목록" tools={<Button tone="quiet" type="button" onClick={() => props.onSectionChange('tenants')}><Radar size={14} /> 고객사 관리 <ArrowRight size={14} /></Button>} footer={`${scopedTenants.length}개 고객사 · 범위: ${scope === 'all' ? '전체' : selectedTenant?.name ?? ''}`}>
           <TenantControlTable tenants={scopedTenants} selectedTenantId={selectedTenant?.id} onSelectTenant={onSelectTenant} onEnterTenant={props.onEnterTenant} />
         </Panel>
-        <Panel title="지금 확인할 항목" subtitle="장애·SLA·인증 문제만 표시" tools={<button type="button" className="pc-button ghost" onClick={() => props.onSectionChange('support')}>CS 전체 <ArrowRight size={14} /></button>}>
+        <Panel title="지금 확인할 항목" subtitle="장애·SLA·인증 문제만 표시" tools={<Button tone="quiet" type="button" onClick={() => props.onSectionChange('support')}>CS 전체 <ArrowRight size={14} /></Button>}>
           <div className="pc-alert-list">
             {exceptionTickets.map((ticket) => (
               <div className="pc-alert" key={ticket.id}>
@@ -842,7 +839,7 @@ function TicketDetail({ ticket, props, onOpenDialog }: { ticket?: SupportTicket;
       <div>
         <div className="pc-detail-grid"><DetailStat label="고객사" value={ticket.tenant} /><DetailStat label="SLA" value={ticket.sla} /><DetailStat label="상태" value={ticket.status} /><DetailStat label={ticket.requesterName ? '요청자' : '담당'} value={ticket.requesterName || ticket.owner} /></div>
         <div className="pc-detail-section"><strong>접수 내용</strong><p>{ticket.description || '상세 내용이 없습니다.'}</p></div>
-        {ticket.evidence && <button type="button" className="pc-button small" onClick={() => void downloadEvidence(ticket).catch((reason) => props.onToast(reason instanceof Error ? reason.message : 'CS 증빙을 다운로드하지 못했습니다.'))}><FileClock size={15} /> {ticket.evidence.name} 다운로드</button>}
+        {ticket.evidence && <Button tone="ghost" size="sm" type="button" onClick={() => void downloadEvidence(ticket).catch((reason) => props.onToast(reason instanceof Error ? reason.message : 'CS 증빙을 다운로드하지 못했습니다.'))}><FileClock size={15} /> {ticket.evidence.name} 다운로드</Button>}
         {ticket.source === 'developer-support' && (
           <section className="pc-support-thread" aria-label="고객사 개발 지원 대화">
             <div className="pc-support-thread-head"><div><MessageCircle size={16} /><strong>고객사 메신저</strong></div><span>{ticket.messageCount ?? supportConversation?.messages.length ?? 0}개 메시지</span></div>
@@ -865,8 +862,8 @@ function TicketDetail({ ticket, props, onOpenDialog }: { ticket?: SupportTicket;
               {replyAttachments.length > 0 && <div className="pc-support-pending-files">{replyAttachments.map((attachment) => <span key={attachment.id}><Paperclip size={13} /><span>{attachment.name} · {attachment.size}</span><button type="button" aria-label={`${attachment.name} 첨부 취소`} onClick={() => void removeReplyAttachment(attachment)} disabled={replyAttachmentUploading || replySending}><X size={13} /></button></span>)}</div>}
               <div className="pc-support-reply-actions">
                 <input ref={replyAttachmentInputRef} className="pc-visually-hidden" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void chooseReplyAttachments(files) }} />
-                <button className="pc-button" type="button" disabled={replyAttachmentUploading || replySending || conversationLoading || Boolean(conversationError)} onClick={() => replyAttachmentInputRef.current?.click()}><Paperclip size={15} /> {replyAttachmentUploading ? '업로드 중…' : '파일 첨부'}</button>
-                <button className="pc-button primary" type="submit" disabled={!reply.trim() || replySending || replyAttachmentUploading || conversationLoading || Boolean(conversationError)}><Send size={15} /> {replySending ? '전송 중…' : '메신저 답장'}</button>
+                <Button tone="ghost" type="button" disabled={replyAttachmentUploading || replySending || conversationLoading || Boolean(conversationError)} onClick={() => replyAttachmentInputRef.current?.click()}><Paperclip size={15} /> {replyAttachmentUploading ? '업로드 중…' : '파일 첨부'}</Button>
+                <Button tone="primary" type="submit" disabled={!reply.trim() || replySending || replyAttachmentUploading || conversationLoading || Boolean(conversationError)}><Send size={15} /> {replySending ? '전송 중…' : '메신저 답장'}</Button>
               </div>
             </form>
           </section>
@@ -876,10 +873,10 @@ function TicketDetail({ ticket, props, onOpenDialog }: { ticket?: SupportTicket;
       <div className="pc-detail-actions">
         <label className="pc-field"><span>상태</span><select value={statusDraft} onChange={(event) => setStatusDraft(event.target.value)}><option>접수</option><option>기술팀 처리중</option><option>고객 회신 대기</option><option>수정본 검증중</option><option>해결</option><option>종료</option></select></label>
         <label className="pc-field"><span>담당자</span><select value={ownerDraft} onChange={(event) => setOwnerDraft(event.target.value)}><option>개발운영진</option><option>이민지</option><option>박하늘</option><option>김도윤</option><option>미배정</option></select></label>
-        <Button primary disabled={saving || (statusDraft === ticket.status && ownerDraft === ticket.owner)} onClick={() => void saveAssignment()}><CheckCircle2 size={15} /> {saving ? '저장 중…' : '상태 저장'}</Button>
-        <Button onClick={() => onOpenDialog({ kind: 'timeline', ticket })}><FileClock size={15} /> 처리 이력</Button>
-        <Button onClick={() => onOpenDialog({ kind: 'owner-notice', ticket })}><UserCheck size={15} /> 담당자 알림</Button>
-        <Button primary disabled={!tenant} onClick={() => tenant && props.onRequestSupport(tenant)}><LockKeyhole size={15} /> 지원 세션 요청</Button>
+        <Button tone="primary" type="button" disabled={saving || (statusDraft === ticket.status && ownerDraft === ticket.owner)} onClick={() => void saveAssignment()}><CheckCircle2 size={15} /> {saving ? '저장 중…' : '상태 저장'}</Button>
+        <Button tone="ghost" type="button" onClick={() => onOpenDialog({ kind: 'timeline', ticket })}><FileClock size={15} /> 처리 이력</Button>
+        <Button tone="ghost" type="button" onClick={() => onOpenDialog({ kind: 'owner-notice', ticket })}><UserCheck size={15} /> 담당자 알림</Button>
+        <Button tone="primary" type="button" disabled={!tenant} onClick={() => tenant && props.onRequestSupport(tenant)}><LockKeyhole size={15} /> 지원 세션 요청</Button>
       </div>
     </div>
   </aside>
@@ -904,7 +901,7 @@ function SupportView({ scopedTickets, onOpenDialog, props }: SectionProps) {
       {tickets.length ? <div className="pc-table-wrap"><table className="pc-table">
         <thead><tr><th>티켓</th><th>고객사</th><th>우선순위</th><th>상태</th><th>담당</th><th>SLA</th><th aria-label="상세" /></tr></thead>
         <tbody>{tickets.map((ticket) => <tr key={ticket.id} className={selectedTicket?.id === ticket.id ? 'selected' : undefined}>
-          <td><span className="pc-cell-copy"><strong>{ticket.title}</strong><span>{ticket.id}{ticket.newRequest && <Badge tone="danger">새 요청</Badge>}{ticket.unanswered && !ticket.newRequest && <Badge tone="warning">미답변</Badge>}</span></span></td><td>{ticket.tenant}</td><td><Badge tone={toneForService(ticket.priority)}>{ticket.priority}</Badge></td><td><Badge tone={ticket.status.includes('대기') ? 'warning' : 'info'}>{ticket.status}</Badge></td><td>{ticket.owner}</td><td className="pc-code"><strong>{ticket.sla}</strong></td><td><button type="button" className="pc-row-button" aria-label={`${ticket.id} 상세 보기`} onClick={() => setSelectedTicketId(ticket.id)}><ChevronRight size={17} /></button></td>
+          <td><span className="pc-cell-copy"><strong>{ticket.title}</strong><span>{ticket.id}{ticket.newRequest && <Badge tone="danger">새 요청</Badge>}{ticket.unanswered && !ticket.newRequest && <Badge tone="warning">미답변</Badge>}</span></span></td><td>{ticket.tenant}</td><td><Badge tone={toneForService(ticket.priority)}>{ticket.priority}</Badge></td><td><Badge tone={ticket.status.includes('대기') ? 'warning' : 'info'}>{ticket.status}</Badge></td><td>{ticket.owner}</td><td className="pc-code"><strong>{ticket.sla}</strong></td><td><IconButton tone="ghost" size="sm" type="button" aria-label={`${ticket.id} 상세 보기`} onClick={() => setSelectedTicketId(ticket.id)}><ChevronRight size={17} /></IconButton></td>
         </tr>)}</tbody>
       </table></div> : <EmptyState label="선택한 조건의 티켓이 없습니다." />}
     </Panel>
@@ -924,9 +921,9 @@ function IntegrationDetail({ item, props, onScope, onOpenDialog }: { item?: Inte
         <div className="pc-detail-section"><strong>데이터 격리</strong><p>{item.kind === 'AI' ? '프롬프트와 답변 원문은 운영자에게 공개되지 않습니다.' : '인증 토큰과 주문 원문은 표시하지 않습니다.'}</p></div>
       </div>
       <div className="pc-detail-actions">
-        <Button onClick={() => onOpenDialog({ kind: 'diagnostic', item })}><Activity size={15} /> 진단 상세</Button>
-        {item.status !== '정상' && <Button primary onClick={() => onOpenDialog({ kind: 'reconnect', item })}><KeyRound size={15} /> 고객사 재연결 요청</Button>}
-        <Button onClick={() => { onScope(tenant.id); props.onSectionChange('support') }}><LifeBuoy size={15} /> 관련 CS 보기</Button>
+        <Button tone="ghost" type="button" onClick={() => onOpenDialog({ kind: 'diagnostic', item })}><Activity size={15} /> 진단 상세</Button>
+        {item.status !== '정상' && <Button tone="primary" type="button" onClick={() => onOpenDialog({ kind: 'reconnect', item })}><KeyRound size={15} /> 고객사 재연결 요청</Button>}
+        <Button tone="ghost" type="button" onClick={() => { onScope(tenant.id); props.onSectionChange('support') }}><LifeBuoy size={15} /> 관련 CS 보기</Button>
       </div>
     </div>
   </aside>
@@ -943,7 +940,7 @@ function IntegrationsView({ scopedIntegrations, onScope, onOpenDialog, props }: 
       {items.length ? <div className="pc-table-wrap"><table className="pc-table">
         <thead><tr><th>서비스</th><th>고객사</th><th>구분</th><th>상태</th><th>최근 동기화</th><th>성공률</th><th>진단</th><th aria-label="상세" /></tr></thead>
         <tbody>{items.map((item) => { const tenant = tenants.find((value) => value.id === item.tenantId); return <tr key={item.id} className={selected?.id === item.id ? 'selected' : undefined}>
-          <td><div className="pc-cell-main"><span className="pc-logo channel">{item.short}</span><span className="pc-cell-copy"><strong>{item.name}</strong><span>{item.id}</span></span></div></td><td>{tenant?.name}</td><td>{item.kind}</td><td><Badge tone={toneForService(item.status)}>{item.status}</Badge></td><td className="pc-code">{item.lastSync}</td><td>{item.successRate}</td><td>{item.result}</td><td><button type="button" className="pc-row-button" aria-label={`${item.name} 상세 보기`} onClick={() => setSelectedId(item.id)}><ChevronRight size={17} /></button></td>
+          <td><div className="pc-cell-main"><span className="pc-logo channel">{item.short}</span><span className="pc-cell-copy"><strong>{item.name}</strong><span>{item.id}</span></span></div></td><td>{tenant?.name}</td><td>{item.kind}</td><td><Badge tone={toneForService(item.status)}>{item.status}</Badge></td><td className="pc-code">{item.lastSync}</td><td>{item.successRate}</td><td>{item.result}</td><td><IconButton tone="ghost" size="sm" type="button" aria-label={`${item.name} 상세 보기`} onClick={() => setSelectedId(item.id)}><ChevronRight size={17} /></IconButton></td>
         </tr> })}</tbody>
       </table></div> : <EmptyState label="선택한 조건의 연동이 없습니다." />}
     </Panel>
@@ -963,7 +960,7 @@ function AuditDetail({ event, props, onOpenDialog }: { event?: AuditEvent; props
         <div className="pc-detail-section"><strong>허용 범위</strong><p>{event.scope}</p></div>
         <div className="pc-safe-note"><ShieldCheck size={16} /> 실제 운영자 신원으로 기록되며 고객사 사용자를 가장하지 않습니다.</div>
       </div>
-      <div className="pc-detail-actions"><Button onClick={() => onOpenDialog({ kind: 'audit-record', event })}><ExternalLink size={15} /> 전체 기록</Button><Button primary onClick={() => props.onRequestSupport(tenant)}><LockKeyhole size={15} /> 새 지원 세션 요청</Button></div>
+      <div className="pc-detail-actions"><Button tone="ghost" type="button" onClick={() => onOpenDialog({ kind: 'audit-record', event })}><ExternalLink size={15} /> 전체 기록</Button><Button tone="primary" type="button" onClick={() => props.onRequestSupport(tenant)}><LockKeyhole size={15} /> 새 지원 세션 요청</Button></div>
     </div>
   </aside>
 }
@@ -975,11 +972,11 @@ function AuditView({ scope, scopedTenants, onOpenDialog, props }: SectionProps) 
   const selected = events.find((event) => event.id === selectedId) ?? events[0]
   const scopedTenant = scope === 'all' ? undefined : scopedTenants[0]
   return <div className="pc-workspace">
-    <Panel title="접근 감사로그" subtitle="조회·진단·지원 세션 활동을 실제 운영자 신원으로 기록" tools={<Button small primary={Boolean(scopedTenant)} disabled={!scopedTenant} title={!scopedTenant ? '상단에서 고객사를 선택해 주세요.' : undefined} onClick={() => scopedTenant ? props.onRequestSupport(scopedTenant) : props.onToast('지원 세션을 요청할 고객사를 먼저 선택해 주세요.')}><Plus size={15} /> 지원 세션 요청</Button>} footer="보존기간 365일 · 진행중 지원 세션 0건">
+    <Panel title="접근 감사로그" subtitle="조회·진단·지원 세션 활동을 실제 운영자 신원으로 기록" tools={<Button tone={scopedTenant ? 'primary' : 'ghost'} size="sm" type="button" disabled={!scopedTenant} title={!scopedTenant ? '상단에서 고객사를 선택해 주세요.' : undefined} onClick={() => scopedTenant ? props.onRequestSupport(scopedTenant) : props.onToast('지원 세션을 요청할 고객사를 먼저 선택해 주세요.')}><Plus size={15} /> 지원 세션 요청</Button>} footer="보존기간 365일 · 진행중 지원 세션 0건">
       {events.length ? <div className="pc-table-wrap"><table className="pc-table">
         <thead><tr><th>시간</th><th>이벤트</th><th>고객사</th><th>운영자</th><th>허용 범위</th><th>결과</th><th>참조</th><th aria-label="상세" /></tr></thead>
         <tbody>{events.map((event) => { const tenant = tenants.find((value) => value.id === event.tenantId); return <tr key={event.id} className={selected?.id === event.id ? 'selected' : undefined}>
-          <td className="pc-code">{event.at}</td><td><span className="pc-cell-copy"><strong>{event.event}</strong><span>{event.id}</span></span></td><td>{tenant?.name}</td><td>{event.actor}</td><td>{event.scope}</td><td><Badge tone={toneForService(event.result)}>{event.result}</Badge></td><td className="pc-code">{event.reference}</td><td><button type="button" className="pc-row-button" aria-label={`${event.id} 상세 보기`} onClick={() => setSelectedId(event.id)}><ChevronRight size={17} /></button></td>
+          <td className="pc-code">{event.at}</td><td><span className="pc-cell-copy"><strong>{event.event}</strong><span>{event.id}</span></span></td><td>{tenant?.name}</td><td>{event.actor}</td><td>{event.scope}</td><td><Badge tone={toneForService(event.result)}>{event.result}</Badge></td><td className="pc-code">{event.reference}</td><td><IconButton tone="ghost" size="sm" type="button" aria-label={`${event.id} 상세 보기`} onClick={() => setSelectedId(event.id)}><ChevronRight size={17} /></IconButton></td>
         </tr> })}</tbody>
       </table></div> : <EmptyState label="선택한 고객사의 감사 이벤트가 없습니다." />}
     </Panel>
@@ -1205,10 +1202,10 @@ export function PlatformConsole(props: PlatformConsoleProps) {
             <p>{meta.description}</p>
           </div>
           <div className="pc-actions">
-            {props.section === 'tenants' && <Button onClick={() => setDialog({ kind: 'onboarding' })}><Plus size={15} /> 고객사 온보딩</Button>}
-            {props.section === 'support' && <Button primary onClick={() => setDialog({ kind: 'new-ticket' })}><Plus size={15} /> 새 CS 등록</Button>}
-            {props.section === 'integrations' && <Button onClick={() => setDialog({ kind: 'diagnostic' })}><RefreshCw size={15} /> 상태 점검</Button>}
-            <Button onClick={props.onReturnTenant}><LockKeyhole size={15} /> 승인 후 고객사 접근</Button>
+            {props.section === 'tenants' && <Button tone="ghost" type="button" onClick={() => setDialog({ kind: 'onboarding' })}><Plus size={15} /> 고객사 온보딩</Button>}
+            {props.section === 'support' && <Button tone="primary" type="button" onClick={() => setDialog({ kind: 'new-ticket' })}><Plus size={15} /> 새 CS 등록</Button>}
+            {props.section === 'integrations' && <Button tone="ghost" type="button" onClick={() => setDialog({ kind: 'diagnostic' })}><RefreshCw size={15} /> 상태 점검</Button>}
+            <Button tone="ghost" type="button" onClick={props.onReturnTenant}><LockKeyhole size={15} /> 승인 후 고객사 접근</Button>
           </div>
         </header>
 
@@ -1229,7 +1226,7 @@ export function PlatformConsole(props: PlatformConsoleProps) {
 
         <ScopeBar scope={scope} onScope={changeScope} />
 
-        {(loading || loadError || actions.length > 0) && <section className="pc-draft-status" aria-live="polite"><div><FileClock size={17} /><strong>{loading ? '플랫폼 운영 데이터 동기화 중' : loadError ? '플랫폼 운영 데이터 오류' : '공유 운영 기록'}</strong><span>{loading ? '고객사·CS·감사 이력을 불러오고 있습니다.' : loadError || `영속화된 운영 액션 ${actions.length}건 · 모든 운영자에게 공유됩니다.`}</span></div>{loadError ? <Button small onClick={() => void refresh()}>다시 시도</Button> : <Badge tone={loading ? 'neutral' : 'success'}>{loading ? '동기화' : '저장 완료'}</Badge>}</section>}
+        {(loading || loadError || actions.length > 0) && <section className="pc-draft-status" aria-live="polite"><div><FileClock size={17} /><strong>{loading ? '플랫폼 운영 데이터 동기화 중' : loadError ? '플랫폼 운영 데이터 오류' : '공유 운영 기록'}</strong><span>{loading ? '고객사·CS·감사 이력을 불러오고 있습니다.' : loadError || `영속화된 운영 액션 ${actions.length}건 · 모든 운영자에게 공유됩니다.`}</span></div>{loadError ? <Button tone="ghost" size="sm" type="button" onClick={() => void refresh()}>다시 시도</Button> : <Badge tone={loading ? 'neutral' : 'success'}>{loading ? '동기화' : '저장 완료'}</Badge>}</section>}
 
         {props.section === 'platform' && <Overview {...sectionProps} />}
         {props.section === 'tenants' && <TenantsView {...sectionProps} />}

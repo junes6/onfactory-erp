@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { BriefcaseBusiness, CalendarClock, ExternalLink, RefreshCw } from 'lucide-react'
 import { formatShortDateTime, seoulDateInputValue } from '../utils/dateTime'
 import './SupportProgramsWidget.css'
+import { Button } from './ui/Button'
 
 type SupportProgram = {
   id: string
@@ -77,7 +78,7 @@ export function SupportProgramsWidget({ workspaceScope }: { workspaceScope?: str
   const connected = feed && Object.values(feed.sources).some((source) => ['live', 'public', 'stale'].includes(source.state))
 
   return <section className="support-program-widget dashboard-section-card" aria-labelledby="support-program-title">
-    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><BriefcaseBusiness size={18} /></span><h2 id="support-program-title">정부 지원사업 공고</h2></div><button className="text-button" type="button" disabled={loading} onClick={() => setReloadKey((value) => value + 1)}><RefreshCw size={15} /> 새로고침</button></header>
+    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><BriefcaseBusiness size={18} /></span><h2 id="support-program-title">정부 지원사업 공고</h2></div><Button tone="quiet" type="button" disabled={loading} onClick={() => setReloadKey((value) => value + 1)}><RefreshCw size={15} /> 새로고침</Button></header>
     <div className="support-program-body dashboard-section-body">
       {loading && <div className="support-program-state"><RefreshCw size={20} /><strong>공식 공고를 확인하는 중입니다</strong></div>}
       {!loading && error && <div className="support-program-state is-error"><BriefcaseBusiness size={20} /><strong>{error}</strong><span>아래 공식 공고 페이지에서 바로 확인할 수 있습니다.</span></div>}

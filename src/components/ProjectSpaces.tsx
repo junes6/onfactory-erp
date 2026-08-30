@@ -4,6 +4,7 @@ import { formatDateLabel, formatDateTime } from '../utils/dateTime'
 import { downloadDocumentAttachment, uploadDocumentAttachments, type StoredDocumentAttachment } from '../utils/documentAttachments'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ProjectSpaces.css'
+import { Button, ButtonLink, IconButton } from './ui/Button'
 
 type ProjectRole = 'owner' | 'editor' | 'viewer'
 type ProjectMember = { id: string; name: string; team?: string; role: ProjectRole }
@@ -199,10 +200,10 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
           </div>
         </div>
         <div className="page-header-actions">
-          {detail.link && <a className="button secondary project-link-button" href={detail.link} target="_blank" rel="noreferrer noopener"><ExternalLink size={16} /> 프로젝트 링크 열기</a>}
-          {isOwner && <button className="button secondary" type="button" onClick={() => setEditorOpen('settings')}><Settings2 size={17} /> 멤버·설정</button>}
-          {isOwner && <button className="button ghost project-delete" type="button" onClick={() => void deleteProject()}><Trash2 size={16} /> 삭제</button>}
-          {canPost && detail.status !== 'archived' && <button className="button primary" type="button" onClick={() => { setDetailTab('feed'); setComposerOpen(true) }}><Plus size={18} /> 글 · 파일 올리기</button>}
+          {detail.link && <ButtonLink tone="secondary" className="project-link-button" href={detail.link} target="_blank" rel="noreferrer noopener"><ExternalLink size={16} /> 프로젝트 링크 열기</ButtonLink>}
+          {isOwner && <Button tone="secondary" type="button" onClick={() => setEditorOpen('settings')}><Settings2 size={17} /> 멤버·설정</Button>}
+          {isOwner && <Button tone="ghost" className="project-delete" type="button" onClick={() => void deleteProject()}><Trash2 size={16} /> 삭제</Button>}
+          {canPost && detail.status !== 'archived' && <Button tone="primary" type="button" onClick={() => { setDetailTab('feed'); setComposerOpen(true) }}><Plus size={18} /> 글 · 파일 올리기</Button>}
         </div>
       </header>
 
@@ -224,7 +225,7 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
         : <>
           {composerOpen && <PostComposer workspaceScope={workspaceScope} projectName={detail.name} onToast={onToast} onClose={() => setComposerOpen(false)} onSubmit={createPost} />}
           <section className="project-feed">
-            {posts.length === 0 && !composerOpen && <div className="empty-state compact"><FolderKanban size={28} /><h3>아직 올린 글이 없습니다</h3><p>{canPost ? '회의록·자료·진행 상황을 글이나 파일로 올려 멤버와 공유하세요.' : '편집 권한이 있는 멤버가 글을 올리면 여기에 표시됩니다.'}</p>{canPost && <button className="button primary" type="button" onClick={() => setComposerOpen(true)}><Plus size={17} /> 첫 글 올리기</button>}</div>}
+            {posts.length === 0 && !composerOpen && <div className="empty-state compact"><FolderKanban size={28} /><h3>아직 올린 글이 없습니다</h3><p>{canPost ? '회의록·자료·진행 상황을 글이나 파일로 올려 멤버와 공유하세요.' : '편집 권한이 있는 멤버가 글을 올리면 여기에 표시됩니다.'}</p>{canPost && <Button tone="primary" type="button" onClick={() => setComposerOpen(true)}><Plus size={17} /> 첫 글 올리기</Button>}</div>}
             {posts.map((post) => <PostCard key={post.id} post={post} currentUserId={currentUserId} isOwner={isOwner} canComment={Boolean(role)} workspaceScope={workspaceScope} onToast={onToast} onDownload={download} onDelete={() => void deletePost(post)} onPin={() => void togglePin(post)} onUpdate={(input) => updatePost(post, input)} onComment={(input) => addComment(post, input)} onDeleteComment={(comment) => void deleteComment(post, comment)} />)}
           </section>
         </>}
@@ -236,7 +237,7 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
   return <div className="content-page project-page">
     <header className="page-header">
       <div><span className="eyebrow">PROJECTS</span><h1>프로젝트</h1><p>프로젝트마다 단계·기간·거래처를 관리하고, 같은 공간에서 글·파일·댓글로 협업합니다. 멤버 권한(소유자·편집·열람)별로 공유됩니다.</p></div>
-      <div className="page-header-actions"><button className="button primary" type="button" onClick={() => setEditorOpen('create')}><Plus size={18} /> 새 프로젝트</button></div>
+      <div className="page-header-actions"><Button tone="primary" type="button" onClick={() => setEditorOpen('create')}><Plus size={18} /> 새 프로젝트</Button></div>
     </header>
     <div className="project-toolbar">
       <div className="segmented" role="group" aria-label="프로젝트 상태"><button type="button" className={filter === 'active' ? 'active' : ''} aria-pressed={filter === 'active'} onClick={() => setFilter('active')}>진행 중 {projects.filter((p) => p.status !== 'archived').length}</button><button type="button" className={filter === 'archived' ? 'active' : ''} aria-pressed={filter === 'archived'} onClick={() => setFilter('archived')}>보관 {projects.filter((p) => p.status === 'archived').length}</button></div>
@@ -244,7 +245,7 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
       {canManage && <span className="project-toolbar-note">관리자는 모든 프로젝트를 볼 수 있습니다. 직원은 참여 중이거나 회사 전체 공개인 프로젝트만 봅니다.</span>}
     </div>
     {loading ? <div className="empty-state compact"><FolderKanban size={26} /><h3>프로젝트를 불러오는 중</h3></div>
-      : visibleProjects.length === 0 ? <div className="empty-state"><FolderKanban size={30} /><h3>{filter === 'archived' ? '보관된 프로젝트가 없습니다' : '아직 프로젝트가 없습니다'}</h3><p>신제품 개발, 인증 갱신, 수주 건처럼 함께 일하는 단위로 만들고 멤버를 초대하세요.</p><button className="button primary" type="button" onClick={() => setEditorOpen('create')}><Plus size={18} /> 첫 프로젝트 만들기</button></div>
+      : visibleProjects.length === 0 ? <div className="empty-state"><FolderKanban size={30} /><h3>{filter === 'archived' ? '보관된 프로젝트가 없습니다' : '아직 프로젝트가 없습니다'}</h3><p>신제품 개발, 인증 갱신, 수주 건처럼 함께 일하는 단위로 만들고 멤버를 초대하세요.</p><Button tone="primary" type="button" onClick={() => setEditorOpen('create')}><Plus size={18} /> 첫 프로젝트 만들기</Button></div>
         : <div className="project-grid">
           {visibleProjects.map((project) => <button type="button" className={`project-card${project.status === 'archived' ? ' is-archived' : ''}`} key={project.id} onClick={() => setSelectedId(project.id)}>
             <div className="project-card-head"><span className="project-card-icon"><FolderKanban size={20} /></span><span className="project-card-badges">{project.category && <StatusBadge className="status-pill" tone="info">{project.category}</StatusBadge>}{project.stage && <StatusBadge className="status-pill" dot tone={stageTone(project.stage)}>{project.stage}</StatusBadge>}{project.role && <StatusBadge className="status-pill" tone={roleTone[project.role]}>{roleLabel[project.role]}</StatusBadge>}</span></div>
@@ -287,7 +288,7 @@ function ProjectEditor({ project, directory, currentUserId, currentUserName, onC
   const toggleMember = (id: string) => setMembers((current) => current.some((member) => member.id === id) ? current.filter((member) => member.id !== id) : [...current, { id, role: 'editor' }])
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className="modal-card project-editor" role="dialog" aria-modal="true" aria-labelledby="project-editor-title">
-      <header><div><span className="eyebrow">{project ? 'PROJECT SETTINGS' : 'NEW PROJECT'}</span><h2 id="project-editor-title">{project ? '멤버 · 설정' : '새 프로젝트'}</h2><p>{project ? '멤버 권한·관리 정보·공개 범위를 바꿉니다.' : '이름만 정하면 시작됩니다. 멤버·관리 정보는 나중에도 바꿀 수 있습니다.'}</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
+      <header><div><span className="eyebrow">{project ? 'PROJECT SETTINGS' : 'NEW PROJECT'}</span><h2 id="project-editor-title">{project ? '멤버 · 설정' : '새 프로젝트'}</h2><p>{project ? '멤버 권한·관리 정보·공개 범위를 바꿉니다.' : '이름만 정하면 시작됩니다. 멤버·관리 정보는 나중에도 바꿀 수 있습니다.'}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
       <form onSubmit={async (event: FormEvent) => { event.preventDefault(); if (name.trim().length < 2) return; setBusy(true); const ok = await onSave({ name: name.trim(), description: description.trim(), visibility, members, stage, client: client.trim(), startDate, endDate, amount, link: link.trim(), category: category.trim(), ...(project ? { status } : {}) }); setBusy(false); if (ok) onClose() }}>
         <label className="form-field full"><span>프로젝트 이름 <em>필수</em></span><input value={name} onChange={(event) => setName(event.target.value)} autoFocus required minLength={2} maxLength={80} placeholder="예: 한국도로공사 시뮬레이션" /></label>
         <label className="form-field full"><span>설명 <em>선택</em></span><input value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} placeholder="무엇을 위한 프로젝트인지 한 줄로" /></label>
@@ -326,7 +327,7 @@ function ProjectEditor({ project, directory, currentUserId, currentUserName, onC
           </ul>
           <p className="project-member-hint">편집: 글·파일 올리기 가능 · 열람: 보기와 댓글만 · 회사 전체 공개여도 글쓰기는 멤버만 가능합니다.</p>
         </div>
-        <footer><button type="button" className="button ghost" onClick={onClose} disabled={busy}>취소</button><button type="submit" className="button primary" disabled={busy || name.trim().length < 2}>{busy ? '저장 중…' : project ? '설정 저장' : '프로젝트 만들기'}</button></footer>
+        <footer><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>취소</Button><Button tone="primary" type="submit" disabled={busy || name.trim().length < 2}>{busy ? '저장 중…' : project ? '설정 저장' : '프로젝트 만들기'}</Button></footer>
       </form>
     </section>
   </div>
@@ -367,8 +368,8 @@ function PostForm({ workspaceScope, projectName, initial, submitLabel, busyLabel
     <div className="project-post-form-foot">
       <AttachmentPicker attachments={attachments} busy={uploading} onPick={(files) => void pick(files)} onRemove={(attachment) => setAttachments((current) => current.filter((item) => item.id !== attachment.id))} />
       <div className="project-post-form-actions">
-        <button type="button" className="button ghost" onClick={onCancel} disabled={busy}>취소</button>
-        <button type="submit" className="button primary" disabled={busy || uploading || (!title.trim() && !body.trim() && attachments.length === 0)}><Send size={15} /> {busy ? busyLabel : submitLabel}</button>
+        <Button tone="ghost" type="button" onClick={onCancel} disabled={busy}>취소</Button>
+        <Button tone="primary" type="submit" disabled={busy || uploading || (!title.trim() && !body.trim() && attachments.length === 0)}><Send size={15} /> {busy ? busyLabel : submitLabel}</Button>
       </div>
     </div>
   </form>
@@ -376,7 +377,7 @@ function PostForm({ workspaceScope, projectName, initial, submitLabel, busyLabel
 
 function PostComposer(props: { workspaceScope?: string; projectName: string; onToast: (message: string) => void; onClose: () => void; onSubmit: (input: { title: string; body: string; attachments: StoredDocumentAttachment[] }) => Promise<boolean> }) {
   return <section className="panel project-composer" aria-label="새 글 작성">
-    <div className="project-composer-head"><strong><Pencil size={15} /> 새 글 · 파일</strong><button type="button" className="icon-button" aria-label="닫기" onClick={props.onClose}><X size={17} /></button></div>
+    <div className="project-composer-head"><strong><Pencil size={15} /> 새 글 · 파일</strong><IconButton tone="ghost" type="button" aria-label="닫기" onClick={props.onClose}><X size={17} /></IconButton></div>
     <PostForm workspaceScope={props.workspaceScope} projectName={props.projectName} submitLabel="올리기" busyLabel="올리는 중…" onToast={props.onToast} onCancel={props.onClose} onSubmit={props.onSubmit} />
   </section>
 }
@@ -428,7 +429,7 @@ function PostCard({ post, currentUserId, isOwner, canComment, workspaceScope, on
           <textarea rows={2} value={text} onChange={(event) => setText(event.target.value)} maxLength={2000} placeholder="댓글을 남기거나 파일을 첨부하세요" autoFocus />
           <div className="project-comment-composer-tools">
             <AttachmentPicker attachments={attachments} busy={uploading} label="파일" onPick={(files) => void pick(files)} onRemove={(attachment) => setAttachments((current) => current.filter((item) => item.id !== attachment.id))} />
-            <div className="project-post-form-actions"><button type="button" className="button ghost" onClick={() => setShowComposer(false)} disabled={busy}>취소</button><button type="submit" className="button primary small" disabled={busy || uploading || (!text.trim() && attachments.length === 0)}><MessageCircle size={14} /> {busy ? '남기는 중…' : '댓글'}</button></div>
+            <div className="project-post-form-actions"><Button tone="ghost" type="button" onClick={() => setShowComposer(false)} disabled={busy}>취소</Button><Button tone="primary" size="sm" type="submit" disabled={busy || uploading || (!text.trim() && attachments.length === 0)}><MessageCircle size={14} /> {busy ? '남기는 중…' : '댓글'}</Button></div>
           </div>
         </form>
         : <button type="button" className="project-comment-open" onClick={() => setShowComposer(true)}><MessageCircle size={14} /> 댓글 남기기{post.comments.length ? ` (${post.comments.length})` : ''}</button>)}

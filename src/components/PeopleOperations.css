@@ -47,11 +47,6 @@
   gap: var(--space-8);
 }
 
-.danger-confirm {
-  border-color: var(--color-blue) !important;
-  background: var(--color-blue) !important;
-}
-
 .leave-policy-modes {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -242,7 +237,6 @@
 .account-onboarding { display: inline-flex; align-items: center; width: fit-content; margin-top: var(--space-4); padding: var(--space-4) var(--space-8); border-radius: var(--radius-8); color: var(--color-blue-deep); background: var(--color-blue-soft); font-size: var(--font-11); font-weight: var(--weight-medium); }
 .account-onboarding.expired { color: var(--color-danger); background: var(--color-danger-soft); }
 .account-credential-actions { min-width: 174px; display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-8); }
-.account-credential-actions .small-button { min-height: 32px; display: inline-flex; align-items: center; gap: var(--space-4); white-space: nowrap; }
 .people-credential-panel { display: flex; flex-direction: column; gap: var(--space-16); padding: var(--card-inset); }
 .credential-warning { display: flex; align-items: flex-start; gap: var(--space-8); padding: var(--space-12); border-radius: var(--radius-8); color: var(--color-warning-ink); background: var(--amber-soft); }
 .credential-warning svg { flex: 0 0 auto; margin-top: var(--space-0); }
@@ -280,7 +274,7 @@ html[data-theme='dark'] .leave-duration-preview { border-color: var(--line); bac
   .leave-policy-settings { grid-template-columns: 1fr; margin: var(--space-12) var(--space-12) var(--space-12); }
   .leave-admin-panel > header { align-items: flex-start; flex-direction: column; }
   .leave-admin-panel > header > div:last-child { width: 100%; }
-  .leave-admin-panel > header > div:last-child .button { flex: 1; }
+  .leave-admin-panel > header > div:last-child .ui-button { flex: 1; }
   .leave-admin-grid > section { padding: var(--space-12); }
   .leave-balance-list article { grid-template-columns: auto minmax(0, 1fr) auto; }
   .leave-balance-list article > span:not(.person-avatar) { display: none; }

@@ -7,6 +7,7 @@ import { quickLinksStorageKey, readQuickLinks, writeQuickLinks, type QuickLink }
 import { downloadDocumentAttachment } from '../utils/documentAttachments'
 import { FileText, FolderSearch, Download } from 'lucide-react'
 import './DashboardWorkspace.css'
+import { Button } from './ui/Button'
 
 export type DashboardWidgetId = 'summary' | 'ai' | 'schedule' | 'todo' | 'work' | 'links' | 'alert' | 'files' | 'support'
 export type DashboardWidgetSize = 'half' | 'wide' | 'full'
@@ -117,7 +118,7 @@ function useDialogFocus(open: boolean, onClose: () => void) {
 }
 
 export function DashboardLayoutButton({ onClick }: { onClick: () => void }) {
-  return <button className="button ghost dashboard-layout-trigger" type="button" onClick={onClick}><LayoutDashboard size={18} /> 위젯 편집</button>
+  return <Button tone="ghost" className="dashboard-layout-trigger" type="button" onClick={onClick}><LayoutDashboard size={18} /> 위젯 편집</Button>
 }
 
 export function DashboardLayoutModal({ open, preferences, onChange, onClose }: {
@@ -153,7 +154,7 @@ export function DashboardLayoutModal({ open, preferences, onChange, onClose }: {
           </div>
         </article>)}
       </div>
-      <footer><button className="button ghost" type="button" onClick={() => onChange(defaultDashboardWidgets)}>기본 배치로</button><button className="button primary" type="button" onClick={onClose}><Check size={18} /> 적용 완료</button></footer>
+      <footer><Button tone="ghost" type="button" onClick={() => onChange(defaultDashboardWidgets)}>기본 배치로</Button><Button tone="primary" type="button" onClick={onClose}><Check size={18} /> 적용 완료</Button></footer>
     </section>
   </div>
 }
@@ -207,7 +208,7 @@ export function QuickLinksWidget({ scope, onToast }: { scope: string; onToast: (
       <label><span>웹 주소</span><input name="url" key={`url-${editingLink?.id ?? 'new'}`} defaultValue={editingLink?.url ?? ''} type="url" placeholder="https://www.example.com" required /></label>
       <label><span>아이콘 색상</span><select name="color" key={`color-${editingLink?.id ?? 'new'}`} defaultValue={editingLink?.color ?? 'green'}><option value="green">초록</option><option value="blue">파랑</option><option value="amber">주황</option><option value="violet">보라</option></select></label>
       {error && <p role="alert">{error}</p>}
-      <button className="button primary" type="submit">{editingLink ? <Pencil size={17} /> : <Plus size={17} />} 바로가기 저장</button>
+      <Button tone="primary" type="submit">{editingLink ? <Pencil size={17} /> : <Plus size={17} />} 바로가기 저장</Button>
     </form>}</div>
   </section>
 }
@@ -244,7 +245,7 @@ export function FrequentFilesWidget({ workspaceScope, onOpenLibrary, onToast }: 
     finally { setDownloadingId(null) }
   }
   return <section className="frequent-files-card dashboard-section-card">
-    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><FileText size={18} /></span><h2>자주 찾는 파일</h2></div><button className="text-button" type="button" onClick={onOpenLibrary}>자료실 열기 <ArrowRight size={16} /></button></header>
+    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><FileText size={18} /></span><h2>자주 찾는 파일</h2></div><Button tone="quiet" type="button" onClick={onOpenLibrary}>자료실 열기 <ArrowRight size={16} /></Button></header>
     <div className="frequent-files-body dashboard-section-body">
       {files === null && <p className="frequent-files-empty">자료를 불러오는 중…</p>}
       {files !== null && files.length === 0 && <div className="empty-state compact"><FolderSearch size={24} /><h3>아직 내려받은 자료가 없습니다</h3><p>기업 자료실에서 파일을 내려받으면 자주 쓰는 순서로 여기에 모입니다.</p></div>}

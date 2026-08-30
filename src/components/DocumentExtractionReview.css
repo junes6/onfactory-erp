@@ -5,7 +5,7 @@
 .extraction-panel strong { font-size: var(--font-13); }
 .extraction-panel p { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); line-height: 1.55; }
 .extraction-panel ul { margin: var(--space-4) var(--space-0) var(--space-0); padding-left: var(--space-16); color: var(--color-warning-ink); font-size: var(--font-11); }
-.extraction-panel .button { flex: 0 0 auto; min-height: 34px; }
+.extraction-panel .ui-button { flex: 0 0 auto; }
 .extraction-panel.is-failed { background: var(--color-warning-soft); }
 .extraction-panel.is-failed > svg { color: var(--color-warning-ink); }
 .extraction-panel.is-applied { background: var(--color-success-soft); }
@@ -36,5 +36,5 @@
   .extraction-field-list > li { grid-template-columns: minmax(0, 1fr); }
   .extraction-exclude { grid-column: 1; grid-row: auto; justify-self: start; }
   .extraction-review > footer { flex-direction: column-reverse; }
-  .extraction-review > footer .button { width: 100%; }
+  .extraction-review > footer .ui-button { width: 100%; }
 }

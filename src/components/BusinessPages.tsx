@@ -35,6 +35,7 @@ import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { formatDateTime } from '../utils/dateTime'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './BusinessPagesEnhancements.css'
+import { Button, IconButton, buttonClassName } from './ui/Button'
 
 type BusinessPageProps = {
   onToast: (message: string) => void
@@ -641,9 +642,9 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, c
           <p>{canManage ? `${companyName}의 제품 기준정보부터 표시·법규, 판매채널과 재고 LOT까지 제품 중심으로 연결합니다.` : '제품 기준정보, 표시·법규와 재고 LOT를 업무에 필요한 범위에서 조회합니다.'}</p>
         </div>
         {canManage && <div className="heading-actions">
-          <button className="primary-button" type="button" onClick={() => openEditor()}>
+          <Button tone="primary" type="button" onClick={() => openEditor()}>
             <Package size={17} aria-hidden="true" /> 제품 등록
-          </button>
+          </Button>
         </div>}
       </header>
 
@@ -743,16 +744,16 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, c
             <Package size={32} aria-hidden="true" />
             <h3>{companyName}에 등록된 제품이 없습니다</h3>
             <p>첫 제품의 품목코드와 표시정보를 등록하면 재고·판매채널을 함께 연결할 수 있습니다.</p>
-            {canManage && <button className="primary-button" type="button" onClick={() => openEditor()}><Plus size={17} /> 첫 제품 등록</button>}
+            {canManage && <Button tone="primary" type="button" onClick={() => openEditor()}><Plus size={17} /> 첫 제품 등록</Button>}
           </div>
         ) : (
           <div className="business-empty-state">
             <Search size={30} aria-hidden="true" />
             <h3>검색 결과가 없습니다</h3>
             <p>검색어나 제품 분류를 다시 확인해 주세요.</p>
-            <button className="secondary-button" type="button" onClick={() => { setQuery(''); setCategory('전체') }}>
+            <Button tone="ghost" type="button" onClick={() => { setQuery(''); setCategory('전체') }}>
               검색 초기화
-            </button>
+            </Button>
           </div>
         )}
       </section>
@@ -913,7 +914,7 @@ function ProductEditorDialog({
       <section ref={dialogRef} className="modal-card product-editor-modal" role="dialog" aria-modal="true" aria-labelledby="product-editor-title">
         <header>
           <div><span className="page-kicker">PRODUCT MASTER</span><h2 id="product-editor-title">{product ? '제품 정보 편집' : '신규 제품 등록'}</h2><p>제품명만 입력하면 바로 등록됩니다. 나머지 항목은 나중에 채우고 표시 검증으로 확인하세요.</p></div>
-          <button className="icon-button" type="button" aria-label="닫기" disabled={saving} onClick={onClose}><X size={21} /></button>
+          <IconButton tone="ghost" type="button" aria-label="닫기" disabled={saving} onClick={onClose}><X size={21} /></IconButton>
         </header>
         <form noValidate onSubmit={submit}>
           {Object.keys(errors).length > 0 && <div className="form-error-summary" role="alert"><AlertTriangle size={18} /><span>입력값 {Object.keys(errors).length}곳을 확인해 주세요.</span></div>}
@@ -926,7 +927,7 @@ function ProductEditorDialog({
                   {imageDataUrl ? <img src={imageDataUrl} alt="선택한 제품 이미지 미리보기" /> : <><ImagePlus size={28} /><span>등록된 이미지 없음</span></>}
                 </div>
                 <div className="product-image-actions">
-                  <label className={`secondary-button file-picker-button${imageBusy ? ' disabled' : ''}`}>
+                  <label className={buttonClassName({ tone: 'ghost', className: `file-picker-button${imageBusy ? ' disabled' : ''}` })}>
                     <ImagePlus size={17} aria-hidden="true" /> {imageBusy ? '이미지 처리 중…' : imageDataUrl ? '이미지 변경' : '이미지 선택'}
                     <input
                       type="file"
@@ -936,7 +937,7 @@ function ProductEditorDialog({
                       onChange={(event) => void selectImage(event.target.files?.[0])}
                     />
                   </label>
-                  {imageDataUrl && <button className="danger-text-button" type="button" disabled={imageBusy || saving} onClick={() => { setImageDataUrl(''); setImageFileName(''); setImageError('') }}><Trash2 size={16} /> 이미지 삭제</button>}
+                  {imageDataUrl && <Button tone="danger" size="sm" type="button" disabled={imageBusy || saving} onClick={() => { setImageDataUrl(''); setImageFileName(''); setImageError('') }}><Trash2 size={16} /> 이미지 삭제</Button>}
                   <small>{imageFileName || 'JPG·PNG·WEBP, 원본 5MB 이하'}</small>
                 </div>
                 {imageError && <div className="field-error product-image-error" role="alert">{imageError}</div>}
@@ -978,7 +979,7 @@ function ProductEditorDialog({
               </div>
             </section>
           </div>
-          <footer><span>저장 후 표시 상태는 자동으로 ‘검토중’으로 변경됩니다.</span><div><button className="secondary-button" type="button" disabled={saving || imageBusy} onClick={onClose}>취소</button><button className="primary-button" type="submit" disabled={saving || imageBusy}>{saving ? '저장 중…' : product ? '변경사항 저장' : '제품 등록'}</button></div></footer>
+          <footer><span>저장 후 표시 상태는 자동으로 ‘검토중’으로 변경됩니다.</span><div><Button tone="ghost" type="button" disabled={saving || imageBusy} onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={saving || imageBusy}>{saving ? '저장 중…' : product ? '변경사항 저장' : '제품 등록'}</Button></div></footer>
         </form>
       </section>
     </div>
@@ -1091,9 +1092,9 @@ function ProductDetailDialog({
             <h2 id="product-detail-title">{product.name}</h2>
             <p>{product.code} · {product.specification}</p>
           </div>
-          <button ref={closeButtonRef} className="close-button" type="button" aria-label="닫기" onClick={onClose}>
+          <IconButton tone="ghost" ref={closeButtonRef} type="button" aria-label="닫기" onClick={onClose}>
             <X size={20} aria-hidden="true" />
-          </button>
+          </IconButton>
         </header>
 
         <div className="product-detail-tabs" role="tablist" aria-label="제품 상세 정보">
@@ -1175,9 +1176,9 @@ function ProductDetailDialog({
                   ? <ul>{validation.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
                   : <p>{validation ? '현재 필수 입력값 기준 확인 항목이 없습니다.' : '표시사항 다시 검증을 실행하면 결과가 이곳에 기록됩니다.'}</p>}
               </div>}
-              <button className="secondary-button" type="button" aria-expanded={showValidationHistory} onClick={() => setShowValidationHistory((current) => !current)}>
+              <Button tone="ghost" type="button" aria-expanded={showValidationHistory} onClick={() => setShowValidationHistory((current) => !current)}>
                 <FileCheck2 size={16} aria-hidden="true" /> {showValidationHistory ? '검토 이력 닫기' : '검토 이력 보기'}
-              </button>
+              </Button>
             </div>
           )}
 
@@ -1233,9 +1234,9 @@ function ProductDetailDialog({
                 </dl>
               </div>
               {showLotHistory && <div className="lot-history-list"><div><strong>{detail.lotNo}</strong><span>{detail.manufacturedAt} 제조 · {detail.warehouse} {detail.location}</span><BusinessStatusBadge status={detail.inspection} /></div><p>현재 제품에 연결된 추가 LOT는 없습니다.</p></div>}
-              <button className="secondary-button" type="button" aria-expanded={showLotHistory} onClick={() => setShowLotHistory((current) => !current)}>
+              <Button tone="ghost" type="button" aria-expanded={showLotHistory} onClick={() => setShowLotHistory((current) => !current)}>
                 <Warehouse size={16} aria-hidden="true" /> {showLotHistory ? 'LOT 이력 닫기' : '전체 LOT 이력'}
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -1243,15 +1244,15 @@ function ProductDetailDialog({
         <footer className="product-detail-actions">
           <span>표시 검증 · {validation?.checkedAt ? formatDateTime(validation.checkedAt) : '실행 전'}</span>
           {canViewCommercial ? <div>
-            <button className="danger-text-button" type="button" onClick={onDelete}>
+            <Button tone="danger" size="sm" type="button" onClick={onDelete}>
               <Trash2 size={16} aria-hidden="true" /> 제품 삭제
-            </button>
-            <button className="secondary-button" type="button" onClick={onValidate}>
+            </Button>
+            <Button tone="ghost" type="button" onClick={onValidate}>
               <RefreshCw size={16} aria-hidden="true" /> 표시 다시 검증
-            </button>
-            <button className="primary-button" type="button" onClick={onEdit}>
+            </Button>
+            <Button tone="primary" type="button" onClick={onEdit}>
               제품 정보 편집 <ArrowRight size={16} aria-hidden="true" />
-            </button>
+            </Button>
           </div> : <strong>조회 전용 · 변경은 관리자에게 요청하세요.</strong>}
         </footer>
       </section>
@@ -1329,7 +1330,7 @@ function ShipmentEditorDialog({ shipment, channels, busy, onClose, onSave }: {
 
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
     <section ref={dialogRef} className="modal-card shipment-editor-modal" role="dialog" aria-modal="true" aria-labelledby="shipment-editor-title">
-      <header><div><span className="page-kicker">FULFILLMENT</span><h2 id="shipment-editor-title">{shipment ? '배송·송장 수정' : '배송 주문 등록'}</h2><p>출고에 필요한 수취 정보와 송장번호를 관리합니다.</p></div><button className="icon-button" type="button" aria-label="닫기" disabled={busy} onClick={onClose}><X size={20} /></button></header>
+      <header><div><span className="page-kicker">FULFILLMENT</span><h2 id="shipment-editor-title">{shipment ? '배송·송장 수정' : '배송 주문 등록'}</h2><p>출고에 필요한 수취 정보와 송장번호를 관리합니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" disabled={busy} onClick={onClose}><X size={20} /></IconButton></header>
       <form onSubmit={submit}>
         <div className="shipment-editor-grid">
           <label className="form-field"><span>주문번호 *</span><input name="orderNo" defaultValue={shipment?.orderNo ?? ''} placeholder="채널 주문번호" /></label>
@@ -1344,7 +1345,7 @@ function ShipmentEditorDialog({ shipment, channels, busy, onClose, onSave }: {
         </div>
         {error && <div className="channel-credential-error" role="alert"><AlertTriangle size={17} /> {error}</div>}
         <div className="shipment-editor-help"><Truck size={18} /><span>송장번호를 입력하면 ‘송장등록’ 상태가 되고 인쇄 버튼이 활성화됩니다.</span></div>
-        <footer><button className="secondary-button" type="button" disabled={busy} onClick={onClose}>취소</button><button className="primary-button" type="submit" disabled={busy}>{busy ? '저장 중…' : '배송정보 저장'}</button></footer>
+        <footer><Button tone="ghost" type="button" disabled={busy} onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={busy}>{busy ? '저장 중…' : '배송정보 저장'}</Button></footer>
       </form>
     </section>
   </div>
@@ -1724,10 +1725,10 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
               </button>
             ))}
           </div>
-          {canManage && <button className="secondary-button" type="button" onClick={() => setChannelDialog('catalog')}><Plus size={17} aria-hidden="true" /> 채널 연결</button>}
-          {canManage && <button className="primary-button" type="button" disabled={Boolean(checkingChannelId)} onClick={() => void runChannelHealthCheck()}>
+          {canManage && <Button tone="ghost" type="button" onClick={() => setChannelDialog('catalog')}><Plus size={17} aria-hidden="true" /> 채널 연결</Button>}
+          {canManage && <Button tone="primary" type="button" disabled={Boolean(checkingChannelId)} onClick={() => void runChannelHealthCheck()}>
             <RefreshCw className={checkingChannelId ? 'spin' : ''} size={17} aria-hidden="true" /> {checkingChannelId ? '점검 중…' : '연결 상태 점검'}
-          </button>}
+          </Button>}
         </div>
       </header>
 
@@ -1739,7 +1740,7 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
       ]} />
 
       {healthPanelOpen && <section className="channel-health-panel" aria-labelledby="channel-health-title">
-        <header><div><span className="channel-health-icon"><RefreshCw size={18} /></span><div><h2 id="channel-health-title">판매채널 연결 상태</h2><p>저장된 설정만 점검하며 자격정보가 없는 채널은 외부 API를 호출하지 않습니다.</p></div></div><button className="icon-button" type="button" aria-label="상태 점검 결과 닫기" onClick={() => setHealthPanelOpen(false)}><X size={18} /></button></header>
+        <header><div><span className="channel-health-icon"><RefreshCw size={18} /></span><div><h2 id="channel-health-title">판매채널 연결 상태</h2><p>저장된 설정만 점검하며 자격정보가 없는 채널은 외부 API를 호출하지 않습니다.</p></div></div><IconButton tone="ghost" type="button" aria-label="상태 점검 결과 닫기" onClick={() => setHealthPanelOpen(false)}><X size={18} /></IconButton></header>
         <div className="channel-health-table" role="table" aria-label="판매채널 상태 점검 결과">
           <div className="channel-health-row header" role="row"><span>채널</span><span>자격정보</span><span>API 응답</span><span>상품 매핑</span><span>마지막 점검</span><span /></div>
           {channels.map((channel) => {
@@ -1765,7 +1766,7 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
           <span className="section-live-status setup"><span /> 채널별 연결 상태</span>
         </div>
         <div className="sales-channel-grid">
-          {channels.length === 0 && <div className="business-empty-state"><Store size={32} /><h3>{canManage ? '설정한 판매채널이 없습니다' : '판매채널 운영 권한이 필요합니다'}</h3><p>{canManage ? '공식 판매자센터에서 API 권한을 준비한 뒤 자격정보를 등록하세요.' : '자격정보와 주문·배송 데이터는 회사 관리자만 관리할 수 있습니다.'}</p>{canManage && <button className="primary-button" type="button" onClick={() => setChannelDialog('catalog')}><Plus size={17} /> 첫 채널 설정</button>}</div>}
+          {channels.length === 0 && <div className="business-empty-state"><Store size={32} /><h3>{canManage ? '설정한 판매채널이 없습니다' : '판매채널 운영 권한이 필요합니다'}</h3><p>{canManage ? '공식 판매자센터에서 API 권한을 준비한 뒤 자격정보를 등록하세요.' : '자격정보와 주문·배송 데이터는 회사 관리자만 관리할 수 있습니다.'}</p>{canManage && <Button tone="primary" type="button" onClick={() => setChannelDialog('catalog')}><Plus size={17} /> 첫 채널 설정</Button>}</div>}
           {channels.map((channel) => {
             const definition = channelDefinition(channel.id)
             const scaledRevenue = channel.revenue * factor
@@ -1794,9 +1795,9 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
                 </div>
                 <div className="channel-card-actions">
                   {definition && <a href={definition.sellerUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> 판매자센터</a>}
-                  {canManage && <button className="channel-sync-button" type="button" onClick={() => openChannelSetup(channel.id)}>
+                  {canManage && <Button tone="ghost" full type="button" onClick={() => openChannelSetup(channel.id)}>
                     <KeyRound size={16} aria-hidden="true" /> {channel.connectionStatus === 'setup-required' ? '연결 설정' : '재연결 설정'}
-                  </button>}
+                  </Button>}
                   {canManage && <button className="channel-health-card-button" type="button" disabled={Boolean(checkingChannelId)} onClick={() => void runChannelHealthCheck(channel)}><RefreshCw size={15} /> 상태 점검</button>}
                   {canManage && definition && <button className="channel-remove-button" type="button" aria-label={`${channel.name} 채널 해제`} onClick={() => { openChannelSetup(channel.id); setConfirmDisconnect(true) }}><Trash2 size={15} /> 해제</button>}
                 </div>
@@ -1813,10 +1814,10 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
             <p>채널 주문 CSV 또는 수기 주문을 출고대기로 모으고, 택배사·송장번호 등록 후 바로 인쇄합니다.</p>
           </div>
           {canManage && <div className="shipment-heading-actions">
-            <button className="text-action-button" type="button" onClick={downloadShipmentTemplate}>CSV 양식</button>
+            <Button tone="quiet" type="button" onClick={downloadShipmentTemplate}>CSV 양식</Button>
             <input ref={shipmentFileRef} className="sr-only" type="file" accept=".csv,text/csv" onChange={(event) => void importShipmentCsv(event.target.files?.[0])} />
-            <button className="secondary-button" type="button" onClick={() => shipmentFileRef.current?.click()}><FileUp size={17} /> 주문 CSV 가져오기</button>
-            <button className="primary-button" type="button" onClick={() => setShipmentDialog('new')}><Plus size={17} /> 배송 주문 등록</button>
+            <Button tone="ghost" type="button" onClick={() => shipmentFileRef.current?.click()}><FileUp size={17} /> 주문 CSV 가져오기</Button>
+            <Button tone="primary" type="button" onClick={() => setShipmentDialog('new')}><Plus size={17} /> 배송 주문 등록</Button>
           </div>}
         </div>
         <div className="shipment-integration-note">
@@ -1840,9 +1841,9 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
               <td>{shipment.trackingNo ? <><strong>{shipment.courier}</strong><span>{shipment.trackingNo}</span></> : <span>송장 미등록</span>}</td>
               <td><BusinessStatusBadge status={shipment.status} /></td>
               <td><div className="shipment-row-actions">
-                <button className="secondary-button" type="button" onClick={() => setShipmentDialog(shipment.id)}>{shipment.trackingNo ? '송장 수정' : '송장 등록'}</button>
-                <button className="icon-button" type="button" aria-label={`${shipment.orderNo} 송장 인쇄`} disabled={!shipment.trackingNo} onClick={() => printShippingLabel(shipment)}><Printer size={17} /></button>
-                {shipment.status !== '출고완료' && <button className="icon-button" type="button" aria-label={`${shipment.orderNo} 출고 완료`} disabled={!shipment.trackingNo} onClick={() => void completeShipment(shipment)}><CheckCircle2 size={17} /></button>}
+                <Button tone="ghost" type="button" size="sm" onClick={() => setShipmentDialog(shipment.id)}>{shipment.trackingNo ? '송장 수정' : '송장 등록'}</Button>
+                <IconButton tone="ghost" type="button" aria-label={`${shipment.orderNo} 송장 인쇄`} disabled={!shipment.trackingNo} size="sm" onClick={() => printShippingLabel(shipment)}><Printer size={17} /></IconButton>
+                {shipment.status !== '출고완료' && <IconButton tone="ghost" type="button" aria-label={`${shipment.orderNo} 출고 완료`} disabled={!shipment.trackingNo} size="sm" onClick={() => void completeShipment(shipment)}><CheckCircle2 size={17} /></IconButton>}
                 <button className={`shipment-delete-button${confirmShipmentDeleteId === shipment.id ? ' confirming' : ''}`} type="button" aria-label={confirmShipmentDeleteId === shipment.id ? `${shipment.orderNo} 배송 행 삭제 확인` : `${shipment.orderNo} 배송 행 삭제`} onClick={() => confirmShipmentDeleteId === shipment.id ? void deleteShipment(shipment) : setConfirmShipmentDeleteId(shipment.id)}>{confirmShipmentDeleteId === shipment.id ? '삭제 확인' : <Trash2 size={17} />}</button>
               </div></td>
             </tr>)}</tbody>
@@ -1859,7 +1860,7 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
       />}
       {canManage && channelDialog && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !savingChannel && setChannelDialog(null)}>
         <section ref={channelDialogRef} className="modal-card channel-connect-modal" role="dialog" aria-modal="true" aria-labelledby="channel-connect-title">
-          <header><div><span className="page-kicker">CHANNEL CONNECT</span><h2 id="channel-connect-title">{selectedDefinition ? `${selectedDefinition.name} 연결 설정` : '판매채널 선택'}</h2><p>{selectedDefinition ? selectedDefinition.accessNote : '공식 판매자센터와 API 문서를 확인한 뒤 자격정보를 준비하세요.'}</p></div><button className="icon-button" type="button" aria-label="닫기" disabled={savingChannel} onClick={() => setChannelDialog(null)}><X size={21} /></button></header>
+          <header><div><span className="page-kicker">CHANNEL CONNECT</span><h2 id="channel-connect-title">{selectedDefinition ? `${selectedDefinition.name} 연결 설정` : '판매채널 선택'}</h2><p>{selectedDefinition ? selectedDefinition.accessNote : '공식 판매자센터와 API 문서를 확인한 뒤 자격정보를 준비하세요.'}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" disabled={savingChannel} onClick={() => setChannelDialog(null)}><X size={21} /></IconButton></header>
           {channelDialog === 'catalog' && <>
             <div className="integration-truth-banner"><ShieldCheck size={20} /><div><strong>실 API 자격정보가 없으면 연결 완료로 표시하지 않습니다.</strong><p>연결되지 않은 채널은 주문·매출 수치를 0으로 표시하며 운영 데이터로 추정하지 않습니다.</p></div></div>
             <div className="channel-catalog">{channelDefinitions.map((definition) => {
@@ -1870,7 +1871,7 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
                 {existing ? <CheckCircle2 size={19} /> : <ChevronRight size={19} />}
               </button>
             })}</div>
-            <footer><span><ExternalLink size={17} /> 외부 링크는 각 플랫폼의 공식 센터로 열립니다.</span><button className="secondary-button" type="button" onClick={() => setChannelDialog(null)}>닫기</button></footer>
+            <footer><span><ExternalLink size={17} /> 외부 링크는 각 플랫폼의 공식 센터로 열립니다.</span><Button tone="ghost" type="button" onClick={() => setChannelDialog(null)}>닫기</Button></footer>
           </>}
           {selectedDefinition && <>
             <div className="channel-connect-steps"><span className="done">1. 채널 선택</span><i /><span className="active">2. 자격정보</span><i /><span>3. 서버 테스트</span></div>
@@ -1894,8 +1895,8 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
               </section>
             </div>
             <footer className="channel-setup-footer">
-              <div>{selectedChannel && <button className="danger-text-button" type="button" disabled={savingChannel} onClick={() => confirmDisconnect ? void disconnectChannel(selectedChannel) : setConfirmDisconnect(true)}><Trash2 size={16} /> {confirmDisconnect ? '한 번 더 눌러 해제' : '연결 설정 해제'}</button>}</div>
-              <div><button className="secondary-button" type="button" disabled={savingChannel} onClick={() => setChannelDialog('catalog')}>채널 목록</button>{!selectedChannel && <button className="secondary-button" type="button" disabled={savingChannel} onClick={() => void addChannelToList(selectedDefinition)}>목록에 추가</button>}<button className="secondary-button" type="button" disabled={savingChannel} onClick={() => void saveChannelCredentials(selectedDefinition, false)}>자격정보 저장</button><button className="primary-button" type="button" disabled={savingChannel} onClick={() => void saveChannelCredentials(selectedDefinition, true)}>{savingChannel ? '확인 중…' : '입력 형식 점검'}</button></div>
+              <div>{selectedChannel && <Button tone="danger" size="sm" type="button" disabled={savingChannel} onClick={() => confirmDisconnect ? void disconnectChannel(selectedChannel) : setConfirmDisconnect(true)}><Trash2 size={16} /> {confirmDisconnect ? '한 번 더 눌러 해제' : '연결 설정 해제'}</Button>}</div>
+              <div><Button tone="ghost" type="button" disabled={savingChannel} onClick={() => setChannelDialog('catalog')}>채널 목록</Button>{!selectedChannel && <Button tone="ghost" type="button" disabled={savingChannel} onClick={() => void addChannelToList(selectedDefinition)}>목록에 추가</Button>}<Button tone="ghost" type="button" disabled={savingChannel} onClick={() => void saveChannelCredentials(selectedDefinition, false)}>자격정보 저장</Button><Button tone="primary" type="button" disabled={savingChannel} onClick={() => void saveChannelCredentials(selectedDefinition, true)}>{savingChannel ? '확인 중…' : '입력 형식 점검'}</Button></div>
             </footer>
           </>}
         </section>

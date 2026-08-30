@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Bot, Check, Quote, RefreshCw } from 'lucide-react'
 import { DOCUMENT_EXTRACTION_FIELDS, type DocumentDraft, type ExtractionKind } from '../utils/documentExtraction'
 import './DocumentExtractionReview.css'
+import { Button } from './ui/Button'
 
 export type DocumentExtractionState =
   | { status: 'idle'; sourceId?: undefined; sourceName?: undefined }
@@ -44,7 +45,7 @@ export function DocumentExtractionReview({ kind, state, disabled, onApprove, onD
     return <section className="extraction-panel is-failed" role="status" aria-live="polite">
       <Bot size={19} />
       <div><strong>파일은 보관했고, 아래에서 직접 입력할 수 있습니다</strong><p>{state.message}</p></div>
-      {onRetry && <button className="button ghost" type="button" disabled={disabled} onClick={onRetry}><RefreshCw size={15} /> 다시 읽기</button>}
+      {onRetry && <Button tone="ghost" type="button" disabled={disabled} onClick={onRetry}><RefreshCw size={15} /> 다시 읽기</Button>}
     </section>
   }
 
@@ -56,7 +57,7 @@ export function DocumentExtractionReview({ kind, state, disabled, onApprove, onD
         <p>{state.sourceName} 기준{typeof state.confidence === 'number' ? ` · 문서 판독 신뢰도 ${Math.round(state.confidence * 100)}%` : ''}. 저장 전에 아래 내용을 마지막으로 확인하세요.</p>
         {state.warnings.length > 0 && <ul>{state.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
       </div>
-      {onRetry && <button className="button ghost" type="button" disabled={disabled} onClick={onRetry}><RefreshCw size={15} /> 다시 읽기</button>}
+      {onRetry && <Button tone="ghost" type="button" disabled={disabled} onClick={onRetry}><RefreshCw size={15} /> 다시 읽기</Button>}
     </section>
   }
 
@@ -101,8 +102,8 @@ export function DocumentExtractionReview({ kind, state, disabled, onApprove, onD
       })}
     </ol>
     <footer>
-      <button className="button ghost" type="button" disabled={disabled} onClick={onDismiss}>직접 입력할게요</button>
-      <button className="button primary" type="button" disabled={disabled || acceptedCount === 0} onClick={approve}><Check size={17} /> 확인한 {acceptedCount}개 입력하기</button>
+      <Button tone="ghost" type="button" disabled={disabled} onClick={onDismiss}>직접 입력할게요</Button>
+      <Button tone="primary" type="button" disabled={disabled || acceptedCount === 0} onClick={approve}><Check size={17} /> 확인한 {acceptedCount}개 입력하기</Button>
     </footer>
   </section>
 }

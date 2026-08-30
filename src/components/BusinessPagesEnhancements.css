@@ -427,16 +427,7 @@
   gap: var(--space-4);
 }
 
-.shipment-row-actions .secondary-button {
-  min-height: 36px;
-  padding-inline: var(--space-8);
-  font-size: var(--font-13);
-  white-space: nowrap;
-}
-
-.shipment-row-actions .icon-button {
-  width: 36px;
-  height: 36px;
+.shipment-row-actions .ui-icon-button {
   flex: 0 0 auto;
 }
 
@@ -462,17 +453,6 @@
   color: var(--color-white);
   border-color: var(--color-danger);
   background: var(--color-danger);
-}
-
-.icon-button.danger {
-  color: var(--color-danger);
-}
-
-.icon-button:disabled,
-.secondary-button:disabled,
-.primary-button:disabled {
-  cursor: not-allowed;
-  opacity: .48;
 }
 
 .shipment-editor-modal {

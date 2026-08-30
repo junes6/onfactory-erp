@@ -1,0 +1,78 @@
+/* =====================================================================
+   공용 버튼 — 전 화면 버튼 톤앤매너의 유일한 출처.
+   화면별 CSS에서 버튼 모양을 다시 정의하지 않는다 (scripts/verify-button-tone.mjs).
+   ===================================================================== */
+.ui-button {
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
+  padding: var(--space-0) var(--space-16);
+  border: var(--hairline) solid transparent;
+  border-radius: var(--radius-8);
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-15);
+  font-weight: var(--weight-medium);
+  line-height: 1.2;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ui-button > svg { flex: 0 0 auto; }
+.ui-button.is-sm { min-height: 36px; padding: var(--space-0) var(--space-12); font-size: var(--font-13); }
+.ui-button.is-full { width: 100%; }
+.ui-button:disabled { cursor: not-allowed; opacity: .5; }
+.ui-button:focus-visible { outline: var(--hairline) solid var(--color-primary); outline-offset: var(--space-4); }
+
+.ui-button.is-primary { color: var(--color-white); border-color: var(--forest-dark); background: var(--forest-dark); }
+.ui-button.is-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--forest-dark) 82%, var(--color-sidebar-base)); }
+
+.ui-button.is-secondary { color: var(--forest); border-color: var(--color-blue-soft); background: var(--forest-soft); }
+.ui-button.is-secondary:hover:not(:disabled) { border-color: var(--color-primary); }
+
+.ui-button.is-ghost { color: var(--color-blue-deep); border-color: var(--line); background: var(--color-surface); }
+.ui-button.is-ghost:hover:not(:disabled) { color: var(--color-primary); border-color: var(--color-primary); background: var(--color-primary-soft); }
+
+.ui-button.is-quiet { min-height: 34px; padding: var(--space-0) var(--space-8); gap: var(--space-4); color: var(--forest); background: transparent; }
+.ui-button.is-quiet:hover:not(:disabled) { background: var(--forest-soft); }
+.ui-button.is-quiet.is-sm { min-height: 30px; }
+
+.ui-button.is-danger { color: var(--color-danger); border-color: var(--color-danger-soft); background: var(--color-danger-soft); }
+.ui-button.is-danger:hover:not(:disabled) { border-color: var(--color-danger); }
+
+.ui-icon-button {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  padding: var(--space-0);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  color: var(--color-gray-600);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+.ui-icon-button.is-sm { width: 34px; height: 34px; }
+.ui-icon-button:hover:not(:disabled) { color: var(--color-primary); border-color: var(--color-primary); background: var(--color-primary-soft); }
+.ui-icon-button:disabled { cursor: not-allowed; opacity: .5; }
+.ui-icon-button:focus-visible { outline: var(--hairline) solid var(--color-primary); outline-offset: var(--space-4); }
+.ui-icon-button.is-quiet { border-color: transparent; background: transparent; }
+.ui-icon-button.is-danger { color: var(--color-danger); }
+.ui-icon-button.is-danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); background: var(--color-danger-soft); }
+
+html[data-theme='dark'] :is(.ui-button.is-ghost, .ui-icon-button) { background: var(--surface); }
+
+@media (max-width: 640px) {
+  /* 모바일에서는 한 줄에 하나씩 놓이도록, 버튼 묶음 안의 버튼이 남는 폭을 나눠 갖는다. */
+  .page-header-actions > .ui-button,
+  .heading-actions > .ui-button { flex: 1 1 auto; }
+}
+
+/* 쉬운 화면 모드: 버튼도 손가락으로 누르기 쉬운 크기로 함께 커진다. */
+html[data-easy-mode='on'] .app-shell .ui-button { min-height: 52px; padding-inline: var(--space-24); font-size: var(--font-15); }
+html[data-easy-mode='on'] .app-shell .ui-button.is-quiet { padding-inline: var(--space-12); }
+html[data-easy-mode='on'] .app-shell .ui-icon-button { width: 48px; height: 48px; }

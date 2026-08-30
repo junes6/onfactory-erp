@@ -71,7 +71,7 @@
   .performance-caution span { width: 100%; }
   .performance-header { display: grid; }
   .performance-actions { width: 100%; }
-  .performance-actions .button { flex: 1; }
+  .performance-actions .ui-button { flex: 1; }
   .performance-toolbar { align-items: stretch; flex-direction: column; }
   .performance-period-copy { min-width: 0; }
   .performance-card { padding: var(--card-inset); }
@@ -83,7 +83,7 @@
   .performance-weight-list { grid-template-columns: minmax(0, 1fr); }
   .performance-settings > footer { align-items: stretch; flex-direction: column; }
   .performance-settings > footer > div { width: 100%; }
-  .performance-settings > footer .button { flex: 1; }
+  .performance-settings > footer .ui-button { flex: 1; }
 }
 
 /* v4: 성과 요약 스트립 + 지표 게이지 */

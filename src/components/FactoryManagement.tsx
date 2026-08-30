@@ -45,6 +45,7 @@ import {
 import './FactoryManagement.css'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
+import { Button } from './ui/Button'
 
 type FactoryManagementProps = {
   onToast: (message: string) => void
@@ -827,8 +828,8 @@ function LocationModal({
           {error && <div className="factory-form-error" role="alert"><AlertTriangle size={17} />{error}</div>}
           <div className="factory-modal__note"><CheckCircle2 size={18} /><span>저장 후 선택한 구역의 위치 목록과 운영 배치도에 즉시 반영됩니다.</span></div>
           <footer className="factory-modal__actions">
-            <button type="button" className="factory-button factory-button--ghost" onClick={onClose}>취소</button>
-            <button type="submit" className="factory-button factory-button--primary"><Save size={17} />{state.mode === 'edit' ? '변경사항 저장' : '위치 등록'}</button>
+            <Button tone="ghost" type="button" onClick={onClose}>취소</Button>
+            <Button tone="primary" type="submit"><Save size={17} />{state.mode === 'edit' ? '변경사항 저장' : '위치 등록'}</Button>
           </footer>
         </form>
       </section>
@@ -1266,7 +1267,7 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
       <section className="factory-overview factory-empty-state" aria-label="공장 등록 안내">
         <FactoryIcon size={32} aria-hidden="true" />
         <div><h2>아직 등록된 항목이 없습니다</h2><p>{canManage ? '첫 공장을 등록한 뒤 도면 또는 블록 편집기로 실제 공간을 구성하세요.' : '회사 관리자가 공장을 등록하면 이곳에서 운영 위치를 확인할 수 있습니다.'}</p></div>
-        {canManage && <button className="factory-button factory-button--primary" type="button" onClick={() => void registerFactory()}><Plus size={17} /> 첫 공장 등록</button>}
+        {canManage && <Button tone="primary" type="button" onClick={() => void registerFactory()}><Plus size={17} /> 첫 공장 등록</Button>}
       </section>
     </div>
   }
@@ -1286,7 +1287,7 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
               {availableFactories.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
             </select>
           </label>
-          {canManage && <div className="factory-page__action-buttons"><button className="factory-button factory-button--ghost" type="button" onClick={() => void registerFactory()}><Plus size={16} /> 공장 추가</button><button className="factory-button factory-button--danger" type="button" onClick={() => void deleteFactory()}><Trash2 size={16} /> 공장 삭제</button></div>}
+          {canManage && <div className="factory-page__action-buttons"><Button tone="ghost" type="button" size="sm" onClick={() => void registerFactory()}><Plus size={16} /> 공장 추가</Button><Button tone="danger" type="button" size="sm" onClick={() => void deleteFactory()}><Trash2 size={16} /> 공장 삭제</Button></div>}
         </div>
       </header>
 

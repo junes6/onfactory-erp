@@ -48,29 +48,6 @@
   gap: var(--space-8);
 }
 
-.collab-button {
-  min-height: 46px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-8);
-  padding: var(--space-0) var(--space-16);
-  border: var(--hairline) solid var(--line);
-  border-radius: var(--radius-8);
-  background: var(--surface);
-  font-size: var(--font-15);
-  font-weight: var(--weight-medium);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.collab-button.full { width: 100%; }
-.collab-button.primary { border-color: var(--forest-dark); color: var(--color-white); background: var(--forest-dark); }
-.collab-button.primary:hover { background: var(--forest); }
-.collab-button.secondary:hover { border-color: var(--color-blue-soft); background: var(--color-blue-soft); }
-.collab-button.danger { border-color: var(--color-danger-soft); color: var(--color-danger); background: var(--color-danger-soft); }
-.collab-button.danger:hover { background: var(--color-danger-soft); }
-
 .collab-icon-button,
 .messenger-header-actions button,
 .collab-dialog-header > button {
@@ -194,7 +171,7 @@
 .collab-empty.compact { min-height: 170px; }
 .collab-empty strong { color: var(--ink); font-size: var(--font-15); }
 .collab-empty span { max-width: 320px; color: var(--muted); font-size: var(--font-15); line-height: 1.55; }
-.collab-empty .collab-button { margin-top: var(--space-4); }
+.collab-empty .ui-button { margin-top: var(--space-4); }
 
 .collab-overlay {
   position: fixed;
@@ -989,22 +966,6 @@
 .journal-list-copy > strong { display: block; overflow: hidden; color: var(--ink); font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
 .journal-list-copy > small { display: block; overflow: hidden; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
 .journal-list-item > time { color: var(--muted); font-size: var(--font-13); font-weight: var(--weight-medium); text-align: right; white-space: nowrap; }
-.journal-view-button {
-  min-height: 38px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-4);
-  padding: var(--space-0) var(--space-8);
-  border: var(--hairline) solid var(--color-blue-soft);
-  border-radius: var(--radius-8);
-  color: var(--forest);
-  background: var(--surface);
-  font-size: var(--font-15);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-}
-.journal-view-button:hover { border-color: var(--forest); background: var(--forest-soft); }
 
 .journal-editor-panel { min-width: 0; }
 .journal-editor-header {
@@ -1176,7 +1137,6 @@
   }
   .journal-list-item > .collab-status-chip { grid-column: 2; justify-self: start; }
   .journal-list-item > time { grid-column: 3; text-align: left; }
-  .journal-view-button { grid-column: 4; grid-row: 1 / span 2; }
   .journal-title-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .journal-title-fields .collab-field:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
   .journal-two-columns { grid-template-columns: 1fr; }
@@ -1206,7 +1166,7 @@
   .collab-page { gap: var(--space-16); }
   .collab-page-header h1 { font-size: var(--font-22); }
   .collab-page-header p { font-size: var(--font-15); }
-  .collab-page-actions .collab-button { flex: 1; }
+  .collab-page-actions .ui-button { flex: 1; }
   .calendar-panel {
     overflow-x: auto;
     overscroll-behavior-inline: contain;
@@ -1246,7 +1206,7 @@
   .collab-dialog-body { padding: var(--space-16); }
   .collab-dialog-footer { align-items: stretch; flex-direction: column-reverse; padding: var(--space-12) var(--space-16); }
   .collab-dialog-footer > div { width: 100%; }
-  .collab-dialog-footer > div .collab-button { flex: 1; }
+  .collab-dialog-footer > div .ui-button { flex: 1; }
   .journal-summary { gap: var(--space-8); }
   .journal-summary > div { min-height: 80px; padding: var(--space-12); }
   .journal-summary-icon { width: 38px; height: 38px; }
@@ -1262,7 +1222,6 @@
   .journal-list-copy { grid-column: 2 / -1; }
   .journal-list-item > .collab-status-chip { grid-column: 2; }
   .journal-list-item > time { grid-column: 2; }
-  .journal-view-button { grid-column: 3; grid-row: 1; }
   .journal-editor-header { padding: var(--space-16); }
   .journal-editor-header-actions { flex-wrap: wrap; justify-content: flex-end; }
   .journal-editor-header h2 { font-size: var(--font-22); }
@@ -1272,11 +1231,11 @@
   .journal-title-fields { grid-template-columns: 1fr; }
   .journal-title-fields .collab-field:nth-child(2) { grid-column: auto; grid-row: auto; }
   .journal-attachment-head { align-items: flex-start; flex-direction: column; }
-  .journal-attachment-head .collab-button { width: 100%; }
+  .journal-attachment-head .ui-button { width: 100%; }
   .journal-attachment-list { grid-template-columns: 1fr; }
   .journal-editor-footer { align-items: stretch; flex-direction: column; padding: var(--space-12) var(--space-16); }
   .journal-editor-footer > div { width: 100%; }
-  .journal-editor-footer .collab-button { flex: 1; }
+  .journal-editor-footer .ui-button { flex: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1493,14 +1452,14 @@
 @media (max-width: 620px) {
   .journal-summary-chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
   .journal-summary-chip { justify-content: space-between; }
-  .journal-header-actions > .collab-button { width: 100%; }
+  .journal-header-actions > .ui-button { width: 100%; }
   .journal-list-controls { align-items: stretch; flex-direction: column; }
   .journal-list-controls .collab-search { width: 100%; }
   .journal-workspace.list-only .journal-list,
   .journal-list { grid-template-columns: minmax(0, 1fr); padding: var(--space-8); }
   .journal-list-card { height: 72px; max-height: 72px; }
   .journal-entry-section-head { align-items: flex-start; flex-direction: column; }
-  .journal-entry-section-head .collab-button { width: 100%; }
+  .journal-entry-section-head .ui-button { width: 100%; }
   .journal-editor-body { padding-inline: var(--space-16); }
   .journal-editor-footer { padding-inline: var(--space-16); }
 }

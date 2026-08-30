@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, Check, Eye, EyeOff, RotateCcw, Settings2, X } from 'lucide-react'
 import './WorkspaceNavigation.css'
+import { Button } from './ui/Button'
 
 export type WorkspaceNavSource<Id extends string> = {
   id: Id
@@ -112,7 +113,7 @@ export function WorkspaceNavigationEditor<Id extends string>({ open, source, pre
           <div><button type="button" aria-label={`${item.label} 위로 이동`} disabled={index === 0} onClick={() => move(index, -1)}><ArrowUp size={18} /></button><button type="button" aria-label={`${item.label} 아래로 이동`} disabled={index === preferences.length - 1} onClick={() => move(index, 1)}><ArrowDown size={18} /></button></div>
         </article>)}
       </div>
-      <footer><button className="button ghost" type="button" onClick={reset}><RotateCcw size={17} /> 기본값 복원</button><button className="button primary" type="button" onClick={onClose}><Check size={18} /> 편집 완료</button></footer>
+      <footer><Button tone="ghost" type="button" onClick={reset}><RotateCcw size={17} /> 기본값 복원</Button><Button tone="primary" type="button" onClick={onClose}><Check size={18} /> 편집 완료</Button></footer>
     </section>
   </div>
 }

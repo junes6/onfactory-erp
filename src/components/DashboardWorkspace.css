@@ -84,7 +84,7 @@ html[data-theme='dark'] .dashboard-link-form :is(input,select) { color: var(--in
   .dashboard-widget-setting-actions { width: 100%; }
   .dashboard-widget-setting-actions select { min-width: 0; flex: 1; }
   .dashboard-layout-modal > footer { align-items: stretch; flex-direction: column-reverse; }
-  .dashboard-layout-modal > footer .button { width: 100%; }
+  .dashboard-layout-modal > footer .ui-button { width: 100%; }
   .dashboard-link-form { grid-template-columns: 1fr; }
   .dashboard-link-form > div, .dashboard-link-form > p { grid-column: 1; }
 }

@@ -3,6 +3,7 @@ import { Check, ClipboardCheck, FileText, Keyboard, MessageCircle, Pencil, Refre
 import { formatDateTime } from '../utils/dateTime'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ApprovalQueue.css'
+import { Button, IconButton } from './ui/Button'
 
 type ProposalKind = 'document-classification' | 'task-from-message' | 'sentinel-task'
 type ProposalStatus = 'pending' | 'approved' | 'edited' | 'rejected' | 'expired'
@@ -140,7 +141,7 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
   return <div className="content-page approval-page">
     <header className="page-header">
       <div><span className="eyebrow">AI REVIEW</span><h1>AI 제안 검토</h1><p>AI가 "이렇게 할까요?"라고 올린 제안을 사람이 결정합니다. 승인하기 전에는 아무것도 실행되지 않습니다.</p></div>
-      <div className="page-header-actions"><button className="button secondary" type="button" onClick={() => void evaluateNow()}><RefreshCw size={17} /> 지금 점검</button></div>
+      <div className="page-header-actions"><Button tone="secondary" type="button" onClick={() => void evaluateNow()}><RefreshCw size={17} /> 지금 점검</Button></div>
     </header>
 
     <section className="approval-stats" aria-label="유형별 최근 4주 승인률">
@@ -157,7 +158,7 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
         <span className="approval-keys"><Keyboard size={15} /> ↑↓ 이동 · Enter/A 승인 · E 수정 · X 거절</span>
       </div>
       {loading ? <div className="empty-state compact"><RefreshCw size={22} /><h3>AI 제안을 불러오는 중</h3></div>
-        : error ? <div className="empty-state compact"><ShieldAlert size={22} /><h3>{error}</h3><button className="button secondary" type="button" onClick={() => void load()}>다시 시도</button></div>
+        : error ? <div className="empty-state compact"><ShieldAlert size={22} /><h3>{error}</h3><Button tone="secondary" type="button" onClick={() => void load()}>다시 시도</Button></div>
           : visible.length === 0 ? <div className="empty-state compact"><ClipboardCheck size={26} /><h3>{filter === 'pending' ? '검토할 AI 제안이 없습니다' : '아직 제안 이력이 없습니다'}</h3><p>문서를 올리거나 메신저에서 “~해주세요”라고 지시하면, 센티널이 위험 신호를 찾으면 여기에 제안이 쌓입니다.</p></div>
             : <div className="approval-list" role="list" ref={listRef}>
               {visible.map((item) => {
@@ -206,7 +207,7 @@ function ProposalEditDialog({ proposal, busy, onClose, onSubmit }: { proposal: P
   }, [onClose])
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className="modal-card approval-edit-modal" role="dialog" aria-modal="true" aria-labelledby="approval-edit-title">
-      <header><div><span className="eyebrow">EDIT & APPROVE</span><h2 id="approval-edit-title">수정 후 승인</h2><p>{proposal.summary}</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
+      <header><div><span className="eyebrow">EDIT & APPROVE</span><h2 id="approval-edit-title">수정 후 승인</h2><p>{proposal.summary}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
       <form onSubmit={(event) => {
         event.preventDefault()
         if (isDocument) { onSubmit({ category: category.trim(), tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean) }); return }
@@ -228,7 +229,7 @@ function ProposalEditDialog({ proposal, busy, onClose, onSubmit }: { proposal: P
           <label className="form-field full"><span>마감</span><input type="datetime-local" value={due} onChange={(event) => setDue(event.target.value)} /></label>
         </>}
         <p className="approval-edit-note">무엇을 고쳤는지는 diff로 저장되어 자동화 승급 판단에 쓰입니다.</p>
-        <footer><button type="button" className="button ghost" disabled={busy} onClick={onClose}>취소</button><button type="submit" className="button primary" disabled={busy}><Check size={18} /> {busy ? '실행 중…' : '수정한 내용으로 승인'}</button></footer>
+        <footer><Button tone="ghost" type="button" disabled={busy} onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={busy}><Check size={18} /> {busy ? '실행 중…' : '수정한 내용으로 승인'}</Button></footer>
       </form>
     </section>
   </div>

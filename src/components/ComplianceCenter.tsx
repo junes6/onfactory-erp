@@ -14,6 +14,7 @@ import { applyApprovedValues, canExtractDocumentFile, DOCUMENT_EXTRACTION_FIELDS
 import { DocumentExtractionReview, type DocumentExtractionState } from './DocumentExtractionReview'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ComplianceCenter.css'
+import { Button } from './ui/Button'
 
 type ComplianceStatus = '유효' | '갱신예정' | '보완필요' | '만료'
 type ComplianceRecord = {
@@ -281,7 +282,7 @@ function RecordModal({ record, workspaceScope, currentUserName, onClose, onSave,
         if (cleanup.failed.length) onToast(`항목은 저장했지만 제거한 증빙 ${cleanup.failed.length}개의 원본 정리에 실패했습니다.`)
         onClose()
       }}>
-        <section className="compliance-attachments"><input ref={fileRef} className="sr-only" type="file" multiple onChange={(event) => void attachFiles(event)} /><div><strong>인증서 원본부터 올려 주세요</strong><span>PDF·이미지는 AI가 번호·기관·날짜를 읽고, 원문 근거와 함께 확인 화면에 보여 드립니다.</span></div><button ref={uploadButtonRef} className="button secondary" type="button" data-initial-focus={!record ? 'true' : undefined} disabled={busy || attachmentBusy} onClick={() => fileRef.current?.click()}><Upload size={17} /> {attachmentBusy ? '처리 중…' : '파일 선택'}</button></section>
+        <section className="compliance-attachments"><input ref={fileRef} className="sr-only" type="file" multiple onChange={(event) => void attachFiles(event)} /><div><strong>인증서 원본부터 올려 주세요</strong><span>PDF·이미지는 AI가 번호·기관·날짜를 읽고, 원문 근거와 함께 확인 화면에 보여 드립니다.</span></div><Button tone="secondary" ref={uploadButtonRef} type="button" data-initial-focus={!record ? 'true' : undefined} disabled={busy || attachmentBusy} onClick={() => fileRef.current?.click()}><Upload size={17} /> {attachmentBusy ? '처리 중…' : '파일 선택'}</Button></section>
         <div className="compliance-file-list">{attachments.map((file) => <span key={file.id}><FileText size={15} /><span>{file.name} · {file.size}<small>{isStoredDocumentAttachment(file) ? '원본 저장됨' : '이전 파일 정보 · 원본 없음'}</small></span>{isStoredDocumentAttachment(file) && <button type="button" aria-label={`${file.name} 원본 보기`} disabled={Boolean(downloadingId)} onClick={() => void downloadAttachment(file)}><Download size={14} /></button>}<button type="button" aria-label={`${file.name} 제거`} disabled={busy || attachmentBusy} onClick={() => void removeAttachment(file)}><X size={14} /></button></span>)}</div>
         <DocumentExtractionReview
           kind="compliance"
@@ -292,7 +293,7 @@ function RecordModal({ record, workspaceScope, currentUserName, onClose, onSave,
           onRetry={extraction.status !== 'review' && extraction.sourceId ? () => { const source = attachments.find((attachment) => attachment.id === extraction.sourceId); if (source) void extract(source) } : undefined}
         />
         {!showForm
-          ? <section className="compliance-manual-entry"><p>파일이 없거나 AI 없이 등록하려면 직접 입력할 수 있습니다.</p><div><button className="button ghost" type="button" disabled={busy || attachmentBusy} onClick={() => void requestClose()}>취소</button><button className="button secondary" type="button" disabled={busy || attachmentBusy || extracting} onClick={() => setShowForm(true)}>파일 없이 직접 입력</button></div></section>
+          ? <section className="compliance-manual-entry"><p>파일이 없거나 AI 없이 등록하려면 직접 입력할 수 있습니다.</p><div><Button tone="ghost" type="button" disabled={busy || attachmentBusy} onClick={() => void requestClose()}>취소</Button><Button tone="secondary" type="button" disabled={busy || attachmentBusy || extracting} onClick={() => setShowForm(true)}>파일 없이 직접 입력</Button></div></section>
           : <>
         <div className="compliance-form-grid">
           <label><span>관리 분류</span><select name="category" defaultValue={approved.category ?? record?.category ?? ''} required><option value="" disabled>분류 선택</option><option>HACCP</option><option>품목제조보고</option><option>자가품질검사</option><option>식품표시 검토</option><option>위생교육</option><option>검교정</option><option>ISO 22000</option><option>FSSC 22000</option><option>기타 인증</option></select></label>
@@ -305,7 +306,7 @@ function RecordModal({ record, workspaceScope, currentUserName, onClose, onSave,
           <label className="full"><span>필수 확인 항목 · 한 줄에 하나</span><textarea name="checklist" rows={4} defaultValue={record?.checklist.join('\n')} placeholder={'예: 인증서 원본 확인\n갱신 신청 일정 등록'} /></label>
           <label className="full"><span>메모</span><textarea name="note" rows={3} defaultValue={record?.note} /></label>
         </div>
-        <footer><button className="button ghost" type="button" disabled={busy || attachmentBusy} onClick={() => void requestClose()}>취소</button><button className="button primary" type="submit" disabled={busy || attachmentBusy || extracting}><FileCheck2 size={18} /> {busy ? '저장 중…' : extracting ? 'AI 읽는 중…' : '확인 후 저장'}</button></footer>
+        <footer><Button tone="ghost" type="button" disabled={busy || attachmentBusy} onClick={() => void requestClose()}>취소</Button><Button tone="primary" type="submit" disabled={busy || attachmentBusy || extracting}><FileCheck2 size={18} /> {busy ? '저장 중…' : extracting ? 'AI 읽는 중…' : '확인 후 저장'}</Button></footer>
           </>}
       </form>
     </section>
@@ -369,7 +370,7 @@ export function ComplianceCenter({ workspaceScope, canManage, currentUserName, c
     finally { setDownloadingId('') }
   }
   return <div className="compliance-page">
-    <header className="compliance-page-head"><div><span>FOOD SAFETY & CERTIFICATION</span><h1>식품안전 · 인증</h1><p>인증·검사·교육·검교정 일정과 증빙을 항목별로 빠르게 확인합니다.</p></div>{canManage && <button className="button primary" type="button" onClick={() => setEditing('new')}><Plus size={18} /> 새 항목 등록</button>}</header>
+    <header className="compliance-page-head"><div><span>FOOD SAFETY & CERTIFICATION</span><h1>식품안전 · 인증</h1><p>인증·검사·교육·검교정 일정과 증빙을 항목별로 빠르게 확인합니다.</p></div>{canManage && <Button tone="primary" type="button" onClick={() => setEditing('new')}><Plus size={18} /> 새 항목 등록</Button>}</header>
 
     <section className="compliance-topline" aria-label="인증 현황 요약">
       <span><ShieldCheck size={16} /> 전체 <strong>{records.length}</strong></span>
@@ -433,7 +434,7 @@ export function ComplianceCenter({ workspaceScope, canManage, currentUserName, c
             <section><div className="compliance-detail-section-title"><ClipboardCheck size={16} /><strong>필수 확인 항목</strong><span>{selectedRecord.checklist.length}</span></div><ul className="compliance-checklist">{selectedRecord.checklist.map((item) => <li key={item}><CheckCircle2 size={15} />{item}</li>)}{selectedRecord.checklist.length === 0 && <li className="empty">등록된 확인 항목이 없습니다.</li>}</ul></section>
             <section><div className="compliance-detail-section-title"><FileText size={16} /><strong>증빙자료</strong><span>{selectedRecord.attachments.length}</span></div><div className="compliance-detail-files">{selectedRecord.attachments.map((attachment) => <button type="button" disabled={!isStoredDocumentAttachment(attachment) || Boolean(downloadingId)} onClick={() => void downloadAttachment(attachment)} key={attachment.id}><FileText size={15} /><span><strong>{attachment.name}</strong><small>{attachment.size}{!isStoredDocumentAttachment(attachment) ? ' · 원본 없음' : ''}</small></span>{isStoredDocumentAttachment(attachment) && <Download size={15} />}</button>)}{selectedRecord.attachments.length === 0 && <p>등록된 증빙자료가 없습니다.</p>}</div></section>
             {selectedRecord.note && <section className="compliance-detail-note"><strong>관리 메모</strong><p>{selectedRecord.note}</p></section>}
-            <footer><span>최근 수정 {formatDateTime(selectedRecord.updatedAt)}</span>{canManage && <div><button className="button secondary" type="button" onClick={() => setEditing(selectedRecord)}><Pencil size={16} /> 수정</button><button className="button ghost danger" type="button" onClick={() => void remove(selectedRecord)}><Trash2 size={16} /> 삭제</button></div>}</footer>
+            <footer><span>최근 수정 {formatDateTime(selectedRecord.updatedAt)}</span>{canManage && <div><Button tone="secondary" size="sm" type="button" onClick={() => setEditing(selectedRecord)}><Pencil size={16} /> 수정</Button><Button tone="danger" size="sm" type="button" onClick={() => void remove(selectedRecord)}><Trash2 size={16} /> 삭제</Button></div>}</footer>
           </>
         })() : <div className="compliance-detail-empty"><FileCheck2 size={30} /><h2>항목을 선택하세요</h2><p>왼쪽 목록에서 인증·검토 항목을 선택하면 상세 정보와 증빙을 확인할 수 있습니다.</p></div>}
       </aside>

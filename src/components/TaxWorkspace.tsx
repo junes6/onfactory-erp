@@ -22,6 +22,7 @@ import {
 } from '../utils/taxSchedule'
 import { evidenceDateOf, isTaxPeriodPreset, taxPeriodOptions, taxPeriodRange, type TaxPeriodPreset } from '../utils/taxEvidencePeriod'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
+import { Button, ButtonLink, IconButton } from './ui/Button'
 
 type TaxStatus = '예정' | '신고 완료' | '납부 완료'
 type TaxRecord = {
@@ -279,7 +280,7 @@ export function TaxWorkspace({ workspaceScope, canManage, currentUserId, current
           : <li key={item}><span>{item}</span></li>)}</ul>
         <small>{schedule.appliesTo} · <a href={schedule.sourceUrl} target="_blank" rel="noreferrer">{schedule.sourceLabel} <ExternalLink size={11} /></a></small>
       </div>
-      {canManage && <button className="button secondary tax-status-action" type="button" onClick={() => void persistScheduleStatus(schedule, nextStatus(status))}>{status === '납부 완료' ? <X size={15} /> : <Check size={15} />} {nextStatusLabel(status)}</button>}
+      {canManage && <Button tone="secondary" className="tax-status-action" type="button" onClick={() => void persistScheduleStatus(schedule, nextStatus(status))}>{status === '납부 완료' ? <X size={15} /> : <Check size={15} />} {nextStatusLabel(status)}</Button>}
     </article>
   }
 
@@ -288,8 +289,8 @@ export function TaxWorkspace({ workspaceScope, canManage, currentUserId, current
       <div><strong>우리 회사 세무 캘린더</strong><span>{ENTITY_LABEL[profile.entityType]} · {VAT_LABEL[profile.vatType]} · {profile.fiscalYearEndMonth}월 결산 기준{usingDefaultProfile ? ' (기본값으로 자동 적용 중)' : ''}</span></div>
       <div className="tax-toolbar-actions">
         <label><span className="sr-only">조회 연도</span><select value={year} onChange={(event) => setYear(Number(event.target.value))}>{years.map((item) => <option key={item} value={item}>{item}년</option>)}</select></label>
-        <a className="button ghost" href={NTS_YEAR_CALENDAR_URL(year)} target="_blank" rel="noreferrer">국세청 원문 <ExternalLink size={15} /></a>
-        {canManage && <button className="button secondary" type="button" onClick={() => setProfileOpen(true)}><Pencil size={16} /> 회사 조건 {usingDefaultProfile ? '확인' : '수정'}</button>}
+        <ButtonLink tone="ghost" href={NTS_YEAR_CALENDAR_URL(year)} target="_blank" rel="noreferrer">국세청 원문 <ExternalLink size={15} /></ButtonLink>
+        {canManage && <Button tone="secondary" type="button" onClick={() => setProfileOpen(true)}><Pencil size={16} /> 회사 조건 {usingDefaultProfile ? '확인' : '수정'}</Button>}
       </div>
     </section>
 
@@ -321,7 +322,7 @@ export function TaxWorkspace({ workspaceScope, canManage, currentUserId, current
         {canManage && <div className="tax-delivery-bar">
           <label><span className="sr-only">전달 기간</span><select value={periodPreset} onChange={(event) => { if (isTaxPeriodPreset(event.target.value)) setPeriodPreset(event.target.value) }}>{periodOptions.map((option) => <option key={option.preset} value={option.preset}>{option.label}</option>)}</select></label>
           <span className="tax-delivery-count">{periodDocumentCount}개 대상</span>
-          <button className="button primary" type="button" disabled={exporting || periodDocumentCount === 0} onClick={() => void exportEvidence()}><SendHorizontal size={16} /> {exporting ? '묶는 중…' : '세무사에게 전달'}</button>
+          <Button tone="primary" type="button" disabled={exporting || periodDocumentCount === 0} onClick={() => void exportEvidence()}><SendHorizontal size={16} /> {exporting ? '묶는 중…' : '세무사에게 전달'}</Button>
         </div>}
         <div className="tax-evidence-upload-bar">
           <label className="tax-evidence-date"><span>증빙 일자</span><input type="date" value={evidenceDate} max="2100-12-31" onChange={(event) => setEvidenceDate(event.target.value || today)} /></label>
@@ -331,7 +332,7 @@ export function TaxWorkspace({ workspaceScope, canManage, currentUserId, current
         <div className="tax-evidence-list" aria-busy={documentsLoading || uploading}>{EVIDENCE_BUCKETS.map((bucket) => { const files = yearDocuments.filter((document) => evidenceBucket(document) === bucket.id); return <article className="tax-evidence-row" key={bucket.id}>
           <div className="tax-evidence-main"><strong>{bucket.id}</strong><span>{bucket.description}</span></div><span className="tax-evidence-count">{files.length}개</span>
           <div className="tax-evidence-files">{files.map((file) => <span key={file.id}><button type="button" onClick={() => void downloadEvidence(file)}><Paperclip size={13} /> {file.name}</button>{(canManage || file.uploadedById === currentUserId) && <button type="button" aria-label={`${file.name} 삭제`} onClick={() => void removeEvidence(file)}><Trash2 size={13} /></button>}</span>)}</div>
-          <button className="button ghost tax-upload-button" type="button" aria-label={`${bucket.id} 증빙 파일 넣기`} disabled={uploading} onClick={() => pickEvidenceFiles(bucket.id)}><Upload size={15} /> 추가</button>
+          <Button tone="ghost" className="tax-upload-button" type="button" aria-label={`${bucket.id} 증빙 파일 넣기`} disabled={uploading} onClick={() => pickEvidenceFiles(bucket.id)}><Upload size={15} /> 추가</Button>
         </article> })}</div>
         {!documentsLoading && yearDocuments.length === 0 && <p className="tax-evidence-empty">아직 {year}년 증빙이 없습니다. 매출·매입·급여 등 알맞은 칸에 파일을 넣으면 증빙 일자와 분류가 함께 저장됩니다.</p>}
 
@@ -375,10 +376,10 @@ function TaxProfileEditor({ record, profile, currentUserName, onClose, onSave }:
     if (await onSave(next)) onClose(); else setBusy(false)
   }
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="modal-card it-modal tax-profile-modal" role="dialog" aria-modal="true" aria-labelledby="tax-profile-title">
-    <header><div><span className="eyebrow">TAX PROFILE</span><h2 id="tax-profile-title">회사 세무 조건</h2><p>{record ? '저장된 조건입니다.' : '지금은 기본값으로 일정을 만들고 있습니다.'} 일정 적용에 필요한 조건만 저장합니다. 실제 신고 전에는 담당 세무사와 적용 여부를 확인해 주세요.</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
+    <header><div><span className="eyebrow">TAX PROFILE</span><h2 id="tax-profile-title">회사 세무 조건</h2><p>{record ? '저장된 조건입니다.' : '지금은 기본값으로 일정을 만들고 있습니다.'} 일정 적용에 필요한 조건만 저장합니다. 실제 신고 전에는 담당 세무사와 적용 여부를 확인해 주세요.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
     <form onSubmit={submit}><div className="form-grid"><label className="form-field"><span>사업자 유형</span><select name="entityType" defaultValue={profile.entityType}><option value="corporation">법인사업자</option><option value="individual">개인사업자</option></select></label><label className="form-field"><span>부가가치세 유형</span><select name="vatType" defaultValue={profile.vatType}><option value="general">일반과세</option><option value="simplified">간이과세</option><option value="exempt">면세</option></select></label></div>
       <div className="form-grid"><label className="form-field"><span>결산월</span><select name="fiscalYearEndMonth" defaultValue={profile.fiscalYearEndMonth}>{Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={month}>{month}월</option>)}</select></label><label className="form-field"><span>급여·원천징수 여부</span><select name="hasPayroll" defaultValue={profile.hasPayroll ? 'yes' : 'no'}><option value="yes">있음</option><option value="no">없음</option></select></label></div>
       <label className="form-field full"><span>원천세 납부 주기</span><select name="withholdingCycle" defaultValue={profile.withholdingCycle}><option value="monthly">매월 납부</option><option value="semiannual">반기납부 승인받음</option></select></label>
-      <footer><button className="button ghost" type="button" onClick={onClose}>취소</button><button className="button primary" type="submit" disabled={busy}><Check size={17} /> {busy ? '계산 중…' : '저장하고 일정 계산'}</button></footer></form>
+      <footer><Button tone="ghost" type="button" onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={busy}><Check size={17} /> {busy ? '계산 중…' : '저장하고 일정 계산'}</Button></footer></form>
   </section></div>
 }

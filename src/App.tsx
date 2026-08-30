@@ -40,6 +40,7 @@ import { dayKind, holidayName } from './utils/koreanHolidays'
 import {
   type Tenant, type WorkEvidence, type WorkItem, type WorkRule,
 } from './domainData'
+import { Button, IconButton } from './components/ui/Button'
 
 type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'finance' | 'ip' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
 type PageId = TenantPage | PlatformSection | 'billing'
@@ -206,12 +207,12 @@ function SharedCalendarPreview({ onOpen, events }: { onOpen: () => void; events:
   const monthLabel = formatMonthLabel(todayDate)
   const todayHoliday = holidayName(todayKey)
   return <section className="home-calendar-card dashboard-section-card" aria-labelledby="home-calendar-title">
-    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><CalendarDays size={18} /></span><h2 id="home-calendar-title">공유 일정</h2></div><button className="text-button" type="button" onClick={onOpen}>전체 보기 <ArrowRight size={16} /></button></header>
+    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><CalendarDays size={18} /></span><h2 id="home-calendar-title">공유 일정</h2></div><Button tone="quiet" type="button" onClick={onOpen}>전체 보기 <ArrowRight size={16} /></Button></header>
     <div className="dashboard-section-body"><p className="home-calendar-month">{monthLabel}{todayHoliday && <em className="home-calendar-holiday">오늘 · {todayHoliday}</em>}</p>
       <div className="mini-weekdays" aria-hidden="true">{['월', '화', '수', '목', '금', '토', '일'].map((day) => <span className={day === '일' ? 'is-sun' : day === '토' ? 'is-sat' : ''} key={day}>{day}</span>)}</div>
       <div className="mini-calendar-days">{days.map((item) => <button type="button" className={`${item.today ? 'today' : ''}${item.kind === 'holiday' || item.kind === 'sunday' ? ' is-holiday-day' : item.kind === 'saturday' ? ' is-saturday' : ''}`} title={item.holiday ?? undefined} key={item.key} onClick={onOpen}><span>{item.day}</span>{item.event && <i className={item.event} />}</button>)}</div>
       {todayEvents.length > 0 ? <div className="today-agenda">{todayEvents.slice(0, 2).map((event) => <article key={event.id}><time>{event.start}</time><span className={`agenda-color ${event.scope === 'department' ? 'quality' : event.scope}`} /><div><strong>{event.title}</strong><p>{event.department} · {event.location || '장소 미정'}</p></div></article>)}</div> : <div className="empty-state"><CalendarDays size={25} /><h3>오늘 공유 일정이 없습니다</h3><p>일정을 등록하면 권한이 있는 직원에게 바로 공유됩니다.</p></div>}
-      <button className="button secondary full" type="button" onClick={onOpen}><CalendarDays size={17} /> 일정 등록</button>
+      <Button tone="secondary" full type="button" onClick={onOpen}><CalendarDays size={17} /> 일정 등록</Button>
     </div>
   </section>
 }
@@ -365,7 +366,7 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
       content = <SupportProgramsWidget workspaceScope={workspaceScope} />
     } else if (preference.id === 'work') {
       content = <section className="my-work-card dashboard-section-card">
-        <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><ListChecks size={18} /></span><h2>다음 업무</h2></div><button type="button" className="text-button" onClick={() => onNavigate('tasks')}>전체 보기 <ArrowRight size={16} /></button></header>
+        <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><ListChecks size={18} /></span><h2>다음 업무</h2></div><Button tone="quiet" type="button" onClick={() => onNavigate('tasks')}>전체 보기 <ArrowRight size={16} /></Button></header>
         <div className="work-mini-list dashboard-section-body">
           {myWork.length === 0 && <div className="empty-state compact"><CheckCircle2 size={26} /><h3>지금 처리할 업무가 없습니다</h3><p>새 업무가 배정되면 여기에 표시됩니다.</p></div>}
           {myWork.slice(0, 2).map((item) => <article className="work-mini" key={item.id}>
@@ -377,8 +378,8 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
       </section>
     } else {
       content = <section className={'priority-alert-bar dashboard-section-card ' + (!operatingDataAvailable ? 'setup' : attentionCount === 0 || !canAssignTasks ? 'neutral' : '')}>
-        <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><AlertTriangle size={18} /></span><h2>중요 알림</h2></div><button className="text-button" type="button" onClick={onOpenAlerts}>전체 보기 <ArrowRight size={15} /></button></header>
-        <div className="priority-alert-content"><span className="priority-alert-icon"><AlertTriangle size={20} /></span><div><strong>{dashboardAlert.title}</strong><p>{dashboardAlert.detail}</p></div><button className="small-button" type="button" onClick={() => onNavigate(dashboardAlert.page)}>{!operatingDataAvailable ? '초기 설정' : '상세 확인'} <ArrowRight size={15} /></button></div>
+        <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><AlertTriangle size={18} /></span><h2>중요 알림</h2></div><Button tone="quiet" type="button" onClick={onOpenAlerts}>전체 보기 <ArrowRight size={15} /></Button></header>
+        <div className="priority-alert-content"><span className="priority-alert-icon"><AlertTriangle size={20} /></span><div><strong>{dashboardAlert.title}</strong><p>{dashboardAlert.detail}</p></div><Button tone="ghost" size="sm" type="button" onClick={() => onNavigate(dashboardAlert.page)}>{!operatingDataAvailable ? '초기 설정' : '상세 확인'} <ArrowRight size={15} /></Button></div>
       </section>
     }
     const visibleIndex = visibleWidgets.findIndex((item) => item.id === preference.id)
@@ -498,10 +499,10 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
           <button className={myWork.length === 0 ? 'is-neutral' : ''} type="button" aria-label={`확인할 업무 ${myWork.length}건`} onClick={() => onNavigate('tasks')}><ListChecks size={15} /><span>확인 업무</span><strong>{myWork.length}</strong></button>
           <button className={attentionCount === 0 ? 'is-neutral' : ''} type="button" aria-label={`AI 알림 ${attentionCount}건`} onClick={onOpenAlerts}><Sparkles size={15} /><span>AI 알림</span><strong>{attentionCount}</strong></button>
           {canAssignTasks && <button className={pendingProposals === 0 ? 'is-neutral' : 'is-attention'} type="button" aria-label={`검토할 AI 제안 ${pendingProposals}건`} onClick={() => onNavigate('approvals')}><ClipboardCheck size={15} /><span>AI 제안</span><strong>{pendingProposals}</strong></button>}
-        </div>{layoutOpen ? <button className="button primary" type="button" onClick={finishLayoutEdit}><Check size={18} /> 편집 완료</button> : <DashboardLayoutButton onClick={() => setLayoutOpen(true)} />}{canAssignTasks ? <button className="button primary" type="button" onClick={() => onCreateTask()}><Plus size={18} /> 새 업무 지시</button> : <StatusBadge className="status-pill" tone="neutral">직원용 업무 화면</StatusBadge>}</>}
+        </div>{layoutOpen ? <Button tone="primary" type="button" onClick={finishLayoutEdit}><Check size={18} /> 편집 완료</Button> : <DashboardLayoutButton onClick={() => setLayoutOpen(true)} />}{canAssignTasks ? <Button tone="primary" type="button" onClick={() => onCreateTask()}><Plus size={18} /> 새 업무 지시</Button> : <StatusBadge className="status-pill" tone="neutral">직원용 업무 화면</StatusBadge>}</>}
       />
       {layoutOpen && <section className="dashboard-layout-workbench" aria-labelledby="dashboard-layout-workbench-title">
-        <div className="dashboard-layout-guide"><span className="dashboard-layout-guide-icon"><GripVertical size={19} /></span><div><h2 id="dashboard-layout-workbench-title">블록을 끌면 놓을 수 있는 슬롯 가이드가 나타납니다</h2><p>블록 아무 곳이나 잡아 끌어 보세요. 파란 가이드가 표시된 슬롯에 놓으면 자동으로 격자에 맞춰지고, 순서와 너비는 이 계정에 바로 저장됩니다. 핸들을 누르면 방향키로도 이동할 수 있습니다.</p></div><span className="dashboard-layout-saved"><Check size={15} /> 개인 저장</span><button type="button" className="small-button" onClick={() => { setWidgetPreferences(defaultDashboardWidgets.map((item) => ({ ...item }))); setKeyboardWidgetId(null); setLayoutAnnouncement('기본 위젯 배치로 되돌렸습니다.') }}><RotateCcw size={15} /> 기본 배치</button></div>
+        <div className="dashboard-layout-guide"><span className="dashboard-layout-guide-icon"><GripVertical size={19} /></span><div><h2 id="dashboard-layout-workbench-title">블록을 끌면 놓을 수 있는 슬롯 가이드가 나타납니다</h2><p>블록 아무 곳이나 잡아 끌어 보세요. 파란 가이드가 표시된 슬롯에 놓으면 자동으로 격자에 맞춰지고, 순서와 너비는 이 계정에 바로 저장됩니다. 핸들을 누르면 방향키로도 이동할 수 있습니다.</p></div><span className="dashboard-layout-saved"><Check size={15} /> 개인 저장</span><Button tone="ghost" size="sm" type="button" onClick={() => { setWidgetPreferences(defaultDashboardWidgets.map((item) => ({ ...item }))); setKeyboardWidgetId(null); setLayoutAnnouncement('기본 위젯 배치로 되돌렸습니다.') }}><RotateCcw size={15} /> 기본 배치</Button></div>
         <div className="dashboard-hidden-widgets"><strong>숨긴 위젯</strong>{hiddenWidgets.length === 0 ? <span>모든 위젯이 표시 중입니다.</span> : hiddenWidgets.map((item) => <button type="button" key={item.id} onClick={() => { updateWidget(item.id, { visible: true }); setLayoutAnnouncement(`${dashboardWidgetLabels[item.id]} 위젯을 다시 표시했습니다.`) }}><Plus size={14} /> {dashboardWidgetLabels[item.id]}</button>)}</div>
       </section>}
       <div className={`dashboard-widget-grid${layoutOpen ? ' is-layout-editing' : ''}${draggingWidgetId ? ' is-drag-active' : ''}`}>
@@ -623,7 +624,7 @@ function CompletionModal({ item, workspaceScope, onToast, onClose, onSubmit }: {
   }
   return <div className="modal-backdrop workflow-sheet-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) void discardAndClose() }}>
     <section ref={dialogRef} className="modal-card workflow-modal workflow-completion-sheet" role="dialog" aria-modal="true" aria-labelledby="completion-modal-title">
-      <header><div><span className="eyebrow">COMPLETE WORK</span><h2 id="completion-modal-title">완료 보고하기</h2><p>{item.title}</p></div><button type="button" className="icon-button" aria-label="닫기" disabled={busy || uploading} onClick={() => void discardAndClose()}><X size={21} /></button></header>
+      <header><div><span className="eyebrow">COMPLETE WORK</span><h2 id="completion-modal-title">완료 보고하기</h2><p>{item.title}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" disabled={busy || uploading} onClick={() => void discardAndClose()}><X size={21} /></IconButton></header>
       <form onSubmit={submit}>
         <label className="form-field full"><span>무엇을 했나요? <em>필수</em></span><textarea autoFocus data-autofocus rows={3} value={summary} onChange={(event) => setSummary(event.target.value)} placeholder="완료한 내용과 결과를 짧게 적어 주세요." required /></label>
         <section className="workflow-upload workflow-upload-compact" aria-labelledby="work-evidence-title"><div><h3 id="work-evidence-title">사진·파일 첨부 <small>선택</small></h3><p>필요한 경우에만 사진이나 증빙 파일을 추가하세요.</p></div><input ref={inputRef} className="sr-only" type="file" multiple onChange={async (event) => {
@@ -643,11 +644,11 @@ function CompletionModal({ item, workspaceScope, onToast, onClose, onSubmit }: {
             } catch (error) { setUploadError(`${file.name}: ${error instanceof Error ? error.message : '업로드 실패'}`) }
           }
           setEvidence((current) => [...current, ...uploaded].slice(0, 10)); setUploading(false)
-        }} /><button className="button secondary" type="button" disabled={uploading || evidence.length >= 10} onClick={() => inputRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '파일 추가'}</button></section>
+        }} /><Button tone="secondary" type="button" disabled={uploading || evidence.length >= 10} onClick={() => inputRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '파일 추가'}</Button></section>
         {uploadError && <p className="workflow-upload-error" role="alert">{uploadError}</p>}
         {evidence.length > 0 && <div className="workflow-evidence-list">{evidence.map((file) => <div key={file.id}><FileText size={18} /><span><strong>{file.name}</strong><small>{file.size} · 원본 저장됨</small></span><button type="button" aria-label={`${file.name} 삭제`} disabled={busy || uploading} onClick={() => void removeEvidence(file)}><X size={16} /></button></div>)}</div>}
         <p className="workflow-submit-guide"><ShieldCheck size={17} /> 제출하면 {item.requestedBy}님에게 확인 요청이 갑니다.</p>
-        <footer><button type="button" className="button ghost" disabled={busy || uploading} onClick={() => void discardAndClose()}>취소</button><button type="submit" className="button primary" disabled={busy || uploading || summary.trim().length < 3}><Check size={18} /> 제출</button></footer>
+        <footer><Button tone="ghost" type="button" disabled={busy || uploading} onClick={() => void discardAndClose()}>취소</Button><Button tone="primary" type="submit" disabled={busy || uploading || summary.trim().length < 3}><Check size={18} /> 제출</Button></footer>
       </form>
     </section>
   </div>
@@ -661,12 +662,12 @@ function WorkReviewModal({ item, workspaceScope, onToast, onClose, onSubmit }: {
   const valid = mode === 'approve' || comment.trim().length >= 2
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section ref={dialogRef} className="modal-card workflow-modal" role="dialog" aria-modal="true" aria-labelledby="review-modal-title">
-      <header><div><span className="eyebrow">WORK REVIEW</span><h2 id="review-modal-title">{mode === 'approve' ? '결재 승인' : '수정 요청'}</h2><p>{item.title}</p></div><button type="button" className="icon-button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
+      <header><div><span className="eyebrow">WORK REVIEW</span><h2 id="review-modal-title">{mode === 'approve' ? '결재 승인' : '수정 요청'}</h2><p>{item.title}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
       <form onSubmit={async (event) => { event.preventDefault(); if (!valid) return; setBusy(true); const message = comment.trim(); if (await onSubmit(mode, message, mode === 'request-changes' ? message : undefined)) onClose(); else setBusy(false) }}>
         <div className="workflow-submission-preview"><strong>담당자 완료 보고</strong><p>{item.completion?.summary || '레거시 업무로 완료내용이 등록되지 않았습니다.'}</p>{item.completion?.evidence.map((file) => file.id.startsWith('DOC-') ? <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={14} /> {file.name} · {file.size}</button> : <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}</span>)}</div>
         <div className="workflow-review-decision" role="radiogroup" aria-label="검토 결정"><button type="button" role="radio" aria-checked={mode === 'approve'} onClick={() => { setMode('approve'); setComment('') }}><Check size={16} /> 승인</button><button type="button" role="radio" aria-checked={mode === 'request-changes'} onClick={() => { setMode('request-changes'); setComment('') }}>수정 요청</button></div>
         <label className="form-field full"><span>{mode === 'approve' ? '승인 메모' : '수정 요청 내용'} <em>{mode === 'approve' ? '선택' : '필수'}</em></span><textarea autoFocus data-autofocus rows={mode === 'approve' ? 3 : 4} value={comment} onChange={(event) => setComment(event.target.value)} placeholder={mode === 'approve' ? '필요할 때만 남기세요. 비워 두고 바로 승인할 수 있습니다.' : '무엇을 왜, 어떻게 보완해야 하는지 한 번에 작성해 주세요. 예: LOT 번호와 조치 전·후 사진을 보완해 주세요.'} required={mode !== 'approve'} /></label>
-        <footer><button type="button" className="button ghost" onClick={onClose}>취소</button><button type="submit" className={`button ${mode === 'approve' ? 'primary' : 'danger'}`} disabled={busy || !valid}>{mode === 'approve' && <Check size={18} />}{mode === 'approve' ? ' 승인 완료' : '수정 요청 보내기'}</button></footer>
+        <footer><Button tone="ghost" type="button" onClick={onClose}>취소</Button><Button tone={mode === 'approve' ? 'primary' : 'danger'} type="submit" disabled={busy || !valid}>{mode === 'approve' && <Check size={18} />}{mode === 'approve' ? ' 승인 완료' : '수정 요청 보내기'}</Button></footer>
       </form>
     </section>
   </div>
@@ -682,7 +683,7 @@ function WorkRuleModal({ assignees, onClose, onSubmit }: { assignees: WorkAssign
   const today = seoulDateInputValue()
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section ref={dialogRef} className="modal-card workflow-modal" role="dialog" aria-modal="true" aria-labelledby="rule-modal-title">
-      <header><div><span className="eyebrow">RECURRING WORK</span><h2 id="rule-modal-title">반복 업무 규칙 만들기</h2><p>매주 또는 매월 자동으로 업무를 생성합니다.</p></div><button type="button" className="icon-button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
+      <header><div><span className="eyebrow">RECURRING WORK</span><h2 id="rule-modal-title">반복 업무 규칙 만들기</h2><p>매주 또는 매월 자동으로 업무를 생성합니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
       <form onSubmit={async (event) => {
         event.preventDefault()
         const input: Record<string, unknown> = Object.fromEntries(new FormData(event.currentTarget).entries())
@@ -714,7 +715,7 @@ function WorkRuleModal({ assignees, onClose, onSubmit }: { assignees: WorkAssign
           <label className="form-field"><span>우선순위</span><select name="priority" defaultValue="보통"><option>긴급</option><option>높음</option><option>보통</option></select></label>
           <p className="workflow-rule-hint full"><CalendarDays size={16} /> 시작일 이후 첫 {frequency === 'weekly' ? workWeekdayNames[weekday] : monthlyMode === 'last-weekday' ? `마지막 주 ${workWeekdayNames[weekday]}` : `${monthDay}일`}부터 자동 생성됩니다.</p>
         </div>
-        <footer><button type="button" className="button ghost" onClick={onClose}>취소</button><button type="submit" className="button primary" disabled={busy || assignees.length === 0}><Repeat2 size={18} /> 규칙 생성</button></footer>
+        <footer><Button tone="ghost" type="button" onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={busy || assignees.length === 0}><Repeat2 size={18} /> 규칙 생성</Button></footer>
       </form>
     </section>
   </div>
@@ -852,7 +853,7 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, work
   }
 
   return <div className="content-page workflow-page">
-    <PageHeader eyebrow="WORKFLOW" title="업무지시 · 결재" description="지시부터 수행·검토·승인까지, 업무가 어느 단계에 있는지 보드에서 바로 확인합니다." action={canAssignTasks ? <div className="page-action-row"><button className="button secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Repeat2 size={18} /> 반복 업무</button><button className="button primary" type="button" onClick={onCreate}><Plus size={18} /> 새 업무 지시</button></div> : <StatusBadge className="status-pill" tone="neutral">내 업무 수행</StatusBadge>} />
+    <PageHeader eyebrow="WORKFLOW" title="업무지시 · 결재" description="지시부터 수행·검토·승인까지, 업무가 어느 단계에 있는지 보드에서 바로 확인합니다." action={canAssignTasks ? <div className="page-action-row"><Button tone="secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Repeat2 size={18} /> 반복 업무</Button><Button tone="primary" type="button" onClick={onCreate}><Plus size={18} /> 새 업무 지시</Button></div> : <StatusBadge className="status-pill" tone="neutral">내 업무 수행</StatusBadge>} />
 
     <div className="workflow-board-toolbar">
       <div className="workflow-board-tabs" role="tablist" aria-label="업무 화면 전환">
@@ -891,7 +892,7 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, work
       })}
     </div>}
 
-    {boardTab === 'rules' && canAssignTasks && <section className="panel recurring-work-panel"><header><div><span className="eyebrow">RECURRING RULES</span><h2>반복 업무 규칙</h2><p>도래한 규칙은 요청됨 단계에 자동 생성됩니다.</p></div><button className="button secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Plus size={17} /> 규칙 추가</button></header><div className="recurring-rule-grid">{rules.map((rule) => <article key={rule.id}><div><span className={`rule-state ${rule.active ? 'active' : 'paused'}`}>{rule.active ? '활성' : '중지'}</span><strong>{rule.title}</strong><p>{rule.description}</p></div><dl><div><dt>주기</dt><dd>{workRuleScheduleLabel(rule)}</dd></div><div><dt>담당자</dt><dd>{rule.owner}</dd></div><div><dt>다음 실행</dt><dd>{formatWorkRuleRun(rule.nextRun, rule.dueTime)}</dd></div></dl><div className="recurring-rule-actions"><button className="button ghost" type="button" onClick={() => void onToggleRule(rule)}>{rule.active ? <PauseCircle size={17} /> : <PlayCircle size={17} />}{rule.active ? ' 일시 중지' : ' 다시 활성화'}</button><button className="button danger" type="button" onClick={() => void onDeleteRule(rule)}><Trash2 size={17} /> 삭제</button></div></article>)}{rules.length === 0 && <div className="empty-state"><Repeat2 size={30} /><h3>반복 규칙이 없습니다</h3><p>매주·매월 반복되는 점검을 자동화해 보세요.</p></div>}</div></section>}
+    {boardTab === 'rules' && canAssignTasks && <section className="panel recurring-work-panel"><header><div><span className="eyebrow">RECURRING RULES</span><h2>반복 업무 규칙</h2><p>도래한 규칙은 요청됨 단계에 자동 생성됩니다.</p></div><Button tone="secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Plus size={17} /> 규칙 추가</Button></header><div className="recurring-rule-grid">{rules.map((rule) => <article key={rule.id}><div><span className={`rule-state ${rule.active ? 'active' : 'paused'}`}>{rule.active ? '활성' : '중지'}</span><strong>{rule.title}</strong><p>{rule.description}</p></div><dl><div><dt>주기</dt><dd>{workRuleScheduleLabel(rule)}</dd></div><div><dt>담당자</dt><dd>{rule.owner}</dd></div><div><dt>다음 실행</dt><dd>{formatWorkRuleRun(rule.nextRun, rule.dueTime)}</dd></div></dl><div className="recurring-rule-actions"><Button tone="ghost" type="button" onClick={() => void onToggleRule(rule)}>{rule.active ? <PauseCircle size={17} /> : <PlayCircle size={17} />}{rule.active ? ' 일시 중지' : ' 다시 활성화'}</Button><Button tone="danger" type="button" onClick={() => void onDeleteRule(rule)}><Trash2 size={17} /> 삭제</Button></div></article>)}{rules.length === 0 && <div className="empty-state"><Repeat2 size={30} /><h3>반복 규칙이 없습니다</h3><p>매주·매월 반복되는 점검을 자동화해 보세요.</p></div>}</div></section>}
 
     {drawerItem && <div className="workflow-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDrawerId(null) }}>
       <aside ref={drawerRef} className="workflow-drawer" role="dialog" aria-modal="true" aria-labelledby="workflow-drawer-title">
@@ -905,14 +906,14 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, work
             </div>
             <h2 id="workflow-drawer-title">{drawerItem.title}</h2>
           </div>
-          <button type="button" className="icon-button" aria-label="상세 닫기" onClick={() => setDrawerId(null)}><X size={21} /></button>
+          <IconButton tone="ghost" type="button" aria-label="상세 닫기" onClick={() => setDrawerId(null)}><X size={21} /></IconButton>
         </header>
         <ol className="workflow-drawer-stepper" aria-label={`업무 단계, 현재 ${workStatusLabel(drawerItem.status)}`}>{stages.map((status, index) => <li className={index < drawerStep ? 'done' : index === drawerStep ? 'current' : ''} aria-current={index === drawerStep ? 'step' : undefined} key={status}><i>{index < drawerStep ? <Check size={11} /> : index + 1}</i><span>{workStatusLabel(status)}</span></li>)}</ol>
         <div className="workflow-drawer-body">
           <section className={`workflow-drawer-action${drawerChangeRequested ? ' is-revision' : ''}${drawerAction ? ' has-action' : ''}`} aria-label="지금 할 일">
             <div><span>지금 할 일</span><strong>{drawerGuide}</strong></div>
             {drawerChangeRequested && <p className="workflow-drawer-revision"><AlertTriangle size={15} /> {drawerItem.review?.requestedChanges || drawerItem.review?.comment || '요청자가 보완 내용을 남기지 않았습니다.'}</p>}
-            {drawerAction && <button className="button primary" type="button" onClick={drawerAction.run}>{drawerAction.label} <ArrowRight size={16} /></button>}
+            {drawerAction && <Button tone="primary" type="button" onClick={drawerAction.run}>{drawerAction.label} <ArrowRight size={16} /></Button>}
           </section>
           {explicitCompletionCriteria(drawerItem) && <section className="workflow-drawer-block" aria-label="완료 기준"><span>완료 기준</span><p>{explicitCompletionCriteria(drawerItem)}</p></section>}
           {drawerItem.attachments?.length ? <section className="workflow-drawer-block" aria-label="지시 첨부"><span>지시 첨부</span><div className="workflow-drawer-files">{drawerItem.attachments.map((file) => <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('첨부 파일을 다운로드하지 못했습니다.') }}><Paperclip size={13} /> {file.name} · {file.size}</button>)}</div></section> : null}
@@ -1111,9 +1112,9 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
 
   return (
     <div className="content-page">
-      <PageHeader eyebrow="INVENTORY & LOT" title="재고 · LOT" description="창고 환경과 유통기한, 출고 가능 수량을 제품 흐름에 맞춰 관리합니다." action={<><button className="button ghost" type="button" aria-pressed={warehouseView === 'large'} onClick={() => setWarehouseView((view) => view === 'compact' ? 'large' : 'compact')}><Layers3 size={18} /> {warehouseView === 'compact' ? '크게 보기' : '컴팩트 보기'}</button>{canManage ? <><button className="button ghost" type="button" onClick={() => openWarehouseMovement()}><Boxes size={18} /> 입출고 등록</button><button className="button primary" type="button" onClick={() => setEditing('new')}><Plus size={18} /> 창고 등록</button></> : <StatusBadge className="status-pill" tone="neutral">조회 전용</StatusBadge>}</>} />
+      <PageHeader eyebrow="INVENTORY & LOT" title="재고 · LOT" description="창고 환경과 유통기한, 출고 가능 수량을 제품 흐름에 맞춰 관리합니다." action={<><Button tone="ghost" type="button" aria-pressed={warehouseView === 'large'} onClick={() => setWarehouseView((view) => view === 'compact' ? 'large' : 'compact')}><Layers3 size={18} /> {warehouseView === 'compact' ? '크게 보기' : '컴팩트 보기'}</Button>{canManage ? <><Button tone="ghost" type="button" onClick={() => openWarehouseMovement()}><Boxes size={18} /> 입출고 등록</Button><Button tone="primary" type="button" onClick={() => setEditing('new')}><Plus size={18} /> 창고 등록</Button></> : <StatusBadge className="status-pill" tone="neutral">조회 전용</StatusBadge>}</>} />
       <section className={`warehouse-grid is-${warehouseView}`}>
-        {locations.length === 0 && <div className="empty-state"><Warehouse size={30} /><h3>아직 등록된 항목이 없습니다</h3><p>첫 창고를 등록하면 보관 조건과 공간 사용률을 이곳에서 관리할 수 있습니다.</p>{canManage && <button className="button primary" type="button" onClick={() => setEditing('new')}><Plus size={17} /> 첫 창고 등록</button>}</div>}
+        {locations.length === 0 && <div className="empty-state"><Warehouse size={30} /><h3>아직 등록된 항목이 없습니다</h3><p>첫 창고를 등록하면 보관 조건과 공간 사용률을 이곳에서 관리할 수 있습니다.</p>{canManage && <Button tone="primary" type="button" onClick={() => setEditing('new')}><Plus size={17} /> 첫 창고 등록</Button>}</div>}
         {locations.map((location) => {
           const lots = lotsByWarehouse[location.id] ?? []
           const unresolvedCount = lots.filter((lot) => lot.quantity === null).length
@@ -1148,12 +1149,12 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
         })}
       </section>
       <section className="panel table-panel inventory-movement-panel">
-        <div className="panel-heading"><div><h2>{showAllMovements ? '전체 입출고 원장' : '최근 입출고'}</h2><p>LOT별 수량, 등록 사유와 증빙자료를 확인합니다.</p></div><div className="inventory-panel-actions">{movements.length > 8 && <button type="button" className="small-button" aria-pressed={showAllMovements} onClick={() => setShowAllMovements((value) => !value)}>{showAllMovements ? '최근 8건만' : `전체 ${movements.length}건`}</button>}{canManage && <button type="button" className="small-button" onClick={() => openWarehouseMovement()}><Plus size={16} /> 내역 등록</button>}</div></div>
+        <div className="panel-heading"><div><h2>{showAllMovements ? '전체 입출고 원장' : '최근 입출고'}</h2><p>LOT별 수량, 등록 사유와 증빙자료를 확인합니다.</p></div><div className="inventory-panel-actions">{movements.length > 8 && <Button tone="ghost" size="sm" type="button" aria-pressed={showAllMovements} onClick={() => setShowAllMovements((value) => !value)}>{showAllMovements ? '최근 8건만' : `전체 ${movements.length}건`}</Button>}{canManage && <Button tone="ghost" size="sm" type="button" onClick={() => openWarehouseMovement()}><Plus size={16} /> 내역 등록</Button>}</div></div>
         {movements.length === 0 ? <div className="empty-state compact"><Boxes size={28} /><h3>등록된 입출고가 없습니다</h3><p>첫 입고, 출고 또는 재고조정 내역을 등록해 보세요.</p></div> : <div className="responsive-table"><table><thead><tr><th>구분 · 품목</th><th>LOT</th><th>수량</th><th>창고</th><th>일시 · 사유</th><th>증빙</th>{canManage && <th>관리</th>}</tr></thead><tbody>{(showAllMovements ? movements : movements.slice(0, 8)).map((movement) => <tr key={movement.id}><td><div className={'movement-direction ' + movement.direction}>{movement.direction === '입고' ? <ArrowDownToLine size={17} /> : <ArrowUpFromLine size={17} />}<span><strong>{movement.product}</strong><small>{movement.id}</small></span></div></td><td><strong>{movement.lot}</strong></td><td><strong>{movement.quantity.toLocaleString()}{movement.unit}</strong></td><td>{locations.find((location) => location.id === movement.warehouseId)?.name ?? movement.warehouseId}</td><td><strong>{formatDateTime(movement.occurredAt)}</strong><span>{movement.reason}</span></td><td>{movement.evidence ? movement.evidenceId ? <button type="button" className="movement-evidence download" onClick={async () => { if (!await downloadStoredDocument(movement.evidenceId!, movement.evidence!, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={15} /> {movement.evidence}</button> : <span className="movement-evidence"><Paperclip size={15} /> {movement.evidence}</span> : '—'}</td>{canManage && <td><button type="button" className="movement-delete" onClick={() => void removeMovement(movement)}>삭제</button></td>}</tr>)}</tbody></table></div>}
       </section>
       {movementOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeWarehouseMovement()}>
         <section ref={movementDialogRef} className="modal-card inventory-movement-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-movement-title">
-          <header><div><span className="eyebrow">STOCK MOVEMENT</span><h2 id="inventory-movement-title">{movementPreset ? `${movementPreset.direction === '입고' ? '재고 추가' : '재고 차감'} · ${locations.find((location) => location.id === movementPreset.warehouseId)?.name ?? '선택 창고'}` : '입출고 등록'}</h2><p>LOT와 수량, 이동 사유를 남겨 재고 변동 이력을 관리합니다.</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={closeWarehouseMovement}><X size={21} /></button></header>
+          <header><div><span className="eyebrow">STOCK MOVEMENT</span><h2 id="inventory-movement-title">{movementPreset ? `${movementPreset.direction === '입고' ? '재고 추가' : '재고 차감'} · ${locations.find((location) => location.id === movementPreset.warehouseId)?.name ?? '선택 창고'}` : '입출고 등록'}</h2><p>LOT와 수량, 이동 사유를 남겨 재고 변동 이력을 관리합니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={closeWarehouseMovement}><X size={21} /></IconButton></header>
           <form onSubmit={saveMovement}>
             <div className="form-grid"><label className="form-field"><span>구분</span><select name="direction" defaultValue={movementPreset?.direction ?? '입고'}><option>입고</option><option>출고</option><option>재고조정</option></select></label><label className="form-field"><span>처리 일시</span><input name="occurredAt" type="datetime-local" defaultValue={defaultMovementTime} /></label></div>
             <p className="inventory-ledger-note"><Database size={16} /><span><strong>현재고 계산 기준</strong> 입고·출고는 확정 현재고에 더하고 빼며, 재고조정은 입력 수량을 해당 LOT의 실사 현재고로 확정합니다. 기존 출고만 있는 LOT은 먼저 재고조정을 등록해 주세요.</span></p>
@@ -1161,19 +1162,19 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
             <div className="form-grid three"><label className="form-field"><span>수량</span><input name="quantity" type="number" min="0" step="0.001" required /></label><label className="form-field"><span>단위</span><select name="unit" defaultValue="EA"><option>EA</option><option>BOX</option><option>KG</option><option>G</option><option>ROLL</option></select></label><label className="form-field"><span>창고</span><select name="warehouseId" required defaultValue={movementPreset?.warehouseId ?? locations[0]?.id ?? ''}><option value="" disabled>창고 선택</option>{locations.map((location) => <option value={location.id} key={location.id}>{location.name}</option>)}</select></label></div>
             <label className="form-field full"><span>처리 사유</span><textarea name="reason" rows={3} placeholder="예: 온라인 주문 출고" required /></label>
             <label className="form-field full"><span>증빙자료 (선택)</span><input name="evidence" type="file" accept="image/*,.pdf,.xlsx,.xls,.csv" /><small>파일 원본을 고객사 자료 저장소에 보관하고 입출고 이력에서 다시 다운로드할 수 있습니다.</small></label>
-            <footer><button type="button" className="button ghost" onClick={closeWarehouseMovement}>취소</button><button type="submit" className="button primary"><Check size={18} /> 입출고 저장</button></footer>
+            <footer><Button tone="ghost" type="button" onClick={closeWarehouseMovement}>취소</Button><Button tone="primary" type="submit"><Check size={18} /> 입출고 저장</Button></footer>
           </form>
         </section>
       </div>}
       {editing && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setEditing(null)}>
         <section ref={warehouseDialogRef} className="modal-card warehouse-modal" role="dialog" aria-modal="true" aria-labelledby="warehouse-modal-title">
-          <header><div><span className="eyebrow">WAREHOUSE SETUP</span><h2 id="warehouse-modal-title">{editing === 'new' ? '새 창고 등록' : '창고 정보 변경'}</h2><p>보관 조건과 공간 사용 기준을 설정합니다.</p></div><button className="icon-button" type="button" aria-label="닫기" onClick={() => setEditing(null)}><X size={21} /></button></header>
+          <header><div><span className="eyebrow">WAREHOUSE SETUP</span><h2 id="warehouse-modal-title">{editing === 'new' ? '새 창고 등록' : '창고 정보 변경'}</h2><p>보관 조건과 공간 사용 기준을 설정합니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={() => setEditing(null)}><X size={21} /></IconButton></header>
           <form onSubmit={saveWarehouse}>
             <label className="form-field full"><span>창고명</span><input name="name" autoFocus data-autofocus defaultValue={editing === 'new' ? '' : editing.name} placeholder="예: 냉장 3창고" required /></label>
             <div className="form-grid"><label className="form-field"><span>보관 유형</span><select name="type" defaultValue={editing === 'new' ? '냉장' : editing.type}><option>실온</option><option>냉장</option><option>냉동</option><option>포장재</option></select></label><label className="form-field"><span>현재 온도</span><input name="temperature" defaultValue={editing === 'new' ? '3.0℃' : editing.temperature} /></label></div>
             <label className="form-field full"><span>현재 공간 사용률 (%)</span><input name="utilization" type="number" min="0" max="100" defaultValue={editing === 'new' ? 0 : editing.utilization} /></label>
             <div className="modal-note"><ShieldCheck size={18} /><p><strong>등록 후 로케이션을 세분화할 수 있습니다.</strong><span>공장관리 도면의 재고 위치에도 이 창고가 연결됩니다.</span></p></div>
-            <footer>{editing !== 'new' && <button type="button" className="danger-text-button" onClick={() => void removeWarehouse()}><Trash2 size={17} /> 창고 삭제</button>}<span className="modal-footer-spacer" /><button type="button" className="button ghost" onClick={() => setEditing(null)}>취소</button><button type="submit" className="button primary"><Check size={18} /> {editing === 'new' ? '창고 등록' : '변경 저장'}</button></footer>
+            <footer>{editing !== 'new' && <Button tone="danger" size="sm" type="button" onClick={() => void removeWarehouse()}><Trash2 size={17} /> 창고 삭제</Button>}<span className="modal-footer-spacer" /><Button tone="ghost" type="button" onClick={() => setEditing(null)}>취소</Button><Button tone="primary" type="submit"><Check size={18} /> {editing === 'new' ? '창고 등록' : '변경 저장'}</Button></footer>
           </form>
         </section>
       </div>}
@@ -1246,7 +1247,7 @@ function TaskModal({ initialText, initialDescription = '', requesterName, reques
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
       <section ref={dialogRef} className="modal-card task-modal" role="dialog" aria-modal="true" aria-labelledby="task-modal-title">
-        <header><div><span className="eyebrow">NEW WORK</span><h2 id="task-modal-title">새 업무 지시</h2><p>무엇을, 누가, 언제까지 할지만 정하면 바로 지시할 수 있습니다.</p></div><button type="button" className="icon-button" aria-label="닫기" disabled={busy} onClick={onClose}><X size={21} /></button></header>
+        <header><div><span className="eyebrow">NEW WORK</span><h2 id="task-modal-title">새 업무 지시</h2><p>무엇을, 누가, 언제까지 할지만 정하면 바로 지시할 수 있습니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" disabled={busy} onClick={onClose}><X size={21} /></IconButton></header>
         <form onSubmit={submit}>
           <div className="task-required-fields">
             <label className="form-field full"><span>무엇을 <em>필수</em></span><input autoFocus data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 신규 제품 표시사항 최종 검토" required /></label>
@@ -1258,13 +1259,13 @@ function TaskModal({ initialText, initialDescription = '', requesterName, reques
             <div className="task-optional-fields-body">
               <label className="form-field"><span>우선순위</span><select name="priority" defaultValue="보통"><option>긴급</option><option>높음</option><option>보통</option></select></label>
               <label className="form-field full"><span>완료 기준</span><textarea rows={3} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="필요할 때만 완료 조건을 적어 주세요." /></label>
-              <section className="task-attachment-picker" aria-labelledby="task-attachment-title"><div><strong id="task-attachment-title">사진·파일</strong><small>선택 · 파일당 10MB 이하</small></div><input ref={inputRef} className="sr-only" type="file" multiple onChange={(event) => { setPendingFiles(Array.from(event.target.files ?? []).slice(0, 10)); event.target.value = '' }} /><button className="button secondary" type="button" disabled={busy} onClick={() => inputRef.current?.click()}><Paperclip size={17} /> 파일 선택</button></section>
+              <section className="task-attachment-picker" aria-labelledby="task-attachment-title"><div><strong id="task-attachment-title">사진·파일</strong><small>선택 · 파일당 10MB 이하</small></div><input ref={inputRef} className="sr-only" type="file" multiple onChange={(event) => { setPendingFiles(Array.from(event.target.files ?? []).slice(0, 10)); event.target.value = '' }} /><Button tone="secondary" type="button" disabled={busy} onClick={() => inputRef.current?.click()}><Paperclip size={17} /> 파일 선택</Button></section>
               {pendingFiles.length > 0 && <div className="task-pending-files">{pendingFiles.map((file, index) => <span key={`${file.name}-${file.lastModified}`}><FileText size={15} /> {file.name}<button type="button" aria-label={`${file.name} 제외`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={14} /></button></span>)}</div>}
             </div>
           </details>
           {error && <p className="workflow-upload-error" role="alert">{error}</p>}
           {assignees.length === 0 && <div className="modal-note"><AlertTriangle size={18} /><p><strong>배정 가능한 직원 정보를 불러오지 못했습니다.</strong><span>직원 계정이 승인됐는지 확인한 뒤 다시 열어 주세요.</span></p></div>}
-          <footer><button type="button" className="button ghost" disabled={busy} onClick={onClose}>취소</button><button type="submit" className="button primary" disabled={busy || assignees.length === 0 || !title.trim()}><Check size={18} /> {busy ? '저장 중…' : '업무 지시하기'}</button></footer>
+          <footer><Button tone="ghost" type="button" disabled={busy} onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={busy || assignees.length === 0 || !title.trim()}><Check size={18} /> {busy ? '저장 중…' : '업무 지시하기'}</Button></footer>
         </form>
       </section>
     </div>
@@ -1301,14 +1302,14 @@ function SupportSessionModal({ tenant, tickets, onClose, onCreate }: {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section ref={dialogRef} className="modal-card support-modal" role="dialog" aria-modal="true" aria-labelledby="support-title">
-        <header><div><span className="eyebrow">SECURE SUPPORT</span><h2 id="support-title">{tenant.name} 지원 세션 요청</h2><p>고객사 동의 후 제한된 범위에서만 확인합니다.</p></div><button type="button" className="icon-button" aria-label="닫기" onClick={onClose}><X size={21} /></button></header>
+        <header><div><span className="eyebrow">SECURE SUPPORT</span><h2 id="support-title">{tenant.name} 지원 세션 요청</h2><p>고객사 동의 후 제한된 범위에서만 확인합니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
         <form onSubmit={submit}>
           <label className="form-field full"><span>연결할 CS 티켓</span><select name="ticket">{tenantTickets.map((ticket) => <option key={ticket.id} value={ticket.id}>{ticket.id} · {ticket.title}</option>)}<option value="new">새 지원 요청</option></select></label>
           <label className="form-field full"><span>지원 사유</span><textarea name="reason" required rows={3} defaultValue="고객사가 보고한 판매채널 동기화 오류를 확인합니다." /></label>
           <div className="form-grid"><label className="form-field"><span>접근 범위</span><select name="scope"><option>연동 로그 · 읽기 전용</option><option>설정 정보 · 읽기 전용</option><option>고객 화면 공동 보기</option></select></label><label className="form-field"><span>유효 시간</span><select name="duration"><option>15분</option><option>30분</option></select></label></div>
           <div className="modal-note secure"><ShieldCheck size={19} /><p><strong>고객으로 가장하지 않습니다.</strong><span>운영자 실명과 수행 작업이 감사로그에 기록되며, 원본 데이터는 수정할 수 없습니다.</span></p></div>
           {error && <div className="modal-note"><AlertTriangle size={18} /><p><strong>저장하지 못했습니다.</strong><span>{error}</span></p></div>}
-          <footer><button type="button" className="button ghost" onClick={onClose} disabled={busy}>취소</button><button type="submit" className="button primary" disabled={busy}><Headphones size={18} /> {busy ? '저장 중…' : '승인 요청 저장'}</button></footer>
+          <footer><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>취소</Button><Button tone="primary" type="submit" disabled={busy}><Headphones size={18} /> {busy ? '저장 중…' : '승인 요청 저장'}</Button></footer>
         </form>
       </section>
     </div>

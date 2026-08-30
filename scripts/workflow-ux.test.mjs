@@ -37,7 +37,7 @@ test('시작부터 완료 제출까지 3클릭 흐름을 유지한다', () => {
   assert.match(completionSource, /무엇을 했나요\? <em>필수<\/em>/)
   assert.match(completionSource, /사진·파일 첨부 <small>선택<\/small>/)
   assert.match(completionSource, /제출하면 \{item\.requestedBy\}님에게 확인 요청이 갑니다\./)
-  assert.match(completionSource, /> 제출<\/button>/)
+  assert.match(completionSource, /> 제출<\/Button>/)
 })
 
 test('최신 보완 사유와 완료 기준은 상세 드로어에서만 조건부 표시한다', () => {

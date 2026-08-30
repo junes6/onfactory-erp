@@ -14,7 +14,6 @@
 .tax-workspace-toolbar > div:first-child > span { color: var(--muted); font-size: var(--font-13); }
 .tax-toolbar-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-8); }
 .tax-toolbar-actions select { min-height: 36px; padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--ink); font: inherit; }
-.tax-toolbar-actions .button { min-height: 36px; }
 .tax-profile-callout { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-16); padding: var(--card-inset); border: var(--dashboard-stroke) solid var(--color-card-line); border-radius: var(--radius-8); background: var(--surface); }
 .tax-profile-callout > span:first-child { width: 44px; height: 44px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-primary); background: var(--color-primary-soft); }
 .tax-profile-callout h2 { margin: var(--space-0) var(--space-0) var(--space-4); font-size: var(--font-15); }
@@ -34,7 +33,7 @@
 .tax-section-head h2 { margin: var(--space-0); white-space: nowrap; font-size: var(--font-15); }
 .tax-section-head span,
 .tax-section-head small { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); }
-.tax-section-head .button { flex: 0 0 auto; }
+.tax-section-head .ui-button { flex: 0 0 auto; }
 .tax-schedule-list { max-height: 680px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .tax-schedule-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; align-items: center; gap: var(--space-12); padding: var(--space-12) var(--card-inset); border-bottom: var(--hairline) solid var(--line); }
 .tax-schedule-row:last-child { border-bottom: 0; }
@@ -76,7 +75,7 @@
 .tax-delivery-bar select { min-height: 38px; flex: 1 1 180px; padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--ink); font: inherit; }
 .tax-delivery-bar label { min-width: 0; flex: 1 1 180px; display: flex; }
 .tax-delivery-count { color: var(--muted); font-size: var(--font-13); white-space: nowrap; }
-.tax-delivery-bar .button { min-height: 38px; flex: 0 0 auto; }
+.tax-delivery-bar .ui-button { flex: 0 0 auto; }
 .tax-evidence-upload-bar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-8); padding: var(--space-8) var(--card-inset); border-bottom: var(--hairline) solid var(--line); }
 .tax-evidence-upload-bar > span { color: var(--muted); font-size: var(--font-11); }
 .tax-evidence-date { display: inline-flex; align-items: center; gap: var(--space-8); }
@@ -110,17 +109,17 @@
   .tax-section-head { align-items: stretch; flex-direction: column; }
   .tax-toolbar-actions { align-items: stretch; }
   .tax-toolbar-actions > *,
-  .tax-toolbar-actions .button { flex: 1 1 auto; }
+.tax-toolbar-actions .ui-button { flex: 1 1 auto; }
   .tax-profile-callout { grid-template-columns: auto 1fr; }
-  .tax-profile-callout > .button,
-  .tax-profile-callout > span:last-child { grid-column: 1 / -1; }
+  .tax-profile-callout > .ui-button,
+.tax-profile-callout > span:last-child { grid-column: 1 / -1; }
   .tax-schedule-row { grid-template-columns: 64px minmax(0, 1fr); }
   .tax-status-action { grid-column: 1 / -1; width: 100%; }
   .tax-evidence-row { grid-template-columns: minmax(0, 1fr) auto; }
   .tax-evidence-files { grid-column: 1 / -1; }
   .tax-upload-button { grid-column: 1 / -1; width: 100%; }
   .tax-delivery-bar > * { flex: 1 1 100%; }
-  .tax-delivery-bar .button { width: 100%; }
+  .tax-delivery-bar .ui-button { width: 100%; }
   .tax-delivery-history li { grid-template-columns: minmax(0, 1fr); }
   .tax-delivery-history code { grid-column: 1; grid-row: auto; }
 }

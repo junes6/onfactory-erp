@@ -28,5 +28,5 @@ html[data-theme='dark'] .workspace-nav-editor, html[data-theme='dark'] .workspac
   .workspace-nav-editor-list article > div { grid-column: 2; }
   .workspace-nav-editor > header, .workspace-nav-editor > footer { padding-inline: var(--space-16); }
   .workspace-nav-editor > footer { align-items: stretch; flex-direction: column-reverse; }
-  .workspace-nav-editor > footer .button { width: 100%; }
+  .workspace-nav-editor > footer .ui-button { width: 100%; }
 }

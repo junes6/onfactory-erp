@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { ArrowRight, Check, ChevronDown, Circle, Pencil, Plus, RefreshCw, Sparkles, Trash2, X } from 'lucide-react'
 import { seoulDateInputValue } from '../utils/dateTime'
 import './PersonalTodoWidget.css'
+import { Button } from './ui/Button'
 
 type PersonalTodo = {
   id: string
@@ -170,7 +171,7 @@ export function PersonalTodoWidget({ workspaceScope, onNavigate, onToast }: {
   </article>
 
   return <section className="personal-todo-widget dashboard-section-card" aria-labelledby="personal-todo-title">
-    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><Check size={18} /></span><h2 id="personal-todo-title">내 To-do</h2></div><button className="text-button" type="button" disabled={syncing} onClick={() => void sync(true)}><Sparkles size={15} /> {syncing ? '정리 중' : 'AI 정리'}</button></header>
+    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><Check size={18} /></span><h2 id="personal-todo-title">내 To-do</h2></div><Button tone="quiet" type="button" disabled={syncing} onClick={() => void sync(true)}><Sparkles size={15} /> {syncing ? '정리 중' : 'AI 정리'}</Button></header>
     <div className="personal-todo-body dashboard-section-body">
       <form className="personal-todo-add" onSubmit={createTodo}>
         <label className="sr-only" htmlFor="personal-todo-input">할 일</label>
