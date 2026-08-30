@@ -9,7 +9,7 @@ test('client extraction parser keeps values with source evidence and discards un
       kind: { value: '특허', evidence: '특허증' },
       title: { value: '<b>저온 건조 장치</b>', evidence: '발명의 명칭: 저온 건조 장치' },
       number: { value: '10-2026-0001', evidence: '등록번호 10-2026-0001' },
-      holder: { value: '주식회사 온팩토리', evidence: '특허권자: 주식회사 온팩토리' },
+      holder: { value: '주식회사 인더필드', evidence: '특허권자: 주식회사 인더필드' },
       filedAt: { value: '2025-01-02', evidence: '출원일 2025.01.02' },
       registeredAt: { value: '2026-03-04', evidence: '등록일 2026.03.04' },
       expiresAt: { value: '2046-03-04', evidence: '존속기간 만료일 2046.03.04' },

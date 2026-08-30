@@ -3,6 +3,7 @@ import {
   FolderKanban, Landmark, ListChecks, NotebookPen, Package, ShieldCheck, Sparkles, Store, Users,
   type LucideIcon,
 } from 'lucide-react'
+import { BRAND } from '../brand'
 
 export type TenantRouteId =
   | 'ai'
@@ -34,7 +35,7 @@ export type ServiceModule = {
   name: string
   version: string
   industry: 'all' | TenantIndustryType
-  /** 사이드바 브랜드 라벨 ('FOOD ERP' 하드코딩 대체) */
+  /** 업종 모듈 표시 라벨 — 사이드바 툴팁·콘솔에서 쓴다. 브랜드 태그라인과는 별개다. */
   brandLabel?: string
   routes: readonly TenantRouteId[]
   capabilities: readonly string[]
@@ -115,7 +116,7 @@ const itAssistant = {
 export const serviceModules: readonly ServiceModule[] = [
   {
     id: 'core',
-    name: '온팩토리 코어 플랫폼',
+    name: `${BRAND.name} 코어 플랫폼`,
     version: '1.1.0',
     industry: 'all',
     routes: ['ai', 'schedule', 'tasks', 'approvals', 'journal', 'projects', 'people', 'finance', 'ip', 'documents'],

@@ -20,7 +20,7 @@ export function NotificationBellIcon({ size = 22, ...props }: IconProps) {
   )
 }
 
-export function OnFactoryMark({ size = 38, ...props }: IconProps) {
+export function BrandMark({ size = 38, ...props }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 38 38" fill="none" aria-hidden="true" {...props}>
       <rect width="38" height="38" rx="11" fill="currentColor" />

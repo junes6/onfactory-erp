@@ -1,0 +1,19 @@
+{
+  "name": "인더필드",
+  "englishName": "InTheField",
+  "tagline": "BUSINESS OPERATIONS CLOUD",
+  "title": "인더필드 | 통합 업무 운영 클라우드",
+  "manifestName": "인더필드 — 통합 업무 운영 클라우드",
+  "description": "업무·프로젝트·일정·문서·결재를 연결하는 AI 통합 운영 클라우드",
+  "platformOpsLabel": "PLATFORM OPS",
+  "platformConsoleLabel": "INTHEFIELD PLATFORM",
+  "platformWorkspaceLabel": "인더필드 플랫폼",
+  "platformOperatorLabel": "인더필드 운영자",
+  "platformAdminLabel": "인더필드 통합 관리자",
+  "assistantLabel": "인더필드 운영 어시스턴트",
+  "operatorTeam": "인더필드 운영",
+  "supportTeam": "인더필드",
+  "storageLabel": "인더필드 보관함",
+  "nasBasePath": "/인더필드",
+  "offlineTitle": "인더필드 — 연결 없음"
+}

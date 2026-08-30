@@ -18,7 +18,10 @@ test('shared access copy stays industry-neutral across login and password onboar
   const source = read('src/components/AccessExperience.tsx')
   assert.equal(source.includes('FOOD OPERATIONS CLOUD'), false)
   assert.equal(source.includes('공장의 오늘'), false)
-  assert.equal(source.match(/BUSINESS OPERATIONS CLOUD/g)?.length, 2)
+  // 태그라인은 brand.json 한 곳에서만 정의하고 화면은 BRAND.tagline을 참조한다.
+  assert.equal(source.match(/BUSINESS OPERATIONS CLOUD/g)?.length, undefined)
+  assert.equal(source.match(/{BRAND.tagline}/g)?.length, 2)
+  assert.equal(JSON.parse(read('shared/brand.json')).tagline, 'BUSINESS OPERATIONS CLOUD')
   assert.match(source, /회사의 오늘을/)
   assert.match(source, /업종별 모듈과 AI/)
 })

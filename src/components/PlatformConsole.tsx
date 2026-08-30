@@ -34,6 +34,7 @@ import { Bot, Radar, Sparkles, Users } from 'lucide-react'
 import { StatusBadge } from './StatusBadge'
 import './PlatformConsole.css'
 import { Button, IconButton } from './ui/Button'
+import { BRAND } from '../brand'
 
 export type PlatformSection = 'platform' | 'tenants' | 'support' | 'integrations' | 'audit'
 
@@ -1197,7 +1198,7 @@ export function PlatformConsole(props: PlatformConsoleProps) {
       <div className="pc-shell">
         <header className="pc-head">
           <div className="pc-head-copy">
-            <div className="pc-eyebrow"><HeadIcon size={16} aria-hidden="true" /> ONFACTORY PLATFORM</div>
+            <div className="pc-eyebrow"><HeadIcon size={16} aria-hidden="true" /> {BRAND.platformConsoleLabel}</div>
             <h1>{meta.title}</h1>
             <p>{meta.description}</p>
           </div>

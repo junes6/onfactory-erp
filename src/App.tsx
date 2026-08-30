@@ -8,7 +8,7 @@ import {
   Briefcase, FileStack, FileSignature, FolderKanban, Landmark, Award, ExternalLink,
 } from 'lucide-react'
 import AIChat from './components/AIChat'
-import { ChatBubbleIcon, NotificationBellIcon, OnFactoryMark } from './components/AppIcons'
+import { ChatBubbleIcon, NotificationBellIcon, BrandMark } from './components/AppIcons'
 import { LoginPage, PasswordChangePage, ProfileEditor, SettingsDrawer, type AccentChoice, type EasyModeChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
 import { ProjectSpacesPage } from './components/ProjectSpaces'
 import { TaxAssetsPage } from './components/TaxAssets'
@@ -41,6 +41,7 @@ import {
   type Tenant, type WorkEvidence, type WorkItem, type WorkRule,
 } from './domainData'
 import { Button, IconButton } from './components/ui/Button'
+import { BRAND } from './brand'
 
 type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'finance' | 'ip' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
 type PageId = TenantPage | PlatformSection | 'billing'
@@ -1708,7 +1709,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'auto' })
   }
   const enterPlatform = () => {
-    if (account?.role !== 'platform-operator') { setToast('통합 관리자는 온팩토리 운영자 계정으로만 접근할 수 있습니다.'); return }
+    if (account?.role !== 'platform-operator') { setToast(`통합 관리자는 ${BRAND.platformOperatorLabel} 계정으로만 접근할 수 있습니다.`); return }
     setMode('platform')
     setPage('platform')
     setMobileNav(false)
@@ -1838,7 +1839,7 @@ export default function App() {
       publishSessionChange(sessionIdentity(body.account))
       if (body.account.role === 'platform-operator') { setMode('platform'); setPage('platform') }
       else { setMode('tenant'); setPage('ai') }
-      setToast(`${body.account.tenantName ?? '온팩토리'} 워크스페이스에 로그인했습니다.`)
+      setToast(`${body.account.tenantName ?? BRAND.name} 워크스페이스에 로그인했습니다.`)
       return { ok: true, message: '로그인했습니다.' }
     } catch {
       return { ok: false, message: '인증 서버에 연결할 수 없습니다. 서버 실행 상태를 확인해 주세요.' }
@@ -1912,7 +1913,7 @@ export default function App() {
     }
   }
 
-  if (authStatus === 'checking') return <main className="auth-loading" aria-live="polite"><OnFactoryMark size={48} /><strong>온팩토리</strong><span>안전한 세션을 확인하고 있습니다…</span></main>
+  if (authStatus === 'checking') return <main className="auth-loading" aria-live="polite"><BrandMark size={48} /><strong>{BRAND.name}</strong><span>안전한 세션을 확인하고 있습니다…</span></main>
   if (authStatus === 'signed-out') return <LoginPage onLogin={login} initialError={toast} />
   if (account?.requiresPasswordChange) return <PasswordChangePage name={account.name} email={account.email} onChange={changeInitialPassword} onLogout={logout} />
 
@@ -1923,11 +1924,11 @@ export default function App() {
       {storeStatus?.readOnly && <div className="store-readonly-banner" role="alert"><AlertTriangle size={17} /><span><strong>읽기 전용 모드</strong> — 저장소가 읽기 전용(STORE_READ_ONLY)으로 기동되어 모든 변경이 저장되지 않습니다.{storeStatus.fallbackReason ? ` ${storeStatus.fallbackReason}` : ''}</span></div>}
       {isMobile && mobileNav && <button type="button" className="nav-scrim" aria-label="메뉴 닫기" onClick={() => setMobileNav(false)} />}
       <aside id="main-navigation" className={'sidebar ' + (mobileNav ? 'open' : '')} aria-label={mode === 'platform' ? '플랫폼 운영 메뉴' : `${tenantName} 업무 메뉴`} aria-hidden={isMobile && !mobileNav} inert={isMobile && !mobileNav ? true : undefined}>
-        <div className="brand"><OnFactoryMark /><div><strong>온팩토리</strong><span>{mode === 'platform' ? 'PLATFORM OPS' : brandLabelForIndustry(account?.industryType)}</span></div><button type="button" className="sidebar-close" aria-label="메뉴 닫기" onClick={() => setMobileNav(false)}><X size={21} /></button></div>
+        <div className="brand" title={mode === 'platform' ? BRAND.platformWorkspaceLabel : brandLabelForIndustry(account?.industryType)}><BrandMark /><div><strong>{BRAND.name}</strong><span>{mode === 'platform' ? BRAND.platformOpsLabel : BRAND.tagline}</span></div><button type="button" className="sidebar-close" aria-label="메뉴 닫기" onClick={() => setMobileNav(false)}><X size={21} /></button></div>
         {mode === 'tenant' ? (
           <button type="button" className="company-switcher" aria-label={`현재 고객사 ${tenantName}`} onClick={() => setToast(`현재 고객사는 ${tenantName}입니다.`)}><span className="company-logo">{tenantName.slice(0, 1)}</span><span><small>현재 고객사</small><strong>{tenantName}</strong></span><ChevronDown size={17} /></button>
         ) : (
-          <div className="operator-badge"><span><ShieldCheck size={18} /></span><div><small>운영자 전용</small><strong>온팩토리 플랫폼</strong></div></div>
+          <div className="operator-badge"><span><ShieldCheck size={18} /></span><div><small>운영자 전용</small><strong>{BRAND.platformWorkspaceLabel}</strong></div></div>
         )}
         <nav className="nav-list">
           <div className="nav-caption-row"><span className="nav-caption">{mode === 'platform' ? 'PLATFORM CONTROL' : 'WORKSPACE'}</span>{mode === 'tenant' && <WorkspaceNavigationEditButton onClick={() => setNavEditorOpen(true)} />}</div>
@@ -1948,7 +1949,7 @@ export default function App() {
 
       <div className="app-body">
         <header className="topbar">
-          <div className="topbar-left"><button className="menu-button" type="button" aria-label="메뉴 열기" aria-controls="main-navigation" aria-expanded={mobileNav} onClick={() => setMobileNav(true)}><Menu size={22} /></button><div className="breadcrumb"><span>{mode === 'platform' ? '온팩토리 운영자' : tenantName}</span><strong>{mode === 'platform' ? platformPageTitles[page as PlatformSection | 'billing'] : routeLabel(page as TenantRouteId)}</strong></div></div>
+          <div className="topbar-left"><button className="menu-button" type="button" aria-label="메뉴 열기" aria-controls="main-navigation" aria-expanded={mobileNav} onClick={() => setMobileNav(true)}><Menu size={22} /></button><div className="breadcrumb"><span>{mode === 'platform' ? BRAND.platformOperatorLabel : tenantName}</span><strong>{mode === 'platform' ? platformPageTitles[page as PlatformSection | 'billing'] : routeLabel(page as TenantRouteId)}</strong></div></div>
           <div className="topbar-actions">
             <div className="global-search">
               <Search size={19} />
@@ -1982,7 +1983,7 @@ export default function App() {
       </div>
 
       <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => setMessengerOpen(false)} onToast={setToast} onUnreadChange={setMessengerUnread} />
-      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? '온팩토리'} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
+      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? BRAND.name} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
       {profileOpen && account && <ProfileEditor account={account} onClose={() => setProfileOpen(false)} onToast={setToast} onSaved={(next) => { setAccount((current) => current ? { ...current, ...next } as AuthAccount : current) }} />}
       <WorkspaceNavigationEditor open={navEditorOpen} source={tenantNavSource} preferences={tenantNavPreferences} onChange={setTenantNavPreferences} onClose={() => setNavEditorOpen(false)} />
       {taskDraft !== null && <TaskModal initialText={taskDraft.title} initialDescription={taskDraft.completionCriteria} requesterName={account?.name ?? '사용자'} requesterId={account?.id ?? ''} assignees={workAssignees} workspaceScope={workspaceScope} onClose={() => setTaskDraft(null)} onSave={saveTask} />}

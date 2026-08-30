@@ -2159,7 +2159,7 @@ test('developer operations support is a private immutable messenger channel with
       assert.equal(adminDeleteSomeoneElsesRoom.status, 404)
 
       const forgedOtherTenantRoom = {
-        id: 'direct-forged-support', type: 'direct', name: '개발운영진', subtitle: '온팩토리 · 기술 지원',
+        id: 'direct-forged-support', type: 'direct', name: '개발운영진', subtitle: '인더필드 · 기술 지원',
         memberId: 'SYS-DEVELOPER-OPS', participantIds: ['USR-POHANG-ADMIN', 'SYS-DEVELOPER-OPS'], hiddenFor: [],
         lineageId: 'developer-support:TENANT-POHANG:USR-POHANG-ADMIN', generation: 1, lifecycle: 'active',
         systemChannel: 'developer-support', supportRequesterId: 'USR-POHANG-ADMIN', unread: 0,
@@ -2215,7 +2215,7 @@ test('company library stores real files and enforces tenant document permissions
         name: '생산 점검표.txt', category: '생산·품질', visibility: 'restricted',
         allowedUserIds: 'USR-SUNSEA-OH', tags: '생산,점검', summary: '생산팀 일일 점검표',
       })
-      const payload = Buffer.from('온팩토리 생산 점검 자료', 'utf8')
+      const payload = Buffer.from('인더필드 생산 점검 자료', 'utf8')
       const upload = await fetch(`${origin}/api/documents?${params}`, {
         method: 'POST',
         headers: {

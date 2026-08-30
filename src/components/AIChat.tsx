@@ -3,6 +3,7 @@ import { AlertCircle, ArrowUp, CheckCircle2, ClipboardPlus, FileText, LoaderCirc
 import { assistantExperienceForIndustry } from '../modules/registry'
 import { aiTaskDraftFromAnswer } from '../utils/aiTaskDraft'
 import { formatDateTime } from '../utils/dateTime'
+import { BRAND } from '../brand'
 
 export type ChatAttachmentMeta = {
   documentId: string
@@ -250,7 +251,7 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
       <div className="ai-chat-head dashboard-section-header">
         <div className="ai-chat-identity dashboard-section-title">
           <span className="claude-mark"><Sparkles size={20} /></span>
-          <div><strong>AI 업무 대화</strong><span>온팩토리 운영 어시스턴트</span></div>
+          <div><strong>AI 업무 대화</strong><span>{BRAND.assistantLabel}</span></div>
         </div>
         <span className={'connection-pill ' + apiMode}>
           <i />{apiMode === 'claude' ? 'Claude 연결됨' : apiMode === 'checking' ? '연결 확인 중' : '데모 모드'}

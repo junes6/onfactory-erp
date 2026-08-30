@@ -10,6 +10,7 @@ import { AttendancePanel } from './AttendancePanel'
 import { BarChart3 } from 'lucide-react'
 import { formatDateLabel, formatDateTime, seoulDateInputValue } from '../utils/dateTime'
 import './PeopleOperations.css'import { Button, IconButton } from './ui/Button'
+import { BRAND } from '../brand'
 
 
 type PeopleOperationsProps = {
@@ -728,7 +729,7 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       </article>)}</div>
       <div className="account-safety-note"><AlertTriangle size={19} /><div><strong>초기 비밀번호는 승인 또는 재발급 직후 한 번만 표시됩니다.</strong><p>72시간 후 만료되며 첫 로그인에서 새 비밀번호를 설정하기 전에는 업무 데이터에 접근할 수 없습니다.</p></div></div>
       <section className="operator-access-log" aria-labelledby="operator-access-log-title">
-        <div className="people-subsection-head"><div><h3 id="operator-access-log-title">운영사(온팩토리) 접속 이력</h3><p>플랫폼 운영자가 우리 회사 워크스페이스에 접속·조회·변경한 모든 기록입니다.</p></div><strong>{operatorAccessLog.length}건</strong></div>
+        <div className="people-subsection-head"><div><h3 id="operator-access-log-title">{`운영사(${BRAND.name}) 접속 이력`}</h3><p>플랫폼 운영자가 우리 회사 워크스페이스에 접속·조회·변경한 모든 기록입니다.</p></div><strong>{operatorAccessLog.length}건</strong></div>
         {operatorAccessLog.length === 0
           ? <div className="people-empty-state"><ShieldCheck size={22} /><strong>운영사 접속 기록이 없습니다.</strong><span>운영자가 접속하면 시각·행위·운영자 이름이 여기에 남습니다.</span></div>
           : <div className="operator-access-list">{operatorAccessLog.slice(0, 50).map((event) => <article key={event.id}><time>{event.at}</time><div><strong>{event.event}</strong><small>{event.scope}</small></div><span>{event.actor}</span></article>)}</div>}

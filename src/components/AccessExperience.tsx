@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Accessibility, ArrowLeft, Briefcase, Check, ChevronRight, Download, Eye, EyeOff, KeyRound, Laptop, LockKeyhole, LogIn, Mail, Moon, Palette, Phone, Save, ShieldCheck, Smartphone, Sun, Type, UserPen, X } from 'lucide-react'
-import { OnFactoryMark } from './AppIcons'
+import { BrandMark } from './AppIcons'
 import { Button, IconButton } from './ui/Button'
+import { BRAND } from '../brand'
 
 export type ThemeChoice = 'light' | 'dark' | 'system'
 export type FontChoice = 'standard' | 'large' | 'extra'
@@ -43,7 +44,7 @@ function InstallBanner() {
   return <div className="auth-install-banner" role="note" aria-label="앱 설치 안내">
     <Smartphone size={18} />
     <div>
-      <strong>온팩토리를 앱처럼 설치할 수 있어요</strong>
+      <strong>{BRAND.name}를 앱처럼 설치할 수 있어요</strong>
       <span>{installEvent ? 'PC에서는 독립 창으로, 휴대폰에서는 홈 화면 아이콘으로 바로 엽니다.' : isIos ? 'Safari 공유 버튼 → “홈 화면에 추가”를 누르면 홈 화면에서 바로 엽니다.' : 'Chrome 주소창 오른쪽의 설치 아이콘(또는 메뉴 → 앱 설치)을 누르면 독립 창으로 엽니다.'}</span>
     </div>
     {installEvent && <button type="button" className="auth-install-action" onClick={() => { void installEvent.prompt().then(() => installEvent.userChoice).then((choice) => { if (choice.outcome === 'accepted') setInstalled(true) }).catch(() => {}) }}><Download size={16} /> 설치</button>}
@@ -135,8 +136,8 @@ export function LoginPage({ onLogin, initialError = '' }: LoginPageProps) {
 
   return (
     <main className="auth-shell">
-      <section className="auth-brand-panel" aria-label="온팩토리 소개">
-        <div className="auth-brand"><OnFactoryMark size={48} /><div><strong>온팩토리</strong><span>BUSINESS OPERATIONS CLOUD</span></div></div>
+      <section className="auth-brand-panel" aria-label={`${BRAND.name} 소개`}>
+        <div className="auth-brand"><BrandMark size={48} /><div><strong>{BRAND.name}</strong><span>{BRAND.tagline}</span></div></div>
         <div className="auth-brand-copy">
           <span className="auth-overline">ONE CONNECTED WORKSPACE</span>
           <h1>회사의 오늘을<br />한눈에, 한 흐름으로.</h1>
@@ -151,10 +152,10 @@ export function LoginPage({ onLogin, initialError = '' }: LoginPageProps) {
       <section className="auth-form-panel">
         <div className="auth-form-card">
           {view === 'login' && <>
-            <header><span className="auth-mobile-brand"><OnFactoryMark size={38} /> 온팩토리</span><h2>다시 만나서 반갑습니다</h2><p>회사 계정으로 안전하게 로그인하세요.</p></header>
+            <header><span className="auth-mobile-brand"><BrandMark size={38} /> {BRAND.name}</span><h2>다시 만나서 반갑습니다</h2><p>회사 계정으로 안전하게 로그인하세요.</p></header>
             <InstallBanner />
             <form onSubmit={submitLogin}>
-              <label className="form-field full"><span>회사 워크스페이스</span><select value={workspace} onChange={(event) => changeWorkspace(event.target.value as 'tenant' | 'platform')}><option value="tenant">고객사 ERP (회사 계정)</option><option value="platform">온팩토리 통합 관리자</option></select></label>
+              <label className="form-field full"><span>회사 워크스페이스</span><select value={workspace} onChange={(event) => changeWorkspace(event.target.value as 'tenant' | 'platform')}><option value="tenant">고객사 ERP (회사 계정)</option><option value="platform">{BRAND.platformAdminLabel}</option></select></label>
               <label className="form-field full"><span>이메일</span><div className="input-with-icon"><Mail size={18} /><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" required /></div></label>
               <label className="form-field full"><span>비밀번호</span><div className="input-with-icon"><KeyRound size={18} /><input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /><button type="button" aria-label={showPassword ? '비밀번호 숨기기' : '비밀번호 보기'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
               <div className="auth-form-options"><label><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} /> 이 기기에서 로그인 유지</label><button type="button" onClick={() => { setView('forgot'); setNotice('') }}>비밀번호 찾기</button></div>
@@ -239,13 +240,13 @@ export function PasswordChangePage({ name, email, onChange, onLogout }: Password
     setSubmitting(false)
   }
   return <main className="auth-shell">
-    <section className="auth-brand-panel" aria-label="온팩토리 보안 안내">
-      <div className="auth-brand"><OnFactoryMark size={48} /><div><strong>온팩토리</strong><span>BUSINESS OPERATIONS CLOUD</span></div></div>
+    <section className="auth-brand-panel" aria-label={`${BRAND.name} 보안 안내`}>
+      <div className="auth-brand"><BrandMark size={48} /><div><strong>{BRAND.name}</strong><span>{BRAND.tagline}</span></div></div>
       <div className="auth-brand-copy"><span className="auth-overline">SECURE ONBOARDING</span><h1>처음 한 번,<br />안전하게 시작합니다.</h1><p>관리자가 발급한 초기 비밀번호는 제한된 시간만 유효하며 새 비밀번호 설정 후 즉시 폐기됩니다.</p></div>
       <div className="auth-trust-row"><span><ShieldCheck size={18} /> 첫 로그인 강제 변경</span><span><LockKeyhole size={18} /> 다른 세션 자동 만료</span></div>
     </section>
     <section className="auth-form-panel"><div className="auth-form-card">
-      <header><span className="auth-mobile-brand"><OnFactoryMark size={38} /> 온팩토리</span><h2>새 비밀번호를 설정하세요</h2><p>{name}님 · {email}<br />설정을 마쳐야 회사 워크스페이스를 사용할 수 있습니다.</p></header>
+      <header><span className="auth-mobile-brand"><BrandMark size={38} /> {BRAND.name}</span><h2>새 비밀번호를 설정하세요</h2><p>{name}님 · {email}<br />설정을 마쳐야 회사 워크스페이스를 사용할 수 있습니다.</p></header>
       <form onSubmit={submit}>
         <label className="form-field full"><span>새 비밀번호</span><div className="input-with-icon"><KeyRound size={18} /><input type="password" autoFocus autoComplete="new-password" minLength={10} maxLength={72} value={password} onChange={(event) => setPassword(event.target.value)} required /></div></label>
         <label className="form-field full"><span>새 비밀번호 확인</span><div className="input-with-icon"><LockKeyhole size={18} /><input type="password" autoComplete="new-password" minLength={10} maxLength={72} value={confirm} onChange={(event) => setConfirm(event.target.value)} required /></div></label>
@@ -393,7 +394,7 @@ export function ProfileEditor({ account, onClose, onSaved, onToast }: { account:
           <label className="form-field"><span>연락처</span><div className="input-with-icon"><Phone size={17} /><input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="010-0000-0000" maxLength={30} /></div></label>
         </div>
         <div className="form-grid">
-          <label className="form-field"><span>부서</span><input value={team} onChange={(event) => setTeam(event.target.value)} maxLength={40} placeholder={operator ? '온팩토리 운영' : '예: 품질관리'} /></label>
+          <label className="form-field"><span>부서</span><input value={team} onChange={(event) => setTeam(event.target.value)} maxLength={40} placeholder={operator ? BRAND.operatorTeam : '예: 품질관리'} /></label>
           <label className="form-field"><span>직책</span><div className="input-with-icon"><Briefcase size={17} /><input value={jobRole} onChange={(event) => setJobRole(event.target.value)} maxLength={40} placeholder="예: 품질 책임자" /></div></label>
         </div>
         <label className="form-field full"><span>한 줄 소개 <em>선택</em></span><input value={bio} onChange={(event) => setBio(event.target.value)} maxLength={200} placeholder="담당 업무나 연락 가능한 시간을 적어 두면 동료가 찾기 쉽습니다." /></label>

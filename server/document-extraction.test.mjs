@@ -53,7 +53,7 @@ test('document extraction reads one tenant PDF/image, returns only a review draf
       captured.push(input)
       const properties = input.output_config?.format?.schema?.properties ?? {}
       const payload = properties.kind
-        ? withEvidence({ kind: '특허', title: '저온 건조 방법', number: '10-2026-1234567', holder: '주식회사 온팩토리', issuer: '특허청', filedAt: '2025-01-02', registeredAt: '2026-03-04', expiresAt: '2046-03-04' })
+        ? withEvidence({ kind: '특허', title: '저온 건조 방법', number: '10-2026-1234567', holder: '주식회사 인더필드', issuer: '특허청', filedAt: '2025-01-02', registeredAt: '2026-03-04', expiresAt: '2046-03-04' })
         : properties.client
           ? withEvidence({ title: '유지보수 연간 계약', client: '○○주식회사', number: '2026-CT-014', startDate: '2026-01-01', endDate: '2026-12-31', amount: '12,000,000원' })
           : withEvidence({ category: 'HACCP', name: '식품안전관리인증', authority: '한국식품안전관리인증원', certificateNo: 'HACCP-2026-01', issuedAt: '2026-01-05', expiresAt: '2029-01-04' })

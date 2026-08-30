@@ -62,6 +62,7 @@ import {
   PLATFORM_TENANT_FIXTURES,
   PLATFORM_TICKET_FIXTURES,
 } from './store/demo-seed.mjs'
+import { BRAND } from './brand.mjs'
 
 const DEFAULT_MODEL = 'claude-sonnet-5'
 const MAX_MESSAGES = 30
@@ -1721,7 +1722,7 @@ export function createApp(options = {}) {
       tenantId: tenant.id,
       tenantName: tenant.name,
       industryType: tenant.industryType ?? 'food_manufacturing',
-      team: '온팩토리 운영',
+      team: BRAND.operatorTeam,
       jobRole: '플랫폼 운영자',
       operatorMode: {
         operatorId: account.id,
@@ -1813,7 +1814,7 @@ export function createApp(options = {}) {
 
   const requirePlatformOperator = (request, response, next) => {
     if (request.auth?.role !== 'platform-operator' || request.auth.tenantId) {
-      response.status(403).json({ error: { code: 'PLATFORM_OPERATOR_REQUIRED', message: '온팩토리 플랫폼 운영자 권한이 필요합니다.' } })
+      response.status(403).json({ error: { code: 'PLATFORM_OPERATOR_REQUIRED', message: `${BRAND.platformWorkspaceLabel} 운영자 권한이 필요합니다.` } })
       return
     }
     next()
@@ -2486,7 +2487,7 @@ export function createApp(options = {}) {
     if (!client) { response.json({ answer: ruleAnswer(), mode: 'rules' }); return }
     try {
       const context = JSON.stringify({ briefing, tenants: tenants.map((tenant) => ({ id: tenant.id, name: tenant.name, industryType: tenant.industryType, plan: tenant.plan, metrics: tenant.metrics, admins: tenant.admins.map((admin) => admin.name), consentCurrent: tenant.consentCurrent })) })
-      const result = await client.messages.create({ model, max_tokens: 800, system: '당신은 온팩토리 플랫폼 운영 관제 보조입니다. 주어진 JSON(고객사 지표·주의 신호)만 근거로 한국어로 간결히 답하고, 없는 정보는 모른다고 말하세요. 권장 조치는 한 줄씩 번호로 제시하세요.', messages: [{ role: 'user', content: `관제 데이터:\n${context}\n\n질문: ${question}` }] })
+      const result = await client.messages.create({ model, max_tokens: 800, system: '당신은 ${BRAND.platformWorkspaceLabel} 운영 관제 보조입니다. 주어진 JSON(고객사 지표·주의 신호)만 근거로 한국어로 간결히 답하고, 없는 정보는 모른다고 말하세요. 권장 조치는 한 줄씩 번호로 제시하세요.', messages: [{ role: 'user', content: `관제 데이터:\n${context}\n\n질문: ${question}` }] })
       const text = (result.content ?? []).map((block) => block?.type === 'text' ? block.text : '').join('').trim()
       response.json({ answer: text || ruleAnswer(), mode: text ? 'ai' : 'rules' })
     } catch { response.json({ answer: ruleAnswer(), mode: 'rules' }) }
@@ -2718,7 +2719,7 @@ export function createApp(options = {}) {
   // 운영자 모드 진입: 세션에 진입 테넌트를 기록하고 관리자 권한의 유효 신원을 돌려준다.
   app.post('/api/platform/tenants/:id/enter', requireSession, async (request, response) => {
     if (request.sessionAccount.role !== 'platform-operator') {
-      response.status(403).json({ error: { code: 'PLATFORM_OPERATOR_REQUIRED', message: '온팩토리 플랫폼 운영자 권한이 필요합니다.' } })
+      response.status(403).json({ error: { code: 'PLATFORM_OPERATOR_REQUIRED', message: `${BRAND.platformWorkspaceLabel} 운영자 권한이 필요합니다.` } })
       return
     }
     const tenant = platformTenant(String(request.params.id))
@@ -2788,7 +2789,7 @@ export function createApp(options = {}) {
   app.post('/api/platform/exit', requireSession, async (request, response) => {
     const account = request.sessionAccount
     if (account.role !== 'platform-operator') {
-      response.status(403).json({ error: { code: 'PLATFORM_OPERATOR_REQUIRED', message: '온팩토리 플랫폼 운영자 권한이 필요합니다.' } })
+      response.status(403).json({ error: { code: 'PLATFORM_OPERATOR_REQUIRED', message: `${BRAND.platformWorkspaceLabel} 운영자 권한이 필요합니다.` } })
       return
     }
     const session = request.session
@@ -3492,7 +3493,7 @@ export function createApp(options = {}) {
     members.unshift({
       id: DEVELOPER_OPERATIONS_ID,
       name: DEVELOPER_OPERATIONS_NAME,
-      team: '온팩토리',
+      team: BRAND.supportTeam,
       role: '기술 지원 · 시스템 계정',
       status: 'online',
       system: true,
@@ -3612,7 +3613,7 @@ export function createApp(options = {}) {
     const participantId = String(request.body?.participantId ?? '').trim()
     const developerSupport = participantId === DEVELOPER_OPERATIONS_ID
     const participant = developerSupport
-      ? { id: DEVELOPER_OPERATIONS_ID, name: DEVELOPER_OPERATIONS_NAME, team: '온팩토리', jobRole: '기술 지원' }
+      ? { id: DEVELOPER_OPERATIONS_ID, name: DEVELOPER_OPERATIONS_NAME, team: BRAND.supportTeam, jobRole: '기술 지원' }
       : accounts.find((account) => account.id === participantId
         && account.tenantId === request.auth.tenantId && account.approved)
     if (!participant || participant.id === request.auth.id) {

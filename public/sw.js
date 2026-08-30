@@ -1,4 +1,4 @@
-/* 온팩토리 서비스워커 — 설치 가능성(PWA) 확보 + 오프라인 "연결 없음" 안내만.
+/* 인더필드 서비스워커 — 설치 가능성(PWA) 확보 + 오프라인 "연결 없음" 안내만.
  * 데이터·API는 절대 캐시하지 않는다(네트워크 우선, 실패 시 문서 탐색에만 offline.html). 푸시 없음. */
 const CACHE = 'onfactory-shell-v1'
 const OFFLINE_URL = '/offline.html'

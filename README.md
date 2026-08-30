@@ -1,4 +1,4 @@
-# 온팩토리
+# 인더필드 (InTheField)
 
 식품제조사의 제품·업무·재고·공장·판매·인사를 하나의 흐름으로 연결하고, Claude 기반 AI가 정보 조회, 검증 제안, 업무 초안 작성을 지원하는 통합관리 웹시스템입니다.
 
@@ -54,7 +54,7 @@ PowerShell에서는 seed 실행 전에 `$env:DEMO_SEED_PASSWORD='12자 이상의
 - 햇살바다 관리자: `admin@sunsea.co.kr` / `demo1234`
 - 햇살바다 일반 직원(생산 반장): `taesik.oh@sunsea.co.kr` / `demo1234`
 - 포항시수산가공협동조합 관리자: `admin@pohangcoop.co.kr` / `demo1234`
-- 온팩토리 플랫폼 운영자: `operator@onfactory.co.kr` / `demo1234`
+- 인더필드 플랫폼 운영자: `operator@onfactory.co.kr` / `demo1234` (기존 계정 이메일은 데이터 연결 보존을 위해 유지합니다)
 - 승인 대기 계정 확인용: `newstaff@sunsea.co.kr` / `demo1234`
 
 제품·업무·반복규칙·일정·메신저·일지·휴가원장·창고·입출고·판매채널·공장 배치·인증대장은 로그인한 고객사 범위로 Postgres의 도메인별 정규 테이블에 저장됩니다. 기업 자료 메타데이터는 `items`, 원본 파일은 로컬 또는 S3 어댑터에 저장됩니다. 같은 고객사 계정으로 접속하면 브라우저가 달라도 권한 범위에 맞는 동일한 공유 상태를 불러옵니다.

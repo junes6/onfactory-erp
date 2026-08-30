@@ -1525,7 +1525,7 @@
           "provider": "webdav",
           "endpoint": "",
           "share": "",
-          "basePath": "/온팩토리",
+          "basePath": "/인더필드",
           "account": "",
           "status": "설정 필요"
         },
