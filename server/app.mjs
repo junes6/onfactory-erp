@@ -21,6 +21,7 @@ import { registerBillingRoutes } from './billing-routes.mjs'
 import { registerAttendanceRoutes } from './attendance-routes.mjs'
 import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
 import { registerPersonalCoreRoutes } from './personal-core-routes.mjs'
+import { backupSettings, BACKUP_STATUS_KEY, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
 import { BillingServiceError, createBillingService, createMemoryBillingRepository } from './billing-service.mjs'
 import { attachBlocksToLatestUserMessage, ChatAttachmentError, normalizeChatAttachmentRequest, resolveChatAttachments } from './chat-attachments.mjs'
 import { registerPerformanceRoutes } from './performance-routes.mjs'
@@ -2570,6 +2571,12 @@ export function createApp(options = {}) {
     integrations: workspaceStore.platform.integrations,
     actions: workspaceStore.platform.actions,
     auditEvents: workspaceStore.platform.auditEvents,
+    backupStatus: workspaceStore.platform[BACKUP_STATUS_KEY] ?? null,
+    backupSettings: (() => {
+      const settings = backupSettings(options.env ?? process.env)
+      // 콘솔에는 "어디에 얼마나 보관하는가"만 보이고 경로·버킷 자격정보는 노출하지 않는다.
+      return { enabled: settings.enabled, retention: settings.retention, scheduleHour: settings.scheduleHour, intervalHours: settings.intervalHours, nasConfigured: Boolean(settings.nasDirectory), cloudConfigured: Boolean(settings.cloudBucket) }
+    })(),
   })
 
   // ------------------------------------------------------------------
@@ -2615,6 +2622,29 @@ export function createApp(options = {}) {
   app.locals.runSentinelForAllTenants = (now = new Date()) => Object.keys(workspaceStore.tenants).map((tenantId) => ({ tenantId, ...runSentinel(tenantId, now) }))
   app.locals.runSentinelForTenant = runSentinel
   app.locals.enqueueProposal = enqueueProposal
+
+  /**
+   * 백업 이중화 실행기. 실패해도 예외를 던지지 않고 플랫폼 콘솔에 경고를 남긴다.
+   * 마지막 성공 시각은 콘솔에서 그대로 확인할 수 있다.
+   */
+  app.locals.runBackupCycle = async (now = new Date()) => {
+    const settings = backupSettings(options.env ?? process.env)
+    if (!settings.enabled) return { skipped: true, reason: 'BACKUP_ENABLED가 1이 아닙니다.' }
+    const result = await runBackupCycle({
+      dataDirectory: options.dataDirectory ?? (workspaceStoreFile ? path.dirname(workspaceStoreFile) : null),
+      settings,
+      storage: settings.cloudBucket ? documentStorage : null,
+      now,
+    })
+    workspaceStore.platform[BACKUP_STATUS_KEY] = nextBackupStatus(workspaceStore.platform[BACKUP_STATUS_KEY], result)
+    if (result.ok && !result.cloud.error) {
+      appendPlatformAudit(workspaceStore.platform, { tenantId: null, event: '백업 완료', scope: `${result.generation} · NAS ${Math.round(result.nas.bytes / 1024)}KB${result.cloud.ok ? ` · 클라우드 ${result.cloud.objects}개` : ''}`, actor: '시스템', reference: result.generation })
+    } else {
+      appendPlatformAudit(workspaceStore.platform, { tenantId: null, event: '백업 경고', scope: workspaceStore.platform[BACKUP_STATUS_KEY].warning, actor: '시스템', reference: result.generation })
+    }
+    try { await commitWorkspaceStore() } catch (error) { console.warn('[backup] status persist failed', { message: error?.message }) }
+    return result
+  }
 
   const proposalGuards = [requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity]
   app.get('/api/proposals', ...proposalGuards, (request, response) => {

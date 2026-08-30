@@ -158,7 +158,22 @@ type PlatformState = {
   auditEvents: AuditEvent[]
   newSupportRequestCount?: number
   unansweredSupportCount?: number
+  backupStatus?: BackupStatus | null
+  backupSettings?: BackupSettingsView
 }
+
+type BackupStatus = {
+  lastAttemptAt: string
+  lastSuccessAt: string
+  lastGeneration: string
+  lastError: string
+  warning: string
+  nas: { ok: boolean; path: string; bytes: number; error: string }
+  cloud: { ok: boolean; bucket: string; objects: number; error: string }
+  prunedCount: number
+  consecutiveFailures: number
+}
+type BackupSettingsView = { enabled: boolean; retention: number; scheduleHour: number; intervalHours: number; nasConfigured: boolean; cloudConfigured: boolean }
 
 type PlatformContextValue = PlatformState & {
   loading: boolean
@@ -177,7 +192,7 @@ type PlatformContextValue = PlatformState & {
   downloadSupportAttachment: (ticketId: string, attachment: SupportAttachment) => Promise<void>
 }
 
-const emptyPlatformState: PlatformState = { tenants: [], supportTickets: [], integrations: [], actions: [], auditEvents: [] }
+const emptyPlatformState: PlatformState = { tenants: [], supportTickets: [], integrations: [], actions: [], auditEvents: [], backupStatus: null }
 const PlatformDataContext = createContext<PlatformContextValue | null>(null)
 
 function usePlatformData() {
@@ -930,6 +945,33 @@ function IntegrationDetail({ item, props, onScope, onOpenDialog }: { item?: Inte
   </aside>
 }
 
+/** 백업 이중화 현황. 마지막 성공 시각과 실패 경고를 콘솔에서 바로 본다. */
+function BackupPanel() {
+  const { backupStatus: status, backupSettings: settings } = usePlatformData()
+  if (!settings?.enabled) {
+    return <Panel title="백업 이중화" subtitle="야간 DB 덤프 → NAS · 파일 원본 → 클라우드 버킷">
+      <div className="pc-form-note"><AlertTriangle size={17} /><span>백업 배치가 꺼져 있습니다. 배포 환경에 BACKUP_ENABLED=1과 BACKUP_NAS_DIRECTORY를 설정하세요.</span></div>
+    </Panel>
+  }
+  const stale = status?.lastSuccessAt
+    ? Date.now() - Date.parse(status.lastSuccessAt) > settings.intervalHours * 2 * 60 * 60 * 1000
+    : true
+  return <Panel
+    title="백업 이중화"
+    subtitle={`매 ${settings.intervalHours}시간 · ${settings.retention}세대 보관 · NAS ${settings.nasConfigured ? '연결' : '미설정'} · 클라우드 ${settings.cloudConfigured ? '연결' : '미설정'}`}
+    tools={<Badge tone={status?.warning ? 'danger' : stale ? 'warning' : 'success'}>{status?.warning ? '경고' : stale ? '확인 필요' : '정상'}</Badge>}
+  >
+    <div className="pc-detail-grid">
+      <DetailStat label="마지막 성공" value={status?.lastSuccessAt ? formatDateTime(status.lastSuccessAt) : '아직 없음'} />
+      <DetailStat label="마지막 시도" value={status?.lastAttemptAt ? formatDateTime(status.lastAttemptAt) : '아직 없음'} />
+      <DetailStat label="최근 세대" value={status?.lastGeneration || '—'} />
+      <DetailStat label="연속 실패" value={`${status?.consecutiveFailures ?? 0}회`} />
+    </div>
+    {status?.warning && <div className="pc-form-note"><AlertTriangle size={17} /><span>{status.warning}</span></div>}
+    {status?.nas?.ok && <p className="pc-backup-detail">NAS {Math.max(1, Math.round((status.nas.bytes ?? 0) / 1024))}KB 보관{status.cloud?.ok ? ` · 클라우드 ${status.cloud.objects}개 미러` : status.cloud?.bucket ? ' · 클라우드 미러 실패' : ''}{status.prunedCount ? ` · 오래된 ${status.prunedCount}세대 정리` : ''}</p>}
+  </Panel>
+}
+
 function IntegrationsView({ scopedIntegrations, onScope, onOpenDialog, props }: SectionProps) {
   const { tenants } = usePlatformData()
   const [status, setStatus] = useState<'all' | IntegrationState['status']>('all')
@@ -1232,7 +1274,7 @@ export function PlatformConsole(props: PlatformConsoleProps) {
         {props.section === 'platform' && <Overview {...sectionProps} />}
         {props.section === 'tenants' && <TenantsView {...sectionProps} />}
         {props.section === 'support' && <SupportView {...sectionProps} />}
-        {props.section === 'integrations' && <IntegrationsView {...sectionProps} />}
+        {props.section === 'integrations' && <><IntegrationsView {...sectionProps} /><BackupPanel /></>}
         {props.section === 'audit' && <AuditView {...sectionProps} />}
       </div>
       {dialog && <PlatformDialog dialog={dialog} scope={scope} onClose={() => setDialog(null)} onScope={changeScope} onSectionChange={props.onSectionChange} onToast={props.onToast} />}

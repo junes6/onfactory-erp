@@ -324,3 +324,5 @@ html[data-theme='dark'] .pc-assistant { background: var(--color-gray-50); }
 @media (max-width: 960px) { .pc-finding-list li { grid-template-columns: auto minmax(0, 1fr); } .pc-finding-actions { grid-column: 1 / -1; } }
 
 html[data-theme='dark'] .pc-briefing-chips em.is-info { color: var(--ink); }
+
+.pc-backup-detail { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--pc-muted); font-size: var(--font-13); }

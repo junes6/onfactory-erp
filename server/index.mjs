@@ -7,6 +7,7 @@ import { createPostgresBillingRepository } from './billing-repository.mjs'
 import { createBillingService, createMemoryBillingRepository } from './billing-service.mjs'
 import { performanceMaintenanceErrors, runPerformanceMonthlyMaintenance } from './performance-maintenance.mjs'
 import { initializeRuntimeStore } from './store/index.mjs'
+import { backupSettings, millisecondsUntilNextRun } from './backup-mirror.mjs'
 
 // .env.local is already covered by the project's *.local gitignore rule.
 config({ path: '.env.local', quiet: true })
@@ -30,6 +31,7 @@ const app = createApp({
   initialWorkspaceStore: runtimeStore.workspaceStore,
   sessions: runtimeStore.sessions,
   workspaceStoreFile,
+  dataDirectory,
   onWorkspaceStoreChange: (workspaceStore) => runtimeStore.adapter.commitSnapshot(workspaceStore),
   seedPlatformFixtures: runtimeStore.adapter.kind === 'json' && !runtimeStore.adapter.readOnly,
   seedDemoAccounts: runtimeStore.adapter.kind === 'json',
@@ -108,6 +110,23 @@ const billingMaintenanceTimer = setInterval(() => {
 }, 60 * 60 * 1_000)
 billingMaintenanceTimer.unref?.()
 
+// 백업 이중화: 지정한 시각(KST)에 첫 실행, 이후 BACKUP_INTERVAL_HOURS마다.
+const backupSchedule = backupSettings(process.env)
+let backupTimer = null
+let backupIntervalTimer = null
+if (backupSchedule.enabled) {
+  const firstRun = millisecondsUntilNextRun(backupSchedule)
+  console.log(`[backup] scheduled in ${Math.round(firstRun / 60_000)}분 (매 ${backupSchedule.intervalHours}시간, 세대 ${backupSchedule.retention}개 보관)`)
+  backupTimer = setTimeout(() => {
+    void app.locals.runBackupCycle?.().catch((error) => console.warn('[backup] cycle failed', { message: error?.message }))
+    backupIntervalTimer = setInterval(() => {
+      void app.locals.runBackupCycle?.().catch((error) => console.warn('[backup] cycle failed', { message: error?.message }))
+    }, backupSchedule.intervalHours * 60 * 60 * 1_000)
+    backupIntervalTimer.unref?.()
+  }, firstRun)
+  backupTimer.unref?.()
+}
+
 const server = app.listen(port, host, () => {
   const mode = process.env.ANTHROPIC_API_KEY?.trim() ? 'Claude' : 'demo'
   console.log(`[server] http://${host}:${port} (${mode} mode, ${runtimeStore.adapter.kind}${runtimeStore.adapter.readOnly ? ' read-only' : ''} store)`)
@@ -118,6 +137,8 @@ function shutdown(signal) {
   if (shuttingDown) return
   shuttingDown = true
   clearInterval(billingMaintenanceTimer)
+  if (backupTimer) clearTimeout(backupTimer)
+  if (backupIntervalTimer) clearInterval(backupIntervalTimer)
   console.log(`[server] ${signal} received; shutting down`)
   server.close(async () => {
     try {
