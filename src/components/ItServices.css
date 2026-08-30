@@ -37,6 +37,10 @@
 .it-upload small { margin-left: var(--space-4); color: var(--muted); font-size: var(--font-11); font-weight: var(--weight-regular); }
 .it-file-list { display: flex; flex-wrap: wrap; gap: var(--space-8); margin-top: var(--space-8); }
 .it-file-list > span { display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-8); border-radius: var(--radius-8); background: var(--canvas); font-size: var(--font-13); }
+.it-modal :is(.extraction-panel, .extraction-review) { margin-top: var(--space-12); }
+.it-manual-entry { display: grid; gap: var(--space-12); margin-top: var(--space-16); padding-top: var(--space-12); border-top: var(--hairline) solid var(--line); }
+.it-manual-entry p { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.it-manual-entry > div { display: flex; justify-content: flex-end; gap: var(--space-8); }
 .it-file-list button { display: grid; place-items: center; width: 22px; height: 22px; border: none; border-radius: var(--radius-8); background: transparent; cursor: pointer; }
 
 html[data-theme='dark'] :is(.it-summary-strip article,.it-toolbar select,.it-row-files button,.it-row-actions button) { background: var(--surface); }

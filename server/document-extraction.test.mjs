@@ -41,6 +41,8 @@ function billingSpy({ failLedger = false } = {}) {
   }
 }
 
+const withEvidence = (values) => Object.fromEntries(Object.entries(values).map(([name, value]) => [name, { value, evidence: `원문: ${value}` }]))
+
 test('document extraction reads one tenant PDF/image, returns only a review draft and records fixed usage', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'onfactory-document-extraction-'))
   const captured = []
@@ -49,12 +51,15 @@ test('document extraction reads one tenant PDF/image, returns only a review draf
     countTokens: async () => ({ input_tokens: 31 }),
     create: async (input) => {
       captured.push(input)
-      const ip = Boolean(input.output_config?.format?.schema?.properties?.kind)
+      const properties = input.output_config?.format?.schema?.properties ?? {}
+      const payload = properties.kind
+        ? withEvidence({ kind: '특허', title: '저온 건조 방법', number: '10-2026-1234567', holder: '주식회사 온팩토리', issuer: '특허청', filedAt: '2025-01-02', registeredAt: '2026-03-04', expiresAt: '2046-03-04' })
+        : properties.client
+          ? withEvidence({ title: '유지보수 연간 계약', client: '○○주식회사', number: '2026-CT-014', startDate: '2026-01-01', endDate: '2026-12-31', amount: '12,000,000원' })
+          : withEvidence({ category: 'HACCP', name: '식품안전관리인증', authority: '한국식품안전관리인증원', certificateNo: 'HACCP-2026-01', issuedAt: '2026-01-05', expiresAt: '2029-01-04' })
       return {
         id: `extract-${captured.length}`, model: 'claude-test', usage: { input_tokens: 27, output_tokens: 15 },
-        content: [{ type: 'text', text: JSON.stringify(ip
-          ? { kind: '특허', title: '저온 건조 방법', number: '10-2026-1234567', holder: '주식회사 햇살바다', issuer: '특허청', filedAt: '2025-01-02', registeredAt: '2026-03-04', expiresAt: '2046-03-04', confidence: 0.96, warnings: [] }
-          : { category: 'HACCP', name: '식품안전관리인증', authority: '한국식품안전관리인증원', certificateNo: 'HACCP-2026-01', issuedAt: '2026-01-05', expiresAt: '2029-01-04', confidence: 0.94, warnings: [] }) }],
+        content: [{ type: 'text', text: JSON.stringify({ ...payload, confidence: 0.94, warnings: [] }) }],
       }
     },
   } }
@@ -66,7 +71,7 @@ test('document extraction reads one tenant PDF/image, returns only a review draf
 
       const beforeCompliance = await (await fetch(`${origin}/api/workspace/compliance-records`, { headers: { cookie: admin.cookie, 'x-workspace-identity': admin.identity } })).json()
       const beforeIp = await (await fetch(`${origin}/api/workspace/ip-rights`, { headers: { cookie: admin.cookie, 'x-workspace-identity': admin.identity } })).json()
-      const cases = [[certificate, 'compliance'], [patent, 'ip-right']]
+      const cases = [[certificate, 'compliance'], [patent, 'ip-right'], [certificate, 'contract']]
       for (const [document, target] of cases) {
         const response = await fetch(`${origin}/api/documents/${document.id}/extract`, {
           method: 'POST', headers: { cookie: admin.cookie, 'x-workspace-identity': admin.identity, 'content-type': 'application/json' },
@@ -80,12 +85,15 @@ test('document extraction reads one tenant PDF/image, returns only a review draf
         assert.equal('raw' in body, false)
         assert.equal('tenantId' in body.draft, false)
         assert.equal('status' in body.draft, false)
+        // 값마다 원문 근거가 함께 와야 확인 화면에서 대조할 수 있다.
+        assert.ok(Object.keys(body.draft.fields).length > 0)
+        assert.ok(Object.values(body.draft.fields).every((field) => field.value && field.evidence))
       }
       assert.equal(captured[0].messages.at(-1).content.some((block) => block.type === 'document'), true)
       assert.equal(captured[1].messages.at(-1).content.some((block) => block.type === 'image'), true)
       assert.equal(captured.every((input) => input.output_config.format.schema.additionalProperties === false), true)
-      assert.deepEqual(billing.calls.reservations.map((entry) => entry.feature), ['document-extraction', 'document-extraction'])
-      assert.deepEqual(billing.calls.events.map((entry) => entry.feature), ['document-extraction', 'document-extraction'])
+      assert.deepEqual(billing.calls.reservations.map((entry) => entry.feature), ['document-extraction', 'document-extraction', 'document-extraction'])
+      assert.deepEqual(billing.calls.events.map((entry) => entry.feature), ['document-extraction', 'document-extraction', 'document-extraction'])
       assert.equal(billing.calls.releases.length, 0)
 
       const afterCompliance = await (await fetch(`${origin}/api/workspace/compliance-records`, { headers: { cookie: admin.cookie, 'x-workspace-identity': admin.identity } })).json()
@@ -130,20 +138,29 @@ test('document extraction rejects auth, stale scope, other tenants and unsupport
 })
 
 test('malicious extraction output is sanitized, and provider-success parse failures remain billable', async () => {
+  const evidence = (value) => ({ value, evidence: `원문: ${value}` })
   const malicious = normalizeDocumentExtraction(JSON.stringify({
-    kind: '특허', title: `<script>${'가'.repeat(250)}</script>`, number: '10-1', holder: '권리자\u0000', issuer: '특허청',
-    filedAt: '2026-02-30', registeredAt: '2026-01-02', expiresAt: '2025-01-01', confidence: 99,
+    kind: evidence('특허'),
+    title: { value: `<script>${'가'.repeat(250)}</script>`, evidence: `<b>${'나'.repeat(300)}</b>` },
+    number: evidence('10-1'), holder: evidence('권리자\u0000'), issuer: { value: '특허청', evidence: '' },
+    filedAt: evidence('2026-02-30'), registeredAt: evidence('2026-01-02'), expiresAt: evidence('2025-01-01'), confidence: 99,
     warnings: ['확인 필요', '<b>확인 필요</b>'], tenantId: 'TENANT-OTHER', documentId: 'DOC-FORGED', status: '등록', __proto__: { polluted: true },
   }), 'ip-right')
-  assert.equal(malicious.title.includes('<'), false)
-  assert.equal(malicious.title.length <= 200, true)
-  assert.equal(malicious.filedAt, '')
-  assert.equal(malicious.registeredAt, '')
-  assert.equal(malicious.expiresAt, '')
+  assert.equal(malicious.fields.title.value.includes('<'), false)
+  assert.equal(malicious.fields.title.value.length <= 200, true)
+  assert.equal(malicious.fields.title.evidence.includes('<'), false)
+  assert.equal(malicious.fields.title.evidence.length <= 240, true)
+  assert.equal(malicious.fields.holder.value, '권리자')
+  // 근거 없는 값은 채우지 않고 경고로만 남긴다.
+  assert.equal('issuer' in malicious.fields, false)
+  assert.ok(malicious.warnings.some((warning) => warning.includes('원문 근거가 없어')))
+  assert.equal('filedAt' in malicious.fields, false)
+  assert.equal('registeredAt' in malicious.fields, false)
+  assert.equal('expiresAt' in malicious.fields, false)
   assert.equal(malicious.confidence, null)
   assert.equal('tenantId' in malicious, false)
   assert.equal('documentId' in malicious, false)
-  assert.equal('status' in malicious, false)
+  assert.deepEqual(Object.keys(malicious), ['fields', 'confidence', 'warnings'])
 
   const directory = await mkdtemp(path.join(os.tmpdir(), 'onfactory-document-extraction-invalid-'))
   const billing = billingSpy({ failLedger: true })

@@ -1,0 +1,40 @@
+/* 문서 자동 입력: 판독 상태 알림과 원문 근거 확인 화면 */
+.extraction-panel { display: flex; align-items: flex-start; gap: var(--space-12); padding: var(--space-12) var(--space-16); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--color-primary-soft); }
+.extraction-panel > svg { flex: 0 0 auto; margin-top: var(--space-4); color: var(--color-primary); }
+.extraction-panel > div { min-width: 0; flex: 1; display: grid; gap: var(--space-4); }
+.extraction-panel strong { font-size: var(--font-13); }
+.extraction-panel p { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); line-height: 1.55; }
+.extraction-panel ul { margin: var(--space-4) var(--space-0) var(--space-0); padding-left: var(--space-16); color: var(--color-warning-ink); font-size: var(--font-11); }
+.extraction-panel .button { flex: 0 0 auto; min-height: 34px; }
+.extraction-panel.is-failed { background: var(--color-warning-soft); }
+.extraction-panel.is-failed > svg { color: var(--color-warning-ink); }
+.extraction-panel.is-applied { background: var(--color-success-soft); }
+.extraction-panel.is-applied > svg { color: var(--color-success-ink); }
+
+.extraction-review { display: grid; gap: var(--space-12); padding: var(--space-16); border: var(--dashboard-stroke) solid var(--color-primary); border-radius: var(--radius-8); background: var(--color-primary-soft); }
+.extraction-review > header { display: flex; align-items: flex-start; gap: var(--space-12); }
+.extraction-review > header > svg { flex: 0 0 auto; margin-top: var(--space-4); color: var(--color-primary); }
+.extraction-review > header > div { min-width: 0; display: grid; gap: var(--space-4); }
+.extraction-review strong { font-size: var(--font-15); }
+.extraction-review header p { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); line-height: 1.55; }
+.extraction-warnings { margin: var(--space-0); padding-left: var(--space-16); color: var(--color-warning-ink); font-size: var(--font-11); line-height: 1.6; }
+.extraction-field-list { display: grid; gap: var(--space-8); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.extraction-field-list > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-4) var(--space-8); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.extraction-field-list > li.is-excluded { opacity: .6; }
+.extraction-field-list label { min-width: 0; display: grid; gap: var(--space-4); }
+.extraction-field-list label > span { color: var(--muted); font-size: var(--font-11); font-weight: var(--weight-medium); }
+.extraction-field-list :is(input, select) { min-height: 40px; width: 100%; padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--ink); font: inherit; font-size: var(--font-13); }
+.extraction-field-list :is(input, select):disabled { background: var(--color-gray-50); color: var(--subtle); }
+.extraction-evidence { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: var(--space-4); margin: var(--space-0); color: var(--subtle); font-size: var(--font-11); line-height: 1.55; }
+.extraction-evidence > svg { flex: 0 0 auto; margin-top: var(--space-4); }
+.extraction-evidence > span { min-width: 0; }
+.extraction-exclude { grid-column: 2; grid-row: 1; align-self: center; min-height: 34px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--muted); font: inherit; font-size: var(--font-11); white-space: nowrap; cursor: pointer; }
+.extraction-exclude[aria-pressed='true'] { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-soft); }
+.extraction-review > footer { display: flex; justify-content: flex-end; gap: var(--space-8); }
+
+@media (max-width: 760px) {
+  .extraction-field-list > li { grid-template-columns: minmax(0, 1fr); }
+  .extraction-exclude { grid-column: 1; grid-row: auto; justify-self: start; }
+  .extraction-review > footer { flex-direction: column-reverse; }
+  .extraction-review > footer .button { width: 100%; }
+}

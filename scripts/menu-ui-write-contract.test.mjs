@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const read = (relativePath) => readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
-const [app, collaboration, dashboard, business, factory, people, library, compliance, taxAssets, taxWorkspace, ipRights, apiSmoke, quickLinkSmoke, workspaceHook, serverApp, packageJsonText] = await Promise.all([
+const [app, collaboration, dashboard, business, factory, people, library, compliance, taxAssets, taxWorkspace, ipRights, itServices, apiSmoke, quickLinkSmoke, workspaceHook, serverApp, packageJsonText] = await Promise.all([
   read('src/App.tsx'),
   read('src/components/CollaborationSuite.tsx'),
   read('src/components/DashboardWorkspace.tsx'),
@@ -15,6 +15,7 @@ const [app, collaboration, dashboard, business, factory, people, library, compli
   read('src/components/TaxAssets.tsx'),
   read('src/components/TaxWorkspace.tsx'),
   read('src/components/IpRights.tsx'),
+  read('src/components/ItServices.tsx'),
   read('server/store/menu-write-smoke.test.mjs'),
   read('scripts/quick-links-storage.test.mjs'),
   read('src/hooks/useWorkspaceState.ts'),
@@ -150,7 +151,9 @@ const contracts = [
       [/onClick=\{\(\) => void remove\(record\)\}/, 'delete button wiring'],
       [/onSave=\{save\}/, 'editor form wiring'],
       [/requestDocumentExtraction\(attachment\.id, 'compliance'/, 'stored certificate content extraction'],
-      [/applyBlankFormValues\(formRef\.current, values\)/, 'AI draft fills only blank review fields'],
+      [/setExtraction\(\{ status: 'review', sourceId: attachment\.id, sourceName: attachment\.name, draft \}\)/, 'the AI draft goes to a review screen, never straight into the record'],
+      [/const approveExtraction = \(values: Record<string, string>\) => \{[\s\S]*?applyApprovedValues\(formRef\.current, values\)/, 'only approved values reach the form'],
+      [/const \[showForm, setShowForm\] = useState\(Boolean\(record\)\)/, 'registration starts from the uploaded file, not from typing'],
       [/인증서 원본부터 올려 주세요/, 'file-first registration flow'],
     ],
   },
@@ -179,6 +182,19 @@ const contracts = [
     ],
   },
   {
+    screen: '계약·거래처', persistenceId: 'it-contracts', source: itServices, checks: [
+      [/useWorkspaceState<ItContract\[]>\('it-contracts'/, 'shared refresh source'],
+      [/const removeContract = async[\s\S]*?current\.filter\(\(item\) => item\.id !== contract\.id\)[\s\S]*?if \(!result\.ok\)/, 'delete and failure handling'],
+      [/onSave=\{async \(next\) => \{[\s\S]*?setContracts\(\(current\) => current\.some[\s\S]*?: \[next, \.\.\.current\]/, 'create/update list synchronization'],
+      [/onClick=\{\(\) => setEditor\(\{ kind: 'contract' \}\)\}/, 'create button wiring'],
+      [/onClick=\{\(\) => void removeContract\(contract\)\}/, 'delete button wiring'],
+      [/requestDocumentExtraction\(attachment\.id, 'contract'/, 'stored contract content extraction'],
+      [/setExtraction\(\{ status: 'review', sourceId: attachment\.id, sourceName: attachment\.name, draft \}\)/, 'the AI draft goes to a review screen, never straight into the record'],
+      [/const \[showForm, setShowForm\] = useState\(Boolean\(item\)\)/, 'registration starts from the uploaded file, not from typing'],
+      [/계약서 파일/, 'file-first registration flow'],
+    ],
+  },
+  {
     screen: '지식재산·인증', persistenceId: 'ip-rights', source: ipRights, checks: [
       [/useWorkspaceState<IpRight\[]>\('ip-rights'/, 'shared refresh source'],
       [/const remove = async[\s\S]*?current\.filter\(\(item\) => item\.id !== right\.id\)[\s\S]*?if \(!result\.ok\)/, 'delete and failure handling'],
@@ -187,7 +203,9 @@ const contracts = [
       [/onClick=\{\(\) => setEditor\(\{\}\)\}/, 'create button wiring'],
       [/onClick=\{\(\) => void remove\(right\)\}/, 'delete button wiring'],
       [/requestDocumentExtraction\(attachment\.id, 'ip-right'/, 'stored patent content extraction'],
-      [/applyBlankFormValues\(formRef\.current, values\)/, 'AI draft fills only blank review fields'],
+      [/setExtraction\(\{ status: 'review', sourceId: attachment\.id, sourceName: attachment\.name, draft \}\)/, 'the AI draft goes to a review screen, never straight into the record'],
+      [/const approveExtraction = \(values: Record<string, string>\) => \{[\s\S]*?applyApprovedValues\(formRef\.current, values\)/, 'only approved values reach the form'],
+      [/const \[showForm, setShowForm\] = useState\(Boolean\(item\)\)/, 'registration starts from the uploaded file, not from typing'],
       [/deleteDocumentAttachments\(removedRef\.current, workspaceScope\)/, 'detached originals are removed only after a successful save'],
       [/if \(busy \|\| uploading \|\| closingRef\.current\) return/, 'modal cannot close while an upload or save is in flight'],
       [/for \(const id of cleanup\.deleted\) uploadedRef\.current\.delete\(id\)/, 'partial cancel cleanup retries only failed originals'],
@@ -203,7 +221,7 @@ for (const contract of contracts) {
 }
 
 test('all UI contracts stay paired to the same persistence target exercised by lifecycle smoke', () => {
-  assert.equal(contracts.length, 14)
+  assert.equal(contracts.length, 15)
   const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   for (const { screen, persistenceId } of contracts) {
     if (persistenceId.startsWith('localStorage:')) {

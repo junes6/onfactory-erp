@@ -9,8 +9,8 @@ import {
   uploadDocumentAttachments,
   type StoredDocumentAttachment,
 } from '../utils/documentAttachments'
-import { applyBlankFormValues, canExtractDocumentFile, requestDocumentExtraction } from '../utils/documentExtraction'
-import { DocumentExtractionNotice, type DocumentExtractionState } from './DocumentExtractionNotice'
+import { applyApprovedValues, canExtractDocumentFile, DOCUMENT_EXTRACTION_FIELDS, readFormValues, requestDocumentExtraction } from '../utils/documentExtraction'
+import { DocumentExtractionReview, type DocumentExtractionState } from './DocumentExtractionReview'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './IpRights.css'
 
@@ -146,6 +146,9 @@ function IpEditor({ item, workspaceScope, currentUserName, onToast, onClose, onS
   const [closing, setClosing] = useState(false)
   const [attachments, setAttachments] = useState<StoredDocumentAttachment[]>(item?.attachments ?? [])
   const [extraction, setExtraction] = useState<DocumentExtractionState>({ status: 'idle' })
+  // 등록은 파일 업로드부터 시작한다. 확인 화면을 마치거나 "직접 입력"을 고른 뒤에만 폼이 열린다.
+  const [showForm, setShowForm] = useState(Boolean(item))
+  const [approved, setApproved] = useState<Record<string, string>>({})
   const fileRef = useRef<HTMLInputElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
   const uploadedRef = useRef(new Set<string>())
@@ -164,14 +167,26 @@ function IpEditor({ item, workspaceScope, currentUserName, onToast, onClose, onS
     setExtraction({ status: 'extracting', sourceId: attachment.id, sourceName: attachment.name })
     try {
       const draft = await requestDocumentExtraction(attachment.id, 'ip-right', workspaceScope, controller.signal)
-      if (controller.signal.aborted || !formRef.current) return
-      const { confidence, warnings, ...values } = draft
-      const appliedFields = applyBlankFormValues(formRef.current, values)
-      setExtraction({ status: 'ready', sourceId: attachment.id, sourceName: attachment.name, appliedFields, confidence, warnings })
+      if (controller.signal.aborted) return
+      setExtraction({ status: 'review', sourceId: attachment.id, sourceName: attachment.name, draft })
     } catch (error) {
       if (controller.signal.aborted) return
+      setShowForm(true)
       setExtraction({ status: 'failed', sourceId: attachment.id, sourceName: attachment.name, message: error instanceof Error ? error.message : 'AI가 파일을 읽지 못했습니다.' })
     }
+  }
+
+  /** 확인 화면에서 승인한 값만 폼에 넣는다. 사용자가 이미 손으로 친 값은 지우지 않는다. */
+  const approveExtraction = (values: Record<string, string>) => {
+    if (extraction.status !== 'review') return
+    const typed = readFormValues(formRef.current, DOCUMENT_EXTRACTION_FIELDS['ip-right'].map((field) => field.name))
+    setApproved((current) => ({ ...current, ...typed, ...values }))
+    applyApprovedValues(formRef.current, values)
+    setShowForm(true)
+    setExtraction({
+      status: 'applied', sourceId: extraction.sourceId, sourceName: extraction.sourceName,
+      appliedFields: Object.keys(values).length, confidence: extraction.draft.confidence, warnings: extraction.draft.warnings,
+    })
   }
 
   const cancel = async () => {
@@ -258,7 +273,7 @@ function IpEditor({ item, workspaceScope, currentUserName, onToast, onClose, onS
   }, [item])
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (!locked && event.target === event.currentTarget) void cancel() }}>
     <section ref={dialogRef} className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="ip-editor-title" aria-busy={locked}>
-      <header><div><span className="eyebrow">IP RIGHT</span><h2 id="ip-editor-title">{item ? '권리 · 인증 수정' : '권리 · 인증 등록'}</h2><p>명칭만 있으면 등록됩니다. 등록증·인증서 원본 파일을 함께 올려 두세요.</p></div><button className="icon-button" type="button" aria-label="닫기" disabled={locked} onClick={() => void cancel()}><X size={21} /></button></header>
+      <header><div><span className="eyebrow">IP RIGHT</span><h2 id="ip-editor-title">{item ? '권리 · 인증 수정' : '권리 · 인증 등록'}</h2><p>{item ? '등록증·인증서 원본을 다시 올리면 값을 새로 읽어 드립니다.' : '특허증·등록증·인증서 파일을 올리면 명칭·번호·날짜를 읽어 확인 화면에 보여 드립니다.'}</p></div><button className="icon-button" type="button" aria-label="닫기" disabled={locked} onClick={() => void cancel()}><X size={21} /></button></header>
       <form ref={formRef} onSubmit={submit}>
         <section className="it-upload"><div><strong>등록증 · 인증서 파일 <small>PDF·이미지는 AI 자동 입력</small></strong></div>
           <input ref={fileRef} className="sr-only" type="file" multiple accept="application/pdf,image/jpeg,image/png,image/gif,image/webp" onChange={async (event) => {
@@ -277,15 +292,26 @@ function IpEditor({ item, workspaceScope, currentUserName, onToast, onClose, onS
           <button ref={uploadButtonRef} className="button secondary" type="button" data-initial-focus={!item ? 'true' : undefined} disabled={locked} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '파일 추가'}</button>
         </section>
         {attachments.length > 0 && <div className="it-file-list">{attachments.map((file) => <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}<button type="button" aria-label={`${file.name} 원본 보기`} disabled={locked} onClick={() => void download(file)}><Download size={13} /></button><button type="button" aria-label={`${file.name} 제외`} disabled={locked} onClick={() => void removeAttachment(file)}><X size={13} /></button></span>)}</div>}
-        <DocumentExtractionNotice state={extraction} disabled={locked} onRetry={extraction.sourceId ? () => { const source = attachments.find((attachment) => attachment.id === extraction.sourceId); if (source) void extract(source) } : undefined} />
-        <div className="form-grid"><label className="form-field"><span>명칭 <em className="field-required">필수</em></span><input ref={titleInputRef} name="title" data-initial-focus={item ? 'true' : undefined} defaultValue={item?.title ?? ''} required placeholder="예: 3D 시뮬레이션 렌더링 방법 특허" /></label><label className="form-field"><span>유형</span><select name="kind" defaultValue={item?.kind ?? ''} required><option value="" disabled>유형 선택</option>{IP_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select></label></div>
-        <div className="form-grid"><label className="form-field"><span>출원 · 등록번호</span><input name="number" defaultValue={item?.number ?? ''} placeholder="예: 10-2026-0012345" /></label><label className="form-field"><span>권리자</span><input name="holder" defaultValue={item?.holder ?? ''} placeholder="예: 주식회사 3D뮤즈" /></label></div>
-        <label className="form-field full"><span>발급 · 관할 기관</span><input name="issuer" defaultValue={item?.issuer ?? ''} placeholder="예: 특허청" /></label>
-        <div className="form-grid"><label className="form-field"><span>출원일</span><input name="filedAt" type="date" defaultValue={item?.filedAt ?? ''} /></label><label className="form-field"><span>등록일</span><input name="registeredAt" type="date" defaultValue={item?.registeredAt ?? ''} /></label></div>
-        <div className="form-grid"><label className="form-field"><span>만료 · 갱신일</span><input name="expiresAt" type="date" defaultValue={item?.expiresAt ?? ''} /></label><label className="form-field"><span>상태</span><select name="status" defaultValue={item?.status ?? '등록'}>{IP_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label></div>
+        <DocumentExtractionReview
+          kind="ip-right"
+          state={extraction}
+          disabled={locked}
+          onApprove={approveExtraction}
+          onDismiss={() => { setShowForm(true); setExtraction({ status: 'idle' }) }}
+          onRetry={extraction.status !== 'review' && extraction.sourceId ? () => { const source = attachments.find((attachment) => attachment.id === extraction.sourceId); if (source) void extract(source) } : undefined}
+        />
+        {!showForm
+          ? <section className="it-manual-entry"><p>파일이 없거나 AI 없이 등록하려면 직접 입력할 수 있습니다.</p><div><button type="button" className="button ghost" disabled={locked} onClick={() => void cancel()}>{closing ? '정리 중…' : '취소'}</button><button type="button" className="button secondary" disabled={locked || extracting} onClick={() => setShowForm(true)}>파일 없이 직접 입력</button></div></section>
+          : <>
+        <div className="form-grid"><label className="form-field"><span>명칭 <em className="field-required">필수</em></span><input ref={titleInputRef} name="title" data-initial-focus={item ? 'true' : undefined} defaultValue={approved.title ?? item?.title ?? ''} required placeholder="예: 3D 시뮬레이션 렌더링 방법 특허" /></label><label className="form-field"><span>유형</span><select name="kind" defaultValue={approved.kind ?? item?.kind ?? ''} required><option value="" disabled>유형 선택</option>{IP_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select></label></div>
+        <div className="form-grid"><label className="form-field"><span>출원 · 등록번호</span><input name="number" defaultValue={approved.number ?? item?.number ?? ''} placeholder="예: 10-2026-0012345" /></label><label className="form-field"><span>권리자</span><input name="holder" defaultValue={approved.holder ?? item?.holder ?? ''} placeholder="예: 주식회사 3D뮤즈" /></label></div>
+        <label className="form-field full"><span>발급 · 관할 기관</span><input name="issuer" defaultValue={approved.issuer ?? item?.issuer ?? ''} placeholder="예: 특허청" /></label>
+        <div className="form-grid"><label className="form-field"><span>출원일</span><input name="filedAt" type="date" defaultValue={approved.filedAt ?? item?.filedAt ?? ''} /></label><label className="form-field"><span>등록일</span><input name="registeredAt" type="date" defaultValue={approved.registeredAt ?? item?.registeredAt ?? ''} /></label></div>
+        <div className="form-grid"><label className="form-field"><span>만료 · 갱신일</span><input name="expiresAt" type="date" defaultValue={approved.expiresAt ?? item?.expiresAt ?? ''} /></label><label className="form-field"><span>상태</span><select name="status" defaultValue={item?.status ?? '등록'}>{IP_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label></div>
         <label className="form-field full"><span>담당자</span><input name="owner" defaultValue={item?.owner ?? currentUserName} /></label>
         <label className="form-field full"><span>메모</span><textarea name="note" rows={2} defaultValue={item?.note ?? ''} placeholder="연차료 납부·갱신 절차 등" /></label>
         <footer><button type="button" className="button ghost" disabled={locked} onClick={() => void cancel()}>{closing ? '정리 중…' : '취소'}</button><button type="submit" className="button primary" disabled={locked || extracting}><Check size={18} /> {busy ? '저장 중…' : extracting ? 'AI 읽는 중…' : '확인 후 저장'}</button></footer>
+          </>}
       </form>
     </section>
   </div>

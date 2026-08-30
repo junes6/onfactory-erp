@@ -10,8 +10,8 @@ import {
   isStoredDocumentAttachment,
   uploadDocumentAttachments,
 } from '../utils/documentAttachments'
-import { applyBlankFormValues, canExtractDocumentFile, requestDocumentExtraction } from '../utils/documentExtraction'
-import { DocumentExtractionNotice, type DocumentExtractionState } from './DocumentExtractionNotice'
+import { applyApprovedValues, canExtractDocumentFile, DOCUMENT_EXTRACTION_FIELDS, readFormValues, requestDocumentExtraction } from '../utils/documentExtraction'
+import { DocumentExtractionReview, type DocumentExtractionState } from './DocumentExtractionReview'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ComplianceCenter.css'
 
@@ -119,6 +119,9 @@ function RecordModal({ record, workspaceScope, currentUserName, onClose, onSave,
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [downloadingId, setDownloadingId] = useState('')
   const [extraction, setExtraction] = useState<DocumentExtractionState>({ status: 'idle' })
+  // 등록은 인증서 파일부터 시작한다. 확인 화면을 마치거나 "직접 입력"을 고른 뒤에만 입력칸이 열린다.
+  const [showForm, setShowForm] = useState(Boolean(record))
+  const [approved, setApproved] = useState<Record<string, string>>({})
   const uploadedIdsRef = useRef(new Set<string>())
   const removedIdsRef = useRef(new Set<string>())
   const extractionAbortRef = useRef<AbortController | null>(null)
@@ -155,14 +158,26 @@ function RecordModal({ record, workspaceScope, currentUserName, onClose, onSave,
     setExtraction({ status: 'extracting', sourceId: attachment.id, sourceName: attachment.name })
     try {
       const draft = await requestDocumentExtraction(attachment.id, 'compliance', workspaceScope, controller.signal)
-      if (controller.signal.aborted || !formRef.current) return
-      const { confidence, warnings, ...values } = draft
-      const appliedFields = applyBlankFormValues(formRef.current, values)
-      setExtraction({ status: 'ready', sourceId: attachment.id, sourceName: attachment.name, appliedFields, confidence, warnings })
+      if (controller.signal.aborted) return
+      setExtraction({ status: 'review', sourceId: attachment.id, sourceName: attachment.name, draft })
     } catch (error) {
       if (controller.signal.aborted) return
+      setShowForm(true)
       setExtraction({ status: 'failed', sourceId: attachment.id, sourceName: attachment.name, message: error instanceof Error ? error.message : 'AI가 파일을 읽지 못했습니다.' })
     }
+  }
+
+  /** 확인 화면에서 승인한 값만 입력칸에 넣는다. 자동 확정하지 않는다. */
+  const approveExtraction = (values: Record<string, string>) => {
+    if (extraction.status !== 'review') return
+    const typed = readFormValues(formRef.current, DOCUMENT_EXTRACTION_FIELDS.compliance.map((field) => field.name))
+    setApproved((current) => ({ ...current, ...typed, ...values }))
+    applyApprovedValues(formRef.current, values)
+    setShowForm(true)
+    setExtraction({
+      status: 'applied', sourceId: extraction.sourceId, sourceName: extraction.sourceName,
+      appliedFields: Object.keys(values).length, confidence: extraction.draft.confidence, warnings: extraction.draft.warnings,
+    })
   }
 
   const attachFiles = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -266,21 +281,32 @@ function RecordModal({ record, workspaceScope, currentUserName, onClose, onSave,
         if (cleanup.failed.length) onToast(`항목은 저장했지만 제거한 증빙 ${cleanup.failed.length}개의 원본 정리에 실패했습니다.`)
         onClose()
       }}>
-        <section className="compliance-attachments"><input ref={fileRef} className="sr-only" type="file" multiple onChange={(event) => void attachFiles(event)} /><div><strong>인증서 원본부터 올려 주세요</strong><span>PDF·이미지는 AI가 번호·기관·날짜를 읽어 빈 칸에 임시 입력합니다.</span></div><button ref={uploadButtonRef} className="button secondary" type="button" data-initial-focus={!record ? 'true' : undefined} disabled={busy || attachmentBusy} onClick={() => fileRef.current?.click()}><Upload size={17} /> {attachmentBusy ? '처리 중…' : '파일 선택'}</button></section>
+        <section className="compliance-attachments"><input ref={fileRef} className="sr-only" type="file" multiple onChange={(event) => void attachFiles(event)} /><div><strong>인증서 원본부터 올려 주세요</strong><span>PDF·이미지는 AI가 번호·기관·날짜를 읽고, 원문 근거와 함께 확인 화면에 보여 드립니다.</span></div><button ref={uploadButtonRef} className="button secondary" type="button" data-initial-focus={!record ? 'true' : undefined} disabled={busy || attachmentBusy} onClick={() => fileRef.current?.click()}><Upload size={17} /> {attachmentBusy ? '처리 중…' : '파일 선택'}</button></section>
         <div className="compliance-file-list">{attachments.map((file) => <span key={file.id}><FileText size={15} /><span>{file.name} · {file.size}<small>{isStoredDocumentAttachment(file) ? '원본 저장됨' : '이전 파일 정보 · 원본 없음'}</small></span>{isStoredDocumentAttachment(file) && <button type="button" aria-label={`${file.name} 원본 보기`} disabled={Boolean(downloadingId)} onClick={() => void downloadAttachment(file)}><Download size={14} /></button>}<button type="button" aria-label={`${file.name} 제거`} disabled={busy || attachmentBusy} onClick={() => void removeAttachment(file)}><X size={14} /></button></span>)}</div>
-        <DocumentExtractionNotice state={extraction} disabled={busy || attachmentBusy} onRetry={extraction.sourceId ? () => { const source = attachments.find((attachment) => attachment.id === extraction.sourceId); if (source) void extract(source) } : undefined} />
+        <DocumentExtractionReview
+          kind="compliance"
+          state={extraction}
+          disabled={busy || attachmentBusy}
+          onApprove={approveExtraction}
+          onDismiss={() => { setShowForm(true); setExtraction({ status: 'idle' }) }}
+          onRetry={extraction.status !== 'review' && extraction.sourceId ? () => { const source = attachments.find((attachment) => attachment.id === extraction.sourceId); if (source) void extract(source) } : undefined}
+        />
+        {!showForm
+          ? <section className="compliance-manual-entry"><p>파일이 없거나 AI 없이 등록하려면 직접 입력할 수 있습니다.</p><div><button className="button ghost" type="button" disabled={busy || attachmentBusy} onClick={() => void requestClose()}>취소</button><button className="button secondary" type="button" disabled={busy || attachmentBusy || extracting} onClick={() => setShowForm(true)}>파일 없이 직접 입력</button></div></section>
+          : <>
         <div className="compliance-form-grid">
-          <label><span>관리 분류</span><select name="category" defaultValue={record?.category ?? ''} required><option value="" disabled>분류 선택</option><option>HACCP</option><option>품목제조보고</option><option>자가품질검사</option><option>식품표시 검토</option><option>위생교육</option><option>검교정</option><option>ISO 22000</option><option>FSSC 22000</option><option>기타 인증</option></select></label>
+          <label><span>관리 분류</span><select name="category" defaultValue={approved.category ?? record?.category ?? ''} required><option value="" disabled>분류 선택</option><option>HACCP</option><option>품목제조보고</option><option>자가품질검사</option><option>식품표시 검토</option><option>위생교육</option><option>검교정</option><option>ISO 22000</option><option>FSSC 22000</option><option>기타 인증</option></select></label>
           <label><span>담당자</span><input name="owner" defaultValue={record?.owner ?? currentUserName} required /></label>
-          <label className="full"><span>인증·검토 명칭</span><input name="name" defaultValue={record?.name} required autoFocus /></label>
-          <label><span>발급·검토 기관</span><input name="authority" defaultValue={record?.authority} required /></label>
-          <label><span>인증·보고 번호</span><input name="certificateNo" defaultValue={record?.certificateNo} placeholder="없으면 내부 관리번호" required /></label>
-          <label><span>발급·확인일</span><input name="issuedAt" type="date" defaultValue={record?.issuedAt ?? ''} required /></label>
-          <label><span>유효·다음 검토일</span><input name="expiresAt" type="date" defaultValue={record?.expiresAt} required /></label>
+          <label className="full"><span>인증·검토 명칭</span><input name="name" defaultValue={approved.name ?? record?.name} required autoFocus /></label>
+          <label><span>발급·검토 기관</span><input name="authority" defaultValue={approved.authority ?? record?.authority} required /></label>
+          <label><span>인증·보고 번호</span><input name="certificateNo" defaultValue={approved.certificateNo ?? record?.certificateNo} placeholder="없으면 내부 관리번호" required /></label>
+          <label><span>발급·확인일</span><input name="issuedAt" type="date" defaultValue={approved.issuedAt ?? record?.issuedAt ?? ''} required /></label>
+          <label><span>유효·다음 검토일</span><input name="expiresAt" type="date" defaultValue={approved.expiresAt ?? record?.expiresAt} required /></label>
           <label className="full"><span>필수 확인 항목 · 한 줄에 하나</span><textarea name="checklist" rows={4} defaultValue={record?.checklist.join('\n')} placeholder={'예: 인증서 원본 확인\n갱신 신청 일정 등록'} /></label>
           <label className="full"><span>메모</span><textarea name="note" rows={3} defaultValue={record?.note} /></label>
         </div>
         <footer><button className="button ghost" type="button" disabled={busy || attachmentBusy} onClick={() => void requestClose()}>취소</button><button className="button primary" type="submit" disabled={busy || attachmentBusy || extracting}><FileCheck2 size={18} /> {busy ? '저장 중…' : extracting ? 'AI 읽는 중…' : '확인 후 저장'}</button></footer>
+          </>}
       </form>
     </section>
   </div>

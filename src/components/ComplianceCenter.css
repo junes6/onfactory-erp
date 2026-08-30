@@ -61,7 +61,10 @@
 .compliance-file-list button { width: 30px; height: 30px; display: grid; place-items: center; border: none; border-radius: var(--radius-8); color: var(--muted); background: transparent; cursor: pointer; }
 .compliance-file-list button:hover:not(:disabled) { color: var(--forest); background: var(--forest-soft); }
 .compliance-file-list button:disabled { cursor: wait; opacity: .45; }
-.compliance-modal .document-extraction-notice { margin-top: var(--space-12); margin-bottom: var(--space-12); }
+.compliance-modal :is(.extraction-panel, .extraction-review) { margin-top: var(--space-12); margin-bottom: var(--space-12); }
+.compliance-manual-entry { display: grid; gap: var(--space-12); margin-top: var(--space-16); padding-top: var(--space-12); border-top: var(--hairline) solid var(--line); }
+.compliance-manual-entry p { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.compliance-manual-entry > div { display: flex; justify-content: flex-end; gap: var(--space-8); }
 .compliance-modal footer { display: flex; justify-content: flex-end; gap: var(--space-8); margin-top: var(--space-16); }
 html[data-theme='dark'] :is(.compliance-page,.compliance-modal) :is(input,select,textarea,button) { color: var(--ink); }
 @media (max-width: 900px) { .compliance-overview { grid-template-columns: 1fr 1fr; } .compliance-overview > :nth-child(2) { border-right: none; } .compliance-overview > :nth-child(-n+2) { border-bottom: var(--hairline) solid var(--line); } .compliance-list > article { grid-template-columns: auto minmax(0,1fr) auto; } .compliance-list dl { grid-column: 2 / -1; } }

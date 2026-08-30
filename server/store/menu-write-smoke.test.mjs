@@ -79,6 +79,11 @@ const ipRight = {
   filedAt: '2098-01-01', registeredAt: '2099-01-01', expiresAt: '2099-12-31', status: '등록', owner: '김서원',
   note: '생성 단계', attachments: [], updatedAt: '2026-08-21T00:00:00.000Z',
 }
+const itContract = {
+  id: 'SMOKE-CONTRACT', client: '스모크 거래처', title: '스모크 유지보수 계약', number: '2099-CT-001',
+  startDate: '2099-01-01', endDate: '2099-12-31', amount: 1000000, attachments: [], note: '생성 단계',
+  updatedAt: '2026-08-21T00:00:00.000Z',
+}
 
 const workspaceCases = [
   { screen: '일정관리', key: 'calendar-events', created: [calendarEvent], updated: [{ ...calendarEvent, title: '스모크 일정 수정' }], empty: [] },
@@ -105,6 +110,7 @@ const workspaceCases = [
   { screen: '세무·자산 · 자산대장', key: 'company-assets', created: [companyAsset], updated: [{ ...companyAsset, name: '스모크 자산 수정', note: '수정 단계' }], empty: [] },
   { screen: '세무·자산 · 세무일정', key: 'tax-events', created: [taxEvent], updated: [{ ...taxEvent, title: '스모크 세무 일정 수정', status: '신고 완료' }], empty: [] },
   { screen: '지식재산·인증', key: 'ip-rights', created: [ipRight], updated: [{ ...ipRight, title: '스모크 특허 수정', note: '수정 단계' }], empty: [] },
+  { screen: '계약·거래처', key: 'it-contracts', created: [itContract], updated: [{ ...itContract, title: '스모크 계약 수정', number: '2099-CT-002' }], empty: [] },
 ]
 const documentCase = { screen: '기업 자료실', persistenceId: 'documents-api' }
 

@@ -9,6 +9,8 @@ import {
   uploadDocumentAttachments,
   type StoredDocumentAttachment,
 } from '../utils/documentAttachments'
+import { applyApprovedValues, canExtractDocumentFile, DOCUMENT_EXTRACTION_FIELDS, readFormValues, requestDocumentExtraction } from '../utils/documentExtraction'
+import { DocumentExtractionReview, type DocumentExtractionState } from './DocumentExtractionReview'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ItServices.css'
 
@@ -48,6 +50,7 @@ type ItContract = {
   id: string
   client: string
   title: string
+  number?: string
   startDate: string
   endDate: string
   amount: number
@@ -335,7 +338,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
         ? <div className="empty-state"><FileSignature size={30} /><h3>등록된 계약이 없습니다</h3><p>거래처·기간·금액과 계약서 파일을 등록하세요.</p>{canManage && <button className="button primary" type="button" onClick={() => setEditor({ kind: 'contract' })}><Plus size={17} /> 첫 계약 등록</button>}</div>
         : <div className="it-rows" role="list">{sortedContracts.map((contract) => { const status = contractStatus(contract); return <article className="it-row" role="listitem" key={contract.id}>
           <StatusBadge className="status-pill" dot tone={status.tone}>{status.label}</StatusBadge>
-          <div className="it-row-main"><strong>{contract.title}</strong><small>{contract.client} · {contract.startDate ? formatDateLabel(contract.startDate) : '시작 미정'} ~ {contract.endDate ? formatDateLabel(contract.endDate) : '종료 미정'}</small></div>
+          <div className="it-row-main"><strong>{contract.title}</strong><small>{contract.client}{contract.number ? ` · ${contract.number}` : ''} · {contract.startDate ? formatDateLabel(contract.startDate) : '시작 미정'} ~ {contract.endDate ? formatDateLabel(contract.endDate) : '종료 미정'}</small></div>
           <span className="it-row-meta">{money(contract.amount)}</span>
           <div className="it-row-files">{contract.attachments.length === 0 ? <span className="it-row-meta">문서 없음</span> : contract.attachments.map((file) => <button type="button" key={file.id} onClick={() => void download(file)}><Download size={13} /> {file.name}</button>)}</div>
           {canManage && <div className="it-row-actions"><button type="button" aria-label={`${contract.title} 수정`} onClick={() => setEditor({ kind: 'contract', item: contract })}><Pencil size={15} /></button><button type="button" aria-label={`${contract.title} 삭제`} onClick={() => void removeContract(contract)}><Trash2 size={15} /></button></div>}
@@ -463,11 +466,45 @@ function ContractEditor({ item, clients, workspaceScope, onToast, onClose, onSav
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [attachments, setAttachments] = useState<StoredDocumentAttachment[]>(item?.attachments ?? [])
+  const [extraction, setExtraction] = useState<DocumentExtractionState>({ status: 'idle' })
+  // 계약 등록도 계약서 파일부터 시작한다. 확인 화면을 마치거나 "직접 입력"을 고른 뒤에 입력칸이 열린다.
+  const [showForm, setShowForm] = useState(Boolean(item))
+  const [approved, setApproved] = useState<Record<string, string>>({})
   const fileRef = useRef<HTMLInputElement>(null)
+  const formRef = useRef<HTMLFormElement>(null)
   const uploadedRef = useRef(new Set<string>())
+  const extractionAbortRef = useRef<AbortController | null>(null)
+  const extracting = extraction.status === 'extracting'
   const cancel = async () => {
+    extractionAbortRef.current?.abort()
     if (uploadedRef.current.size) await deleteDocumentAttachments([...uploadedRef.current], workspaceScope)
     onClose()
+  }
+  const extract = async (attachment: StoredDocumentAttachment) => {
+    extractionAbortRef.current?.abort()
+    const controller = new AbortController()
+    extractionAbortRef.current = controller
+    setExtraction({ status: 'extracting', sourceId: attachment.id, sourceName: attachment.name })
+    try {
+      const draft = await requestDocumentExtraction(attachment.id, 'contract', workspaceScope, controller.signal)
+      if (controller.signal.aborted) return
+      setExtraction({ status: 'review', sourceId: attachment.id, sourceName: attachment.name, draft })
+    } catch (error) {
+      if (controller.signal.aborted) return
+      setShowForm(true)
+      setExtraction({ status: 'failed', sourceId: attachment.id, sourceName: attachment.name, message: error instanceof Error ? error.message : 'AI가 계약서를 읽지 못했습니다.' })
+    }
+  }
+  const approveExtraction = (values: Record<string, string>) => {
+    if (extraction.status !== 'review') return
+    const typed = readFormValues(formRef.current, DOCUMENT_EXTRACTION_FIELDS.contract.map((field) => field.name))
+    setApproved((current) => ({ ...current, ...typed, ...values }))
+    applyApprovedValues(formRef.current, values)
+    setShowForm(true)
+    setExtraction({
+      status: 'applied', sourceId: extraction.sourceId, sourceName: extraction.sourceName,
+      appliedFields: Object.keys(values).length, confidence: extraction.draft.confidence, warnings: extraction.draft.warnings,
+    })
   }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -478,6 +515,7 @@ function ContractEditor({ item, clients, workspaceScope, onToast, onClose, onSav
       id: item?.id ?? `CTR-${Date.now()}`,
       client: text('client'),
       title: text('title'),
+      number: text('number'),
       startDate: text('startDate'),
       endDate: text('endDate'),
       amount: Math.max(0, Number(form.get('amount') || 0)),
@@ -490,25 +528,40 @@ function ContractEditor({ item, clients, workspaceScope, onToast, onClose, onSav
   }
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && void cancel()}>
     <section className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="it-contract-title">
-      <header><div><span className="eyebrow">CONTRACT</span><h2 id="it-contract-title">{item ? '계약 수정' : '계약 등록'}</h2><p>거래처와 계약명만 있으면 등록됩니다.</p></div><button className="icon-button" type="button" aria-label="닫기" disabled={busy || uploading} onClick={() => void cancel()}><X size={21} /></button></header>
-      <form onSubmit={submit}>
-        <div className="form-grid"><label className="form-field"><span>거래처 <em className="field-required">필수</em></span><input name="client" list="it-client-options" autoFocus defaultValue={item?.client ?? ''} required placeholder={clients.length ? '등록된 거래처에서 고르거나 직접 입력' : '예: ○○주식회사'} /><datalist id="it-client-options">{clients.map((client) => <option key={client.id} value={client.name}>{[client.contactName, client.phone].filter(Boolean).join(' · ')}</option>)}</datalist></label><label className="form-field"><span>계약명 <em className="field-required">필수</em></span><input name="title" defaultValue={item?.title ?? ''} required placeholder="예: 유지보수 연간 계약" /></label></div>
-        <div className="form-grid"><label className="form-field"><span>계약 시작일</span><input name="startDate" type="date" defaultValue={item?.startDate ?? seoulDateInputValue()} /></label><label className="form-field"><span>계약 종료일</span><input name="endDate" type="date" defaultValue={item?.endDate ?? ''} /></label></div>
-        <label className="form-field full"><span>계약 금액 (원)</span><input name="amount" type="number" min="0" step="1000" defaultValue={item?.amount ?? 0} /></label>
-        <label className="form-field full"><span>메모</span><textarea name="note" rows={2} defaultValue={item?.note ?? ''} placeholder="결제 조건·특약" /></label>
-        <section className="it-upload"><div><strong>계약 문서 <small>선택</small></strong></div><input ref={fileRef} className="sr-only" type="file" multiple onChange={async (event) => {
+      <header><div><span className="eyebrow">CONTRACT</span><h2 id="it-contract-title">{item ? '계약 수정' : '계약 등록'}</h2><p>{item ? '계약서를 다시 올리면 값을 새로 읽어 드립니다.' : '계약서 파일을 올리면 계약명·거래처·기간·금액을 읽어 확인 화면에 보여 드립니다.'}</p></div><button className="icon-button" type="button" aria-label="닫기" disabled={busy || uploading} onClick={() => void cancel()}><X size={21} /></button></header>
+      <form ref={formRef} onSubmit={submit}>
+        <section className="it-upload"><div><strong>계약서 파일 <small>PDF·이미지는 AI 자동 입력</small></strong></div><input ref={fileRef} className="sr-only" type="file" multiple accept="application/pdf,image/jpeg,image/png,image/gif,image/webp" onChange={async (event) => {
           const files = Array.from(event.target.files ?? []); event.target.value = ''
           if (!files.length) return
           setUploading(true)
           try {
-            const added = await uploadDocumentAttachments(files, { workspaceScope, category: '계약 · 거래처', summary: '계약 문서', tags: ['it-contract'] })
+            const added = await uploadDocumentAttachments(files, { workspaceScope, category: '계약 · 거래처', summary: '계약 문서', tags: ['it-contract', 'AI-판독대상'] })
             for (const file of added) uploadedRef.current.add(file.id)
             setAttachments((current) => [...current, ...added])
+            const sourceIndex = files.findIndex(canExtractDocumentFile)
+            if (sourceIndex >= 0 && added[sourceIndex]) void extract(added[sourceIndex])
           } catch (error) { onToast(error instanceof Error ? error.message : '문서를 업로드하지 못했습니다.') }
           finally { setUploading(false) }
-        }} /><button className="button secondary" type="button" disabled={uploading || busy} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '문서 추가'}</button></section>
+        }} /><button className="button secondary" type="button" data-initial-focus={!item ? 'true' : undefined} disabled={uploading || busy} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '계약서 올리기'}</button></section>
         {attachments.length > 0 && <div className="it-file-list">{attachments.map((file) => <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}<button type="button" aria-label={`${file.name} 제외`} onClick={() => setAttachments((current) => current.filter((entry) => entry.id !== file.id))}><X size={14} /></button></span>)}</div>}
-        <footer><button type="button" className="button ghost" disabled={busy || uploading} onClick={() => void cancel()}>취소</button><button type="submit" className="button primary" disabled={busy || uploading}><Check size={18} /> {busy ? '저장 중…' : '저장'}</button></footer>
+        <DocumentExtractionReview
+          kind="contract"
+          state={extraction}
+          disabled={busy || uploading}
+          onApprove={approveExtraction}
+          onDismiss={() => { setShowForm(true); setExtraction({ status: 'idle' }) }}
+          onRetry={extraction.status !== 'review' && extraction.sourceId ? () => { const source = attachments.find((attachment) => attachment.id === extraction.sourceId); if (source) void extract(source) } : undefined}
+        />
+        {!showForm
+          ? <section className="it-manual-entry"><p>파일이 없거나 AI 없이 등록하려면 직접 입력할 수 있습니다.</p><div><button type="button" className="button ghost" disabled={busy || uploading} onClick={() => void cancel()}>취소</button><button type="button" className="button secondary" disabled={busy || uploading || extracting} onClick={() => setShowForm(true)}>파일 없이 직접 입력</button></div></section>
+          : <>
+        <div className="form-grid"><label className="form-field"><span>거래처 <em className="field-required">필수</em></span><input name="client" list="it-client-options" autoFocus defaultValue={approved.client ?? item?.client ?? ''} required placeholder={clients.length ? '등록된 거래처에서 고르거나 직접 입력' : '예: ○○주식회사'} /><datalist id="it-client-options">{clients.map((client) => <option key={client.id} value={client.name}>{[client.contactName, client.phone].filter(Boolean).join(' · ')}</option>)}</datalist></label><label className="form-field"><span>계약명 <em className="field-required">필수</em></span><input name="title" defaultValue={approved.title ?? item?.title ?? ''} required placeholder="예: 유지보수 연간 계약" /></label></div>
+        <label className="form-field full"><span>계약번호</span><input name="number" defaultValue={approved.number ?? item?.number ?? ''} placeholder="예: 2026-CT-014" /></label>
+        <div className="form-grid"><label className="form-field"><span>계약 시작일</span><input name="startDate" type="date" defaultValue={approved.startDate ?? item?.startDate ?? seoulDateInputValue()} /></label><label className="form-field"><span>계약 종료일</span><input name="endDate" type="date" defaultValue={approved.endDate ?? item?.endDate ?? ''} /></label></div>
+        <label className="form-field full"><span>계약 금액 (원)</span><input name="amount" type="number" min="0" step="1000" defaultValue={approved.amount ?? item?.amount ?? 0} /></label>
+        <label className="form-field full"><span>메모</span><textarea name="note" rows={2} defaultValue={item?.note ?? ''} placeholder="결제 조건·특약" /></label>
+        <footer><button type="button" className="button ghost" disabled={busy || uploading} onClick={() => void cancel()}>취소</button><button type="submit" className="button primary" disabled={busy || uploading || extracting}><Check size={18} /> {busy ? '저장 중…' : extracting ? 'AI 읽는 중…' : '확인 후 저장'}</button></footer>
+          </>}
       </form>
     </section>
   </div>

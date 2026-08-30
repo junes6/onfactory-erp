@@ -7,5 +7,12 @@
 .ip-summary strong { font-size: var(--font-22); letter-spacing: -.02em; }
 .ip-filter { margin-bottom: var(--space-12); }
 .ip-kind-mark { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-violet); background: var(--color-violet-soft); }
-.it-modal .document-extraction-notice { margin-top: var(--space-12); margin-bottom: var(--space-12); }
+/* 지식재산 행은 유형 아이콘이 하나 더 앞에 붙는다. 늘어나는 칸은 상태 배지가 아니라 본문이어야 한다. */
+.ip-page .it-row { grid-template-columns: auto auto minmax(0, 1fr) auto auto auto; }
+.ip-page .it-row > .status-pill { justify-self: start; }
+
 html[data-theme='dark'] .ip-summary article { background: var(--surface); }
+
+@media (max-width: 900px) {
+  .ip-page .it-row { grid-template-columns: auto auto minmax(0, 1fr); }
+}
