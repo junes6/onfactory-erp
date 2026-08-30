@@ -336,6 +336,29 @@ CREATE TABLE IF NOT EXISTS personal_todos (
   created_by TEXT, PRIMARY KEY (org_id, id)
 );
 -- P11: 세무사 전달 이력. 서버가 압축본을 만든 순간에만 기록한다(클라이언트 직접 쓰기 금지).
+-- R11-D 개인 지식 코어: 소유자는 테넌트가 아니라 계정이다.
+CREATE TABLE IF NOT EXISTS principles (
+  id TEXT PRIMARY KEY, owner_account_id TEXT NOT NULL REFERENCES core_accounts(id) ON DELETE CASCADE,
+  statement TEXT NOT NULL, payload JSONB NOT NULL DEFAULT '{}'::JSONB, confidence DOUBLE PRECISION,
+  status TEXT NOT NULL DEFAULT 'active', confirmed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), expires_at TIMESTAMPTZ, retired_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ, created_by TEXT
+);
+CREATE TABLE IF NOT EXISTS personal_notes (
+  id TEXT PRIMARY KEY, owner_account_id TEXT NOT NULL REFERENCES core_accounts(id) ON DELETE CASCADE,
+  body TEXT NOT NULL, topic TEXT, source TEXT NOT NULL DEFAULT 'manual', gap_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ, created_by TEXT
+);
+CREATE TABLE IF NOT EXISTS correction_log (
+  id TEXT PRIMARY KEY, owner_account_id TEXT NOT NULL REFERENCES core_accounts(id) ON DELETE CASCADE,
+  proposal_id TEXT, kind TEXT, reason TEXT, diff JSONB, org_id TEXT REFERENCES core_tenants(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ, created_by TEXT
+);
+CREATE TABLE IF NOT EXISTS knowledge_gaps (
+  id TEXT PRIMARY KEY, owner_account_id TEXT NOT NULL REFERENCES core_accounts(id) ON DELETE CASCADE,
+  question TEXT NOT NULL, topic TEXT, source TEXT NOT NULL DEFAULT 'ai', reference TEXT, confidence DOUBLE PRECISION,
+  status TEXT NOT NULL DEFAULT 'open', note_id TEXT, seen_count INTEGER NOT NULL DEFAULT 1, resolved_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ, created_by TEXT
+);
 CREATE TABLE IF NOT EXISTS digests (
   id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
   payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,

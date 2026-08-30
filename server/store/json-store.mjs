@@ -23,6 +23,7 @@ function parseStore(file) {
   parsed.version = 2
   parsed.platform ??= { tenants: [], supportTickets: [], integrations: [], actions: [], auditEvents: [] }
   for (const key of ['tenants', 'supportTickets', 'integrations', 'actions', 'auditEvents']) parsed.platform[key] ??= []
+  parsed.personal ??= {}
   parsed.accountApprovals ??= {}
   parsed.accountCredentials ??= {}
   parsed.invitedAccounts ??= []

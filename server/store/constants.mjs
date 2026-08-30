@@ -77,6 +77,8 @@ export const emptyWorkspaceStore = () => ({
     actions: [],
     auditEvents: [],
   },
+  // R11-D: 계정 소유 개인 지식 코어 (테넌트 격리 위의 별도 계층)
+  personal: {},
   accountApprovals: {},
   accountCredentials: {},
   invitedAccounts: [],

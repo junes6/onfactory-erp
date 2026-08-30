@@ -1,0 +1,48 @@
+/* 내 판단 기록 — 계정 소유 계층 */
+.personal-core-page { display: grid; gap: var(--space-16); }
+.personal-core-section { padding: var(--space-0); }
+.personal-core-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding: var(--space-12) var(--card-inset); border-bottom: var(--dashboard-stroke) solid var(--color-card-line); }
+.personal-core-head > div:first-child { min-width: 0; display: flex; align-items: center; gap: var(--space-8); }
+.personal-core-head svg { flex: 0 0 auto; color: var(--color-primary); }
+.personal-core-head h2 { margin: var(--space-0); font-size: var(--font-15); }
+.personal-core-head span { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); }
+.personal-core-threshold { display: inline-flex; align-items: center; gap: var(--space-8); flex: 0 0 auto; color: var(--muted); font-size: var(--font-11); }
+.personal-core-empty { margin: var(--space-0); padding: var(--space-16) var(--card-inset); color: var(--muted); font-size: var(--font-13); line-height: 1.6; }
+
+.principle-list, .gap-list, .note-list, .correction-list { display: grid; gap: var(--space-0); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.principle-list > li { display: grid; gap: var(--space-8); padding: var(--space-12) var(--card-inset); border-bottom: var(--hairline) solid var(--line); }
+.principle-list > li:last-child { border-bottom: none; }
+.principle-head { display: flex; align-items: center; gap: var(--space-8); }
+.principle-head strong { min-width: 0; font-size: var(--font-13); line-height: 1.5; }
+.principle-list small { color: var(--muted); font-size: var(--font-11); }
+.principle-evidence summary { color: var(--color-primary); font-size: var(--font-11); cursor: pointer; }
+.principle-evidence ul { display: grid; gap: var(--space-4); margin: var(--space-8) var(--space-0) var(--space-0); padding-left: var(--space-16); color: var(--subtle); font-size: var(--font-11); line-height: 1.5; }
+.principle-evidence span { color: var(--muted); }
+.principle-actions { display: flex; gap: var(--space-8); }
+.personal-core-retired { padding: var(--space-12) var(--card-inset); border-top: var(--hairline) solid var(--line); }
+.personal-core-retired summary { color: var(--muted); font-size: var(--font-11); cursor: pointer; }
+.personal-core-retired ul { display: grid; gap: var(--space-4); margin: var(--space-8) var(--space-0) var(--space-0); padding-left: var(--space-16); color: var(--subtle); font-size: var(--font-11); }
+
+.gap-list > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); padding: var(--space-12) var(--card-inset); border-bottom: var(--hairline) solid var(--line); }
+.gap-list > li:last-child { border-bottom: none; }
+.gap-list > li > div:first-child { min-width: 0; display: grid; gap: var(--space-4); }
+.gap-list strong { font-size: var(--font-13); line-height: 1.5; }
+.gap-list small { color: var(--muted); font-size: var(--font-11); }
+.gap-answer { display: flex; align-items: center; gap: var(--space-4); }
+.gap-answer input { min-height: 36px; min-width: 220px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--ink); font: inherit; font-size: var(--font-13); }
+
+.note-form { display: flex; gap: var(--space-8); padding: var(--space-12) var(--card-inset); border-bottom: var(--hairline) solid var(--line); }
+.note-form input { min-height: 40px; flex: 1; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--ink); font: inherit; font-size: var(--font-13); }
+.note-list > li, .correction-list > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); padding: var(--space-12) var(--card-inset); border-bottom: var(--hairline) solid var(--line); }
+.note-list > li:last-child, .correction-list > li:last-child { border-bottom: none; }
+.note-list > li > div { min-width: 0; display: grid; gap: var(--space-4); }
+.note-list strong, .correction-list strong { font-size: var(--font-13); line-height: 1.5; }
+.note-list small, .correction-list small { color: var(--muted); font-size: var(--font-11); }
+.correction-list > li { grid-template-columns: minmax(0, 1fr) auto; }
+
+@media (max-width: 760px) {
+  .personal-core-head { align-items: flex-start; flex-direction: column; }
+  .gap-list > li, .note-list > li, .correction-list > li { grid-template-columns: minmax(0, 1fr); }
+  .gap-answer { flex-wrap: wrap; }
+  .gap-answer input { min-width: 0; flex: 1 1 100%; }
+}

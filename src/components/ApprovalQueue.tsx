@@ -86,14 +86,14 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
   const visible = useMemo(() => (data?.proposals ?? []).filter((item) => filter === 'all' || item.status === 'pending'), [data, filter])
   const selected = visible.find((item) => item.id === selectedId) ?? visible[0] ?? null
 
-  const decide = useCallback(async (proposal: Proposal, decision: 'approve' | 'edit' | 'reject', payload?: Record<string, unknown>) => {
+  const decide = useCallback(async (proposal: Proposal, decision: 'approve' | 'edit' | 'reject', payload?: Record<string, unknown>, reason?: string) => {
     if (busyId) return
     setBusyId(proposal.id)
     try {
       const response = await fetch(`/api/proposals/${encodeURIComponent(proposal.id)}/decide`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(headers ?? {}) },
-        body: JSON.stringify({ decision, payload }),
+        body: JSON.stringify({ decision, payload, reason }),
       })
       const body = await response.json() as { proposal?: Proposal; resultRef?: Proposal['resultRef']; pendingCount?: number; error?: { message?: string } }
       if (!response.ok || !body.proposal) throw new Error(body.error?.message || '결정을 저장하지 못했습니다.')
@@ -189,11 +189,12 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
 
     <OpportunityWatch workspaceScope={workspaceScope} onToast={onToast} />
 
-    {editing && <ProposalEditDialog proposal={editing} busy={busyId === editing.id} onClose={() => setEditing(null)} onSubmit={(payload) => void decide(editing, 'edit', payload)} />}
+    {editing && <ProposalEditDialog proposal={editing} busy={busyId === editing.id} onClose={() => setEditing(null)} onSubmit={(payload, reason) => void decide(editing, 'edit', payload, reason)} />}
   </div>
 }
 
-function ProposalEditDialog({ proposal, busy, onClose, onSubmit }: { proposal: Proposal; busy: boolean; onClose: () => void; onSubmit: (payload: Record<string, unknown>) => void }) {
+function ProposalEditDialog({ proposal, busy, onClose, onSubmit }: { proposal: Proposal; busy: boolean; onClose: () => void; onSubmit: (payload: Record<string, unknown>, reason?: string) => void }) {
+  const [reason, setReason] = useState('')
   const isDocument = proposal.kind === 'document-classification'
   const payload = proposal.payload as Record<string, string>
   const [title, setTitle] = useState(String(payload.title ?? ''))
@@ -215,14 +216,14 @@ function ProposalEditDialog({ proposal, busy, onClose, onSubmit }: { proposal: P
       <header><div><span className="eyebrow">EDIT & APPROVE</span><h2 id="approval-edit-title">수정 후 승인</h2><p>{proposal.summary}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
       <form onSubmit={(event) => {
         event.preventDefault()
-        if (isDocument) { onSubmit({ category: category.trim(), tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean) }); return }
+        if (isDocument) { onSubmit({ category: category.trim(), tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean) }, reason.trim()); return }
         onSubmit({
           title: title.trim(),
           owner: owner.trim(),
           ownerId: owner.trim() === String(payload.owner ?? '') ? payload.ownerId ?? null : null,
           due: due ? new Date(Date.parse(`${due}:00+09:00`)).toISOString() : payload.due,
           priority,
-        })
+        }, reason.trim())
       }}>
         <p className="approval-edit-evidence"><ShieldAlert size={15} /> 근거: {proposal.evidence}</p>
         {isDocument ? <>
@@ -233,7 +234,8 @@ function ProposalEditDialog({ proposal, busy, onClose, onSubmit }: { proposal: P
           <div className="form-grid"><label className="form-field"><span>담당자 이름</span><input value={owner} onChange={(event) => setOwner(event.target.value)} placeholder="비우면 승인자 본인" /></label><label className="form-field"><span>우선순위</span><select value={priority} onChange={(event) => setPriority(event.target.value)}><option>긴급</option><option>높음</option><option>보통</option></select></label></div>
           <label className="form-field full"><span>마감</span><input type="datetime-local" value={due} onChange={(event) => setDue(event.target.value)} /></label>
         </>}
-        <p className="approval-edit-note">무엇을 고쳤는지는 diff로 저장되어 자동화 승급 판단에 쓰입니다.</p>
+        <label className="form-field full"><span>왜 고치셨나요? <em className="field-optional">선택</em></span><input value={reason} maxLength={300} placeholder="예: 이 분류는 항상 인사·노무로 본다" onChange={(event) => setReason(event.target.value)} /></label>
+        <p className="approval-edit-note">무엇을 고쳤는지는 diff로 저장되어 자동화 승급 판단에 쓰입니다. 이유를 적으면 내 판단 기록의 규범 후보 근거가 됩니다.</p>
         <footer><Button tone="ghost" type="button" disabled={busy} onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={busy}><Check size={18} /> {busy ? '실행 중…' : '수정한 내용으로 승인'}</Button></footer>
       </form>
     </section>

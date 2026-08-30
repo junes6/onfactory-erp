@@ -64,6 +64,7 @@ const requiredTables = [
   'spaces', 'space_members', 'items', 'proposals', 'lenses', 'decisions', 'playbooks',
   'automation_policies', 'bookmarks', 'events', 'audit_log',
   'core_tenants', 'core_accounts', 'auth_sessions', 'account_invites', 'password_reset_requests',
+  'principles', 'personal_notes', 'correction_log', 'knowledge_gaps',
 ]
 for (const table of requiredTables) {
   if (!new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+${table}\\b`, 'i').test(schema)) {
@@ -122,6 +123,9 @@ const requiredArtifacts = [
   'src/components/PerformanceReports.tsx',
   'src/tokens.css',
   'src/utils/dateTime.ts',
+  'server/personal-core.mjs',
+  'server/personal-core-routes.mjs',
+  'supabase/migrations/20260831020000_personal_core.sql',
 ]
 for (const artifact of requiredArtifacts) {
   try { statSync(path.join(root, artifact)) }

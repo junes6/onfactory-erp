@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import {
-  AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, BarChart3, Boxes, Building2, Check,
+  AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, BarChart3, BookOpen, Boxes, Building2, Check,
   CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCheck, Clock3,
   Database, Factory, FileClock, FileText, Headphones, Home, Layers3, ListChecks, LockKeyhole, Menu,
   NotebookPen, Package, Paperclip, PauseCircle, PlayCircle, Plus, Repeat2, Search, Settings2, ShieldCheck, ShoppingCart,
@@ -43,9 +43,10 @@ import {
 import { Button, IconButton } from './components/ui/Button'
 import { LensPanel, type LensTarget } from './components/LensPanel'
 import { DailyDigest } from './components/DailyDigest'
+import { PersonalCorePage } from './components/PersonalCorePage'
 import { BRAND } from './brand'
 
-type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'finance' | 'ip' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
+type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'finance' | 'ip' | 'judgement' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
 type PageId = TenantPage | PlatformSection | 'billing'
 type AppMode = 'tenant' | 'platform'
 type NavItem = { id: PageId; label: string; icon: typeof Sparkles; badge?: number }
@@ -1641,7 +1642,7 @@ export default function App() {
       ? { title: nextSharedEvent.title, detail: `${formatWorkDue(`${nextSharedEvent.date}T${nextSharedEvent.start}:00`)} · ${nextSharedEvent.location || '장소 미정'}`, page: 'schedule' as PageId }
       : { title: '첫 공유 일정을 등록해 보세요', detail: `${tenantName} 구성원에게 일정을 공유할 수 있습니다.`, page: 'schedule' as PageId }
   const workAssignees: WorkAssignee[] = directoryAssignees
-  const industryRoutes = new Set<string>(routesForIndustry(account?.industryType))
+  const industryRoutes = new Set<string>([...routesForIndustry(account?.industryType), ...(account?.role === 'tenant-admin' ? ['judgement'] : [])])
   // 메뉴 라벨·아이콘·업종 경로는 레지스트리만이 결정한다. App은 실데이터 배지만 결합한다.
   const tenantNavByIndustry: NavItem[] = navigationForIndustry(account?.industryType).map((item) => ({
     ...item,
@@ -1649,7 +1650,9 @@ export default function App() {
       ? scopedWorkItems.filter((workItem) => workItem.status !== '결재완료').length
       : item.id === 'approvals' ? pendingProposals : undefined,
   }))
-  const tenantNav = account?.role === 'tenant-member' ? tenantNavByIndustry.filter((item) => tenantMemberPages.has(item.id)) : tenantNavByIndustry
+  // 개인 메뉴: 업종 레지스트리가 아니라 계정 권한으로 붙는다. 권한 없는 계정에는 노출되지 않는다.
+  const personalMenu: NavItem[] = account?.role === 'tenant-admin' ? [{ id: 'judgement' as PageId, label: '내 판단 기록', icon: BookOpen }] : []
+  const tenantNav = account?.role === 'tenant-member' ? tenantNavByIndustry.filter((item) => tenantMemberPages.has(item.id)) : [...tenantNavByIndustry, ...personalMenu]
   const tenantNavSource = tenantNav.map(({ id, label }) => ({ id, label }))
   const [tenantNavPreferences, setTenantNavPreferences] = usePersonalNavigation(tenantNavSource, `${account?.tenantId ?? 'tenant'}:${account?.id ?? 'anonymous'}`)
   const personalizedTenantNav = tenantNavPreferences.flatMap((preference) => {
@@ -1909,6 +1912,7 @@ export default function App() {
       case 'factory': return <FactoryManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
       case 'sales': return <SalesChannels onToast={setToast} workspaceScope={workspaceScope} companyName={tenantName} canManage={account?.role === 'tenant-admin'} />
       case 'people': return <PeopleOperationsPage initialTab={peopleInitialTab} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
+      case 'judgement': return <PersonalCorePage workspaceScope={workspaceScope} onToast={setToast} />
       case 'approvals': return <ApprovalQueue workspaceScope={workspaceScope} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onPendingChange={setPendingProposals} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} industryType={account?.industryType ?? 'food_manufacturing'} onAskLens={setLensTarget} onToast={setToast} />
       case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} companyName={tenantName} onAskLens={setLensTarget} onToast={setToast} />
@@ -1955,7 +1959,7 @@ export default function App() {
 
       <div className="app-body">
         <header className="topbar">
-          <div className="topbar-left"><button className="menu-button" type="button" aria-label="메뉴 열기" aria-controls="main-navigation" aria-expanded={mobileNav} onClick={() => setMobileNav(true)}><Menu size={22} /></button><div className="breadcrumb"><span>{mode === 'platform' ? BRAND.platformOperatorLabel : tenantName}</span><strong>{mode === 'platform' ? platformPageTitles[page as PlatformSection | 'billing'] : routeLabel(page as TenantRouteId)}</strong></div></div>
+          <div className="topbar-left"><button className="menu-button" type="button" aria-label="메뉴 열기" aria-controls="main-navigation" aria-expanded={mobileNav} onClick={() => setMobileNav(true)}><Menu size={22} /></button><div className="breadcrumb"><span>{mode === 'platform' ? BRAND.platformOperatorLabel : tenantName}</span><strong>{mode === 'platform' ? platformPageTitles[page as PlatformSection | 'billing'] : tenantNav.find((item) => item.id === page)?.label ?? routeLabel(page as TenantRouteId)}</strong></div></div>
           <div className="topbar-actions">
             <div className="global-search">
               <Search size={19} />
