@@ -44,6 +44,8 @@ export const WORKSPACE_TABLES = Object.freeze({
   // R11-G: 외부 기회 신호 (인제스트 결과 + 테넌트 감시 설정)
   'opportunities': 'opportunities',
   'opportunity-settings': 'opportunity_settings',
+  // R11-C: 대표 브리핑 스냅샷
+  'digests': 'digests',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

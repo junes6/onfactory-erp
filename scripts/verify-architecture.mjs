@@ -93,7 +93,7 @@ const workspaceTables = [
   'inventory_movements', 'product_catalog', 'leave_management', 'factory_layouts', 'calendar_departments',
   'document_storage_settings', 'compliance_records', 'sales_shipments', 'performance_settings', 'performance_report_snapshots',
   'it_projects', 'it_deliverables', 'it_contracts', 'proposals', 'automation_policies', 'it_clients', 'it_support_programs', 'project_spaces', 'project_posts', 'company_assets', 'tax_events', 'ip_rights',
-  'attendance_records', 'tax_deliveries', 'lenses', 'opportunities', 'opportunity_settings',
+  'attendance_records', 'tax_deliveries', 'lenses', 'opportunities', 'opportunity_settings', 'digests',
 ]
 for (const table of workspaceTables) {
   const definition = schema.match(new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+${table}\\s*\\(([\\s\\S]*?)\\);`, 'i'))?.[1] ?? ''

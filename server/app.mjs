@@ -74,6 +74,7 @@ import {
   OPPORTUNITY_SETTINGS_KEY,
   MAX_OPPORTUNITIES,
 } from './opportunity-ingest.mjs'
+import { buildDigest, DIGESTS_KEY, editionFor, findDigest, seoulDateKey as digestDateKey, upsertDigest } from './daily-digest.mjs'
 import {
   DEFAULT_LOCAL_DEMO_PASSWORD,
   DEMO_ACCOUNT_DEFINITIONS,
@@ -101,7 +102,7 @@ const WORKSPACE_STORE_KEYS = new Set([
   'sales-shipments', 'compliance-records', 'document-storage-settings', 'performance-settings', 'performance-reports',
   'it-projects', 'it-deliverables', 'it-contracts', 'ai-proposals', 'automation-policies',
   'it-clients', 'it-support-programs', 'project-spaces', 'project-posts',
-  'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses', 'opportunities', 'opportunity-settings',
+  'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses', 'opportunities', 'opportunity-settings', 'digests',
   'attendance-records', 'personal-todos',
 ])
 // 프로젝트 공간은 멤버십 기반이라 전용 라우트(/api/projects)로만 읽고 쓴다.
@@ -115,7 +116,7 @@ const SENTINEL_TRIGGER_KEYS = new Set(['compliance-records', 'product-catalog', 
 const TENANT_MEMBER_READ_KEYS = new Set([
   'work-items', 'inventory-locations', 'messenger-conversations', 'calendar-events', 'daily-journals',
   'leave-requests', 'leave-management', 'factory-locations', 'factory-layouts', 'work-rules', 'product-catalog', 'inventory-movements', 'calendar-departments',
-  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts', 'it-clients', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses', 'opportunities', 'opportunity-settings',
+  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts', 'it-clients', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses', 'opportunities', 'opportunity-settings', 'digests',
 ])
 const TENANT_MEMBER_WRITE_KEYS = new Set([
   'work-items', 'messenger-conversations', 'calendar-events', 'daily-journals', 'it-projects', 'it-deliverables',
@@ -2925,9 +2926,70 @@ export function createApp(options = {}) {
   })
 
   // ------------------------------------------------------------------
+  // 대표 브리핑: 그날 첫 접속에 아침판, 17시 이후 첫 접속에 저녁판.
+  // 스냅샷을 digests에 남겨 지난 브리핑을 날짜로 다시 볼 수 있다.
+  // ------------------------------------------------------------------
+  const digestsOf = (tenantId) => {
+    const record = workspaceStore.tenants[tenantId]?.[DIGESTS_KEY]
+    return Array.isArray(record?.data) ? record.data : []
+  }
+  const persistDigest = async (tenantId, digest, actorId) => {
+    const tenantStore = workspaceStore.tenants[tenantId] ??= {}
+    const previous = tenantStore[DIGESTS_KEY]
+    tenantStore[DIGESTS_KEY] = { data: upsertDigest(digestsOf(tenantId), digest), updatedAt: digest.generatedAt, updatedBy: actorId }
+    try { await commitWorkspaceStore() }
+    catch (error) {
+      if (previous) tenantStore[DIGESTS_KEY] = previous; else delete tenantStore[DIGESTS_KEY]
+      throw error
+    }
+  }
+
+  app.get('/api/digest', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
+    const tenantId = request.auth.tenantId
+    const now = new Date()
+    const todayKey = digestDateKey(now)
+    const requestedDate = /^\d{4}-\d{2}-\d{2}$/.test(String(request.query.date ?? '')) ? String(request.query.date) : todayKey
+    const requestedEdition = ['morning', 'evening'].includes(String(request.query.edition)) ? String(request.query.edition) : (requestedDate === todayKey ? editionFor(now) : 'morning')
+    const history = digestsOf(tenantId)
+    const stored = findDigest(history, requestedDate, requestedEdition)
+    // 지난 날짜는 저장된 스냅샷만 보여 준다 (지금 데이터로 과거를 다시 쓰지 않는다).
+    if (requestedDate !== todayKey) {
+      response.json({ digest: stored, edition: requestedEdition, date: requestedDate, isToday: false, history: digestSummaries(history) })
+      return
+    }
+    if (stored) {
+      response.json({ digest: stored, edition: requestedEdition, date: requestedDate, isToday: true, history: digestSummaries(history) })
+      return
+    }
+    const digest = buildDigest(workspaceStore.tenants[tenantId] ?? {}, { now, edition: requestedEdition, generatedBy: request.auth.name })
+    try { await persistDigest(tenantId, digest, request.auth.id) }
+    catch {
+      response.status(500).json({ error: { code: 'DIGEST_WRITE_FAILED', message: '브리핑을 저장하지 못했습니다.' } })
+      return
+    }
+    response.json({ digest, edition: requestedEdition, date: requestedDate, isToday: true, history: digestSummaries(digestsOf(tenantId)) })
+  })
+
+  app.post('/api/digest/regenerate', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
+    const now = new Date()
+    const edition = ['morning', 'evening'].includes(String(request.body?.edition)) ? String(request.body.edition) : editionFor(now)
+    const digest = buildDigest(workspaceStore.tenants[request.auth.tenantId] ?? {}, { now, edition, generatedBy: request.auth.name })
+    try { await persistDigest(request.auth.tenantId, digest, request.auth.id) }
+    catch {
+      response.status(500).json({ error: { code: 'DIGEST_WRITE_FAILED', message: '브리핑을 저장하지 못했습니다.' } })
+      return
+    }
+    response.json({ digest, edition, date: digest.date, isToday: true, history: digestSummaries(digestsOf(request.auth.tenantId)) })
+  })
+
+  // ------------------------------------------------------------------
   // 외부 기회 신호(입찰·지원사업). 수집·판정 엔진은 이 저장소 밖의 워커가 담당한다.
   // 여기서는 워커가 밀어넣은 결과를 검증해 저장하고, 임계값을 넘은 건만 승인 큐에 올린다.
   // ------------------------------------------------------------------
+  const digestSummaries = (history) => (Array.isArray(history) ? history : [])
+    .slice(0, 60)
+    .map((item) => ({ id: item.id, date: item.date, edition: item.edition, lineCount: Array.isArray(item.lines) ? item.lines.length : 0 }))
+
   const opportunityIngestToken = String((options.env ?? process.env).OPPORTUNITY_INGEST_TOKEN ?? '').trim()
   const opportunitiesOf = (tenantId) => {
     const record = workspaceStore.tenants[tenantId]?.[OPPORTUNITIES_KEY]
@@ -5845,6 +5907,10 @@ export function createApp(options = {}) {
     }
     if (key === 'personal-todos') {
       response.status(403).json({ error: { code: 'PERSONAL_TODO_ROUTE_REQUIRED', message: '개인 할 일은 내 할 일 전용 기능에서만 변경할 수 있습니다.' } })
+      return
+    }
+    if (key === 'digests') {
+      response.status(403).json({ error: { code: 'DIGEST_ROUTE_REQUIRED', message: '브리핑은 브리핑 화면에서만 생성됩니다.' } })
       return
     }
     if (key === 'opportunities' || key === 'opportunity-settings') {

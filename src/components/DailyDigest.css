@@ -1,0 +1,23 @@
+/* 대표 브리핑 — AI 업무허브 최상단. 그날 먼저 볼 것만 한 줄씩. */
+.daily-digest { display: grid; gap: var(--space-12); margin-bottom: var(--space-16); padding: var(--card-inset); border: var(--dashboard-stroke) solid var(--color-card-line); border-radius: var(--radius-8); background: var(--color-surface); }
+.daily-digest > header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: var(--space-8); }
+.daily-digest > header > div:first-child { min-width: 0; display: grid; gap: var(--space-4); }
+.daily-digest-kicker { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--color-primary); font-size: var(--font-11); font-weight: var(--weight-medium); }
+.daily-digest h2 { margin: var(--space-0); font-size: var(--font-15); }
+.daily-digest header small { color: var(--muted); font-size: var(--font-11); }
+.daily-digest-actions { display: flex; align-items: center; flex: 0 0 auto; gap: var(--space-8); }
+.daily-digest-actions select { min-height: 34px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--ink); font: inherit; font-size: var(--font-13); }
+.daily-digest-empty { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); line-height: 1.6; }
+.daily-digest-lines { display: grid; gap: var(--space-8); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.daily-digest-lines > li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); padding-top: var(--space-8); border-top: var(--hairline) solid var(--line); }
+.daily-digest-lines > li:first-child { padding-top: var(--space-0); border-top: none; }
+.daily-digest-kind { padding: var(--space-4) var(--space-8); border-radius: var(--radius-8); color: var(--color-primary); background: var(--color-primary-soft); font-size: var(--font-11); font-weight: var(--weight-medium); white-space: nowrap; }
+.daily-digest-text { min-width: 0; overflow: hidden; font-size: var(--font-13); line-height: 1.55; text-overflow: ellipsis; }
+.daily-digest-lines button { display: inline-flex; align-items: center; gap: var(--space-4); flex: 0 0 auto; padding: var(--space-0) var(--space-8); border: none; border-radius: var(--radius-8); background: transparent; color: var(--color-primary); font: inherit; font-size: var(--font-11); font-weight: var(--weight-medium); white-space: nowrap; cursor: pointer; }
+.daily-digest-lines button:hover { background: var(--color-primary-soft); }
+
+@media (max-width: 760px) {
+  .daily-digest-lines > li { grid-template-columns: auto minmax(0, 1fr); }
+  .daily-digest-lines button { grid-column: 1 / -1; justify-self: start; }
+  .daily-digest-text { white-space: normal; }
+}

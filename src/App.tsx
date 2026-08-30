@@ -42,6 +42,7 @@ import {
 } from './domainData'
 import { Button, IconButton } from './components/ui/Button'
 import { LensPanel, type LensTarget } from './components/LensPanel'
+import { DailyDigest } from './components/DailyDigest'
 import { BRAND } from './brand'
 
 type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'finance' | 'ip' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
@@ -236,7 +237,7 @@ type DashboardDropTarget = {
   edge: 'before' | 'after'
 }
 
-function AIHome({ workItems, products, salesChannels, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, easyMode = false, industryType, pendingProposals = 0, onAdvanceTask, onCreateTask, onNavigate, onOpenAlerts, onToast }: {
+function AIHome({ workItems, products, salesChannels, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, onOpenTask, easyMode = false, industryType, pendingProposals = 0, onAdvanceTask, onCreateTask, onNavigate, onOpenAlerts, onToast }: {
   pendingProposals?: number
   workItems: WorkItem[]
   products: DashboardProduct[]
@@ -252,6 +253,7 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
   onAdvanceTask: (item: WorkItem) => void
   onCreateTask: (text?: string, completionCriteria?: string) => void
   onNavigate: (page: PageId) => void
+  onOpenTask?: (taskId: string) => void
   onOpenAlerts: () => void
   onToast: (message: string) => void
 }) {
@@ -503,6 +505,7 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
           {canAssignTasks && <button className={pendingProposals === 0 ? 'is-neutral' : 'is-attention'} type="button" aria-label={`검토할 AI 제안 ${pendingProposals}건`} onClick={() => onNavigate('approvals')}><ClipboardCheck size={15} /><span>AI 제안</span><strong>{pendingProposals}</strong></button>}
         </div>{layoutOpen ? <Button tone="primary" type="button" onClick={finishLayoutEdit}><Check size={18} /> 편집 완료</Button> : <DashboardLayoutButton onClick={() => setLayoutOpen(true)} />}{canAssignTasks ? <Button tone="primary" type="button" onClick={() => onCreateTask()}><Plus size={18} /> 새 업무 지시</Button> : <StatusBadge className="status-pill" tone="neutral">직원용 업무 화면</StatusBadge>}</>}
       />
+      {canAssignTasks && <DailyDigest workspaceScope={workspaceScope} onToast={onToast} onOpenTask={(taskId) => onOpenTask?.(taskId)} onNavigate={(page) => onNavigate(page as PageId)} />}
       {layoutOpen && <section className="dashboard-layout-workbench" aria-labelledby="dashboard-layout-workbench-title">
         <div className="dashboard-layout-guide"><span className="dashboard-layout-guide-icon"><GripVertical size={19} /></span><div><h2 id="dashboard-layout-workbench-title">블록을 끌면 놓을 수 있는 슬롯 가이드가 나타납니다</h2><p>블록 아무 곳이나 잡아 끌어 보세요. 파란 가이드가 표시된 슬롯에 놓으면 자동으로 격자에 맞춰지고, 순서와 너비는 이 계정에 바로 저장됩니다. 핸들을 누르면 방향키로도 이동할 수 있습니다.</p></div><span className="dashboard-layout-saved"><Check size={15} /> 개인 저장</span><Button tone="ghost" size="sm" type="button" onClick={() => { setWidgetPreferences(defaultDashboardWidgets.map((item) => ({ ...item }))); setKeyboardWidgetId(null); setLayoutAnnouncement('기본 위젯 배치로 되돌렸습니다.') }}><RotateCcw size={15} /> 기본 배치</Button></div>
         <div className="dashboard-hidden-widgets"><strong>숨긴 위젯</strong>{hiddenWidgets.length === 0 ? <span>모든 위젯이 표시 중입니다.</span> : hiddenWidgets.map((item) => <button type="button" key={item.id} onClick={() => { updateWidget(item.id, { visible: true }); setLayoutAnnouncement(`${dashboardWidgetLabels[item.id]} 위젯을 다시 표시했습니다.`) }}><Plus size={14} /> {dashboardWidgetLabels[item.id]}</button>)}</div>
@@ -1892,7 +1895,7 @@ export default function App() {
       return <PlatformConsole section={page as PlatformSection} focusId={platformFocusId} refreshToken={platformRefreshToken} onSectionChange={(section) => navigate(section)} onReturnTenant={requestTenantSupportAccess} onRequestSupport={setSupportTenant} onEnterTenant={(tenantId) => void enterTenant(tenantId)} onDataChanged={() => setPlatformRefreshToken((current) => current + 1)} onToast={setToast} />
     }
     if (account?.role === 'tenant-member' && !tenantMemberPages.has(page)) {
-      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
+      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
     switch (page) {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
@@ -1912,7 +1915,7 @@ export default function App() {
       case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'it-deliverables':
       case 'it-contracts': return <ItServicesPage view={page as ItServicesView} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} onToast={setToast} />
-      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
+      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
   }
 
