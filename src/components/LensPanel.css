@@ -1,0 +1,68 @@
+/* 렌즈 패널 — 파일 하나를 정해진 관점으로 읽고 근거와 함께 보여 준다. */
+.lens-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  width: min(420px, 100vw);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  overflow-y: auto;
+  padding: var(--space-16);
+  border-left: var(--dashboard-stroke) solid var(--color-card-line);
+  background: var(--color-surface);
+}
+.lens-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-8); }
+.lens-panel-head > div:first-child { min-width: 0; display: grid; gap: var(--space-4); }
+.lens-panel-kicker { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--color-primary); font-size: var(--font-11); font-weight: var(--weight-medium); }
+.lens-panel-head strong { overflow: hidden; font-size: var(--font-15); text-overflow: ellipsis; }
+.lens-panel-head small { color: var(--muted); font-size: var(--font-11); }
+.lens-panel-head-actions { display: flex; flex: 0 0 auto; gap: var(--space-4); }
+.lens-panel-buttons { display: flex; flex-wrap: wrap; gap: var(--space-8); padding-bottom: var(--space-12); border-bottom: var(--hairline) solid var(--line); }
+.lens-panel-hints { display: grid; gap: var(--space-4); margin: var(--space-0); padding-left: var(--space-16); color: var(--muted); font-size: var(--font-11); line-height: 1.6; }
+.lens-panel-empty { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); line-height: 1.6; }
+.lens-spin { animation: lens-spin 1s linear infinite; }
+@keyframes lens-spin { to { transform: rotate(360deg); } }
+
+.lens-answer { display: grid; gap: var(--space-12); }
+.lens-headline { font-size: var(--font-15); line-height: 1.5; }
+.lens-bullets { display: grid; gap: var(--space-4); margin: var(--space-0); padding-left: var(--space-16); font-size: var(--font-13); line-height: 1.65; }
+.lens-decisions { padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--color-primary-soft); }
+.lens-decisions h4 { margin: var(--space-0) var(--space-0) var(--space-4); font-size: var(--font-13); }
+.lens-decisions ul { display: grid; gap: var(--space-4); margin: var(--space-0); padding-left: var(--space-16); font-size: var(--font-13); line-height: 1.6; }
+.lens-table-wrap { overflow-x: auto; }
+.lens-table { width: 100%; border-collapse: collapse; font-size: var(--font-13); }
+.lens-table th, .lens-table td { padding: var(--space-8); border-bottom: var(--hairline) solid var(--line); text-align: left; vertical-align: top; }
+.lens-table th { color: var(--muted); font-size: var(--font-11); font-weight: var(--weight-medium); }
+.lens-tasks { display: grid; gap: var(--space-8); margin: var(--space-0); padding-left: var(--space-16); }
+.lens-tasks li { display: grid; gap: var(--space-4); }
+.lens-tasks strong { font-size: var(--font-13); }
+.lens-tasks small { color: var(--muted); font-size: var(--font-11); }
+.lens-tasks p { margin: var(--space-0); color: var(--subtle); font-size: var(--font-11); line-height: 1.55; }
+.lens-answer-actions { display: flex; justify-content: flex-end; }
+.lens-insufficient { margin: var(--space-0); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--color-warning-soft); color: var(--ink); font-size: var(--font-13); line-height: 1.6; }
+.lens-evidence { padding-top: var(--space-8); border-top: var(--hairline) solid var(--line); }
+.lens-evidence summary { display: flex; align-items: center; gap: var(--space-4); color: var(--muted); font-size: var(--font-11); cursor: pointer; }
+.lens-evidence ul { display: grid; gap: var(--space-8); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
+.lens-evidence li { display: grid; gap: var(--space-4); }
+.lens-evidence span { color: var(--color-primary); font-size: var(--font-11); font-weight: var(--weight-medium); }
+.lens-evidence q { color: var(--subtle); font-size: var(--font-11); line-height: 1.55; }
+
+.lens-settings-modal { width: min(680px, 100%); }
+.lens-settings-list { display: grid; gap: var(--space-12); max-height: 52vh; overflow-y: auto; }
+.lens-settings-row { display: grid; gap: var(--space-8); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.lens-settings-row-head { display: flex; align-items: flex-end; gap: var(--space-8); }
+.lens-settings-row-head .form-field { flex: 1 1 auto; }
+.lens-settings-kinds { display: flex; flex-wrap: wrap; gap: var(--space-12); margin: var(--space-0); padding: var(--space-0); border: none; }
+.lens-settings-kinds legend { padding: var(--space-0); color: var(--muted); font-size: var(--font-11); font-weight: var(--weight-medium); }
+.lens-settings-kinds label { display: inline-flex; align-items: center; gap: var(--space-4); font-size: var(--font-13); }
+.lens-settings-modal form > footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); }
+.lens-settings-modal form > footer > div { display: flex; gap: var(--space-8); }
+
+@media (max-width: 760px) {
+  .lens-panel { width: 100vw; }
+  .lens-settings-modal form > footer { align-items: stretch; flex-direction: column; }
+  .lens-settings-modal form > footer > div { justify-content: flex-end; }
+}

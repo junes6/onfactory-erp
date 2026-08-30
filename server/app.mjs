@@ -27,7 +27,7 @@ import { registerSupportProgramRoutes } from './support-program-routes.mjs'
 import { createSupportProgramService } from './support-program-service.mjs'
 import {
   APPROVAL_WINDOW_DAYS, AUTOMATION_POLICIES_KEY, PROPOSALS_KEY, approvalStatistics, diffProposalPayload,
-  evaluateSentinel, proposeDocumentClassification, proposeTaskFromMessage,
+  evaluateSentinel, newProposalId, proposeDocumentClassification, proposeTaskFromMessage,
 } from './proposal-engine.mjs'
 import { CONSENT_TERMS_VERSION, buildConsentRecord, consentIsCurrent, publicConsentTerms } from './policies/consent-terms.mjs'
 import {
@@ -52,6 +52,17 @@ import {
   normalizeDocumentExtraction,
 } from './document-extraction.mjs'
 import { buildTaxEvidenceArchive, TaxEvidenceExportError } from './tax-evidence-export.mjs'
+import {
+  DocumentLensError,
+  LENS_MIME_TYPES,
+  LENSES_KEY,
+  lensAppliesTo,
+  lensOutputConfig,
+  lensSystemPrompt,
+  normalizeLensList,
+  normalizeLensResult,
+  resolveLenses,
+} from './document-lenses.mjs'
 import {
   DEFAULT_LOCAL_DEMO_PASSWORD,
   DEMO_ACCOUNT_DEFINITIONS,
@@ -79,7 +90,7 @@ const WORKSPACE_STORE_KEYS = new Set([
   'sales-shipments', 'compliance-records', 'document-storage-settings', 'performance-settings', 'performance-reports',
   'it-projects', 'it-deliverables', 'it-contracts', 'ai-proposals', 'automation-policies',
   'it-clients', 'it-support-programs', 'project-spaces', 'project-posts',
-  'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries',
+  'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses',
   'attendance-records', 'personal-todos',
 ])
 // 프로젝트 공간은 멤버십 기반이라 전용 라우트(/api/projects)로만 읽고 쓴다.
@@ -93,7 +104,7 @@ const SENTINEL_TRIGGER_KEYS = new Set(['compliance-records', 'product-catalog', 
 const TENANT_MEMBER_READ_KEYS = new Set([
   'work-items', 'inventory-locations', 'messenger-conversations', 'calendar-events', 'daily-journals',
   'leave-requests', 'leave-management', 'factory-locations', 'factory-layouts', 'work-rules', 'product-catalog', 'inventory-movements', 'calendar-departments',
-  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts', 'it-clients', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries',
+  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts', 'it-clients', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses',
 ])
 const TENANT_MEMBER_WRITE_KEYS = new Set([
   'work-items', 'messenger-conversations', 'calendar-events', 'daily-journals', 'it-projects', 'it-deliverables',
@@ -2685,6 +2696,221 @@ export function createApp(options = {}) {
     }
     scheduleSentinel(tenantId)
     response.json({ proposal: decided, resultRef, stats: approvalStatistics(nextProposals), pendingCount: nextProposals.filter((item) => item.status === 'pending').length })
+  })
+
+  // ------------------------------------------------------------------
+  // 렌즈: 파일 하나를 정해진 관점으로 읽는다. 정의는 코드가 아니라 테넌트 스토어에 있다.
+  // ------------------------------------------------------------------
+  const storedLenses = (tenantId) => {
+    const record = workspaceStore.tenants[tenantId]?.[LENSES_KEY]
+    return Array.isArray(record?.data) ? record.data : []
+  }
+  const tenantLenses = (tenantId) => resolveLenses(storedLenses(tenantId))
+
+  app.get('/api/lenses', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+    if (!request.auth.tenantId) { response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } }); return }
+    response.json({ lenses: tenantLenses(request.auth.tenantId), canManage: request.auth.role === 'tenant-admin' })
+  })
+
+  app.put('/api/lenses', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
+    let lenses
+    try { lenses = normalizeLensList(request.body?.lenses) }
+    catch (error) {
+      if (error instanceof DocumentLensError) { response.status(error.status).json({ error: { code: error.code, message: error.message } }); return }
+      throw error
+    }
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId] ??= {}
+    const previous = tenantStore[LENSES_KEY]
+    tenantStore[LENSES_KEY] = { data: lenses, updatedAt: new Date().toISOString(), updatedBy: request.auth.id }
+    try { await commitWorkspaceStore() }
+    catch {
+      if (previous) tenantStore[LENSES_KEY] = previous; else delete tenantStore[LENSES_KEY]
+      response.status(500).json({ error: { code: 'LENS_WRITE_FAILED', message: '렌즈 설정을 저장하지 못했습니다.' } })
+      return
+    }
+    response.json({ lenses: resolveLenses(lenses) })
+  })
+
+  app.post('/api/documents/:id/lens', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    if (!request.auth.tenantId || !documentStorage) {
+      response.status(503).json({ error: { code: 'DOCUMENT_STORAGE_UNAVAILABLE', message: '파일 저장소가 설정되지 않았습니다.' } })
+      return
+    }
+    const lensId = String(request.body?.lensId ?? '')
+    const lens = tenantLenses(request.auth.tenantId).find((item) => item.id === lensId && item.enabled !== false)
+    if (!lens) { response.status(404).json({ error: { code: 'LENS_NOT_FOUND', message: '사용할 수 있는 렌즈를 찾을 수 없습니다.' } }); return }
+    const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : []
+    const document = documents.find((item) => item.id === request.params.id)
+    if (!document || !canReadDocument(document, request.auth)) {
+      response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없거나 열람 권한이 없습니다.' } })
+      return
+    }
+    const sourceMime = String(document.mime || '').toLowerCase()
+    if (!LENS_MIME_TYPES.includes(sourceMime)) {
+      response.status(415).json({ error: { code: 'LENS_UNSUPPORTED_FILE', message: '렌즈는 PDF·이미지·텍스트 파일만 읽을 수 있습니다.' } })
+      return
+    }
+    if (!lensAppliesTo(lens, sourceMime)) {
+      response.status(409).json({ error: { code: 'LENS_NOT_APPLICABLE', message: '이 렌즈는 다른 종류의 파일을 위한 것입니다.' } })
+      return
+    }
+    if (!client) {
+      response.status(503).json({ error: { code: 'LENS_UNAVAILABLE', message: 'AI 연결이 아직 설정되지 않았습니다. 원본 파일은 그대로 있습니다.' } })
+      return
+    }
+
+    let usageReservation = null
+    let usageActor = null
+    let providerSucceeded = false
+    const startedAt = new Date()
+    try {
+      const attachmentResult = await resolveChatAttachments({
+        requested: [{ documentId: document.id }],
+        documents,
+        account: request.auth,
+        canReadDocument,
+        storage: documentStorage,
+      })
+      if (attachmentResult.contentDocuments !== 1) {
+        throw new DocumentLensError('LENS_UNSUPPORTED_FILE', '이 파일의 본문을 AI가 읽을 수 없습니다.', 415)
+      }
+      const system = lensSystemPrompt(lens, document)
+      const messages = attachBlocksToLatestUserMessage(
+        [{ role: 'user', content: `첨부한 파일 1건을 "${lens.name}" 관점으로 읽어 주세요.` }],
+        attachmentResult.blocks,
+      )
+      usageActor = { id: 'server:document-lens', role: 'system', trusted: true, tenantId: request.auth.tenantId }
+      const count = typeof client.messages.countTokens === 'function'
+        ? await client.messages.countTokens({ model, system, messages })
+        : { input_tokens: Math.ceil(JSON.stringify(messages).length / 4) }
+      usageReservation = (await billingService.reserveUsage(usageActor, {
+        id: `document-lens-res:${request.auth.tenantId}:${request.auth.id}:${randomBytes(12).toString('hex')}`,
+        tenantId: request.auth.tenantId,
+        userId: request.auth.id,
+        feature: 'document-lens',
+        model,
+        estimatedInputTokens: Number(count.input_tokens || 0),
+        estimatedOutputTokens: 1_400,
+        occurredAt: startedAt.toISOString(),
+      })).reservation
+      const result = await client.messages.create({
+        model,
+        max_tokens: 1_400,
+        system,
+        messages,
+        output_config: lensOutputConfig(lens.outputFormat),
+      })
+      providerSucceeded = true
+
+      let usageAccounting = 'recorded'
+      const usageEvent = {
+        id: `anthropic:${result.id || randomBytes(12).toString('hex')}`,
+        reservationId: usageReservation.id,
+        tenantId: request.auth.tenantId,
+        userId: request.auth.id,
+        feature: 'document-lens',
+        model: usageReservation.model,
+        inputTokens: Number(result.usage?.input_tokens || 0),
+        outputTokens: Number(result.usage?.output_tokens || 0),
+        occurredAt: startedAt.toISOString(),
+        durationMs: Date.now() - startedAt.getTime(),
+        metadata: { lensId: lens.id, lensName: lens.name, outputFormat: lens.outputFormat, documentId: document.id, sourceMime },
+      }
+      try { await billingService.recordUsageEvent(usageActor, usageEvent) }
+      catch (ledgerError) {
+        usageAccounting = 'reconciliation-pending'
+        try {
+          await billingService.recordReconciliationPending(usageActor, {
+            ...usageEvent, usageEventId: usageEvent.id, id: `reconciliation:${usageEvent.id}`,
+            lastError: ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
+          })
+        } catch (reconciliationError) {
+          usageAccounting = 'reconciliation-unavailable'
+          console.error('Document lens usage reconciliation persistence failed after provider success', reconciliationError)
+        }
+      }
+
+      response.json({
+        lens: { id: lens.id, name: lens.name, outputFormat: lens.outputFormat },
+        source: { documentId: document.id, name: document.name, mime: sourceMime },
+        result: normalizeLensResult(extractText(result), lens.outputFormat),
+        model: result.model || model,
+        usage: result.usage,
+        usageAccounting,
+      })
+    } catch (error) {
+      if (!providerSucceeded && usageReservation && usageActor) {
+        try { await billingService.releaseUsageReservation(usageActor, { tenantId: request.auth.tenantId, reservationId: usageReservation.id }) }
+        catch { /* 예약은 만료 시 자동 정리된다. */ }
+      }
+      if (error instanceof DocumentLensError || error instanceof ChatAttachmentError) {
+        response.status(error.status).json({ error: { code: error.code, message: error.message } })
+        return
+      }
+      if (error instanceof BillingServiceError) {
+        response.status(error.status).json({ error: { code: error.code, message: error.message, details: error.details } })
+        return
+      }
+      const mapped = mapAnthropicError(error)
+      console.error(`[document-lens] ${mapped.code}`, { status: Number(error?.status) || undefined })
+      response.status(mapped.status).json({ error: { code: mapped.code, message: mapped.message } })
+    }
+  })
+
+  // 업무 추출 결과 → 승인 큐. 제안은 저장만 되고 사람이 결정해야 업무가 된다.
+  app.post('/api/documents/:id/lens/tasks', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
+    const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : []
+    const document = documents.find((item) => item.id === request.params.id)
+    if (!document || !canReadDocument(document, request.auth)) {
+      response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없거나 열람 권한이 없습니다.' } })
+      return
+    }
+    const lensId = String(request.body?.lensId ?? '').slice(0, 80)
+    const lensName = String(request.body?.lensName ?? '렌즈').replace(/[\r\n]+/g, ' ').trim().slice(0, 40)
+    const tasks = Array.isArray(request.body?.tasks) ? request.body.tasks.slice(0, 10) : []
+    const text = (value, max) => String(value ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, max)
+    const prepared = tasks
+      .map((task) => ({
+        title: text(task?.title, 120),
+        owner: text(task?.owner, 40),
+        due: /^\d{4}-\d{2}-\d{2}$/.test(String(task?.due ?? '')) ? String(task.due) : '',
+        reason: text(task?.reason, 300),
+      }))
+      .filter((task) => task.title)
+    if (!prepared.length) { response.status(400).json({ error: { code: 'LENS_TASKS_REQUIRED', message: '승인 큐로 보낼 업무가 없습니다.' } }); return }
+
+    const now = new Date().toISOString()
+    let queued = 0
+    for (const task of prepared) {
+      const created = enqueueProposal(request.auth.tenantId, {
+        id: newProposalId(),
+        kind: 'lens-task',
+        status: 'pending',
+        confidence: null,
+        sourceKey: `lens:${document.id}:${lensId}:${task.title}`,
+        summary: task.title,
+        evidence: `${document.name} · ${lensName}${task.reason ? ` — ${task.reason}` : ''}`,
+        payload: {
+          title: task.title,
+          description: [task.reason, `근거 파일: ${document.name}`].filter(Boolean).join('\n'),
+          owner: task.owner,
+          due: task.due ? new Date(`${task.due}T09:00:00+09:00`).toISOString() : '',
+          priority: '보통',
+          category: '문서 검토',
+          documentId: document.id,
+          lensId,
+        },
+        createdAt: now,
+        createdBy: request.auth.id,
+      })
+      if (created) queued += 1
+    }
+    try { await commitWorkspaceStore() }
+    catch {
+      response.status(500).json({ error: { code: 'LENS_TASK_WRITE_FAILED', message: '승인 큐에 저장하지 못했습니다.' } })
+      return
+    }
+    response.status(201).json({ queued, skipped: prepared.length - queued, pendingCount: proposalsOf(request.auth.tenantId).filter((item) => item.status === 'pending').length })
   })
 
   // ------------------------------------------------------------------

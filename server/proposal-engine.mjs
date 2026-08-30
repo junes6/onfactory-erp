@@ -2,7 +2,7 @@
 // 제안은 절대 직접 실행되지 않는다. 사람이 ✓/✏/✗로 결정하고, 결정 이력이 자동화 승급의 원료가 된다.
 import { randomBytes } from 'node:crypto'
 
-export const PROPOSAL_KINDS = Object.freeze(['document-classification', 'task-from-message', 'sentinel-task'])
+export const PROPOSAL_KINDS = Object.freeze(['document-classification', 'task-from-message', 'sentinel-task', 'lens-task', 'opportunity'])
 export const PROPOSAL_STATUSES = Object.freeze(['pending', 'approved', 'edited', 'rejected', 'expired'])
 export const PROPOSALS_KEY = 'ai-proposals'
 export const AUTOMATION_POLICIES_KEY = 'automation-policies'

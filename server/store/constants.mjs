@@ -39,6 +39,8 @@ export const WORKSPACE_TABLES = Object.freeze({
   'ip-rights': 'ip_rights',
   // P11: 세무사 전달 이력 (서버 전용 기록)
   'tax-deliveries': 'tax_deliveries',
+  // R11-B: 파일 렌즈 정의 (코어 lenses 테이블 재사용)
+  'document-lenses': 'lenses',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

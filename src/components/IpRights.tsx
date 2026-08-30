@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Award, BadgeCheck, Check, Copyright, Download, FileBadge, Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { Award, BadgeCheck, Check, Copyright, Download, FileBadge, Paperclip, Pencil, Plus, Sparkles, Trash2, X } from 'lucide-react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { formatDateLabel, seoulDateInputValue } from '../utils/dateTime'
 import {
@@ -12,6 +12,7 @@ import {
 import { applyApprovedValues, canExtractDocumentFile, DOCUMENT_EXTRACTION_FIELDS, readFormValues, requestDocumentExtraction } from '../utils/documentExtraction'
 import { DocumentExtractionReview, type DocumentExtractionState } from './DocumentExtractionReview'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
+import type { LensTarget } from './LensPanel'
 import './IpRights.css'
 import { Button, IconButton } from './ui/Button'
 
@@ -81,7 +82,7 @@ function kindIcon(kind: IpKind) {
   return kind === '특허' || kind === '실용신안' ? Award : kind === '저작권' ? Copyright : kind === '인증서' || kind === '등록증' ? BadgeCheck : FileBadge
 }
 
-export function IpRightsPage({ workspaceScope, canManage, currentUserName, onToast }: { workspaceScope?: string; canManage: boolean; currentUserName: string; onToast: (message: string) => void }) {
+export function IpRightsPage({ workspaceScope, canManage, currentUserName, onAskLens, onToast }: { workspaceScope?: string; canManage: boolean; currentUserName: string; onAskLens?: (target: LensTarget) => void; onToast: (message: string) => void }) {
   const [rights, setRights] = useWorkspaceState<IpRight[]>('ip-rights', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isIpRights })
   const [editor, setEditor] = useState<{ item?: IpRight } | null>(null)
   const [kindFilter, setKindFilter] = useState<'전체' | IpKind>('전체')
@@ -128,7 +129,7 @@ export function IpRightsPage({ workspaceScope, canManage, currentUserName, onToa
           <StatusBadge className="status-pill" dot tone={ipTone(right.status)}>{right.status}</StatusBadge>
           <div className="it-row-main"><strong>{right.title}</strong><small>{right.kind}{right.number ? ` · ${right.number}` : ''}{right.holder ? ` · 권리자 ${right.holder}` : ''}{right.issuer ? ` · ${right.issuer}` : ''}{right.registeredAt ? ` · 등록 ${formatDateLabel(right.registeredAt)}` : right.filedAt ? ` · 출원 ${formatDateLabel(right.filedAt)}` : ''}</small></div>
           {due && right.status !== '만료' && <span className={`it-row-meta${due.urgent ? ' is-urgent' : ''}`}>{due.label}</span>}
-          <div className="it-row-files">{right.attachments.length === 0 ? <span className="it-row-meta">파일 없음</span> : right.attachments.map((file) => <button type="button" key={file.id} onClick={() => void download(file)}><Download size={13} /> {file.name}</button>)}</div>
+          <div className="it-row-files">{right.attachments.length === 0 ? <span className="it-row-meta">파일 없음</span> : right.attachments.map((file) => <span key={file.id} className="it-row-file"><button type="button" onClick={() => void download(file)}><Download size={13} /> {file.name}</button>{onAskLens && <button type="button" aria-label={`${file.name} AI에게 물어보기`} onClick={() => onAskLens({ id: file.id, name: file.name, context: `지식재산 · 인증 · ${right.title}` })}><Sparkles size={13} /></button>}</span>)}</div>
           {canManage && <div className="it-row-actions"><button type="button" aria-label={`${right.title} 수정`} onClick={() => setEditor({ item: right })}><Pencil size={15} /></button><button type="button" aria-label={`${right.title} 삭제`} onClick={() => void remove(right)}><Trash2 size={15} /></button></div>}
         </article> })}</div>}
     </section>

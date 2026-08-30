@@ -41,6 +41,7 @@ import {
   type Tenant, type WorkEvidence, type WorkItem, type WorkRule,
 } from './domainData'
 import { Button, IconButton } from './components/ui/Button'
+import { LensPanel, type LensTarget } from './components/LensPanel'
 import { BRAND } from './brand'
 
 type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'finance' | 'ip' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
@@ -1348,6 +1349,8 @@ export default function App() {
   const [messengerOpen, setMessengerOpen] = useState(false)
   const [messengerUnread, setMessengerUnread] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // 렌즈 패널: 어느 화면의 파일 카드에서 열든 같은 오른쪽 패널을 쓴다.
+  const [lensTarget, setLensTarget] = useState<LensTarget | null>(null)
   const [navEditorOpen, setNavEditorOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const noticeIds = ['primary', 'secondary', 'tertiary'] as const
@@ -1897,15 +1900,15 @@ export default function App() {
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'finance': return <TaxAssetsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} industryType={account?.industryType ?? 'food_manufacturing'} onToast={setToast} />
-      case 'ip': return <IpRightsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} onToast={setToast} />
+      case 'ip': return <IpRightsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} onAskLens={setLensTarget} onToast={setToast} />
       case 'products': return <ProductManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
       case 'inventory': return <InventoryPage onToast={setToast} canManage={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} />
       case 'factory': return <FactoryManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
       case 'sales': return <SalesChannels onToast={setToast} workspaceScope={workspaceScope} companyName={tenantName} canManage={account?.role === 'tenant-admin'} />
       case 'people': return <PeopleOperationsPage initialTab={peopleInitialTab} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
       case 'approvals': return <ApprovalQueue workspaceScope={workspaceScope} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onPendingChange={setPendingProposals} />
-      case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} industryType={account?.industryType ?? 'food_manufacturing'} onToast={setToast} />
-      case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} companyName={tenantName} onToast={setToast} />
+      case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} industryType={account?.industryType ?? 'food_manufacturing'} onAskLens={setLensTarget} onToast={setToast} />
+      case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} companyName={tenantName} onAskLens={setLensTarget} onToast={setToast} />
       case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'it-deliverables':
       case 'it-contracts': return <ItServicesPage view={page as ItServicesView} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} onToast={setToast} />
@@ -1983,6 +1986,7 @@ export default function App() {
       </div>
 
       <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => setMessengerOpen(false)} onToast={setToast} onUnreadChange={setMessengerUnread} />
+      {lensTarget && <LensPanel target={lensTarget} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} onClose={() => setLensTarget(null)} onToast={setToast} onPendingChange={setPendingProposals} />}
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? BRAND.name} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
       {profileOpen && account && <ProfileEditor account={account} onClose={() => setProfileOpen(false)} onToast={setToast} onSaved={(next) => { setAccount((current) => current ? { ...current, ...next } as AuthAccount : current) }} />}
       <WorkspaceNavigationEditor open={navEditorOpen} source={tenantNavSource} preferences={tenantNavPreferences} onChange={setTenantNavPreferences} onClose={() => setNavEditorOpen(false)} />

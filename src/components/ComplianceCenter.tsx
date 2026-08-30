@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
-import { AlertTriangle, Bot, CalendarClock, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileCheck2, FileText, Gauge, GraduationCap, Microscope, Pencil, Plus, Search, ShieldCheck, Tags, Trash2, Upload, X } from 'lucide-react'
+import { AlertTriangle, Bot, CalendarClock, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileCheck2, FileText, Gauge, GraduationCap, Microscope, Pencil, Plus, Search, ShieldCheck, Sparkles, Tags, Trash2, Upload, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { formatDateTime } from '../utils/dateTime'
@@ -13,6 +13,7 @@ import {
 import { applyApprovedValues, canExtractDocumentFile, DOCUMENT_EXTRACTION_FIELDS, readFormValues, requestDocumentExtraction } from '../utils/documentExtraction'
 import { DocumentExtractionReview, type DocumentExtractionState } from './DocumentExtractionReview'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
+import type { LensTarget } from './LensPanel'
 import './ComplianceCenter.css'
 import { Button } from './ui/Button'
 
@@ -111,7 +112,7 @@ function useComplianceDialog(onClose: () => void) {
   return ref
 }
 
-function RecordModal({ record, workspaceScope, currentUserName, onClose, onSave, onToast }: { record?: ComplianceRecord; workspaceScope?: string; currentUserName: string; onClose: () => void; onSave: (record: ComplianceRecord) => Promise<boolean>; onToast: (message: string) => void }) {
+function RecordModal({ record, workspaceScope, currentUserName, onAskLens, onClose, onSave, onToast }: { record?: ComplianceRecord; workspaceScope?: string; currentUserName: string; onAskLens?: (target: LensTarget) => void; onClose: () => void; onSave: (record: ComplianceRecord) => Promise<boolean>; onToast: (message: string) => void }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const uploadButtonRef = useRef<HTMLButtonElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
@@ -283,7 +284,7 @@ function RecordModal({ record, workspaceScope, currentUserName, onClose, onSave,
         onClose()
       }}>
         <section className="compliance-attachments"><input ref={fileRef} className="sr-only" type="file" multiple onChange={(event) => void attachFiles(event)} /><div><strong>인증서 원본부터 올려 주세요</strong><span>PDF·이미지는 AI가 번호·기관·날짜를 읽고, 원문 근거와 함께 확인 화면에 보여 드립니다.</span></div><Button tone="secondary" ref={uploadButtonRef} type="button" data-initial-focus={!record ? 'true' : undefined} disabled={busy || attachmentBusy} onClick={() => fileRef.current?.click()}><Upload size={17} /> {attachmentBusy ? '처리 중…' : '파일 선택'}</Button></section>
-        <div className="compliance-file-list">{attachments.map((file) => <span key={file.id}><FileText size={15} /><span>{file.name} · {file.size}<small>{isStoredDocumentAttachment(file) ? '원본 저장됨' : '이전 파일 정보 · 원본 없음'}</small></span>{isStoredDocumentAttachment(file) && <button type="button" aria-label={`${file.name} 원본 보기`} disabled={Boolean(downloadingId)} onClick={() => void downloadAttachment(file)}><Download size={14} /></button>}<button type="button" aria-label={`${file.name} 제거`} disabled={busy || attachmentBusy} onClick={() => void removeAttachment(file)}><X size={14} /></button></span>)}</div>
+        <div className="compliance-file-list">{attachments.map((file) => <span key={file.id}><FileText size={15} /><span>{file.name} · {file.size}<small>{isStoredDocumentAttachment(file) ? '원본 저장됨' : '이전 파일 정보 · 원본 없음'}</small></span>{isStoredDocumentAttachment(file) && onAskLens && <button type="button" aria-label={`${file.name} AI에게 물어보기`} onClick={() => onAskLens({ id: file.id, name: file.name, context: `식품안전 · 인증 증빙` })}><Sparkles size={14} /></button>}{isStoredDocumentAttachment(file) && <button type="button" aria-label={`${file.name} 원본 보기`} disabled={Boolean(downloadingId)} onClick={() => void downloadAttachment(file)}><Download size={14} /></button>}<button type="button" aria-label={`${file.name} 제거`} disabled={busy || attachmentBusy} onClick={() => void removeAttachment(file)}><X size={14} /></button></span>)}</div>
         <DocumentExtractionReview
           kind="compliance"
           state={extraction}
@@ -313,7 +314,7 @@ function RecordModal({ record, workspaceScope, currentUserName, onClose, onSave,
   </div>
 }
 
-export function ComplianceCenter({ workspaceScope, canManage, currentUserName, companyName, onToast }: { workspaceScope?: string; canManage: boolean; currentUserName: string; companyName: string; onToast: (message: string) => void }) {
+export function ComplianceCenter({ workspaceScope, canManage, currentUserName, companyName, onAskLens, onToast }: { workspaceScope?: string; canManage: boolean; currentUserName: string; companyName: string; onAskLens?: (target: LensTarget) => void; onToast: (message: string) => void }) {
   const [records, setRecords] = useWorkspaceState<ComplianceRecord[]>('compliance-records', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isRecordArray })
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('전체')
@@ -439,6 +440,6 @@ export function ComplianceCenter({ workspaceScope, canManage, currentUserName, c
         })() : <div className="compliance-detail-empty"><FileCheck2 size={30} /><h2>항목을 선택하세요</h2><p>왼쪽 목록에서 인증·검토 항목을 선택하면 상세 정보와 증빙을 확인할 수 있습니다.</p></div>}
       </aside>
     </section>
-    {editing && <RecordModal record={editing === 'new' ? undefined : editing} workspaceScope={workspaceScope} currentUserName={currentUserName} onClose={() => setEditing(null)} onSave={save} onToast={onToast} />}
+    {editing && <RecordModal record={editing === 'new' ? undefined : editing} workspaceScope={workspaceScope} currentUserName={currentUserName} onAskLens={onAskLens} onClose={() => setEditing(null)} onSave={save} onToast={onToast} />}
   </div>
 }

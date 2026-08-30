@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ClipboardCheck, FileText, Keyboard, MessageCircle, Pencil, RefreshCw, ShieldAlert, X } from 'lucide-react'
+import { Check, ClipboardCheck, FileText, Keyboard, MessageCircle, Pencil, Radar, RefreshCw, ShieldAlert, Sparkles, X } from 'lucide-react'
 import { formatDateTime } from '../utils/dateTime'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ApprovalQueue.css'
 import { Button, IconButton } from './ui/Button'
 
-type ProposalKind = 'document-classification' | 'task-from-message' | 'sentinel-task'
+type ProposalKind = 'document-classification' | 'task-from-message' | 'sentinel-task' | 'lens-task' | 'opportunity'
 type ProposalStatus = 'pending' | 'approved' | 'edited' | 'rejected' | 'expired'
 
 type Proposal = {
@@ -34,6 +34,8 @@ const kindMeta: Record<ProposalKind, { label: string; tone: StatusBadgeTone; ico
   'document-classification': { label: '문서 분류', tone: 'info', icon: FileText },
   'task-from-message': { label: '업무 제안', tone: 'success', icon: MessageCircle },
   'sentinel-task': { label: '생존 센티널', tone: 'warning', icon: ShieldAlert },
+  'lens-task': { label: '문서 렌즈', tone: 'info', icon: Sparkles },
+  opportunity: { label: '외부 기회', tone: 'success', icon: Radar },
 }
 
 function confidenceLabel(value: number | null) {

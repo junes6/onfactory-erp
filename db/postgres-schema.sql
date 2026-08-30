@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS proposals (
 );
 CREATE TABLE IF NOT EXISTS lenses (
   id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE, space_id TEXT REFERENCES spaces(id),
-  name TEXT NOT NULL, payload JSONB NOT NULL DEFAULT '{}'::JSONB,
+  name TEXT, payload JSONB NOT NULL DEFAULT '{}'::JSONB,
+  position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ, created_by TEXT,
   PRIMARY KEY (org_id, id)
 );
