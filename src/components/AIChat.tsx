@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, ArrowUp, CheckCircle2, ClipboardPlus, FileText, LoaderCircle, Paperclip, Sparkles, X } from 'lucide-react'
+import { AlertCircle, ArrowUp, BookOpen, CheckCircle2, ClipboardPlus, FileText, LoaderCircle, Paperclip, Sparkles, X } from 'lucide-react'
 import { assistantExperienceForIndustry } from '../modules/registry'
 import { aiTaskDraftFromAnswer } from '../utils/aiTaskDraft'
 import { formatDateTime } from '../utils/dateTime'
@@ -12,6 +12,14 @@ export type ChatAttachmentMeta = {
   size: number
 }
 
+/** 이 답에 무엇을 근거로 넣었는지. 접힘 형태로 그대로 보여 준다. */
+export type PersonalContextInjection = {
+  injected: { id: string; label: string; count: number; items: string[] }[]
+  dropped: string[]
+  used: number
+  tokenBudget: number
+}
+
 export type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
@@ -21,6 +29,7 @@ export type ChatMessage = {
   sourcePrompt?: string
   createdAt: string
   attachments?: ChatAttachmentMeta[]
+  personalContext?: PersonalContextInjection
 }
 
 type SelectedAttachment = ChatAttachmentMeta & {
@@ -211,6 +220,7 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
         mode?: 'claude' | 'demo'
         attachmentMode?: 'content' | 'metadata'
         attachmentsProcessed?: number
+        personalContext?: PersonalContextInjection
         error?: { message?: string }
       }
       if (!response.ok) throw new Error(data.error?.message || 'AI 요청을 처리하지 못했습니다.')
@@ -230,6 +240,7 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
         model: data.model,
         mode: data.mode || 'demo',
         sourcePrompt: data.mode === 'claude' ? prompt : undefined,
+        personalContext: data.personalContext,
         createdAt: new Date().toISOString(),
       }])
       setApiMode(data.mode === 'claude' ? 'claude' : 'demo')
@@ -268,6 +279,14 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
                 {message.attachments?.length ? <ul className="chat-message-files" aria-label="이 메시지의 첨부 파일">
                   {message.attachments.map((file) => <li key={file.documentId}><FileText size={14} /><span>{file.name}</span><small>{fileSizeLabel(file.size)}</small></li>)}
                 </ul> : null}
+                {message.personalContext?.injected?.length ? <details className="chat-injection">
+                  <summary><BookOpen size={12} /> 이 답에 쓴 내 판단 기록 {message.personalContext.injected.reduce((sum, layer) => sum + layer.count, 0)}건</summary>
+                  <ul>{message.personalContext.injected.map((layer) => <li key={layer.id}>
+                    <strong>{layer.label}</strong>
+                    <ul>{layer.items.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul>
+                  </li>)}</ul>
+                  {message.personalContext.dropped.length > 0 && <small>토큰 상한으로 제외: {message.personalContext.dropped.join(", ")}</small>}
+                </details> : null}
                 {canCreateTask && message.role === 'assistant' && index > 0 && message.sourcePrompt && (
                   <button type="button" className="message-action" onClick={() => {
                     const draft = aiTaskDraftFromAnswer(message.content, message.sourcePrompt)
