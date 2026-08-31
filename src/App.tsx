@@ -1418,7 +1418,10 @@ export default function App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const noticeIds = ['primary', 'secondary', 'tertiary'] as const
   const [readNoticeIds, setReadNoticeIds] = useState<string[]>([])
-  const unread = noticeIds.filter((id) => !readNoticeIds.includes(id)).length
+  // 3번째 줄은 "현재 상태를 불러왔습니다" 류의 알림이라 처리할 일이 없다.
+  // 이걸 배지에 세면 아무것도 할 게 없는 날에도 빨간 숫자가 남아 사람이 알림을 무시하게 된다.
+  const actionableNoticeIds = noticeIds.filter((id) => id !== 'tertiary')
+  const unread = actionableNoticeIds.filter((id) => !readNoticeIds.includes(id)).length
   const notificationWrapRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!notificationsOpen) return
@@ -1891,8 +1894,11 @@ export default function App() {
     } catch { setToast('업무 처리 서버에 연결할 수 없습니다.'); return false }
   }
   const advanceTask = (item: WorkItem) => {
-    if (item.status === '업무요청') void transitionTask(item.id, 'accept')
-    else { navigate('tasks'); setToast(item.status === '수행중' ? '업무 행의 ‘완료 보고하기’를 눌러 결과를 제출해 주세요.' : '업무 행의 ‘확인하기’를 눌러 완료 보고를 검토해 주세요.') }
+    if (item.status === '업무요청') { void transitionTask(item.id, 'accept'); return }
+    // 목록으로 보내고 "어느 버튼을 누르라"고 안내하면, 그 버튼 이름이 화면과 달라지는 순간 막다른 길이 된다.
+    // 해당 업무의 상세를 바로 열어 다음 행동이 그 자리에 있게 한다.
+    setWorkFocusId(item.id)
+    navigate('tasks')
   }
   const saveTask = async (item: WorkItem) => {
     const result = await setWorkItems((current) => [item, ...current])
@@ -2073,14 +2079,17 @@ export default function App() {
             <div className="notification-wrap" ref={notificationWrapRef}>
               <button type="button" className={'top-icon-button ' + (notificationsOpen ? 'active' : '')} aria-label={'알림 ' + unread + '개'} aria-controls="notification-panel" aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((value) => !value); setMessengerOpen(false) }}><NotificationBellIcon />{unread > 0 && <span>{unread}</span>}</button>
               {notificationsOpen && <section className="notification-panel" id="notification-panel">
-                <header><div><h2>알림</h2><p>{unread > 0 ? `읽지 않은 알림 ${unread}개` : '모든 알림을 읽었습니다.'}</p></div><button type="button" disabled={unread === 0} onClick={() => setReadNoticeIds([...noticeIds])}>모두 읽음</button></header>
+                <header><div><h2>알림</h2><p>{unread > 0 ? `읽지 않은 알림 ${unread}개` : '모든 알림을 읽었습니다.'}</p></div><button type="button" disabled={unread === 0} onClick={() => setReadNoticeIds([...actionableNoticeIds])}>모두 읽음</button></header>
                 <div className="notification-list">
                   {([
                     { id: 'primary', tone: 'red', icon: <AlertTriangle size={17} />, title: mode === 'tenant' ? primaryTenantNotice.title : primaryPlatformNotice.title, detail: mode === 'tenant' ? primaryTenantNotice.detail : primaryPlatformNotice.detail, open: () => navigate(mode === 'tenant' ? primaryTenantNotice.page : 'support') },
                     { id: 'secondary', tone: 'amber', icon: mode === 'tenant' ? secondaryTenantNotice.icon : <Package size={17} />, title: mode === 'tenant' ? secondaryTenantNotice.title : secondaryPlatformNotice.title, detail: mode === 'tenant' ? secondaryTenantNotice.detail : secondaryPlatformNotice.detail, open: () => navigate(mode === 'tenant' ? secondaryTenantNotice.page : 'integrations') },
                     { id: 'tertiary', tone: 'green', icon: <CheckCircle2 size={17} />, title: mode === 'tenant' ? moduleConnectivityNotice.title : '플랫폼 운영 데이터를 불러왔습니다', detail: mode === 'tenant' ? moduleConnectivityNotice.detail : '표시된 값은 현재 워크스페이스에서 받은 데이터 기준입니다.', open: undefined as (() => void) | undefined },
                   ]).map((notice) => {
-                    const isRead = readNoticeIds.includes(notice.id)
+                    // 정보성 줄은 읽음/안읽음 상태를 갖지 않고, 누를 곳도 없으니 버튼으로 만들지 않는다.
+                    const informational = notice.id === 'tertiary'
+                    const isRead = informational || readNoticeIds.includes(notice.id)
+                    if (informational) return <div key={notice.id} className="is-read" aria-label={notice.title}><span className={`notice-icon ${notice.tone}`}>{notice.icon}</span><div><strong>{notice.title}</strong><p>{notice.detail}</p><small>현재 상태</small></div></div>
                     return <button type="button" key={notice.id} className={isRead ? 'is-read' : 'is-unread'} aria-label={`${isRead ? '읽음' : '읽지 않음'} · ${notice.title}`} onClick={() => { setReadNoticeIds((current) => current.includes(notice.id) ? current : [...current, notice.id]); notice.open?.(); setNotificationsOpen(false) }}><span className={`notice-icon ${notice.tone}`}>{notice.icon}</span><div><strong>{notice.title}</strong><p>{notice.detail}</p><small>{isRead ? '읽음' : '읽지 않음 · 현재 상태'}</small></div><i className="notice-state" aria-hidden="true" /></button>
                   })}
                 </div>

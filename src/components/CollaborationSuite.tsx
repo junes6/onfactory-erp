@@ -688,6 +688,8 @@ export function MessengerDrawer({
                   value={message}
                   onChange={(event) => setMessage(event.target.value)}
                   onKeyDown={(event) => {
+                    // 한글 조합 중의 Enter는 글자 확정용이다. 막지 않으면 조합 중인 낱말이 그대로 전송된다.
+                    if (event.nativeEvent.isComposing) return
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault()
                       event.currentTarget.form?.requestSubmit()
@@ -926,6 +928,8 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
       onToast('일정 작성자와 관리자만 삭제할 수 있습니다.')
       return
     }
+    // 회사 전체가 보는 일정이다. 되돌릴 수 없으므로 지우기 전에 무엇을 지우는지 밝힌다.
+    if (!window.confirm(`‘${original.title}’ 일정을 삭제할까요?\n같은 일정을 보고 있는 다른 직원에게서도 사라집니다.`)) return
     const result = await setEvents((current) => current.filter((event) => event.id !== editingId))
     if (!result.ok) { onToast(result.message ?? '일정을 삭제하지 못했습니다.'); return }
     onToast('일정을 삭제했습니다.')

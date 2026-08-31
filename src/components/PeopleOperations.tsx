@@ -168,6 +168,8 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
   const [tab, setTab] = useState<PeopleTab>(initialTab && canManage ? initialTab : canManage ? 'members' : 'leave')
   useEffect(() => { if (initialTab && canManage) setTab(initialTab) }, [initialTab, canManage])
   const [leaves, setLeaves] = useWorkspaceState<LeaveRequest[]>('leave-requests', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isLeaveRequestList })
+  // '현재 업무'는 고정 문구가 아니라 실제 배정 업무에서 센다.
+  const [assignedWork] = useWorkspaceState<Array<{ id: string; ownerId?: string; owner?: string; status?: string }>>('work-items', [], { scope: workspaceScope, seedWhenEmpty: false })
   const [leaveManagement, setLeaveManagement] = useWorkspaceState<LeaveManagementState>('leave-management', emptyLeaveManagement, { scope: workspaceScope, seedWhenEmpty: false, validate: isLeaveManagementState })
   const [managedAccounts, setManagedAccounts] = useState<AccountRequest[]>([])
   const [directoryMembers, setDirectoryMembers] = useState<LeaveApprover[]>([])
@@ -183,7 +185,6 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
   const [editingLeaveId, setEditingLeaveId] = useState<string | null>(null)
   const [modal, setModal] = useState<PeopleModal | null>(null)
   const [selectedProfile, setSelectedProfile] = useState<MemberProfile | null>(null)
-  const [confirmAccrual, setConfirmAccrual] = useState(false)
   const [operatorAccessLog, setOperatorAccessLog] = useState<Array<{ id: string; at: string; event: string; scope: string; actor: string; reference?: string }>>([])
   const modalRef = useRef<HTMLElement>(null)
   const modalTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -319,6 +320,13 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
     const end = leave.endDate ?? (leave.period.includes('~') ? leave.period.slice(-10).trim() : start)
     return [start, end || start]
   }
+  /** 담당자에게 아직 안 끝난 업무가 몇 건인지. 업무 데이터가 아예 없으면 셌다고 말하지 않는다. */
+  const openWorkLabel = (accountId: string | undefined, name: string) => {
+    if (assignedWork.length === 0) return '아직 데이터 없음'
+    const open = assignedWork.filter((item) => item?.status !== '결재완료'
+      && (accountId && item?.ownerId ? item.ownerId === accountId : item?.owner === name))
+    return open.length === 0 ? '배정된 업무 없음' : `진행 중 ${open.length}건`
+  }
   const approvedLeaveToday = (accountId: string | undefined, name: string) => leaves.find((leave) => {
     if (leave.status !== '승인') return false
     if (accountId && leave.requesterId ? leave.requesterId !== accountId : leave.name !== name) return false
@@ -340,12 +348,12 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       email: managedAccounts.find((account) => account.id === member.id)?.email,
       role: member.role,
       team: member.team,
-      work: '현재 배정 업무 없음',
+      work: openWorkLabel(member.id, member.name),
       attendance: approvedLeaveToday(member.id, member.name) ? '휴가중' : member.id === currentUserId ? '현재 로그인' : '근무 상태 미연동',
       permission: member.role,
     }))
     if (members.some((person) => person.accountId === currentUserId || person.name === currentUserName)) return members
-    const current: MemberProfile = { accountId: currentUserId, name: currentUserName, role: canManage ? '운영 관리자' : '일반 사용자', team: currentUserTeam, work: '현재 배정 업무 없음', attendance: approvedLeaveToday(currentUserId, currentUserName) ? '휴가중' : '현재 로그인', permission: canManage ? '관리 권한' : '일반 사용자' }
+    const current: MemberProfile = { accountId: currentUserId, name: currentUserName, role: canManage ? '운영 관리자' : '일반 사용자', team: currentUserTeam, work: openWorkLabel(currentUserId, currentUserName), attendance: approvedLeaveToday(currentUserId, currentUserName) ? '휴가중' : '현재 로그인', permission: canManage ? '관리 권한' : '일반 사용자' }
     return [current, ...members]
   }, [canManage, currentUserId, currentUserName, currentUserTeam, directoryMembers, managedAccounts, leaves]) // eslint-disable-line react-hooks/exhaustive-deps
   const selectedProfileAccountId = selectedProfile?.accountId
@@ -432,7 +440,14 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       onToast(mode === 'monthly' ? '이번 달 연차는 이미 발생 처리했습니다.' : '올해 연차는 이미 리뉴얼했습니다.')
       return
     }
-    if (!confirmAccrual) { setConfirmAccrual(true); window.setTimeout(() => setConfirmAccrual(false), 4000); return }
+    // 전 직원의 잔여 휴가를 한 번에 바꾸는 작업이다. "한 번 더 누르기"로는 무엇이 몇 명에게
+    // 일어나는지 알 수 없고, 4초가 지나면 조용히 풀려 사람을 헷갈리게 한다. 내용을 적어 확인받는다.
+    const affected = leaveManagement.balances.length
+    if (affected === 0) { onToast('휴가 원장에 등록된 직원이 없습니다.'); return }
+    const summary = mode === 'monthly'
+      ? `직원 ${affected}명에게 이번 달 연차 ${leaveManagement.policy.monthlyDays}일을 각각 더합니다.`
+      : `직원 ${affected}명의 연차를 ${leaveManagement.policy.annualDays}일로 다시 부여하고, 사용일수를 0으로 되돌립니다.\n이월은 최대 ${leaveManagement.policy.carryOverLimit}일까지만 남습니다.`
+    if (!window.confirm(`${mode === 'monthly' ? '이번 달 연차를 발생시킬까요?' : '연차를 리뉴얼할까요?'}\n\n${summary}\n\n실행하면 되돌릴 수 없습니다.`)) return
 
     const result = await setLeaveManagement((current) => {
       const now = new Date().toISOString()
@@ -455,7 +470,6 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       }))
       return { ...current, balances: nextBalances, ledger: [...entries, ...current.ledger].slice(0, 500) }
     })
-    setConfirmAccrual(false)
     if (!result.ok) { if (result.message) onToast(result.message); return }
     onToast(mode === 'monthly' ? '전 직원의 이번 달 연차를 발생시켰습니다.' : '전 직원의 연차를 리뉴얼했습니다.')
   }
@@ -699,7 +713,7 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
     </section>}
 
     {canManage && tab === 'leave-admin' && <section className="people-content-card leave-admin-panel" role="tabpanel">
-      <header><div><h2>휴가 정책 · 원장</h2><p>연차 발생 기준을 설정하고 직원별 부여·차감·리뉴얼 이력을 관리합니다.</p></div><div><Button tone="ghost" type="button" onClick={(event) => openModal('adjust', event.currentTarget)}><Plus size={17} /> 부여·차감</Button><Button tone={confirmAccrual ? 'danger' : 'primary'} type="button" onClick={runAccrual}><RefreshCw size={17} /> {confirmAccrual ? '한 번 더 눌러 실행' : leaveManagement.policy.mode === 'monthly' ? '이번 달 발생' : leaveManagement.policy.mode === 'yearly' ? '연차 리뉴얼' : '수동 조정 사용'}</Button></div></header>
+      <header><div><h2>휴가 정책 · 원장</h2><p>연차 발생 기준을 설정하고 직원별 부여·차감·리뉴얼 이력을 관리합니다.</p></div><div><Button tone="ghost" type="button" onClick={(event) => openModal('adjust', event.currentTarget)}><Plus size={17} /> 부여·차감</Button><Button tone="primary" type="button" onClick={runAccrual}><RefreshCw size={17} /> {leaveManagement.policy.mode === 'monthly' ? '이번 달 발생' : leaveManagement.policy.mode === 'yearly' ? '연차 리뉴얼' : '수동 조정 사용'}</Button></div></header>
       <div className="leave-policy-modes" role="radiogroup" aria-label="연차 발생 방식">
         <button type="button" role="radio" aria-checked={leaveManagement.policy.mode === 'monthly'} className={leaveManagement.policy.mode === 'monthly' ? 'active' : ''} onClick={() => setPolicyMode('monthly')}><span><CalendarDays size={20} /></span><strong>월별 발생</strong><p>매월 정해진 일수를 자동 부여</p><em>월 {leaveManagement.policy.monthlyDays}일</em></button>
         <button type="button" role="radio" aria-checked={leaveManagement.policy.mode === 'yearly'} className={leaveManagement.policy.mode === 'yearly' ? 'active' : ''} onClick={() => setPolicyMode('yearly')}><span><RefreshCw size={20} /></span><strong>연초 일괄</strong><p>지정일에 연차와 이월분을 리뉴얼</p><em>연 {leaveManagement.policy.annualDays}일</em></button>

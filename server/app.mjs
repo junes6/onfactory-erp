@@ -118,8 +118,8 @@ const WORKSPACE_STORE_KEYS = new Set([
   'sales-shipments', 'compliance-records', 'document-storage-settings', 'performance-settings', 'performance-reports',
   'it-projects', 'it-deliverables', 'it-contracts', 'ai-proposals', 'automation-policies',
   'it-clients', 'it-support-programs', 'project-spaces', 'project-posts',
-  'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses', 'opportunities', 'opportunity-settings', 'digests',
-  'attendance-records', 'personal-todos',
+  'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses', 'opportunities', 'opportunity-settings',
+  'attendance-records', 'personal-todos', 'digests',
 ])
 // 프로젝트 공간은 멤버십 기반이라 전용 라우트(/api/projects)로만 읽고 쓴다.
 const PROJECT_KEYS = new Set(['project-spaces', 'project-posts'])
@@ -137,7 +137,7 @@ const SENTINEL_TRIGGER_KEYS = new Set([
 const TENANT_MEMBER_READ_KEYS = new Set([
   'work-items', 'inventory-locations', 'messenger-conversations', 'calendar-events', 'daily-journals',
   'leave-requests', 'leave-management', 'factory-locations', 'factory-layouts', 'work-rules', 'product-catalog', 'inventory-movements', 'calendar-departments',
-  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts', 'it-clients', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses', 'opportunities', 'opportunity-settings', 'digests',
+  'compliance-records', 'it-projects', 'it-deliverables', 'it-contracts', 'it-clients', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses', 'opportunities', 'opportunity-settings',
 ])
 const TENANT_MEMBER_WRITE_KEYS = new Set([
   'work-items', 'messenger-conversations', 'calendar-events', 'daily-journals', 'it-projects', 'it-deliverables',
@@ -905,6 +905,47 @@ function normalizeMemberCalendarEvent(event, account) {
     owner: account.name,
     department: event.scope === 'company' ? '전사' : account.team || '미지정',
   }
+}
+
+/**
+ * 업종 모듈 목록(it-projects · it-deliverables)의 일반 직원 쓰기 병합.
+ * 이 키들은 멤버 쓰기가 허용돼 있지만 가드가 없어 배열 전체를 갈아치울 수 있었다.
+ * 업무·일정·메신저와 같은 규칙을 적용한다: **남의 행은 손대지 못하고, 자기 행만 더하거나 고친다.**
+ * 소유자 판정에 쓰는 필드가 비어 있는 레거시 행은 "남의 행"으로 보아 보존한다.
+ */
+function mergeMemberOwnedRows(previousData, nextData, account, ownerFields) {
+  if (!Array.isArray(previousData) || !Array.isArray(nextData)) return null
+  const ownsRow = (row) => ownerFields.some((field) => row?.[field] && row[field] === account.id)
+  const previousById = new Map(previousData.map((row) => [row?.id, row]))
+  const seen = new Set()
+  const merged = []
+
+  for (const requested of nextData) {
+    const id = requested?.id
+    if (!id || typeof id !== 'string' || seen.has(id)) return null
+    seen.add(id)
+    const previous = previousById.get(id)
+    if (!previous) {
+      // 새 행은 반드시 본인 소유로 기록한다. 다른 사람 이름으로 등록할 수 없다.
+      if (!ownsRow(requested)) return null
+      merged.push(requested)
+      continue
+    }
+    // 기존 행은 본인 것만 수정할 수 있고, 남의 것은 보낸 그대로가 아니면 거부한다.
+    if (!ownsRow(previous)) {
+      if (!isDeepStrictEqual(requested, previous)) return null
+      merged.push(previous)
+      continue
+    }
+    merged.push(requested)
+  }
+
+  // 보내지 않은 행은 삭제 시도다. 남의 행은 지울 수 없으므로 되살려 둔다.
+  for (const previous of previousData) {
+    if (seen.has(previous?.id) || ownsRow(previous)) continue
+    merged.push(previous)
+  }
+  return merged
 }
 
 function mergeMemberCalendarEvents(previousData, nextData, account, accounts) {
@@ -6016,6 +6057,10 @@ export function createApp(options = {}) {
       response.status(403).json({ error: { code: 'ATTENDANCE_ROUTE_REQUIRED', message: '출퇴근 기록은 출퇴근 관리 전용 기능에서만 조회할 수 있습니다.' } })
       return
     }
+    if (key === 'digests') {
+      response.status(403).json({ error: { code: 'DIGEST_ROUTE_REQUIRED', message: '브리핑은 AI 업무허브의 브리핑 카드에서만 조회할 수 있습니다.' } })
+      return
+    }
     if (key === 'personal-todos') {
       response.status(403).json({ error: { code: 'PERSONAL_TODO_ROUTE_REQUIRED', message: '개인 할 일은 내 할 일 전용 기능에서만 조회할 수 있습니다.' } })
       return
@@ -6232,6 +6277,22 @@ export function createApp(options = {}) {
       nextData = mergeMemberCalendarEvents(previousData, nextData, request.auth, accounts)
       if (!nextData) {
         response.status(403).json({ error: { code: 'CALENDAR_WRITE_FORBIDDEN', message: '본인이 만든 일정만 등록·수정·삭제할 수 있습니다.' } })
+        return
+      }
+    }
+    if (request.auth.role === 'tenant-member' && (key === 'it-projects' || key === 'it-deliverables')) {
+      const previousData = Array.isArray(tenantStore[key]?.data) ? tenantStore[key].data : []
+      const ownerFields = key === 'it-projects' ? ['ownerId'] : ['createdBy', 'ownerId']
+      nextData = mergeMemberOwnedRows(previousData, nextData, request.auth, ownerFields)
+      if (!nextData) {
+        response.status(403).json({
+          error: {
+            code: 'MODULE_ROW_WRITE_FORBIDDEN',
+            message: key === 'it-projects'
+              ? '본인이 담당인 프로젝트만 등록·수정할 수 있습니다.'
+              : '본인이 등록한 산출물만 수정할 수 있습니다.',
+          },
+        })
         return
       }
     }
@@ -6540,6 +6601,20 @@ export function createApp(options = {}) {
     if (error instanceof SyntaxError && 'body' in error) {
       response.status(400).json({
         error: { code: 'INVALID_JSON', message: '요청 JSON 형식을 확인해 주세요.' },
+      })
+      return
+    }
+    // body-parser의 크기 초과는 SyntaxError가 아니라서 그냥 두면 "서버 처리 중 오류"로 나간다.
+    // 사용자는 무엇이 잘못됐는지 알 수 없고, 같은 파일을 계속 다시 올리게 된다.
+    if (error?.type === 'entity.too.large' || error?.status === 413) {
+      const limitMb = Number.isFinite(error?.limit) ? Math.round(error.limit / (1024 * 1024)) : null
+      response.status(413).json({
+        error: {
+          code: 'PAYLOAD_TOO_LARGE',
+          message: limitMb
+            ? `보내려는 내용이 한 번에 저장할 수 있는 크기(${limitMb}MB)를 넘었습니다. 파일 크기를 줄이거나 나눠서 저장해 주세요.`
+            : '보내려는 내용이 한 번에 저장할 수 있는 크기를 넘었습니다. 파일 크기를 줄이거나 나눠서 저장해 주세요.',
+        },
       })
       return
     }

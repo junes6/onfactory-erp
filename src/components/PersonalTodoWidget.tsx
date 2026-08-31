@@ -105,15 +105,17 @@ export function PersonalTodoWidget({ workspaceScope, onNavigate, onToast }: {
 
   const createTodo = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    // currentTarget은 핸들러가 끝나면 null이 된다. await 뒤에 쓰려면 미리 잡아 둬야 한다.
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
     const title = String(form.get('title') ?? '').trim()
     const dueDate = String(form.get('dueDate') ?? '')
     if (!title) return
     setSaving(true)
     try {
       await request('/api/personal-todos', { method: 'POST', body: JSON.stringify({ title, dueAt: toDueAt(dueDate), priority: 'normal' }) })
-      event.currentTarget.reset()
-      onToast('내 할 일에 추가했습니다.')
+      formElement.reset()
+      onToast('할 일을 추가했습니다.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '할 일을 추가하지 못했습니다.')
     } finally { setSaving(false) }

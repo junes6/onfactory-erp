@@ -331,6 +331,8 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
           value={input}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {
+            // 한글 조합 중의 Enter는 글자를 확정하는 키다. 이걸 전송으로 받으면 문장이 잘려 나간다.
+            if (event.nativeEvent.isComposing) return
             if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() }
           }}
           rows={compact ? 2 : 3}

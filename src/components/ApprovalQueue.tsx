@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ClipboardCheck, FileText, Keyboard, MessageCircle, Pencil, Radar, RefreshCw, ShieldAlert, Sparkles, X } from 'lucide-react'
+import { BookOpen, Check, ClipboardCheck, FileText, Keyboard, MessageCircle, Pencil, Radar, RefreshCw, ShieldAlert, Sparkles, X } from 'lucide-react'
 import { formatDateTime } from '../utils/dateTime'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ApprovalQueue.css'
 import { Button, IconButton } from './ui/Button'
 import { OpportunityWatch } from './OpportunityWatch'
 
-type ProposalKind = 'document-classification' | 'task-from-message' | 'sentinel-task' | 'lens-task' | 'opportunity'
+type ProposalKind = 'document-classification' | 'task-from-message' | 'sentinel-task' | 'lens-task' | 'opportunity' | 'principle'
 type ProposalStatus = 'pending' | 'approved' | 'edited' | 'rejected' | 'expired'
 
 type Proposal = {
@@ -31,13 +31,22 @@ type PolicyStat = { kind: ProposalKind; approved: number; edited: number; reject
 
 type QueueResponse = { proposals: Proposal[]; stats: PolicyStat[]; pendingCount: number; windowDays: number }
 
-const kindMeta: Record<ProposalKind, { label: string; tone: StatusBadgeTone; icon: typeof FileText }> = {
+type KindMeta = { label: string; tone: StatusBadgeTone; icon: typeof FileText }
+
+const kindMeta: Record<ProposalKind, KindMeta> = {
   'document-classification': { label: '문서 분류', tone: 'info', icon: FileText },
   'task-from-message': { label: '업무 제안', tone: 'success', icon: MessageCircle },
   'sentinel-task': { label: '생존 센티널', tone: 'warning', icon: ShieldAlert },
   'lens-task': { label: '문서 렌즈', tone: 'info', icon: Sparkles },
   opportunity: { label: '외부 기회', tone: 'success', icon: Radar },
+  principle: { label: '규범 제안', tone: 'info', icon: BookOpen },
 }
+
+/**
+ * 서버가 새 제안 종류를 먼저 배포해도 화면이 죽지 않게 한다.
+ * 이전에는 여기 없는 종류가 큐에 하나만 있어도 AI 제안 검토 화면 전체가 흰 화면이 됐다.
+ */
+const metaFor = (kind: ProposalKind): KindMeta => kindMeta[kind] ?? { label: String(kind), tone: 'neutral', icon: Sparkles }
 
 function confidenceLabel(value: number | null) {
   if (value === null || !Number.isFinite(value)) return null
@@ -58,6 +67,8 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [editing, setEditing] = useState<Proposal | null>(null)
+  // 단축키로 내린 결정은 되돌릴 수 없으므로 한 번 더 확인받는다.
+  const [pendingDecision, setPendingDecision] = useState<{ proposal: Proposal; decision: 'approve' | 'reject' } | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const headers = useMemo(() => (workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined), [workspaceScope])
 
@@ -130,13 +141,16 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
       const index = visible.findIndex((item) => item.id === selected.id)
       if (event.key === 'ArrowDown') { event.preventDefault(); setSelectedId(visible[Math.min(visible.length - 1, index + 1)]?.id ?? selected.id) }
       else if (event.key === 'ArrowUp') { event.preventDefault(); setSelectedId(visible[Math.max(0, index - 1)]?.id ?? selected.id) }
-      else if (selected.status === 'pending' && (event.key === 'Enter' || event.key.toLowerCase() === 'a')) { event.preventDefault(); void decide(selected, 'approve') }
-      else if (selected.status === 'pending' && event.key.toLowerCase() === 'e') { event.preventDefault(); setEditing(selected) }
-      else if (selected.status === 'pending' && event.key.toLowerCase() === 'x') { event.preventDefault(); void decide(selected, 'reject') }
+      // 승인·거절은 되돌릴 수 없다. 화면에 들어오자마자 자동으로 잡힌 첫 항목에는 단축키를 걸지 않는다.
+      // 사용자가 직접 고른 항목(selectedId)일 때만 arm된다.
+      const chosen = selectedId === selected.id && selected.status === 'pending'
+      if (event.key.toLowerCase() === 'e' && chosen) { event.preventDefault(); setEditing(selected) }
+      else if ((event.key === 'Enter' || event.key.toLowerCase() === 'a') && chosen) { event.preventDefault(); setPendingDecision({ proposal: selected, decision: 'approve' }) }
+      else if (event.key.toLowerCase() === 'x' && chosen) { event.preventDefault(); setPendingDecision({ proposal: selected, decision: 'reject' }) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [decide, editing, selected, visible])
+  }, [editing, selected, selectedId, visible])
 
   const pendingCount = data?.pendingCount ?? 0
   const stats = data?.stats ?? []
@@ -149,7 +163,7 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
 
     <section className="approval-stats" aria-label="유형별 최근 4주 승인률">
       {stats.map((stat) => <article key={stat.kind}>
-        <StatusBadge className="status-pill" tone={kindMeta[stat.kind].tone}>{kindMeta[stat.kind].label}</StatusBadge>
+        <StatusBadge className="status-pill" tone={metaFor(stat.kind).tone}>{metaFor(stat.kind).label}</StatusBadge>
         <strong>{stat.approvalRate === null ? '아직 데이터 없음' : `${stat.approvalRate}%`}</strong>
         <small>{stat.total ? `최근 ${stat.windowDays}일 승인 ${stat.approved + stat.edited} · 거절 ${stat.rejected}` : `최근 ${stat.windowDays}일 결정 없음`}</small>
       </article>)}
@@ -165,7 +179,7 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
           : visible.length === 0 ? <div className="empty-state compact"><ClipboardCheck size={26} /><h3>{filter === 'pending' ? '검토할 AI 제안이 없습니다' : '아직 제안 이력이 없습니다'}</h3><p>문서를 올리거나 메신저에서 “~해주세요”라고 지시하면, 센티널이 위험 신호를 찾으면 여기에 제안이 쌓입니다.</p></div>
             : <div className="approval-list" role="list" ref={listRef}>
               {visible.map((item) => {
-                const meta = kindMeta[item.kind]
+                const meta = metaFor(item.kind)
                 const Icon = meta.icon
                 const confidence = confidenceLabel(item.confidence)
                 const isSelected = selected?.id === item.id
@@ -190,6 +204,39 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
     <OpportunityWatch workspaceScope={workspaceScope} onToast={onToast} />
 
     {editing && <ProposalEditDialog proposal={editing} busy={busyId === editing.id} onClose={() => setEditing(null)} onSubmit={(payload, reason) => void decide(editing, 'edit', payload, reason)} />}
+    {pendingDecision && <ShortcutConfirmDialog
+      proposal={pendingDecision.proposal}
+      decision={pendingDecision.decision}
+      busy={busyId === pendingDecision.proposal.id}
+      onCancel={() => setPendingDecision(null)}
+      onConfirm={() => { const target = pendingDecision; setPendingDecision(null); void decide(target.proposal, target.decision) }}
+    />}
+  </div>
+}
+
+/** 단축키로 승인·거절할 때만 뜨는 확인. 화면의 ✓/✗ 버튼은 이미 의도가 분명하므로 그대로 둔다. */
+function ShortcutConfirmDialog({ proposal, decision, busy, onCancel, onConfirm }: {
+  proposal: Proposal
+  decision: 'approve' | 'reject'
+  busy: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const approving = decision === 'approve'
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}>
+    <section className="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="proposal-confirm-title">
+      <header><div><h2 id="proposal-confirm-title">{approving ? '이 제안을 승인할까요?' : '이 제안을 거절할까요?'}</h2><p>{approving ? '승인하면 바로 실행되며 되돌릴 수 없습니다.' : '거절한 제안은 다시 올라오지 않습니다.'}</p></div></header>
+      <div className="approval-confirm-body">
+        <StatusBadge className="status-pill" tone={metaFor(proposal.kind).tone}>{metaFor(proposal.kind).label}</StatusBadge>
+        <strong>{proposal.summary}</strong>
+      </div>
+      <footer>
+        <Button tone="ghost" type="button" onClick={onCancel}>취소</Button>
+        <Button tone={approving ? 'primary' : 'danger'} type="button" disabled={busy} onClick={onConfirm}>
+          {approving ? <><Check size={17} /> 승인</> : <><X size={17} /> 거절</>}
+        </Button>
+      </footer>
+    </section>
   </div>
 }
 

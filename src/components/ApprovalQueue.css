@@ -43,3 +43,6 @@ html[data-theme='dark'] .approval-actions .approve { background: var(--color-suc
   .approval-actions, .approval-link { grid-column: 1 / -1; }
   .approval-keys { display: none; }
 }
+
+.approval-confirm-body { display: grid; gap: var(--space-8); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.approval-confirm-body strong { color: var(--ink); font-size: var(--font-15); line-height: 1.5; }
