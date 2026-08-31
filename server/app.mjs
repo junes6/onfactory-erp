@@ -6301,6 +6301,8 @@ export function createApp(options = {}) {
     kstartupServiceKey: options.kstartupServiceKey,
     bizinfoCertKey: options.bizinfoCertKey,
     bizinfoCommercialUseApproved: options.bizinfoCommercialUseApproved === true,
+    g2bServiceKey: options.g2bServiceKey,
+    ulsanServiceKey: options.ulsanServiceKey,
     cache: options.supportProgramCache,
   })
   registerSupportProgramRoutes({
@@ -6308,6 +6310,8 @@ export function createApp(options = {}) {
     requireAuth,
     requireMatchingWorkspaceIdentity,
     service: supportProgramService,
+    // 순위는 고객사가 이미 등록한 감시 설정으로 매긴다. 별도 설정 화면을 새로 만들지 않는다.
+    profileFor: (tenantId) => ({ ...opportunitySettingsOf(tenantId), industryType: tenantIndustryType(tenantId) }),
   })
 
   registerPerformanceRoutes({

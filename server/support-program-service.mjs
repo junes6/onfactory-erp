@@ -3,13 +3,23 @@ const KSTARTUP_PUBLIC_SUMMARY_ENDPOINT = 'https://www.k-startup.go.kr/web/main/m
 const KSTARTUP_OFFICIAL_URL = 'https://www.k-startup.go.kr/web/contents/bizpbanc-ongoing.do'
 const BIZINFO_ENDPOINT = 'https://www.bizinfo.go.kr/uss/rss/bizinfoApi.do'
 const BIZINFO_OFFICIAL_URL = 'https://www.bizinfo.go.kr/sii/siia/selectSIIA200View.do'
+// 나라장터(조달청) 입찰공고 — 공공데이터포털 용역 입찰공고 조회.
+const G2B_ENDPOINT = 'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch'
+const G2B_OFFICIAL_URL = 'https://www.g2b.go.kr/'
+// 울산광역시 고시·공고 — 공공데이터포털 울산광역시 고시공고 정보.
+const ULSAN_ENDPOINT = 'https://apis.data.go.kr/6310000/ulsanNotice/getUlsanNoticeList'
+const ULSAN_OFFICIAL_URL = 'https://www.ulsan.go.kr/u/rep/bbs/list.ulsan?bbsId=BBS_0000000000000129'
 const DEFAULT_TTL_MS = 60 * 60_000
 const DEFAULT_STALE_MS = 24 * 60 * 60_000
 const DEFAULT_TIMEOUT_MS = 6_000
 
+export const SUPPORT_PROGRAM_SOURCES = Object.freeze(['kstartup', 'bizinfo', 'g2b', 'ulsan'])
+
 export const supportProgramOfficialLinks = Object.freeze([
   { source: 'kstartup', label: 'K-Startup 모집중 공고', url: KSTARTUP_OFFICIAL_URL },
   { source: 'bizinfo', label: '기업마당 지원사업 공고', url: BIZINFO_OFFICIAL_URL },
+  { source: 'g2b', label: '나라장터 입찰공고', url: G2B_OFFICIAL_URL },
+  { source: 'ulsan', label: '울산광역시 고시·공고', url: ULSAN_OFFICIAL_URL },
 ])
 
 const entityMap = new Map([
@@ -42,18 +52,24 @@ function periodDates(value) {
   return { startsOn: matches[0] ?? null, endsOn: matches[1] ?? matches[0] ?? null, periodRaw: text || null }
 }
 
+/** 출처별 허용 도메인과 대체 링크. 상류가 준 링크라도 이 도메인 밖이면 공식 페이지로 되돌린다. */
+const SOURCE_DOMAINS = Object.freeze({
+  kstartup: { fallback: KSTARTUP_OFFICIAL_URL, hosts: ['k-startup.go.kr'] },
+  bizinfo: { fallback: BIZINFO_OFFICIAL_URL, hosts: ['bizinfo.go.kr'] },
+  g2b: { fallback: G2B_OFFICIAL_URL, hosts: ['g2b.go.kr'] },
+  ulsan: { fallback: ULSAN_OFFICIAL_URL, hosts: ['ulsan.go.kr'] },
+})
+
 function officialUrl(value, source) {
-  const fallback = source === 'kstartup' ? KSTARTUP_OFFICIAL_URL : BIZINFO_OFFICIAL_URL
+  const rule = SOURCE_DOMAINS[source] ?? SOURCE_DOMAINS.bizinfo
   try {
-    const url = new URL(String(value ?? ''), fallback)
-    if (url.protocol !== 'https:') return fallback
+    const url = new URL(String(value ?? ''), rule.fallback)
+    if (url.protocol !== 'https:') return rule.fallback
     const host = url.hostname.toLowerCase()
-    const allowed = source === 'kstartup'
-      ? host === 'k-startup.go.kr' || host.endsWith('.k-startup.go.kr')
-      : host === 'bizinfo.go.kr' || host.endsWith('.bizinfo.go.kr')
-    return allowed ? url.toString() : fallback
+    const allowed = rule.hosts.some((allowedHost) => host === allowedHost || host.endsWith(`.${allowedHost}`))
+    return allowed ? url.toString() : rule.fallback
   } catch {
-    return fallback
+    return rule.fallback
   }
 }
 
@@ -120,6 +136,75 @@ export function normalizeBizinfoPrograms(body) {
       periodRaw: period.periodRaw,
       publishedAt: isoDate(row?.creatPnttm ?? row?.pubDate),
       detailUrl: officialUrl(row?.pblancUrl ?? row?.link, 'bizinfo'),
+      feedMode: 'api',
+    }
+  }).filter(Boolean)
+}
+
+function wonAmount(value) {
+  const numeric = Number(String(value ?? '').replace(/[^\d.]/g, ''))
+  return Number.isFinite(numeric) && numeric > 0 ? Math.min(Math.round(numeric), 1_000_000_000_000) : 0
+}
+
+/**
+ * 나라장터(조달청) 입찰공고. 지원사업과 같은 SupportProgram 모양으로 맞춰 한 목록에서 함께 본다.
+ * 입찰은 마감(입찰마감일시)이 곧 접수 마감이므로 endsOn에 넣는다.
+ */
+export function normalizeG2bNotices(body) {
+  return arrayPayload(body).map((row) => {
+    const title = cleanText(row?.bidNtceNm, 180)
+    if (!title) return null
+    const opensOn = isoDate(row?.bidNtceDt ?? row?.rgstDt)
+    const closesOn = isoDate(row?.bidClseDt ?? row?.opengDt)
+    const noticeNo = cleanText(row?.bidNtceNo, 80)
+    return {
+      id: `g2b:${noticeNo || title}`,
+      source: 'g2b',
+      sourceLabel: '나라장터',
+      title,
+      agency: cleanText(row?.ntceInsttNm, 120),
+      operator: cleanText(row?.dminsttNm, 120),
+      category: cleanText(row?.ntceKindNm, 100) || '입찰공고',
+      target: cleanText(row?.bidprcPsblIndstrytyNm ?? row?.prtcptPsblRgnNm, 180),
+      region: cleanText(row?.prtcptPsblRgnNm, 100),
+      summary: cleanText(row?.bidNtceDtlUrl ? '' : row?.ntceSpecDocUrl1, 360),
+      amount: wonAmount(row?.presmptPrce ?? row?.asignBdgtAmt),
+      noticeNo,
+      startsOn: opensOn,
+      endsOn: closesOn,
+      periodRaw: [opensOn, closesOn].filter(Boolean).join(' ~ ') || null,
+      publishedAt: opensOn,
+      detailUrl: officialUrl(row?.bidNtceDtlUrl, 'g2b'),
+      feedMode: 'api',
+    }
+  }).filter(Boolean)
+}
+
+/** 울산광역시 고시·공고. 지역 신호가 확실하므로 region을 고정으로 채운다. */
+export function normalizeUlsanNotices(body) {
+  return arrayPayload(body).map((row) => {
+    const title = cleanText(row?.title ?? row?.nttSj ?? row?.bbsNm, 180)
+    if (!title) return null
+    const period = periodDates(`${row?.bgngDe ?? row?.noticeBgnde ?? ''} ~ ${row?.endDe ?? row?.noticeEndde ?? ''}`)
+    const noticeNo = cleanText(row?.nttNo ?? row?.noticeNo ?? row?.seq, 80)
+    return {
+      id: `ulsan:${noticeNo || title}`,
+      source: 'ulsan',
+      sourceLabel: '울산광역시',
+      title,
+      agency: cleanText(row?.deptNm ?? row?.chargeDept, 120) || '울산광역시',
+      operator: cleanText(row?.chargerNm, 120),
+      category: cleanText(row?.ctgryNm ?? row?.gosiSe, 100) || '고시·공고',
+      target: cleanText(row?.trgetNm, 180),
+      region: '울산광역시',
+      summary: cleanText(row?.cn ?? row?.nttCn ?? row?.description, 360),
+      amount: wonAmount(row?.budgetAmt),
+      noticeNo,
+      startsOn: period.startsOn,
+      endsOn: period.endsOn,
+      periodRaw: period.periodRaw,
+      publishedAt: isoDate(row?.registDe ?? row?.frstRegistPnttm),
+      detailUrl: officialUrl(row?.url ?? row?.link ?? row?.detailUrl, 'ulsan'),
       feedMode: 'api',
     }
   }).filter(Boolean)
@@ -247,6 +332,8 @@ export function createSupportProgramService(options = {}) {
   const keys = {
     kstartup: String(options.kstartupServiceKey ?? '').trim(),
     bizinfo: String(options.bizinfoCertKey ?? '').trim(),
+    g2b: String(options.g2bServiceKey ?? '').trim(),
+    ulsan: String(options.ulsanServiceKey ?? '').trim(),
   }
   const bizinfoApproved = options.bizinfoCommercialUseApproved === true
   const inFlight = new Map()
@@ -276,6 +363,29 @@ export function createSupportProgramService(options = {}) {
       const items = normalizeKStartupPrograms(body)
       if (body?.resultCode && String(body.resultCode) !== '00') throw new SourceError('UPSTREAM_AUTH')
       return items
+    }
+    if (source === 'g2b') {
+      const url = new URL(G2B_ENDPOINT)
+      url.searchParams.set('serviceKey', keys.g2b)
+      url.searchParams.set('numOfRows', '100')
+      url.searchParams.set('pageNo', '1')
+      url.searchParams.set('type', 'json')
+      url.searchParams.set('inqryDiv', '1')
+      const body = await fetchJson(fetchImpl, url, timeoutMs)
+      const resultCode = cleanText(body?.response?.header?.resultCode, 20)
+      if (resultCode && resultCode !== '00') throw new SourceError('UPSTREAM_AUTH')
+      return normalizeG2bNotices(body)
+    }
+    if (source === 'ulsan') {
+      const url = new URL(ULSAN_ENDPOINT)
+      url.searchParams.set('serviceKey', keys.ulsan)
+      url.searchParams.set('numOfRows', '100')
+      url.searchParams.set('pageNo', '1')
+      url.searchParams.set('type', 'json')
+      const body = await fetchJson(fetchImpl, url, timeoutMs)
+      const resultCode = cleanText(body?.response?.header?.resultCode, 20)
+      if (resultCode && resultCode !== '00') throw new SourceError('UPSTREAM_AUTH')
+      return normalizeUlsanNotices(body)
     }
     const url = new URL(BIZINFO_ENDPOINT)
     url.searchParams.set('crtfcKey', keys.bizinfo)
@@ -324,19 +434,18 @@ export function createSupportProgramService(options = {}) {
   }
 
   return {
+    sources: SUPPORT_PROGRAM_SOURCES,
     async list({ source = 'all', limit = 4 } = {}) {
-      const selected = source === 'all' ? ['kstartup', 'bizinfo'] : [source]
+      const selected = source === 'all' ? [...SUPPORT_PROGRAM_SOURCES] : [source]
       const results = await Promise.all(selected.map(async (name) => [name, await loadSource(name)]))
-      const sources = {
-        kstartup: { state: 'not-requested', syncedAt: null },
-        bizinfo: { state: 'not-requested', syncedAt: null },
-      }
+      const sources = Object.fromEntries(SUPPORT_PROGRAM_SOURCES.map((name) => [name, { state: 'not-requested', syncedAt: null }]))
       const items = []
       for (const [name, result] of results) {
         sources[name] = { state: result.state, syncedAt: result.syncedAt }
         items.push(...result.items)
       }
-      const safeLimit = Math.min(12, Math.max(1, Number(limit) || 4))
+      // 관련성 정렬이 충분한 후보를 보도록 상한을 넉넉히 둔다. 화면 노출 개수는 라우트가 다시 자른다.
+      const safeLimit = Math.min(60, Math.max(1, Number(limit) || 4))
       const merged = mergePrograms(items).slice(0, safeLimit)
       const syncedAt = results.map(([, result]) => result.syncedAt).filter(Boolean).sort().at(-1) ?? null
       return {

@@ -56,7 +56,67 @@ test('K-Startup public summary exposes real official titles without a key while 
   assert.equal(repeated.items.length, 1)
   assert.equal(result.sources.kstartup.state, 'public')
   assert.equal(result.sources.bizinfo.state, 'unconfigured')
-  assert.equal(result.officialLinks.length, 2)
+  // 키가 없는 출처는 요청 전에 차단되므로 fetch 호출은 K-Startup 1건뿐이다.
+  assert.equal(result.sources.g2b.state, 'unconfigured')
+  assert.equal(result.sources.ulsan.state, 'unconfigured')
+  assert.deepEqual(result.officialLinks.map((link) => link.source), ['kstartup', 'bizinfo', 'g2b', 'ulsan'])
+})
+
+test('나라장터 and 울산광역시 notices normalize into the same shape and keep their links on the official domain', async () => {
+  const g2bBody = {
+    response: {
+      header: { resultCode: '00' },
+      body: {
+        items: {
+          item: [{
+            bidNtceNo: '20260831-001', bidNtceNm: '통합관제 시스템 유지관리 용역', ntceInsttNm: '울산광역시',
+            dminsttNm: '울산정보산업진흥원', prtcptPsblRgnNm: '울산광역시', ntceKindNm: '일반입찰',
+            bidNtceDt: '2026-08-25', bidClseDt: '2026-09-15', presmptPrce: '250000000',
+            bidNtceDtlUrl: 'https://www.g2b.go.kr/notice/20260831-001',
+          }],
+        },
+      },
+    },
+  }
+  const ulsanBody = { response: { header: { resultCode: '00' }, body: { items: { item: [{
+    nttNo: 'U-2026-77', title: '2026 지역 콘텐츠 기업 지원 공고', deptNm: '문화예술과',
+    bgngDe: '2026-09-01', endDe: '2026-09-30', cn: '지역 콘텐츠 제작 기업을 지원합니다.',
+    url: 'http://malicious.example.com/phish',
+  }] } } } }
+  const service = createSupportProgramService({
+    fetchImpl: async (url) => ({ ok: true, json: async () => (String(url).includes('BidPublicInfo') ? g2bBody : ulsanBody) }),
+    cache: createMemorySupportProgramCache(),
+    clock: () => new Date('2026-08-31T00:00:00.000Z'),
+    g2bServiceKey: 'g2b-key', ulsanServiceKey: 'ulsan-key',
+  })
+
+  const bids = await service.list({ source: 'g2b' })
+  assert.equal(bids.items.length, 1)
+  assert.deepEqual(
+    { source: bids.items[0].source, label: bids.items[0].sourceLabel, endsOn: bids.items[0].endsOn, amount: bids.items[0].amount, region: bids.items[0].region },
+    { source: 'g2b', label: '나라장터', endsOn: '2026-09-15', amount: 250_000_000, region: '울산광역시' },
+  )
+  assert.equal(bids.items[0].detailUrl, 'https://www.g2b.go.kr/notice/20260831-001')
+
+  const notices = await service.list({ source: 'ulsan' })
+  assert.equal(notices.items[0].sourceLabel, '울산광역시')
+  assert.equal(notices.items[0].region, '울산광역시')
+  assert.equal(notices.items[0].endsOn, '2026-09-30')
+  assert.equal(notices.items[0].detailUrl, 'https://www.ulsan.go.kr/u/rep/bbs/list.ulsan?bbsId=BBS_0000000000000129', '도메인 밖 링크는 공식 페이지로 되돌린다')
+  assert.doesNotMatch(JSON.stringify(notices), /ulsan-key|g2b-key/, '서비스 키는 응답에 새지 않는다')
+})
+
+test('a bad service key on the new sources surfaces as an error state, not a crash', async () => {
+  const service = createSupportProgramService({
+    fetchImpl: async () => ({ ok: true, json: async () => ({ response: { header: { resultCode: '30' } } }) }),
+    cache: createMemorySupportProgramCache(),
+    clock: () => new Date('2026-08-31T00:00:00.000Z'),
+    g2bServiceKey: 'wrong-key',
+  })
+  const result = await service.list({ source: 'g2b' })
+  assert.deepEqual(result.items, [])
+  assert.equal(result.sources.g2b.state, 'error')
+  assert.doesNotMatch(JSON.stringify(result), /wrong-key|UPSTREAM_AUTH/)
 })
 
 test('K-Startup public summary parser reads official direct links and rejects waiting pages', () => {

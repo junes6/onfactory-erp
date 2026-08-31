@@ -40,6 +40,8 @@ const app = createApp({
   kstartupServiceKey: process.env.KSTARTUP_SERVICE_KEY?.trim() || '',
   bizinfoCertKey: process.env.BIZINFO_CERT_KEY?.trim() || '',
   bizinfoCommercialUseApproved: process.env.BIZINFO_COMMERCIAL_USE_APPROVED?.trim().toLowerCase() === 'true',
+  g2bServiceKey: process.env.G2B_SERVICE_KEY?.trim() || '',
+  ulsanServiceKey: process.env.ULSAN_SERVICE_KEY?.trim() || '',
   storeStatus: {
     kind: runtimeStore.adapter.kind,
     readOnly: Boolean(runtimeStore.adapter.readOnly),
