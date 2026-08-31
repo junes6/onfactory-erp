@@ -19,3 +19,6 @@
   .opportunity-below li { grid-template-columns: minmax(0, 1fr); }
   .opportunity-below-side { justify-content: flex-start; }
 }
+
+.opportunity-below-reason { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--color-warning-ink); font-size: var(--font-11); line-height: 1.5; }
+.opportunity-below-scale { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); text-align: right; }

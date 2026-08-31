@@ -20,8 +20,13 @@ export type Opportunity = {
   amount: number
   link: string
   score: number | null
+  /** 워커가 보낸 원본 점수와 스케일 판정. 0~1 비율과 0~100 백분율을 모두 받는다. */
+  rawScore?: number | null
+  scoreScale?: 'ratio' | 'percent' | null
   rationale: string
   status: 'queued' | 'below-threshold'
+  /** 왜 승인 큐에 오르지 못했는지. 사람이 읽을 수 있는 문장이다. */
+  statusReason?: string
   receivedAt: string
 }
 
@@ -81,9 +86,12 @@ export function OpportunityWatch({ workspaceScope, onToast }: { workspaceScope?:
           <strong>{item.title}</strong>
           <small>{[item.source, item.agency, item.deadline ? `마감 ${formatDateLabel(item.deadline, false, false)}` : '', money(item.amount)].filter(Boolean).join(' · ')}</small>
           {item.rationale && <p>{item.rationale}</p>}
+          {/* 왜 큐에 안 올랐는지를 목록에서 바로 읽는다. 설정을 고칠지 워커를 고칠지 판단할 근거다. */}
+          {item.statusReason && <p className="opportunity-below-reason">{item.statusReason}</p>}
         </div>
         <div className="opportunity-below-side">
           <StatusBadge tone="neutral">{item.score === null ? '점수 없음' : `${Math.round(item.score * 100)}%`}</StatusBadge>
+          {item.scoreScale === 'percent' && item.rawScore != null && <small className="opportunity-below-scale">워커 원본 {item.rawScore}점</small>}
           {item.link && <ButtonLink tone="quiet" size="sm" href={item.link} target="_blank" rel="noreferrer">공고 <ExternalLink size={12} /></ButtonLink>}
         </div>
       </li>)}</ul>
