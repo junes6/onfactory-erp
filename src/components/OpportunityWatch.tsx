@@ -146,7 +146,7 @@ function OpportunitySettingsDialog({ settings, workspaceScope, onClose, onSaved,
         <IconButton aria-label="닫기" onClick={onClose}>✕</IconButton>
       </header>
       <form onSubmit={submit}>
-        <label className="form-field full"><span>감시 키워드 <em className="field-required">쉼표로 구분</em></span><input value={keywords} maxLength={600} placeholder="예: 급식, 수산물 납품, 식품 R&D" onChange={(event) => setKeywords(event.target.value)} /></label>
+        <label className="form-field full"><span>감시 키워드 <em className="field-required">쉼표로 구분</em></span><input value={keywords} maxLength={600} placeholder={settings.keywords.length ? settings.keywords.join(', ') : '업종 기본 키워드가 적용됩니다'} onChange={(event) => setKeywords(event.target.value)} /></label>
         <label className="form-field full"><span>지역</span><input value={regions} maxLength={300} placeholder="예: 경북, 전국" onChange={(event) => setRegions(event.target.value)} /></label>
         <div className="form-grid">
           <label className="form-field"><span>금액 하한 (원)</span><input type="number" min="0" step="1000000" value={minAmount} onChange={(event) => setMinAmount(event.target.value)} /></label>

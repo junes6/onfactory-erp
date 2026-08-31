@@ -8,6 +8,7 @@ import { downloadDocumentAttachment } from '../utils/documentAttachments'
 import { FileText, FolderSearch, Download } from 'lucide-react'
 import './DashboardWorkspace.css'
 import { Button } from './ui/Button'
+import { useIndustrySurface } from '../modules/IndustryContext'
 
 export type DashboardWidgetId = 'summary' | 'ai' | 'schedule' | 'todo' | 'work' | 'links' | 'alert' | 'files' | 'support'
 export type DashboardWidgetSize = 'half' | 'wide' | 'full'
@@ -160,6 +161,7 @@ export function DashboardLayoutModal({ open, preferences, onChange, onClose }: {
 }
 
 export function QuickLinksWidget({ scope, onToast }: { scope: string; onToast: (message: string) => void }) {
+  const industry = useIndustrySurface()
   const storageKey = quickLinksStorageKey(scope)
   const [links, setLinks] = useState<QuickLink[]>(() => readQuickLinks(window.localStorage, storageKey))
   const [adding, setAdding] = useState(false)
@@ -204,7 +206,7 @@ export function QuickLinksWidget({ scope, onToast }: { scope: string; onToast: (
     </div>
     {adding && <form className="dashboard-link-form" onSubmit={submit}>
       <div><Link2 size={18} /><strong>{editingLink ? '바로가기 수정' : '새 바로가기'}</strong><button type="button" aria-label="편집 취소" onClick={() => { setAdding(false); setEditingId(null); setError('') }}><X size={17} /></button></div>
-      <label><span>이름</span><input name="name" key={`name-${editingLink?.id ?? 'new'}`} defaultValue={editingLink?.name ?? ''} autoFocus placeholder="예: 식품안전나라" required /></label>
+      <label><span>이름</span><input name="name" key={`name-${editingLink?.id ?? 'new'}`} defaultValue={editingLink?.name ?? ''} autoFocus placeholder={industry.examples.quickLink} required /></label>
       <label><span>웹 주소</span><input name="url" key={`url-${editingLink?.id ?? 'new'}`} defaultValue={editingLink?.url ?? ''} type="url" placeholder="https://www.example.com" required /></label>
       <label><span>아이콘 색상</span><select name="color" key={`color-${editingLink?.id ?? 'new'}`} defaultValue={editingLink?.color ?? 'green'}><option value="green">초록</option><option value="blue">파랑</option><option value="amber">주황</option><option value="violet">보라</option></select></label>
       {error && <p role="alert">{error}</p>}

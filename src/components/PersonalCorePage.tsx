@@ -4,6 +4,7 @@ import { formatDateLabel, formatShortDateTime } from '../utils/dateTime'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import { Button, IconButton } from './ui/Button'
 import './PersonalCorePage.css'
+import { useIndustrySurface } from '../modules/IndustryContext'
 
 /**
  * 내 판단 기록 — 계정 소유 계층. 이 화면의 모든 데이터는 로그인한 계정의 것이며
@@ -34,6 +35,7 @@ const STATE_META: Record<PrincipleState, { label: string; tone: StatusBadgeTone 
 }
 
 export function PersonalCorePage({ workspaceScope, onToast }: { workspaceScope?: string; onToast: (message: string) => void }) {
+  const industry = useIndustrySurface()
   const [core, setCore] = useState<PersonalCore | null>(null)
   const [loading, setLoading] = useState(true)
   const [answering, setAnswering] = useState<string | null>(null)
@@ -186,7 +188,7 @@ export function PersonalCorePage({ workspaceScope, onToast }: { workspaceScope?:
         <div><ScrollText size={18} /><div><h2 id="personal-notes-title">내 메모 {core.notes.length}개</h2><span>여기 적은 내용은 이후 AI 답변에 컨텍스트로 들어갑니다.</span></div></div>
       </header>
       <form className="note-form" onSubmit={addNote}>
-        <input value={noteDraft} maxLength={1000} placeholder="예: 급식 납품 견적은 항상 마감 3일 전까지 회신한다" onChange={(event) => setNoteDraft(event.target.value)} />
+        <input value={noteDraft} maxLength={1000} placeholder={industry.examples.memo} onChange={(event) => setNoteDraft(event.target.value)} />
         <Button tone="primary" size="sm" type="submit" disabled={busy || !noteDraft.trim()}>추가</Button>
       </form>
       {core.notes.length > 0 && <ul className="note-list">{core.notes.map((note) => <li key={note.id}>

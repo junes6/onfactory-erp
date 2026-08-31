@@ -142,8 +142,131 @@ export const serviceModules: readonly ServiceModule[] = [
   },
 ] as const
 
+/**
+ * 업종 enum의 유일한 파서. 모르는 값을 조용히 1호 업종으로 떨어뜨리면
+ * IT 고객사가 식품 사이드바·식품 AI 인격을 그대로 받게 되므로, 해석 실패는 null로 남긴다.
+ */
+export function asIndustryType(value: unknown): TenantIndustryType | null {
+  return value === 'it_services' || value === 'food_manufacturing' ? value : null
+}
+
+/** 해석 실패 시의 기본값. 레거시 테넌트 보존을 위해 1호 업종을 쓰되 한 곳에서만 결정한다. */
+export const FALLBACK_INDUSTRY: TenantIndustryType = 'food_manufacturing'
+
+export const resolveIndustry = (value: unknown): TenantIndustryType => asIndustryType(value) ?? FALLBACK_INDUSTRY
+
+export type IndustryMetricId = 'sales-orders' | 'active-projects'
+
+/** 홈 상단 대표 지표 칩. 업종마다 "오늘 가장 먼저 보는 숫자"가 다르다. */
+export type IndustryHeadlineChip = {
+  label: string
+  route: TenantRouteId
+  metric: IndustryMetricId
+  icon: LucideIcon
+}
+
+export type IndustryOnboarding = {
+  title: string
+  detail: string
+  route: TenantRouteId
+}
+
+/**
+ * 화면에 남아 있던 업종 고유 예시 문구를 한곳에 모은다.
+ * 여기 없는 문구를 화면에 직접 쓰면 그 화면은 1호 업종 전용이 된다.
+ */
+export type IndustryExamples = {
+  workTitle: string
+  reviewComment: string
+  scheduleTitle: string
+  quickLink: string
+  memo: string
+  libraryTags: string
+  department: string
+  departments: string
+  position: string
+  projectSpace: string
+  supportProgram: string
+}
+
+export type IndustrySurface = {
+  globalSearchPlaceholder: string
+  librarySearchPlaceholder: string
+  /** 자료실 분류 목록. 공통 분류 + 업종 분류 순서로 둔다. */
+  documentCategories: readonly string[]
+  /** 업무 구분 목록. 마지막은 언제나 '일반'. */
+  workCategories: readonly string[]
+  /** "이 워크스페이스에 실데이터가 있는가"를 판단할 업종 스토어 키. */
+  operatingDataKeys: readonly string[]
+  headlineChip: IndustryHeadlineChip
+  onboarding: IndustryOnboarding
+  examples: IndustryExamples
+}
+
+const sharedDocumentCategories = ['공통자료', '세무·회계', '지식재산·인증', '인사·교육', '회의·업무일지'] as const
+
+const industrySurfaces: Readonly<Record<TenantIndustryType, IndustrySurface>> = {
+  food_manufacturing: {
+    globalSearchPlaceholder: '제품·업무·LOT 통합 검색',
+    librarySearchPlaceholder: '예: 최근 자가품질검사 성적서 찾아줘',
+    documentCategories: [...sharedDocumentCategories, '식품안전·인증', '제품·표시사항', '생산·품질', '재고·물류', '판매·계약'],
+    workCategories: ['제품', '생산', '재고', '품질', '일반'],
+    operatingDataKeys: ['product-catalog', 'sales-channels'],
+    headlineChip: { label: '온라인 주문', route: 'sales', metric: 'sales-orders', icon: Store },
+    onboarding: {
+      title: '워크스페이스 초기 설정을 시작해 주세요',
+      detail: '제품·창고·판매채널을 연결하면 AI 알림이 활성화됩니다.',
+      route: 'products',
+    },
+    examples: {
+      workTitle: '예: 신규 제품 표시사항 최종 검토',
+      reviewComment: '예: LOT 번호와 조치 전·후 사진을 보완해 주세요.',
+      scheduleTitle: '예: 월간 생산계획 회의',
+      quickLink: '예: 식품안전나라',
+      memo: '예: 급식 납품 견적은 항상 마감 3일 전까지 회신한다',
+      libraryTags: 'HACCP, 성적서, 2026 검사',
+      department: '예: 품질관리',
+      departments: '품질관리, 생산 1팀',
+      position: '예: 품질 책임자',
+      projectSpace: '신제품 개발, 인증 갱신, 수주 건처럼 함께 일하는 단위로 만들고 멤버를 초대하세요.',
+      supportProgram: '예: 2026 스마트공장 구축 지원',
+    },
+  },
+  it_services: {
+    globalSearchPlaceholder: '프로젝트·업무·산출물 통합 검색',
+    librarySearchPlaceholder: '예: 최근 프로젝트 계약서 최종본 찾아줘',
+    documentCategories: [...sharedDocumentCategories, '프로젝트', '산출물', '계약·거래처', '제안·견적', '검수·유지보수'],
+    workCategories: ['프로젝트', '산출물', '계약', '검수', '일반'],
+    operatingDataKeys: ['it-projects', 'it-deliverables', 'it-contracts'],
+    headlineChip: { label: '진행 프로젝트', route: 'it-projects', metric: 'active-projects', icon: FolderKanban },
+    onboarding: {
+      title: '워크스페이스 초기 설정을 시작해 주세요',
+      detail: '프로젝트·산출물·거래처 계약을 등록하면 AI 알림이 활성화됩니다.',
+      route: 'it-projects',
+    },
+    examples: {
+      workTitle: '예: 산출물 최종본 검수 요청',
+      reviewComment: '예: 검수 결과와 변경 이력 링크를 보완해 주세요.',
+      scheduleTitle: '예: 월간 프로젝트 진척 회의',
+      quickLink: '예: 사내 위키',
+      memo: '예: 산출물 검수 요청은 항상 마감 3일 전까지 회신한다',
+      libraryTags: '계약서, 산출물, 2026 검수',
+      department: '예: 개발팀',
+      departments: '개발팀, 기획팀',
+      position: '예: 팀장',
+      projectSpace: '구축 프로젝트, 유지보수 계약, 제안 건처럼 함께 일하는 단위로 만들고 멤버를 초대하세요.',
+      supportProgram: '예: 2026 콘텐츠 제작 지원',
+    },
+  },
+}
+
+/** 업종별 화면 문구·목록의 단일 출처. 화면 코드는 여기서만 읽는다. */
+export function industrySurface(industryType: TenantIndustryType | string | null | undefined): IndustrySurface {
+  return industrySurfaces[resolveIndustry(industryType)]
+}
+
 export function modulesForIndustry(industryType: TenantIndustryType | string | null | undefined): readonly ServiceModule[] {
-  const resolved: TenantIndustryType = industryType === 'it_services' ? 'it_services' : 'food_manufacturing'
+  const resolved = resolveIndustry(industryType)
   return serviceModules.filter((module) => module.industry === 'all' || module.industry === resolved)
 }
 
@@ -156,7 +279,7 @@ export function routesForIndustry(industryType: TenantIndustryType | string | nu
  * 대표 메뉴로 노출해 같은 화면이 두 번 보이지 않게 한다.
  */
 export function navigationForIndustry(industryType: TenantIndustryType | string | null | undefined): NavigationModuleItem[] {
-  const isItServices = industryType === 'it_services'
+  const isItServices = resolveIndustry(industryType) === 'it_services'
   return routesForIndustry(industryType)
     .filter((route) => !(isItServices && route === 'projects'))
     .map((route) => routeNavigation[route])
@@ -175,7 +298,7 @@ export function assistantExperienceForIndustry(industryType: TenantIndustryType 
   operatingDataAvailable: boolean
   canViewCommercial: boolean
 }): AssistantExperience {
-  if (industryType === 'it_services') {
+  if (resolveIndustry(industryType) === 'it_services') {
     return {
       welcome: options.operatingDataAvailable
         ? `${options.companyName}의 프로젝트, 산출물, 계약과 업무 현황을 연결했습니다. 무엇을 확인할까요?`
@@ -194,9 +317,7 @@ export function assistantExperienceForIndustry(industryType: TenantIndustryType 
 }
 
 export function librarySearchPlaceholderForIndustry(industryType: TenantIndustryType | string | null | undefined): string {
-  return industryType === 'it_services'
-    ? '예: 최근 프로젝트 계약서 최종본 찾아줘'
-    : '예: 최근 자가품질검사 성적서 찾아줘'
+  return industrySurface(industryType).librarySearchPlaceholder
 }
 
 export function routesForModules(enabled: readonly ServiceModuleId[] = ['core', 'food-manufacturing']) {

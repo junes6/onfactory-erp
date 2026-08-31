@@ -7,6 +7,7 @@ import { Button } from './ui/Button'
 import { BRAND } from '../brand'
 import type { LensTarget } from './LensPanel'
 import { canRunLensOn } from '../utils/documentLenses'
+import { useIndustrySurface } from '../modules/IndustryContext'
 
 type DocumentVisibility = 'all' | 'department' | 'restricted'
 type CompanyDocument = {
@@ -69,6 +70,7 @@ function useLibraryModal(onClose: () => void) {
 }
 
 function DocumentModal({ document, workspaceScope, onClose, onSaved }: { document?: CompanyDocument; workspaceScope?: string; onClose: () => void; onSaved: () => Promise<void> }) {
+  const industry = useIndustrySurface()
   const dialogRef = useLibraryModal(onClose)
   const fileRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
@@ -106,12 +108,12 @@ function DocumentModal({ document, workspaceScope, onClose, onSaved }: { documen
         {!document && <section className="library-dropzone"><input ref={fileRef} className="sr-only" type="file" onChange={(event) => { const selected = event.target.files?.[0] ?? null; setFile(selected); if (selected) { const nameInput = event.currentTarget.form?.elements.namedItem('name') as HTMLInputElement | null; if (nameInput && !nameInput.value) nameInput.value = selected.name } }} /><Upload size={26} /><div><strong>{file?.name ?? '파일을 선택해 주세요'}</strong><span>{file ? humanSize(file.size) : 'PDF, 문서, 이미지, 압축파일 · 최대 10MB'}</span></div><Button tone="secondary" type="button" onClick={() => fileRef.current?.click()}>파일 선택</Button></section>}
         <div className="library-form-grid">
           <label className="full"><span>자료 이름</span><input name="name" defaultValue={document?.name} required autoFocus={Boolean(document)} /></label>
-          <label><span>분류</span><select name="category" defaultValue={document?.category ?? '공통자료'}><option>공통자료</option><option>세무·회계</option><option>지식재산·인증</option><option>식품안전·인증</option><option>제품·표시사항</option><option>생산·품질</option><option>재고·물류</option><option>판매·계약</option><option>인사·교육</option><option>회의·업무일지</option>{document?.category && !['공통자료', '세무·회계', '지식재산·인증', '식품안전·인증', '제품·표시사항', '생산·품질', '재고·물류', '판매·계약', '인사·교육', '회의·업무일지'].includes(document.category) && <option>{document.category}</option>}</select></label>
+          <label><span>분류</span><select name="category" defaultValue={document?.category ?? '공통자료'}>{industry.documentCategories.map((category) => <option key={category}>{category}</option>)}{document?.category && !industry.documentCategories.includes(document.category) && <option>{document.category}</option>}</select></label>
           <label><span>저장 위치</span><select name="storage" defaultValue={document?.storage ?? 'local'}><option value="local">{BRAND.storageLabel}</option><option value="nas" disabled>NAS 동기화 · 자격증명 연결 후 사용</option></select></label>
           <label><span>열람 권한</span><select name="visibility" defaultValue={document?.visibility ?? 'all'}><option value="all">전 직원</option><option value="department">지정 부서</option><option value="restricted">지정 계정</option></select></label>
-          <label><span>허용 부서 · 쉼표 구분</span><input name="departments" defaultValue={document?.departments.join(', ')} placeholder="품질관리, 생산 1팀" /></label>
+          <label><span>허용 부서 · 쉼표 구분</span><input name="departments" defaultValue={document?.departments.join(', ')} placeholder={industry.examples.departments} /></label>
           <label className="full"><span>허용 계정 ID · 제한자료일 때</span><input name="allowedUserIds" defaultValue={document?.allowedUserIds.join(', ')} placeholder="예: 회사 구성원 계정 ID" /></label>
-          <label className="full"><span>AI 검색 태그 · 쉼표 구분</span><input name="tags" defaultValue={document?.tags.join(', ')} placeholder="HACCP, 멍게젓, 2026 검사" /></label>
+          <label className="full"><span>AI 검색 태그 · 쉼표 구분</span><input name="tags" defaultValue={document?.tags.join(', ')} placeholder={industry.examples.libraryTags} /></label>
           <label className="full"><span>자료 요약</span><textarea name="summary" rows={4} defaultValue={document?.summary} placeholder="AI가 파일을 찾고 설명할 때 사용할 핵심 내용을 적어 주세요." required /></label>
         </div>
         {error && <p className="library-error" role="alert">{error}</p>}

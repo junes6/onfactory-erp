@@ -51,6 +51,7 @@ import {
   uploadDocumentAttachments,
 } from '../utils/documentAttachments'
 import './CollaborationSuite.css'import { Button } from './ui/Button'
+import { useIndustrySurface } from '../modules/IndustryContext'
 
 
 type ToastHandler = (message: string) => void
@@ -1116,6 +1117,7 @@ function ScheduleEventDialog({
   onDelete: () => Promise<void>
   onClose: () => void
 }) {
+  const industry = useIndustrySurface()
   const dialogRef = useOverlayFocus(true, onClose)
   const [showDepartmentCreator, setShowDepartmentCreator] = useState(false)
   const [newDepartment, setNewDepartment] = useState('')
@@ -1150,7 +1152,7 @@ function ScheduleEventDialog({
           void onSave(draft).finally(() => setSubmitting(false))
         }}>
           <div className="collab-dialog-body collab-form-grid">
-            <label className="collab-field wide"><span>일정 제목</span><input data-autofocus value={draft.title} disabled={!canEdit} onChange={(event) => update('title', event.target.value)} placeholder="예: 월간 생산계획 회의" /></label>
+            <label className="collab-field wide"><span>일정 제목</span><input data-autofocus value={draft.title} disabled={!canEdit} onChange={(event) => update('title', event.target.value)} placeholder={industry.examples.scheduleTitle} /></label>
             <label className="collab-field"><span>날짜</span><input type="date" value={draft.date} disabled={!canEdit} onChange={(event) => update('date', event.target.value)} /></label>
             <div className="collab-time-fields">
               <label className="collab-field"><span>시작</span><input type="time" value={draft.start} disabled={!canEdit} onChange={(event) => update('start', event.target.value)} /></label>
@@ -1345,6 +1347,7 @@ function JournalReviewDialog({
   onSubmit: (comment: string) => void
   onClose: () => void
 }) {
+  const industry = useIndustrySurface()
   const [comment, setComment] = useState('')
   const dialogRef = useOverlayFocus(true, onClose)
   const isReject = decision === '반려'
@@ -1379,7 +1382,7 @@ function JournalReviewDialog({
                 maxLength={1000}
                 value={comment}
                 onChange={(event) => setComment(event.target.value)}
-                placeholder={isReject ? '예: 냉동창고 LOT별 실사 수량과 조치 결과를 보완해 주세요.' : '필요할 때만 남기세요. 예: 다음 주 계획까지 확인했습니다.'}
+                placeholder={isReject ? industry.examples.reviewComment : '필요할 때만 남기세요. 예: 다음 주 계획까지 확인했습니다.'}
               />
               <small>{comment.length}/1000{isReject ? ' · 2자 이상 입력' : ' · 비워 두어도 승인됩니다'}</small>
             </label>

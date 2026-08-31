@@ -14,6 +14,7 @@ import { DocumentExtractionReview, type DocumentExtractionState } from './Docume
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ItServices.css'
 import { Button, IconButton } from './ui/Button'
+import { useIndustrySurface } from '../modules/IndustryContext'
 
 export type ItServicesView = 'it-projects' | 'it-deliverables' | 'it-contracts'
 
@@ -616,6 +617,7 @@ function ClientEditor({ item, onClose, onSave }: { item?: ItClient; onClose: () 
 }
 
 function ProgramEditor({ item, workspaceScope, currentUserName, onToast, onClose, onSave }: { item?: ItSupportProgram; workspaceScope?: string; currentUserName: string; onToast: (message: string) => void; onClose: () => void; onSave: (next: ItSupportProgram) => Promise<boolean> }) {
+  const industry = useIndustrySurface()
   useEscape(onClose)
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -654,7 +656,7 @@ function ProgramEditor({ item, workspaceScope, currentUserName, onToast, onClose
     <section className="modal-card it-modal" role="dialog" aria-modal="true" aria-labelledby="it-program-title">
       <header><div><span className="eyebrow">SUPPORT PROGRAM</span><h2 id="it-program-title">{item ? '지원사업 수정' : '지원사업 등록'}</h2><p>사업명만 있으면 등록됩니다. 접수·사업 기간을 넣으면 마감을 알려 드립니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={() => void cancel()}><X size={21} /></IconButton></header>
       <form onSubmit={submit}>
-        <div className="form-grid"><label className="form-field"><span>사업명 <em className="field-required">필수</em></span><input name="title" autoFocus defaultValue={item?.title ?? ''} required placeholder="예: 2026 스마트공장 구축 지원" /></label><label className="form-field"><span>주관기관</span><input name="agency" defaultValue={item?.agency ?? ''} placeholder="예: 중소벤처기업부 · 테크노파크" /></label></div>
+        <div className="form-grid"><label className="form-field"><span>사업명 <em className="field-required">필수</em></span><input name="title" autoFocus defaultValue={item?.title ?? ''} required placeholder={industry.examples.supportProgram} /></label><label className="form-field"><span>주관기관</span><input name="agency" defaultValue={item?.agency ?? ''} placeholder="예: 중소벤처기업부 · 테크노파크" /></label></div>
         <div className="form-grid"><label className="form-field"><span>진행 상태</span><select name="status" defaultValue={item?.status ?? '준비'}>{SUPPORT_PROGRAM_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label><label className="form-field"><span>지원 금액 (원)</span><input name="amount" type="number" min="0" step="10000" defaultValue={item?.amount ?? 0} /></label></div>
         <div className="form-grid"><label className="form-field"><span>접수 시작</span><input name="applyStart" type="date" defaultValue={item?.applyStart ?? ''} /></label><label className="form-field"><span>접수 마감</span><input name="applyEnd" type="date" defaultValue={item?.applyEnd ?? ''} /></label></div>
         <div className="form-grid"><label className="form-field"><span>사업 시작</span><input name="startDate" type="date" defaultValue={item?.startDate ?? ''} /></label><label className="form-field"><span>사업 종료</span><input name="endDate" type="date" defaultValue={item?.endDate ?? ''} /></label></div>

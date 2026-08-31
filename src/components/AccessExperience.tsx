@@ -3,6 +3,7 @@ import { Accessibility, ArrowLeft, Briefcase, Check, ChevronRight, Download, Eye
 import { BrandMark } from './AppIcons'
 import { Button, IconButton } from './ui/Button'
 import { BRAND } from '../brand'
+import { useIndustrySurface } from '../modules/IndustryContext'
 
 export type ThemeChoice = 'light' | 'dark' | 'system'
 export type FontChoice = 'standard' | 'large' | 'extra'
@@ -346,6 +347,7 @@ export type ProfileAccount = { id: string; name: string; email: string; team?: s
 
 /** 내 프로필 수정 — 이름·부서·직책·연락처·소개 + 비밀번호 변경 */
 export function ProfileEditor({ account, onClose, onSaved, onToast }: { account: ProfileAccount; onClose: () => void; onSaved: (account: ProfileAccount & Record<string, unknown>) => void; onToast: (message: string) => void }) {
+  const industry = useIndustrySurface()
   const [name, setName] = useState(account.name)
   const [team, setTeam] = useState(account.team ?? '')
   const [jobRole, setJobRole] = useState(account.jobRole ?? '')
@@ -394,7 +396,7 @@ export function ProfileEditor({ account, onClose, onSaved, onToast }: { account:
           <label className="form-field"><span>연락처</span><div className="input-with-icon"><Phone size={17} /><input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="010-0000-0000" maxLength={30} /></div></label>
         </div>
         <div className="form-grid">
-          <label className="form-field"><span>부서</span><input value={team} onChange={(event) => setTeam(event.target.value)} maxLength={40} placeholder={operator ? BRAND.operatorTeam : '예: 품질관리'} /></label>
+          <label className="form-field"><span>부서</span><input value={team} onChange={(event) => setTeam(event.target.value)} maxLength={40} placeholder={operator ? BRAND.operatorTeam : industry.examples.department} /></label>
           <label className="form-field"><span>직책</span><div className="input-with-icon"><Briefcase size={17} /><input value={jobRole} onChange={(event) => setJobRole(event.target.value)} maxLength={40} placeholder="예: 품질 책임자" /></div></label>
         </div>
         <label className="form-field full"><span>한 줄 소개 <em>선택</em></span><input value={bio} onChange={(event) => setBio(event.target.value)} maxLength={200} placeholder="담당 업무나 연락 가능한 시간을 적어 두면 동료가 찾기 쉽습니다." /></label>

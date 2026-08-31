@@ -29,7 +29,8 @@ import { ItServicesPage, type ItServicesView } from './components/ItServices'
 import { ApprovalQueue } from './components/ApprovalQueue'
 import { SupportProgramsWidget } from './components/SupportProgramsWidget'
 import { PersonalTodoWidget } from './components/PersonalTodoWidget'
-import { brandLabelForIndustry, navigationForIndustry, routeLabel, routesForIndustry, type TenantRouteId } from './modules/registry'
+import { IndustryProvider } from './modules/IndustryContext'
+import { brandLabelForIndustry, industrySurface, navigationForIndustry, resolveIndustry, routeLabel, routesForIndustry, type TenantRouteId } from './modules/registry'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
 import { WorkspaceNavigationEditButton, WorkspaceNavigationEditor, usePersonalNavigation } from './components/WorkspaceNavigation'
@@ -120,6 +121,29 @@ type DashboardSalesChannel = {
   revenue: number
   status: string
   connectionStatus?: string
+}
+
+// IT 서비스 모듈의 대시보드 신호. 식품의 제품·판매채널과 같은 자리를 차지한다.
+type DashboardItProject = {
+  id: string
+  name: string
+  client: string
+  status: string
+  dueDate: string
+}
+
+type DashboardItContract = {
+  id: string
+  client: string
+  title: string
+  endDate: string
+}
+
+/** 'YYYY-MM-DD'에 일수를 더한다. 계약 만료 임박 판정에만 쓰므로 KST 자정 기준으로 충분하다. */
+function addDaysIso(dateKey: string, days: number) {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  const shifted = new Date(Date.UTC(year, month - 1, day + days))
+  return shifted.toISOString().slice(0, 10)
 }
 
 type DashboardCalendarEvent = {
@@ -238,11 +262,13 @@ type DashboardDropTarget = {
   edge: 'before' | 'after'
 }
 
-function AIHome({ workItems, products, salesChannels, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, onOpenTask, easyMode = false, industryType, pendingProposals = 0, onAdvanceTask, onCreateTask, onNavigate, onOpenAlerts, onToast }: {
+function AIHome({ workItems, products, salesChannels, itProjects, itContracts, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, onOpenTask, easyMode = false, industryType, pendingProposals = 0, onAdvanceTask, onCreateTask, onNavigate, onOpenAlerts, onToast }: {
   pendingProposals?: number
   workItems: WorkItem[]
   products: DashboardProduct[]
   salesChannels: DashboardSalesChannel[]
+  itProjects: DashboardItProject[]
+  itContracts: DashboardItContract[]
   calendarEvents: DashboardCalendarEvent[]
   currentUserName: string
   currentUserId: string
@@ -264,36 +290,67 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
   const todayIso = seoulDateInputValue(today)
   const todayLabel = formatDateLabel(today)
   const todayEvents = calendarEvents.filter((event) => event.date.slice(0, 10) === todayIso)
-  const totalOrders = salesChannels.reduce((sum, channel) => sum + (Number.isFinite(channel.orders) ? channel.orders : 0), 0)
-  const productAlerts = products.filter((product) => product.status !== '정상' || !['승인', '정상'].includes(product.labelStatus))
-  const channelAlerts = salesChannels.filter((channel) => ['주의', '오류'].includes(channel.status))
+  const surface = industrySurface(industryType)
+  const isItServices = resolveIndustry(industryType) === 'it_services'
+  // 업종 모듈이 주는 점검 신호. 식품은 제품·채널, IT는 프로젝트 마감·계약 만료를 본다.
+  const moduleAlerts: { title: string; detail: string; page: PageId }[] = isItServices
+    ? [
+      ...itProjects
+        .filter((project) => ['진행 중', '검수'].includes(project.status) && project.dueDate && project.dueDate < todayIso)
+        .map((project) => ({ title: `${project.name} 마감일이 지났어요`, detail: `${project.client || '거래처 미지정'} · ${project.status} · ${project.dueDate} 마감`, page: 'it-projects' as PageId })),
+      ...itContracts
+        .filter((contract) => contract.endDate && contract.endDate <= addDaysIso(todayIso, 30))
+        .map((contract) => ({ title: `${contract.title || contract.client} 계약 갱신을 확인해 주세요`, detail: `${contract.client} · ${contract.endDate} 종료`, page: 'it-contracts' as PageId })),
+    ]
+    : [
+      ...products
+        .filter((product) => product.status !== '정상' || !['승인', '정상'].includes(product.labelStatus))
+        .map((product) => ({ title: `${product.name} 점검이 필요해요`, detail: `제품 상태 ${product.status} · 표시정보 ${product.labelStatus}`, page: 'products' as PageId })),
+      ...salesChannels
+        .filter((channel) => ['주의', '오류'].includes(channel.status))
+        .map((channel) => ({ title: `${channel.name} 연결 상태를 확인해 주세요`, detail: `현재 채널 상태가 ${channel.status}로 보고됐습니다.`, page: 'sales' as PageId })),
+    ]
   const urgentWork = openWork.filter((item) => item.priority === '긴급')
-  const attentionCount = productAlerts.length + channelAlerts.length + urgentWork.length
-  const operatingDataAvailable = products.length > 0 || salesChannels.length > 0 || calendarEvents.length > 0 || workItems.length > 0
-  const dashboardAlert = productAlerts[0]
-    ? { title: `${productAlerts[0].name} 점검이 필요해요`, detail: `제품 상태 ${productAlerts[0].status} · 표시정보 ${productAlerts[0].labelStatus}`, page: 'products' as PageId }
-    : channelAlerts[0]
-      ? { title: `${channelAlerts[0].name} 연결 상태를 확인해 주세요`, detail: `현재 채널 상태가 ${channelAlerts[0].status}로 보고됐습니다.`, page: 'sales' as PageId }
-      : urgentWork[0]
-        ? { title: urgentWork[0].title, detail: `${formatWorkDue(urgentWork[0].due)} 마감 · ${workStatusLabel(urgentWork[0].status)}`, page: 'tasks' as PageId }
-        : operatingDataAvailable
-          ? { title: '현재 긴급 점검 항목이 없습니다', detail: '등록된 제품·채널·업무에서 긴급 상태가 발견되지 않았습니다.', page: 'tasks' as PageId }
-          : { title: '운영 데이터를 먼저 연결해 주세요', detail: '제품·창고·판매채널을 등록하면 AI 선제 알림이 시작됩니다.', page: 'products' as PageId }
+  const attentionCount = moduleAlerts.length + urgentWork.length
+  const headlineValue = surface.headlineChip.metric === 'active-projects'
+    ? itProjects.filter((project) => ['수주 확정', '진행 중', '검수'].includes(project.status)).length
+    : salesChannels.reduce((sum, channel) => sum + (Number.isFinite(channel.orders) ? channel.orders : 0), 0)
+  const moduleDataAvailable = isItServices
+    ? itProjects.length > 0 || itContracts.length > 0
+    : products.length > 0 || salesChannels.length > 0
+  const operatingDataAvailable = moduleDataAvailable || calendarEvents.length > 0 || workItems.length > 0
+  const dashboardAlert = moduleAlerts[0]
+    ?? (urgentWork[0]
+      ? { title: urgentWork[0].title, detail: `${formatWorkDue(urgentWork[0].due)} 마감 · ${workStatusLabel(urgentWork[0].status)}`, page: 'tasks' as PageId }
+      : operatingDataAvailable
+        ? { title: '현재 긴급 점검 항목이 없습니다', detail: '등록된 업무와 업종 자료에서 긴급 상태가 발견되지 않았습니다.', page: 'tasks' as PageId }
+        : { title: '운영 데이터를 먼저 연결해 주세요', detail: surface.onboarding.detail.replace('AI 알림이 활성화됩니다', 'AI 선제 알림이 시작됩니다'), page: surface.onboarding.route as PageId })
+  const HeadlineChipIcon = surface.headlineChip.icon
   const [layoutOpen, setLayoutOpen] = useState(false)
   const [widgetPreferences, setWidgetPreferences] = useDashboardPreferences(`${companyName}:${currentUserId}`)
   const [draggingWidgetId, setDraggingWidgetId] = useState<DashboardWidgetPreference['id'] | null>(null)
   const [keyboardWidgetId, setKeyboardWidgetId] = useState<DashboardWidgetPreference['id'] | null>(null)
   const [dropTarget, setDropTarget] = useState<DashboardDropTarget | null>(null)
   const [layoutAnnouncement, setLayoutAnnouncement] = useState('')
+  // AI에 넘기는 운영 데이터도 업종을 따른다. IT 고객사에게 빈 products·salesChannels를 보내면
+  // 모델은 "제품이 하나도 없는 제조사"로 읽고 정작 프로젝트·계약은 근거로 쓰지 못한다.
   const aiContext = {
     date: todayIso,
     company: companyName,
-    salesChannels: salesChannels.map(({ name, orders, units, revenue, status }) => canAssignTasks
-      ? { name, orders, units, revenue, status }
-      : { name, status }),
-    products: products.map(({ name, stock, available, safetyStock, labelStatus, status }) => ({
-      name, stock, available, safetyStock, labelStatus, status,
-    })),
+    industry: resolveIndustry(industryType),
+    ...(isItServices
+      ? {
+        projects: itProjects.map(({ name, client, status, dueDate }) => ({ name, client, status, dueDate })),
+        contracts: canAssignTasks ? itContracts.map(({ client, title, endDate }) => ({ client, title, endDate })) : [],
+      }
+      : {
+        salesChannels: salesChannels.map(({ name, orders, units, revenue, status }) => canAssignTasks
+          ? { name, orders, units, revenue, status }
+          : { name, status }),
+        products: products.map(({ name, stock, available, safetyStock, labelStatus, status }) => ({
+          name, stock, available, safetyStock, labelStatus, status,
+        })),
+      }),
     sharedSchedule: calendarEvents,
     openWork: canAssignTasks ? openWork : myWork,
   }
@@ -499,7 +556,7 @@ function AIHome({ workItems, products, salesChannels, calendarEvents, currentUse
         description="AI에게 업무 정보를 묻거나, 오늘 처리할 일정과 결재를 확인하세요."
         action={<><div className="home-header-chips" aria-label="오늘 핵심 현황">
           {canAssignTasks
-            ? <button className={totalOrders === 0 ? 'is-neutral' : ''} type="button" aria-label={`온라인 주문 ${totalOrders}건`} onClick={() => onNavigate('sales')}><ShoppingCart size={15} /><span>온라인 주문</span><strong>{totalOrders.toLocaleString('ko-KR')}</strong></button>
+            ? <button className={headlineValue === 0 ? 'is-neutral' : ''} type="button" aria-label={`${surface.headlineChip.label} ${headlineValue}건`} onClick={() => onNavigate(surface.headlineChip.route as PageId)}><HeadlineChipIcon size={15} /><span>{surface.headlineChip.label}</span><strong>{headlineValue.toLocaleString('ko-KR')}</strong></button>
             : <button className={todayEvents.length === 0 ? 'is-neutral' : ''} type="button" aria-label={`오늘 일정 ${todayEvents.length}건`} onClick={() => onNavigate('schedule')}><CalendarDays size={15} /><span>오늘 일정</span><strong>{todayEvents.length}</strong></button>}
           <button className={myWork.length === 0 ? 'is-neutral' : ''} type="button" aria-label={`확인할 업무 ${myWork.length}건`} onClick={() => onNavigate('tasks')}><ListChecks size={15} /><span>확인 업무</span><strong>{myWork.length}</strong></button>
           <button className={attentionCount === 0 ? 'is-neutral' : ''} type="button" aria-label={`AI 알림 ${attentionCount}건`} onClick={onOpenAlerts}><Sparkles size={15} /><span>AI 알림</span><strong>{attentionCount}</strong></button>
@@ -660,7 +717,7 @@ function CompletionModal({ item, workspaceScope, onToast, onClose, onSubmit }: {
   </div>
 }
 
-function WorkReviewModal({ item, workspaceScope, onToast, onClose, onSubmit }: { item: WorkItem; workspaceScope?: string; onToast: (message: string) => void; onClose: () => void; onSubmit: (decision: 'approve' | 'request-changes', comment: string, requestedChanges?: string) => Promise<boolean> }) {
+function WorkReviewModal({ item, industryType, workspaceScope, onToast, onClose, onSubmit }: { item: WorkItem; industryType?: string; workspaceScope?: string; onToast: (message: string) => void; onClose: () => void; onSubmit: (decision: 'approve' | 'request-changes', comment: string, requestedChanges?: string) => Promise<boolean> }) {
   const dialogRef = useDialogFocus()
   const [mode, setMode] = useState<'approve' | 'request-changes'>('approve')
   const [comment, setComment] = useState('')
@@ -672,14 +729,14 @@ function WorkReviewModal({ item, workspaceScope, onToast, onClose, onSubmit }: {
       <form onSubmit={async (event) => { event.preventDefault(); if (!valid) return; setBusy(true); const message = comment.trim(); if (await onSubmit(mode, message, mode === 'request-changes' ? message : undefined)) onClose(); else setBusy(false) }}>
         <div className="workflow-submission-preview"><strong>담당자 완료 보고</strong><p>{item.completion?.summary || '레거시 업무로 완료내용이 등록되지 않았습니다.'}</p>{item.completion?.evidence.map((file) => file.id.startsWith('DOC-') ? <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={14} /> {file.name} · {file.size}</button> : <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}</span>)}</div>
         <div className="workflow-review-decision" role="radiogroup" aria-label="검토 결정"><button type="button" role="radio" aria-checked={mode === 'approve'} onClick={() => { setMode('approve'); setComment('') }}><Check size={16} /> 승인</button><button type="button" role="radio" aria-checked={mode === 'request-changes'} onClick={() => { setMode('request-changes'); setComment('') }}>수정 요청</button></div>
-        <label className="form-field full"><span>{mode === 'approve' ? '승인 메모' : '수정 요청 내용'} <em>{mode === 'approve' ? '선택' : '필수'}</em></span><textarea autoFocus data-autofocus rows={mode === 'approve' ? 3 : 4} value={comment} onChange={(event) => setComment(event.target.value)} placeholder={mode === 'approve' ? '필요할 때만 남기세요. 비워 두고 바로 승인할 수 있습니다.' : '무엇을 왜, 어떻게 보완해야 하는지 한 번에 작성해 주세요. 예: LOT 번호와 조치 전·후 사진을 보완해 주세요.'} required={mode !== 'approve'} /></label>
+        <label className="form-field full"><span>{mode === 'approve' ? '승인 메모' : '수정 요청 내용'} <em>{mode === 'approve' ? '선택' : '필수'}</em></span><textarea autoFocus data-autofocus rows={mode === 'approve' ? 3 : 4} value={comment} onChange={(event) => setComment(event.target.value)} placeholder={mode === 'approve' ? '필요할 때만 남기세요. 비워 두고 바로 승인할 수 있습니다.' : `무엇을 왜, 어떻게 보완해야 하는지 한 번에 작성해 주세요. ${industrySurface(industryType).examples.reviewComment}`} required={mode !== 'approve'} /></label>
         <footer><Button tone="ghost" type="button" onClick={onClose}>취소</Button><Button tone={mode === 'approve' ? 'primary' : 'danger'} type="submit" disabled={busy || !valid}>{mode === 'approve' && <Check size={18} />}{mode === 'approve' ? ' 승인 완료' : '수정 요청 보내기'}</Button></footer>
       </form>
     </section>
   </div>
 }
 
-function WorkRuleModal({ assignees, onClose, onSubmit }: { assignees: WorkAssignee[]; onClose: () => void; onSubmit: (input: Record<string, unknown>) => Promise<boolean> }) {
+function WorkRuleModal({ assignees, industryType, onClose, onSubmit }: { assignees: WorkAssignee[]; industryType?: string; onClose: () => void; onSubmit: (input: Record<string, unknown>) => Promise<boolean> }) {
   const dialogRef = useDialogFocus()
   const [frequency, setFrequency] = useState<'weekly' | 'monthly'>('weekly')
   const [monthlyMode, setMonthlyMode] = useState<'day-of-month' | 'last-weekday'>('day-of-month')
@@ -687,6 +744,7 @@ function WorkRuleModal({ assignees, onClose, onSubmit }: { assignees: WorkAssign
   const [monthDay, setMonthDay] = useState(1)
   const [busy, setBusy] = useState(false)
   const today = seoulDateInputValue()
+  const ruleSurface = industrySurface(industryType)
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section ref={dialogRef} className="modal-card workflow-modal" role="dialog" aria-modal="true" aria-labelledby="rule-modal-title">
       <header><div><span className="eyebrow">RECURRING WORK</span><h2 id="rule-modal-title">반복 업무 규칙 만들기</h2><p>매주 또는 매월 자동으로 업무를 생성합니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
@@ -707,10 +765,10 @@ function WorkRuleModal({ assignees, onClose, onSubmit }: { assignees: WorkAssign
         else setBusy(false)
       }}>
         <div className="form-grid">
-          <label className="form-field full"><span>업무 제목</span><input autoFocus data-autofocus name="title" required placeholder="예: 주간 HACCP 기록 점검" /></label>
+          <label className="form-field full"><span>업무 제목</span><input autoFocus data-autofocus name="title" required placeholder={ruleSurface.examples.workTitle} /></label>
           <label className="form-field full"><span>업무 설명</span><textarea name="description" rows={3} required placeholder="담당자가 매회 확인할 완료 기준" /></label>
           <label className="form-field"><span>담당자</span><select name="ownerId" required>{assignees.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-          <label className="form-field"><span>업무 구분</span><select name="category" defaultValue="일반"><option>제품</option><option>생산</option><option>재고</option><option>품질</option><option>일반</option></select></label>
+          <label className="form-field"><span>업무 구분</span><select name="category" defaultValue="일반">{ruleSurface.workCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
           <label className="form-field"><span>반복 주기</span><select value={frequency} onChange={(event) => setFrequency(event.target.value as 'weekly' | 'monthly')}><option value="weekly">주간</option><option value="monthly">월간</option></select></label>
           <label className="form-field"><span>반복 간격</span><select name="interval" defaultValue="1"><option value="1">{frequency === 'weekly' ? '매주' : '매월'}</option><option value="2">{frequency === 'weekly' ? '2주마다' : '2개월마다'}</option><option value="3">{frequency === 'weekly' ? '3주마다' : '3개월마다'}</option></select></label>
           {frequency === 'monthly' && <label className="form-field full"><span>월간 실행 방식</span><select value={monthlyMode} onChange={(event) => setMonthlyMode(event.target.value as 'day-of-month' | 'last-weekday')}><option value="day-of-month">매월 특정일</option><option value="last-weekday">매월 마지막 주 특정 요일</option></select></label>}
@@ -727,8 +785,9 @@ function WorkRuleModal({ assignees, onClose, onSubmit }: { assignees: WorkAssign
   </div>
 }
 
-function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, workspaceScope, focusId, onToast, onCreate, onTransition, onCreateRule, onToggleRule, onDeleteRule }: {
+function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, industryType, workspaceScope, focusId, onToast, onCreate, onTransition, onCreateRule, onToggleRule, onDeleteRule }: {
   items: WorkItem[]; rules: WorkRule[]; currentUserId: string; canAssignTasks: boolean; assignees: WorkAssignee[]
+  industryType?: string
   workspaceScope?: string
   focusId?: string
   onToast: (message: string) => void
@@ -937,8 +996,8 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, work
     </div>}
 
     {dialog?.type === 'completion' && <CompletionModal item={dialog.item} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(summary, evidence) => onTransition(dialog.item.id, 'submit', { completion: { summary, evidence } })} />}
-    {dialog?.type === 'review' && <WorkReviewModal item={dialog.item} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(decision, comment, requestedChanges) => onTransition(dialog.item.id, decision, { review: { comment, requestedChanges } })} />}
-    {dialog?.type === 'rule' && <WorkRuleModal assignees={assignees} onClose={() => setDialog(null)} onSubmit={onCreateRule} />}
+    {dialog?.type === 'review' && <WorkReviewModal item={dialog.item} industryType={industryType} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(decision, comment, requestedChanges) => onTransition(dialog.item.id, decision, { review: { comment, requestedChanges } })} />}
+    {dialog?.type === 'rule' && <WorkRuleModal assignees={assignees} industryType={industryType} onClose={() => setDialog(null)} onSubmit={onCreateRule} />}
   </div>
 }
 
@@ -1188,8 +1247,8 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
   )
 }
 
-function TaskModal({ initialText, initialDescription = '', requesterName, requesterId, assignees, workspaceScope, onClose, onSave }: {
-  initialText: string; initialDescription?: string; requesterName: string; requesterId: string; assignees: WorkAssignee[]; workspaceScope?: string; onClose: () => void; onSave: (item: WorkItem) => Promise<boolean>
+function TaskModal({ initialText, initialDescription = '', requesterName, requesterId, assignees, industryType, workspaceScope, onClose, onSave }: {
+  initialText: string; initialDescription?: string; requesterName: string; requesterId: string; assignees: WorkAssignee[]; industryType?: string; workspaceScope?: string; onClose: () => void; onSave: (item: WorkItem) => Promise<boolean>
 }) {
   const [title, setTitle] = useState(initialText)
   const [description, setDescription] = useState(initialDescription)
@@ -1256,7 +1315,7 @@ function TaskModal({ initialText, initialDescription = '', requesterName, reques
         <header><div><span className="eyebrow">NEW WORK</span><h2 id="task-modal-title">새 업무 지시</h2><p>무엇을, 누가, 언제까지 할지만 정하면 바로 지시할 수 있습니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" disabled={busy} onClick={onClose}><X size={21} /></IconButton></header>
         <form onSubmit={submit}>
           <div className="task-required-fields">
-            <label className="form-field full"><span>무엇을 <em>필수</em></span><input autoFocus data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 신규 제품 표시사항 최종 검토" required /></label>
+            <label className="form-field full"><span>무엇을 <em>필수</em></span><input autoFocus data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder={industrySurface(industryType).examples.workTitle} required /></label>
             <label className="form-field"><span>누가 <em>필수</em></span><select name="ownerId" defaultValue={assignees.find((item) => item.id === requesterId)?.id ?? assignees[0]?.id ?? ''} required><option value="" disabled>직원 선택</option>{assignees.map((assignee) => <option value={assignee.id} key={assignee.id}>{assignee.name}</option>)}</select></label>
             <label className="form-field"><span>언제까지 <em>필수</em></span><input name="due" type="datetime-local" defaultValue={`${seoulDateInputValue()}T18:00`} required /></label>
           </div>
@@ -1380,13 +1439,29 @@ export default function App() {
     scope: workspaceScope,
     seedWhenEmpty: false,
   })
+  // 업종 모듈에 없는 키는 아예 불러오지 않는다. 빈 배열을 들고 있으면 파생 지표가
+  // "0건"으로 살아남아 그 업종에 없는 개념을 계속 화면에 보여 준다.
+  const tenantSignedIn = authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange
+  const tenantIndustry = resolveIndustry(account?.industryType)
+  const hasFoodModule = tenantIndustry === 'food_manufacturing'
+  const hasItModule = tenantIndustry === 'it_services'
   const [dashboardProducts] = useWorkspaceState<DashboardProduct[]>('product-catalog', [], {
-    enabled: authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange,
+    enabled: tenantSignedIn && hasFoodModule,
     scope: workspaceScope,
     seedWhenEmpty: false,
   })
   const [dashboardSalesChannels] = useWorkspaceState<DashboardSalesChannel[]>('sales-channels', [], {
-    enabled: authStatus === 'signed-in' && mode === 'tenant' && account?.role === 'tenant-admin' && !account?.requiresPasswordChange,
+    enabled: tenantSignedIn && hasFoodModule && account?.role === 'tenant-admin',
+    scope: workspaceScope,
+    seedWhenEmpty: false,
+  })
+  const [dashboardItProjects] = useWorkspaceState<DashboardItProject[]>('it-projects', [], {
+    enabled: tenantSignedIn && hasItModule,
+    scope: workspaceScope,
+    seedWhenEmpty: false,
+  })
+  const [dashboardItContracts] = useWorkspaceState<DashboardItContract[]>('it-contracts', [], {
+    enabled: tenantSignedIn && hasItModule && account?.role === 'tenant-admin',
     scope: workspaceScope,
     seedWhenEmpty: false,
   })
@@ -1629,18 +1704,32 @@ export default function App() {
   const nextSharedEvent = [...dashboardCalendarEvents]
     .filter((event) => event.date.slice(0, 10) >= todayKey)
     .sort((a, b) => `${a.date}T${a.start}`.localeCompare(`${b.date}T${b.start}`))[0]
+  const tenantSurface = industrySurface(account?.industryType)
   const channelAttention = dashboardSalesChannels.find((channel) => ['주의', '오류'].includes(channel.status) || channel.connectionStatus === 'setup-required')
-  const workspaceHasOperatingData = workItems.length > 0 || dashboardProducts.length > 0 || dashboardSalesChannels.length > 0 || dashboardCalendarEvents.length > 0
+  const contractAttention = dashboardItContracts.find((contract) => contract.endDate && contract.endDate <= addDaysIso(seoulDateInputValue(), 30))
+  const workspaceHasOperatingData = workItems.length > 0 || dashboardCalendarEvents.length > 0
+    || dashboardProducts.length > 0 || dashboardSalesChannels.length > 0
+    || dashboardItProjects.length > 0 || dashboardItContracts.length > 0
   const primaryTenantNotice = nextWorkNotice
     ? { title: nextWorkNotice.title, detail: `${formatWorkDue(nextWorkNotice.due)} · ${workStatusLabel(nextWorkNotice.status)}`, page: 'tasks' as PageId }
     : workspaceHasOperatingData
       ? { title: '현재 확인할 미완료 업무가 없습니다', detail: '새 업무가 배정되면 알림과 업무 화면에 표시됩니다.', page: 'tasks' as PageId }
-      : { title: '워크스페이스 초기 설정을 시작해 주세요', detail: '제품·창고·판매채널을 연결하면 AI 알림이 활성화됩니다.', page: 'products' as PageId }
+      : { title: tenantSurface.onboarding.title, detail: tenantSurface.onboarding.detail, page: tenantSurface.onboarding.route as PageId }
   const secondaryTenantNotice = channelAttention
-    ? { title: `${channelAttention.name} 연결 상태를 확인해 주세요`, detail: `현재 상태 · ${channelAttention.status}`, page: 'sales' as PageId }
-    : nextSharedEvent
-      ? { title: nextSharedEvent.title, detail: `${formatWorkDue(`${nextSharedEvent.date}T${nextSharedEvent.start}:00`)} · ${nextSharedEvent.location || '장소 미정'}`, page: 'schedule' as PageId }
-      : { title: '첫 공유 일정을 등록해 보세요', detail: `${tenantName} 구성원에게 일정을 공유할 수 있습니다.`, page: 'schedule' as PageId }
+    ? { title: `${channelAttention.name} 연결 상태를 확인해 주세요`, detail: `현재 상태 · ${channelAttention.status}`, page: 'sales' as PageId, icon: <Store size={17} /> }
+    : contractAttention
+      ? { title: `${contractAttention.title || contractAttention.client} 계약 갱신을 확인해 주세요`, detail: `${contractAttention.client} · ${contractAttention.endDate} 종료`, page: 'it-contracts' as PageId, icon: <FileSignature size={17} /> }
+      : nextSharedEvent
+        ? { title: nextSharedEvent.title, detail: `${formatWorkDue(`${nextSharedEvent.date}T${nextSharedEvent.start}:00`)} · ${nextSharedEvent.location || '장소 미정'}`, page: 'schedule' as PageId, icon: <CalendarDays size={17} /> }
+        : { title: '첫 공유 일정을 등록해 보세요', detail: `${tenantName} 구성원에게 일정을 공유할 수 있습니다.`, page: 'schedule' as PageId, icon: <CalendarDays size={17} /> }
+  // 3번째 알림은 "업종 모듈이 지금 무엇을 들고 있는가"를 보고한다.
+  const moduleConnectivityNotice = hasItModule
+    ? dashboardItProjects.length === 0
+      ? { title: '등록된 프로젝트가 아직 없습니다', detail: '프로젝트를 등록하면 마감과 산출물 상태가 여기에 표시됩니다.' }
+      : { title: `프로젝트 ${dashboardItProjects.length}건의 상태를 불러왔습니다`, detail: '표시된 값은 현재 워크스페이스에서 받은 데이터 기준입니다.' }
+    : dashboardSalesChannels.length === 0
+      ? { title: '판매채널 연결을 기다리고 있습니다', detail: '판매채널을 연결하면 주문과 재고 동기화 상태가 표시됩니다.' }
+      : { title: `판매채널 ${dashboardSalesChannels.length}개의 상태를 불러왔습니다`, detail: '표시된 값은 현재 워크스페이스에서 받은 데이터 기준입니다.' }
   const workAssignees: WorkAssignee[] = directoryAssignees
   const industryRoutes = new Set<string>([...routesForIndustry(account?.industryType), ...(account?.role === 'tenant-admin' ? ['judgement'] : [])])
   // 메뉴 라벨·아이콘·업종 경로는 레지스트리만이 결정한다. App은 실데이터 배지만 결합한다.
@@ -1693,13 +1782,22 @@ export default function App() {
         .map((ticket) => ({ id: ticket.id, title: ticket.title, meta: ticket.id + ' · ' + ticket.tenant, page: 'support' as PageId, icon: Headphones }))
       return [...tenantResults, ...ticketResults]
     }
-    const products = dashboardProducts.filter((product) => (product.name + ' ' + product.code + ' ' + product.category).toLowerCase().includes(value)).slice(0, 4).map((product) => ({ id: product.id, title: product.name, meta: product.code + ' · ' + product.category, page: 'products' as PageId, icon: Package }))
+    // 검색 대상도 업종 모듈을 따른다. IT 고객사에게 제품 결과를 줄 수 없고, 줄 이유도 없다.
+    const moduleResults = hasItModule
+      ? [
+        ...dashboardItProjects.filter((project) => (project.name + ' ' + project.client + ' ' + project.status).toLowerCase().includes(value)).slice(0, 3)
+          .map((project) => ({ id: project.id, title: project.name, meta: (project.client || '거래처 미지정') + ' · ' + project.status, page: 'it-projects' as PageId, icon: FolderKanban })),
+        ...dashboardItContracts.filter((contract) => (contract.title + ' ' + contract.client).toLowerCase().includes(value)).slice(0, 2)
+          .map((contract) => ({ id: contract.id, title: contract.title || contract.client, meta: contract.client + (contract.endDate ? ' · ' + contract.endDate + ' 종료' : ''), page: 'it-contracts' as PageId, icon: FileSignature })),
+      ]
+      : dashboardProducts.filter((product) => (product.name + ' ' + product.code + ' ' + product.category).toLowerCase().includes(value)).slice(0, 4)
+        .map((product) => ({ id: product.id, title: product.name, meta: product.code + ' · ' + product.category, page: 'products' as PageId, icon: Package }))
     const taskScope = account?.role === 'tenant-member'
       ? scopedWorkItems
       : tenantWorkItems
     const tasks = taskScope.filter((work) => (work.title + ' ' + work.owner + ' ' + work.id + ' ' + workStatusLabel(work.status)).toLowerCase().includes(value)).slice(0, 3).map((work) => ({ id: work.id, title: work.title, meta: work.owner + ' · ' + workStatusLabel(work.status), page: 'tasks' as PageId, icon: ListChecks }))
-    return [...products, ...tasks]
-  }, [account, dashboardProducts, mode, platformTenants, platformTickets, query, scopedWorkItems, tenantWorkItems])
+    return [...moduleResults, ...tasks]
+  }, [account, dashboardItContracts, dashboardItProjects, dashboardProducts, hasItModule, mode, platformTenants, platformTickets, query, scopedWorkItems, tenantWorkItems])
 
   const navigate = (nextPage: PageId) => {
     if (mode === 'tenant' && account?.role === 'tenant-member' && !tenantMemberPages.has(nextPage)) {
@@ -1898,11 +1996,11 @@ export default function App() {
       return <PlatformConsole section={page as PlatformSection} focusId={platformFocusId} refreshToken={platformRefreshToken} onSectionChange={(section) => navigate(section)} onReturnTenant={requestTenantSupportAccess} onRequestSupport={setSupportTenant} onEnterTenant={(tenantId) => void enterTenant(tenantId)} onDataChanged={() => setPlatformRefreshToken((current) => current + 1)} onToast={setToast} />
     }
     if (account?.role === 'tenant-member' && !tenantMemberPages.has(page)) {
-      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
+      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} itProjects={dashboardItProjects} itContracts={dashboardItContracts} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
     switch (page) {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
-      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} />
+      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'finance': return <TaxAssetsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} industryType={account?.industryType ?? 'food_manufacturing'} onToast={setToast} />
@@ -1919,7 +2017,7 @@ export default function App() {
       case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'it-deliverables':
       case 'it-contracts': return <ItServicesPage view={page as ItServicesView} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} onToast={setToast} />
-      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
+      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} itProjects={dashboardItProjects} itContracts={dashboardItContracts} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
   }
 
@@ -1928,6 +2026,7 @@ export default function App() {
   if (account?.requiresPasswordChange) return <PasswordChangePage name={account.name} email={account.email} onChange={changeInitialPassword} onLogout={logout} />
 
   return (
+    <IndustryProvider industryType={account?.industryType}>
     <div className={'app-shell ' + mode + (storeStatus?.readOnly ? ' has-store-banner' : '') + (account?.operatorMode ? ' has-operator-banner' : '')}>
       <a className="skip-link" href="#main-content">본문으로 바로가기</a>
       {account?.operatorMode && <div className="operator-mode-banner" role="status"><ShieldCheck size={17} /><span><strong>운영자 모드</strong> — {account.operatorMode.tenantName} 접속 중 · 모든 조회·변경이 운영자 {account.operatorMode.operatorName} 이름으로 감사 기록에 남습니다.</span><button type="button" onClick={() => void exitTenant()}>나가기</button></div>}
@@ -1963,7 +2062,7 @@ export default function App() {
           <div className="topbar-actions">
             <div className="global-search">
               <Search size={19} />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={mode === 'platform' ? '고객사·CS 티켓 검색' : '제품·업무·LOT 통합 검색'} role="combobox" aria-expanded={searchResults.length > 0} aria-controls="search-results" aria-autocomplete="list" />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={mode === 'platform' ? '고객사·CS 티켓 검색' : tenantSurface.globalSearchPlaceholder} role="combobox" aria-expanded={searchResults.length > 0} aria-controls="search-results" aria-autocomplete="list" />
               {query && <button type="button" aria-label="검색어 지우기" onClick={() => setQuery('')}><X size={16} /></button>}
               {searchResults.length > 0 && <div className="search-popover" id="search-results" role="listbox">{searchResults.map((result) => {
                 const Icon = result.icon
@@ -1978,8 +2077,8 @@ export default function App() {
                 <div className="notification-list">
                   {([
                     { id: 'primary', tone: 'red', icon: <AlertTriangle size={17} />, title: mode === 'tenant' ? primaryTenantNotice.title : primaryPlatformNotice.title, detail: mode === 'tenant' ? primaryTenantNotice.detail : primaryPlatformNotice.detail, open: () => navigate(mode === 'tenant' ? primaryTenantNotice.page : 'support') },
-                    { id: 'secondary', tone: 'amber', icon: <Package size={17} />, title: mode === 'tenant' ? secondaryTenantNotice.title : secondaryPlatformNotice.title, detail: mode === 'tenant' ? secondaryTenantNotice.detail : secondaryPlatformNotice.detail, open: () => navigate(mode === 'tenant' ? secondaryTenantNotice.page : 'integrations') },
-                    { id: 'tertiary', tone: 'green', icon: <CheckCircle2 size={17} />, title: mode === 'tenant' && dashboardSalesChannels.length === 0 ? '판매채널 연결을 기다리고 있습니다' : mode === 'tenant' ? `판매채널 ${dashboardSalesChannels.length}개의 상태를 불러왔습니다` : '플랫폼 운영 데이터를 불러왔습니다', detail: mode === 'tenant' && dashboardSalesChannels.length === 0 ? '판매채널을 연결하면 주문과 재고 동기화 상태가 표시됩니다.' : '표시된 값은 현재 워크스페이스에서 받은 데이터 기준입니다.', open: undefined as (() => void) | undefined },
+                    { id: 'secondary', tone: 'amber', icon: mode === 'tenant' ? secondaryTenantNotice.icon : <Package size={17} />, title: mode === 'tenant' ? secondaryTenantNotice.title : secondaryPlatformNotice.title, detail: mode === 'tenant' ? secondaryTenantNotice.detail : secondaryPlatformNotice.detail, open: () => navigate(mode === 'tenant' ? secondaryTenantNotice.page : 'integrations') },
+                    { id: 'tertiary', tone: 'green', icon: <CheckCircle2 size={17} />, title: mode === 'tenant' ? moduleConnectivityNotice.title : '플랫폼 운영 데이터를 불러왔습니다', detail: mode === 'tenant' ? moduleConnectivityNotice.detail : '표시된 값은 현재 워크스페이스에서 받은 데이터 기준입니다.', open: undefined as (() => void) | undefined },
                   ]).map((notice) => {
                     const isRead = readNoticeIds.includes(notice.id)
                     return <button type="button" key={notice.id} className={isRead ? 'is-read' : 'is-unread'} aria-label={`${isRead ? '읽음' : '읽지 않음'} · ${notice.title}`} onClick={() => { setReadNoticeIds((current) => current.includes(notice.id) ? current : [...current, notice.id]); notice.open?.(); setNotificationsOpen(false) }}><span className={`notice-icon ${notice.tone}`}>{notice.icon}</span><div><strong>{notice.title}</strong><p>{notice.detail}</p><small>{isRead ? '읽음' : '읽지 않음 · 현재 상태'}</small></div><i className="notice-state" aria-hidden="true" /></button>
@@ -1997,9 +2096,10 @@ export default function App() {
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? BRAND.name} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
       {profileOpen && account && <ProfileEditor account={account} onClose={() => setProfileOpen(false)} onToast={setToast} onSaved={(next) => { setAccount((current) => current ? { ...current, ...next } as AuthAccount : current) }} />}
       <WorkspaceNavigationEditor open={navEditorOpen} source={tenantNavSource} preferences={tenantNavPreferences} onChange={setTenantNavPreferences} onClose={() => setNavEditorOpen(false)} />
-      {taskDraft !== null && <TaskModal initialText={taskDraft.title} initialDescription={taskDraft.completionCriteria} requesterName={account?.name ?? '사용자'} requesterId={account?.id ?? ''} assignees={workAssignees} workspaceScope={workspaceScope} onClose={() => setTaskDraft(null)} onSave={saveTask} />}
+      {taskDraft !== null && <TaskModal initialText={taskDraft.title} initialDescription={taskDraft.completionCriteria} requesterName={account?.name ?? '사용자'} requesterId={account?.id ?? ''} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} onClose={() => setTaskDraft(null)} onSave={saveTask} />}
       {supportTenant && <SupportSessionModal tenant={supportTenant} tickets={platformTickets} onClose={() => setSupportTenant(null)} onCreate={createPlatformSupportSession} />}
       {toast && <div className="toast" role="status"><CheckCircle2 size={19} /><span>{toast}</span><button type="button" aria-label="알림 닫기" onClick={() => setToast('')}><X size={16} /></button></div>}
     </div>
+    </IndustryProvider>
   )
 }

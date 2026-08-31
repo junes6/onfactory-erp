@@ -5,6 +5,7 @@ import { downloadDocumentAttachment, uploadDocumentAttachments, type StoredDocum
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ProjectSpaces.css'
 import { Button, ButtonLink, IconButton } from './ui/Button'
+import { useIndustrySurface } from '../modules/IndustryContext'
 
 type ProjectRole = 'owner' | 'editor' | 'viewer'
 type ProjectMember = { id: string; name: string; team?: string; role: ProjectRole }
@@ -58,6 +59,7 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
   canManage: boolean
   onToast: (message: string) => void
 }) {
+  const industry = useIndustrySurface()
   const headers = useMemo(() => ({ 'content-type': 'application/json', ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}) }), [workspaceScope])
   const [projects, setProjects] = useState<Project[]>([])
   const [directory, setDirectory] = useState<DirectoryEntry[]>([])
@@ -245,7 +247,7 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
       {canManage && <span className="project-toolbar-note">관리자는 모든 프로젝트를 볼 수 있습니다. 직원은 참여 중이거나 회사 전체 공개인 프로젝트만 봅니다.</span>}
     </div>
     {loading ? <div className="empty-state compact"><FolderKanban size={26} /><h3>프로젝트를 불러오는 중</h3></div>
-      : visibleProjects.length === 0 ? <div className="empty-state"><FolderKanban size={30} /><h3>{filter === 'archived' ? '보관된 프로젝트가 없습니다' : '아직 프로젝트가 없습니다'}</h3><p>신제품 개발, 인증 갱신, 수주 건처럼 함께 일하는 단위로 만들고 멤버를 초대하세요.</p><Button tone="primary" type="button" onClick={() => setEditorOpen('create')}><Plus size={18} /> 첫 프로젝트 만들기</Button></div>
+      : visibleProjects.length === 0 ? <div className="empty-state"><FolderKanban size={30} /><h3>{filter === 'archived' ? '보관된 프로젝트가 없습니다' : '아직 프로젝트가 없습니다'}</h3><p>{industry.examples.projectSpace}</p><Button tone="primary" type="button" onClick={() => setEditorOpen('create')}><Plus size={18} /> 첫 프로젝트 만들기</Button></div>
         : <div className="project-grid">
           {visibleProjects.map((project) => <button type="button" className={`project-card${project.status === 'archived' ? ' is-archived' : ''}`} key={project.id} onClick={() => setSelectedId(project.id)}>
             <div className="project-card-head"><span className="project-card-icon"><FolderKanban size={20} /></span><span className="project-card-badges">{project.category && <StatusBadge className="status-pill" tone="info">{project.category}</StatusBadge>}{project.stage && <StatusBadge className="status-pill" dot tone={stageTone(project.stage)}>{project.stage}</StatusBadge>}{project.role && <StatusBadge className="status-pill" tone={roleTone[project.role]}>{roleLabel[project.role]}</StatusBadge>}</span></div>
