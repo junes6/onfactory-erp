@@ -171,13 +171,16 @@ export function PersonalTodoWidget({ workspaceScope, onNavigate, onToast }: {
   </article>
 
   return <section className="personal-todo-widget dashboard-section-card" aria-labelledby="personal-todo-title">
-    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><Check size={18} /></span><h2 id="personal-todo-title">내 To-do</h2></div><Button tone="quiet" type="button" disabled={syncing} onClick={() => void sync(true)}><Sparkles size={15} /> {syncing ? '정리 중' : 'AI 정리'}</Button></header>
+    <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><Check size={18} /></span><h2 id="personal-todo-title">To Do List</h2></div><Button tone="quiet" type="button" disabled={syncing} onClick={() => void sync(true)}><Sparkles size={15} /> {syncing ? '정리 중' : 'AI 정리'}</Button></header>
     <div className="personal-todo-body dashboard-section-body">
       <form className="personal-todo-add" onSubmit={createTodo}>
-        <label className="sr-only" htmlFor="personal-todo-input">할 일</label>
-        <input id="personal-todo-input" name="title" maxLength={180} placeholder="할 일을 바로 입력하세요" autoComplete="off" required />
-        <label className="sr-only" htmlFor="personal-todo-due">마감일</label>
-        <input id="personal-todo-due" name="dueDate" type="date" title="마감일 선택" />
+        <label className="personal-todo-field" htmlFor="personal-todo-input"><span>할 일</span>
+          <input id="personal-todo-input" name="title" maxLength={180} placeholder="할 일을 바로 입력하세요" autoComplete="off" required />
+        </label>
+        {/* 마감일은 서버에서도 선택 항목이다. 비워 둔 채로 추가되는 것이 정상임을 라벨에서 바로 알린다. */}
+        <label className="personal-todo-field" htmlFor="personal-todo-due"><span>마감일 <em>선택</em></span>
+          <input id="personal-todo-due" name="dueDate" type="date" title="마감일 · 비워 두어도 됩니다" />
+        </label>
         <button type="submit" disabled={saving}><Plus size={16} /> 추가</button>
       </form>
       {error && <p className="personal-todo-error" role="alert">{error}</p>}
@@ -186,7 +189,7 @@ export function PersonalTodoWidget({ workspaceScope, onNavigate, onToast }: {
       {!loading && openItems.length > 0 && <div className="personal-todo-list">{openItems.slice(0, 8).map(todoRow)}</div>}
       {editor && <form className="personal-todo-editor" onSubmit={saveEditor}>
         <input aria-label="할 일 수정" value={editor.title} maxLength={180} onChange={(event) => setEditor((current) => current ? { ...current, title: event.target.value } : current)} required autoFocus />
-        <input aria-label="마감일 수정" type="date" value={editor.dueDate} onChange={(event) => setEditor((current) => current ? { ...current, dueDate: event.target.value } : current)} />
+        <input aria-label="마감일 수정 · 비워 두면 기한 없는 할 일이 됩니다" title="마감일 · 비워 두어도 됩니다" type="date" value={editor.dueDate} onChange={(event) => setEditor((current) => current ? { ...current, dueDate: event.target.value } : current)} />
         <select aria-label="우선순위 수정" value={editor.priority} onChange={(event) => setEditor((current) => current ? { ...current, priority: event.target.value as PersonalTodo['priority'] } : current)}><option value="high">높음</option><option value="normal">보통</option><option value="low">낮음</option></select>
         <button type="submit" disabled={updatingId === editor.id}><Check size={15} /> 저장</button>
         <button type="button" aria-label="수정 취소" onClick={() => setEditor(null)}><X size={15} /></button>

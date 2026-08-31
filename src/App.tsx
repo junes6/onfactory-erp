@@ -226,7 +226,7 @@ const dashboardWidgetLabels: Record<DashboardWidgetPreference['id'], string> = {
   ai: 'AI 업무 대화',
   files: '자주 찾는 파일',
   schedule: '공유 일정',
-  todo: '내 To-do',
+  todo: 'To Do List',
   work: '다음 업무',
   links: '업무 바로가기',
   alert: '중요 알림',

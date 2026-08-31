@@ -22,7 +22,7 @@ const widgetLabels: Record<DashboardWidgetId, { title: string; description: stri
   summary: { title: '오늘 핵심 현황', description: '주문·확인 업무·AI 알림을 한 줄로 봅니다.' },
   ai: { title: 'AI 업무 대화', description: '질문과 업무 지시를 처리합니다.' },
   schedule: { title: '공유 일정', description: '오늘 일정과 월간 달력을 봅니다.' },
-  todo: { title: '내 To-do', description: '직접 계획하고 AI가 배정 업무를 자동 정리합니다.' },
+  todo: { title: 'To Do List', description: '직접 계획하고 AI가 배정 업무를 자동 정리합니다.' },
   work: { title: '다음 업무', description: '내가 수행하거나 결재할 업무입니다.' },
   links: { title: '업무 바로가기', description: '자주 쓰는 외부 사이트를 엽니다.' },
   files: { title: '자주 찾는 파일', description: '자주 내려받는 회사 자료를 바로 엽니다.' },
