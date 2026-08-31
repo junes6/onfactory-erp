@@ -51,9 +51,21 @@ function httpsLink(value) {
   return candidate
 }
 
-function score(value) {
+/**
+ * 판정 점수는 두 스케일을 모두 받는다. 워커마다 0~1 비율과 0~100 백분율을 섞어 쓰기 때문에
+ * 한쪽만 받으면 88점짜리 공고가 조용히 "점수 없음"으로 떨어진다.
+ * 1을 넘는 값은 백분율로 보고 100으로 나눈다. 1 이하는 그대로 비율이다
+ * (1은 비율 만점 1.0으로 읽는다. 백분율 1%로 해석하지 않는다).
+ * 100을 넘는 값은 어느 스케일로도 성립하지 않으므로 점수 없음으로 둔다.
+ */
+export function normalizeScore(value) {
+  if (value === null || value === undefined || value === '') return null
   const numeric = Number(value)
-  return Number.isFinite(numeric) && numeric >= 0 && numeric <= 1 ? Math.round(numeric * 1000) / 1000 : null
+  if (!Number.isFinite(numeric) || numeric < 0) return null
+  const scale = numeric > 1 ? 'percent' : 'ratio'
+  const confidence = scale === 'percent' ? numeric / 100 : numeric
+  if (confidence > 1) return null
+  return { confidence: Math.round(confidence * 1000) / 1000, scale, raw: numeric }
 }
 
 /** 서버 간 토큰 비교. 길이 노출을 막기 위해 해시 없이 고정 길이 비교를 쓴다. */
@@ -106,6 +118,7 @@ export function normalizeIngestItem(value) {
     throw new OpportunityIngestError('INVALID_OPPORTUNITY', '공고번호 · 제목 · 대상 테넌트는 필수입니다.')
   }
   const amount = Number(value?.amount)
+  const scored = normalizeScore(value?.score)
   return {
     noticeNo,
     title,
@@ -115,7 +128,10 @@ export function normalizeIngestItem(value) {
     deadline: isoDate(value?.deadline),
     amount: Number.isFinite(amount) && amount >= 0 ? Math.min(Math.round(amount), 1_000_000_000_000) : 0,
     link: httpsLink(value?.link ?? value?.url),
-    score: score(value?.score),
+    // score는 언제나 0~1 정규화값이다. 워커가 보낸 원본과 스케일은 판정 근거로 함께 남긴다.
+    score: scored?.confidence ?? null,
+    scoreScale: scored?.scale ?? null,
+    rawScore: scored?.raw ?? null,
     rationale: plainText(value?.rationale ?? value?.reason, 500),
   }
 }
@@ -140,18 +156,43 @@ export function newOpportunityId() {
   return `OPP-${Date.now()}-${randomBytes(3).toString('hex')}`
 }
 
+const amountText = (value) => `${Number(value).toLocaleString('ko-KR')}원`
+
 /**
  * 임계값 판정: 점수가 없거나 임계 미만이면 목록에만 남기고 승인 큐에는 올리지 않는다.
  * 금액 하한도 같은 규칙으로 본다 (하한 미만이면 목록에만).
+ * 워커가 "왜 큐에 안 올랐는지"를 알아야 판정 프롬프트를 고칠 수 있으므로 비교 결과를 함께 돌려준다.
  */
+export function opportunityVerdict(item, settings) {
+  const threshold = Number.isFinite(settings?.scoreThreshold) ? settings.scoreThreshold : DEFAULT_SCORE_THRESHOLD
+  const minAmount = Number.isFinite(settings?.minAmount) && settings.minAmount > 0 ? settings.minAmount : 0
+  const amount = Number.isFinite(item?.amount) && item.amount > 0 ? item.amount : 0
+  const scored = item?.score !== null && item?.score !== undefined
+  const thresholdMet = scored && item.score >= threshold
+  const amountMet = !(minAmount > 0 && amount > 0 && amount < minAmount)
+  const reason = !scored
+    ? '판정 점수가 없어 목록에만 남겼습니다.'
+    : !thresholdMet
+      ? `판정 점수 ${item.score}이(가) 기준 ${threshold} 미만입니다.`
+      : !amountMet
+        ? `금액 ${amountText(amount)}이(가) 하한 ${amountText(minAmount)} 미만입니다.`
+        : `판정 점수 ${item.score}이(가) 기준 ${threshold} 이상입니다.`
+  return {
+    status: thresholdMet && amountMet ? 'queued' : 'below-threshold',
+    threshold,
+    minAmount,
+    thresholdMet,
+    amountMet,
+    reason,
+  }
+}
+
 export function opportunityStatusFor(item, settings) {
-  if (item.score === null) return 'below-threshold'
-  if (item.score < settings.scoreThreshold) return 'below-threshold'
-  if (settings.minAmount > 0 && item.amount > 0 && item.amount < settings.minAmount) return 'below-threshold'
-  return 'queued'
+  return opportunityVerdict(item, settings).status
 }
 
 export function opportunityRecord(item, settings, receivedAt) {
+  const verdict = opportunityVerdict(item, settings)
   return {
     id: newOpportunityId(),
     key: opportunityKey(item),
@@ -163,9 +204,36 @@ export function opportunityRecord(item, settings, receivedAt) {
     amount: item.amount,
     link: item.link,
     score: item.score,
+    scoreScale: item.scoreScale ?? null,
+    rawScore: item.rawScore ?? null,
     rationale: item.rationale,
-    status: opportunityStatusFor(item, settings),
+    status: verdict.status,
+    statusReason: verdict.reason,
     receivedAt,
+  }
+}
+
+/**
+ * 워커에게 돌려줄 건별 처리 결과 한 줄. 큐에 오르지 못한 이유를 스스로 알 수 있어야
+ * 판정 프롬프트를 고칠 수 있으므로 정규화 결과와 임계값 비교를 모두 담는다.
+ */
+export function ingestResultLine(item, { outcome, settings = null, reason = '' }) {
+  const verdict = settings ? opportunityVerdict(item, settings) : null
+  return {
+    tenantId: item.tenantId,
+    source: item.source,
+    noticeNo: item.noticeNo,
+    outcome,
+    // 정규화 결과: 워커가 보낸 원본과 스케일 판정, 내부에서 쓰는 0~1 신뢰도.
+    rawScore: item.rawScore ?? null,
+    scoreScale: item.scoreScale ?? null,
+    score: item.score ?? null,
+    // 임계값 비교 결과.
+    threshold: verdict ? verdict.threshold : null,
+    thresholdMet: verdict ? verdict.thresholdMet : null,
+    minAmount: verdict ? verdict.minAmount : null,
+    amountMet: verdict ? verdict.amountMet : null,
+    reason: reason || (verdict ? verdict.reason : ''),
   }
 }
 

@@ -11,7 +11,9 @@ import {
   ingestTokenMatches,
   normalizeIngestBatch,
   normalizeOpportunitySettings,
+  normalizeScore,
   opportunityStatusFor,
+  opportunityVerdict,
 } from './opportunity-ingest.mjs'
 import { withServer } from './test-server.mjs'
 
@@ -61,6 +63,51 @@ test('ingest payloads are validated and deduplicated inside one batch', () => {
   assert.equal(items[0].score, 0.8)
 })
 
+test('a score arrives as either a 0~1 ratio or a 0~100 percentage and lands on the same confidence', () => {
+  const percent = normalizeIngestBatch({ opportunities: [{ noticeNo: 'P-1', title: '백분율 워커', tenantId: 'T1', score: 88 }] })[0]
+  const ratio = normalizeIngestBatch({ opportunities: [{ noticeNo: 'R-1', title: '비율 워커', tenantId: 'T1', score: 0.88 }] })[0]
+  assert.equal(percent.score, 0.88)
+  assert.equal(ratio.score, 0.88)
+  assert.equal(percent.score, ratio.score, '88과 0.88은 같은 신뢰도로 정규화된다')
+
+  // 원본과 스케일 판정은 근거로 남긴다.
+  assert.deepEqual({ raw: percent.rawScore, scale: percent.scoreScale }, { raw: 88, scale: 'percent' })
+  assert.deepEqual({ raw: ratio.rawScore, scale: ratio.scoreScale }, { raw: 0.88, scale: 'ratio' })
+
+  // 임계값 판정도 동일해야 한다.
+  const settings = { scoreThreshold: 0.6, minAmount: 0 }
+  assert.equal(opportunityStatusFor(percent, settings), 'queued')
+  assert.equal(opportunityStatusFor(ratio, settings), 'queued')
+})
+
+test('score scale edges are read the way a worker would expect', () => {
+  assert.deepEqual(normalizeScore(1), { confidence: 1, scale: 'ratio', raw: 1 }, '1은 비율 만점이지 1%가 아니다')
+  assert.deepEqual(normalizeScore(100), { confidence: 1, scale: 'percent', raw: 100 })
+  assert.equal(normalizeScore(0).confidence, 0)
+  assert.equal(normalizeScore(101), null, '어느 스케일로도 성립하지 않는 값은 점수 없음')
+  assert.equal(normalizeScore(-1), null)
+  assert.equal(normalizeScore('88').confidence, 0.88, '문자열로 와도 같은 규칙을 쓴다')
+  assert.equal(normalizeScore(undefined), null)
+  assert.equal(normalizeScore('알 수 없음'), null)
+})
+
+test('a verdict explains why a signal missed the queue', () => {
+  const settings = { scoreThreshold: 0.6, minAmount: 50_000_000 }
+  const low = opportunityVerdict({ score: 0.4, amount: 80_000_000 }, settings)
+  assert.equal(low.status, 'below-threshold')
+  assert.equal(low.thresholdMet, false)
+  assert.equal(low.amountMet, true)
+  assert.match(low.reason, /0\.4.*0\.6 미만/)
+
+  const small = opportunityVerdict({ score: 0.9, amount: 1_000_000 }, settings)
+  assert.equal(small.thresholdMet, true)
+  assert.equal(small.amountMet, false)
+  assert.match(small.reason, /하한/)
+
+  assert.match(opportunityVerdict({ score: null, amount: 0 }, settings).reason, /판정 점수가 없어/)
+  assert.equal(opportunityVerdict({ score: 0.7, amount: 80_000_000 }, settings).status, 'queued')
+})
+
 test('score and amount thresholds decide whether a signal reaches the approval queue', () => {
   const settings = { scoreThreshold: 0.6, minAmount: 50_000_000 }
   assert.equal(opportunityStatusFor({ score: 0.7, amount: 80_000_000 }, settings), 'queued')
@@ -94,7 +141,20 @@ test('an ingested opportunity reaches the approval queue once and creates a revi
         ],
       })
       assert.equal(first.status, 201)
-      assert.deepEqual(await first.json(), { accepted: 2, queued: 1, belowThreshold: 1, duplicate: 0, unknownTenant: 0 })
+      const firstBody = await first.json()
+      assert.deepEqual(
+        { accepted: firstBody.accepted, queued: firstBody.queued, belowThreshold: firstBody.belowThreshold, duplicate: firstBody.duplicate, unknownTenant: firstBody.unknownTenant },
+        { accepted: 2, queued: 1, belowThreshold: 1, duplicate: 0, unknownTenant: 0 },
+      )
+
+      // 워커는 응답만 보고 왜 큐에 안 올랐는지 알 수 있어야 한다.
+      const rejected = firstBody.results.find((line) => line.noticeNo === 'B2026-0007')
+      assert.deepEqual(
+        { outcome: rejected.outcome, score: rejected.score, scale: rejected.scoreScale, threshold: rejected.threshold, thresholdMet: rejected.thresholdMet },
+        { outcome: 'below-threshold', score: 0.31, scale: 'ratio', threshold: 0.6, thresholdMet: false },
+      )
+      assert.match(rejected.reason, /기준 0\.6 미만/)
+      assert.equal(firstBody.results.find((line) => line.noticeNo === 'G2026-0001').outcome, 'queued')
 
       const listed = await (await fetch(`${origin}/api/opportunities`, { headers })).json()
       assert.equal(listed.opportunities.length, 2)
@@ -110,7 +170,10 @@ test('an ingested opportunity reaches the approval queue once and creates a revi
 
       // 같은 공고번호를 다시 보내도 중복되지 않는다.
       const again = await ingest(origin, { opportunities: [{ source: '나라장터', noticeNo: 'G2026-0001', title: '학교 급식 식자재 납품', tenantId, score: 0.9 }] })
-      assert.deepEqual((await again.json()).duplicate, 1)
+      const againBody = await again.json()
+      assert.equal(againBody.duplicate, 1)
+      assert.equal(againBody.results[0].outcome, 'duplicate')
+      assert.match(againBody.results[0].reason, /이미 등록/)
       const afterDuplicate = await (await fetch(`${origin}/api/opportunities`, { headers })).json()
       assert.equal(afterDuplicate.opportunities.length, 2)
 
@@ -128,8 +191,17 @@ test('an ingested opportunity reaches the approval queue once and creates a revi
       const saved = await fetch(`${origin}/api/opportunities/settings`, { method: 'PUT', headers, body: JSON.stringify({ settings: { keywords: ['급식', '수산물 납품'], scoreThreshold: 0.3, minAmount: 0 } }) })
       assert.equal(saved.status, 200)
       assert.equal((await saved.json()).settings.scoreThreshold, 0.3)
-      const third = await ingest(origin, { opportunities: [{ source: '기업마당', noticeNo: 'B2026-0009', title: '수산물 가공 R&D', tenantId, score: 0.35 }] })
-      assert.deepEqual((await third.json()), { accepted: 1, queued: 1, belowThreshold: 0, duplicate: 0, unknownTenant: 0 })
+      // 워커가 백분율로 보내도 같은 임계값 판정을 받는다 (35점 = 0.35 ≥ 0.3).
+      const third = await ingest(origin, { opportunities: [{ source: '기업마당', noticeNo: 'B2026-0009', title: '수산물 가공 R&D', tenantId, score: 35 }] })
+      const thirdBody = await third.json()
+      assert.deepEqual(
+        { accepted: thirdBody.accepted, queued: thirdBody.queued, belowThreshold: thirdBody.belowThreshold, duplicate: thirdBody.duplicate, unknownTenant: thirdBody.unknownTenant },
+        { accepted: 1, queued: 1, belowThreshold: 0, duplicate: 0, unknownTenant: 0 },
+      )
+      assert.deepEqual(
+        { raw: thirdBody.results[0].rawScore, scale: thirdBody.results[0].scoreScale, score: thirdBody.results[0].score },
+        { raw: 35, scale: 'percent', score: 0.35 },
+      )
     })
   } finally { await rm(directory, { recursive: true, force: true }) }
 })

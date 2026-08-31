@@ -66,6 +66,7 @@ import {
   resolveLenses,
 } from './document-lenses.mjs'
 import {
+  ingestResultLine,
   ingestTokenMatches,
   normalizeIngestBatch,
   normalizeOpportunitySettings,
@@ -3195,9 +3196,13 @@ export function createApp(options = {}) {
     const now = new Date().toISOString()
     const knownTenants = new Set(workspaceStore.platform.tenants.map((tenant) => tenant?.id))
     const snapshot = new Map()
-    const result = { accepted: 0, queued: 0, belowThreshold: 0, duplicate: 0, unknownTenant: 0 }
+    const result = { accepted: 0, queued: 0, belowThreshold: 0, duplicate: 0, unknownTenant: 0, results: [] }
     for (const item of items) {
-      if (!knownTenants.has(item.tenantId)) { result.unknownTenant += 1; continue }
+      if (!knownTenants.has(item.tenantId)) {
+        result.unknownTenant += 1
+        result.results.push(ingestResultLine(item, { outcome: 'unknown-tenant', reason: '존재하지 않는 고객사입니다.' }))
+        continue
+      }
       const tenantStore = workspaceStore.tenants[item.tenantId] ??= {}
       if (!snapshot.has(item.tenantId)) {
         snapshot.set(item.tenantId, { opportunities: tenantStore[OPPORTUNITIES_KEY], proposals: tenantStore[PROPOSALS_KEY], policies: tenantStore[AUTOMATION_POLICIES_KEY] })
@@ -3205,7 +3210,12 @@ export function createApp(options = {}) {
       const settings = opportunitySettingsOf(item.tenantId)
       const record = opportunityRecord(item, settings, now)
       const existing = opportunitiesOf(item.tenantId)
-      if (existing.some((entry) => entry?.key === record.key)) { result.duplicate += 1; continue }
+      if (existing.some((entry) => entry?.key === record.key)) {
+        result.duplicate += 1
+        result.results.push(ingestResultLine(item, { outcome: 'duplicate', settings, reason: '같은 출처·공고번호가 이미 등록돼 있습니다.' }))
+        continue
+      }
+      result.results.push(ingestResultLine(item, { outcome: record.status, settings }))
       tenantStore[OPPORTUNITIES_KEY] = {
         data: [record, ...existing].slice(0, MAX_OPPORTUNITIES),
         updatedAt: now,

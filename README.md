@@ -219,23 +219,53 @@ Content-Type: application/json
       "deadline":  "2026-10-15",               // 선택 · 실제 달력에 있는 YYYY-MM-DD만 저장
       "amount":    240000000,                  // 선택 · 원 단위 정수
       "link":      "https://www.g2b.go.kr/...", // 선택 · http/https만 저장
-      "score":     0.82,                       // 선택 · 0~1 판정 점수 (없으면 임계 미만 취급)
+      "score":     0.82,                       // 선택 · 판정 점수. 0~1 비율과 0~100 백분율 모두 허용
       "rationale": "감시 키워드 \"급식\" 일치"    // 선택 · 판정 근거
     }
   ]
 }
 ~~~
 
-한 번에 최대 50건입니다. 응답은 처리 결과의 집계입니다.
+### 판정 점수 스케일
+
+워커마다 점수 스케일이 다르므로 **두 가지를 모두 받습니다**. 값을 보고 스케일을 판정합니다.
+
+| 보낸 값 | 스케일 | 내부 신뢰도 |
+| --- | --- | --- |
+| `0.88` | `ratio` | `0.88` |
+| `88` | `percent` | `0.88` |
+| `1` | `ratio` | `1.0` (만점. 1%로 읽지 않습니다) |
+| `100` | `percent` | `1.0` |
+| `101` · 음수 · 숫자가 아닌 값 | — | 점수 없음 (임계 미만 취급) |
+
+**1을 넘는 값은 백분율로 간주해 100으로 나눕니다.** 원본 값과 스케일 판정은 `rawScore`·`scoreScale`로 응답과 기록에 함께 남습니다.
+
+### 응답
+
+한 번에 최대 50건입니다. 응답은 집계와 **건별 판정 결과**입니다.
 
 ~~~json
-{ "accepted": 2, "queued": 1, "belowThreshold": 1, "duplicate": 0, "unknownTenant": 0 }
+{
+  "accepted": 2, "queued": 1, "belowThreshold": 1, "duplicate": 0, "unknownTenant": 0,
+  "results": [
+    {
+      "tenantId": "TENANT-XXXX", "source": "나라장터", "noticeNo": "G2026-0001",
+      "outcome": "queued",
+      "rawScore": 82, "scoreScale": "percent", "score": 0.82,
+      "threshold": 0.6, "thresholdMet": true,
+      "minAmount": 50000000, "amountMet": true,
+      "reason": "판정 점수 0.82이(가) 기준 0.6 이상입니다."
+    }
+  ]
+}
 ~~~
 
 - `queued` — 테넌트 설정의 판정 점수 기준과 금액 하한을 넘어 **승인 큐에 `opportunity` 제안으로 올라간 건**입니다. 관리자가 ✓승인하면 검토 업무가 만들어지고, ✗거절은 학습 신호로 남습니다.
 - `belowThreshold` — 기준 미만이라 목록에만 남긴 건입니다. 승인 큐에는 올리지 않습니다.
 - `duplicate` — 같은 출처·공고번호가 이미 있는 건입니다.
 - `unknownTenant` — 존재하지 않는 고객사입니다.
+
+`results[]`의 `outcome`은 `queued` · `below-threshold` · `duplicate` · `unknown-tenant` 중 하나이며, `reason`은 사람이 읽을 수 있는 탈락 사유입니다. **큐에 오르지 못한 이유를 응답만 보고 알 수 있으므로** 워커는 판정 프롬프트나 임계값 중 어느 쪽을 고쳐야 하는지 스스로 판단할 수 있습니다.
 
 | 상태 코드 | 오류 코드 | 뜻 |
 | --- | --- | --- |
