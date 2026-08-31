@@ -39,24 +39,45 @@ function addDaysKey(now, days) {
 // ---------------------------------------------------------------------------
 // 1) 문서 업로드 → 유형·귀속 분류 제안
 // ---------------------------------------------------------------------------
-const DOCUMENT_RULES = [
-  { category: '식품안전·인증', weight: .95, patterns: [/haccp/i, /인증서/, /성적서/, /자가품질/, /검교정/, /위생교육/, /수료증/, /iso\s?22000/i, /fssc/i] },
-  { category: '공장도면', weight: .9, patterns: [/도면/, /배치도/, /layout/i, /평면도/] },
-  { category: '재고·물류', weight: .85, patterns: [/입고/, /출고/, /재고/, /거래명세/, /송장/, /lot/i, /팔레트/] },
-  { category: '제품', weight: .85, patterns: [/표시사항/, /라벨/, /원재료/, /영양성분/, /품목제조/, /제품명세/] },
-  { category: '판매·주문', weight: .8, patterns: [/주문/, /정산/, /쿠팡/, /네이버/, /스마트스토어/, /발주/, /견적/] },
+/** 어느 업종에서나 성립하는 분류. 여기 있는 것만 모든 고객사에 적용된다. */
+const CORE_DOCUMENT_RULES = [
   { category: '인사·노무', weight: .85, patterns: [/근로계약/, /급여/, /연차/, /휴가/, /4대보험/, /인사/] },
   { category: '계약 · 거래처', weight: .85, patterns: [/계약서/, /계약/, /nda/i, /협약/, /mou/i] },
   { category: '회의·업무일지', weight: .75, patterns: [/회의록/, /회의/, /업무일지/, /주간보고/, /보고서/] },
+]
+
+/**
+ * 업종 분류. 업종 모듈에 없는 분류를 제안하면 승인 큐가 그 고객사에 없는 개념으로 채워지고,
+ * 승인된 결정이 자동화 승급의 학습 재료로 남는다(DECISIONS §2). 그래서 업종별로 갈라 둔다.
+ */
+const INDUSTRY_DOCUMENT_RULES = Object.freeze({
+  food_manufacturing: [
+    { category: '식품안전·인증', weight: .95, patterns: [/haccp/i, /인증서/, /성적서/, /자가품질/, /검교정/, /위생교육/, /수료증/, /iso\s?22000/i, /fssc/i] },
+    { category: '공장도면', weight: .9, patterns: [/도면/, /배치도/, /layout/i, /평면도/] },
+    { category: '재고·물류', weight: .85, patterns: [/입고/, /출고/, /재고/, /거래명세/, /송장/, /lot/i, /팔레트/] },
+    { category: '제품', weight: .85, patterns: [/표시사항/, /라벨/, /원재료/, /영양성분/, /품목제조/, /제품명세/] },
+    { category: '판매·주문', weight: .8, patterns: [/주문/, /정산/, /쿠팡/, /네이버/, /스마트스토어/, /발주/, /견적/] },
+  ],
+  it_services: [
+    { category: '산출물', weight: .9, patterns: [/산출물/, /설계서/, /요구사항/, /명세서/, /매뉴얼/, /가이드/, /wbs/i, /스토리보드/] },
+    { category: '검수·유지보수', weight: .88, patterns: [/검수/, /인수인계/, /하자보수/, /유지보수/, /장애/, /릴리스/, /release/i, /qa/i] },
+    { category: '제안·견적', weight: .85, patterns: [/제안서/, /견적/, /rfp/i, /입찰/, /과업지시/] },
+    { category: '지식재산·인증', weight: .85, patterns: [/특허/, /상표/, /저작권/, /iso\s?9001/i, /iso\s?27001/i, /gs인증/] },
+  ],
+})
+
+const documentRulesFor = (industryType) => [
+  ...(INDUSTRY_DOCUMENT_RULES[industryType] ?? INDUSTRY_DOCUMENT_RULES.food_manufacturing),
+  ...CORE_DOCUMENT_RULES,
 ]
 const GENERIC_CATEGORIES = new Set(['공통자료', '기타', ''])
 const SYSTEM_CATEGORIES = new Set(['개발운영지원', '사내메신저', '프로젝트 산출물'])
 
 /** 파일명·기존 분류·태그로 유형을 추정한다. 0.85 이상이면 '높음'. */
-export function classifyDocument(document) {
+export function classifyDocument(document, industryType = 'food_manufacturing') {
   const haystack = `${document?.name ?? ''} ${document?.originalName ?? ''} ${(document?.tags ?? []).join(' ')} ${document?.summary ?? ''}`
   let best = null
-  for (const rule of DOCUMENT_RULES) {
+  for (const rule of documentRulesFor(industryType)) {
     const hits = rule.patterns.filter((pattern) => pattern.test(haystack)).length
     if (!hits) continue
     const confidence = Math.min(.98, rule.weight + (hits - 1) * .03)
@@ -65,9 +86,9 @@ export function classifyDocument(document) {
   return best
 }
 
-export function proposeDocumentClassification(document, { now = new Date() } = {}) {
+export function proposeDocumentClassification(document, { now = new Date(), industryType = 'food_manufacturing' } = {}) {
   if (!document?.id || SYSTEM_CATEGORIES.has(document.category)) return null
-  const guess = classifyDocument(document)
+  const guess = classifyDocument(document, industryType)
   if (!guess) return null
   const currentCategory = String(document.category ?? '')
   if (guess.category === currentCategory) return null
@@ -254,6 +275,11 @@ const foodRulePack = [
       return out
     },
   },
+]
+
+/** 업종과 무관한 코어 규칙. 결재 적체·마감 초과는 어느 업종에나 있다.
+ *  이 둘이 식품 팩 안에 있던 동안 IT 고객사는 센티널 제안을 한 건도 받지 못했다. */
+const coreRulePack = [
   {
     id: 'approval-backlog',
     label: '결재 48시간 초과 적체',
@@ -302,9 +328,60 @@ const foodRulePack = [
   },
 ]
 
+function itContracts(tenantStore) { return Array.isArray(tenantStore?.['it-contracts']?.data) ? tenantStore['it-contracts'].data : [] }
+function itProjects(tenantStore) { return Array.isArray(tenantStore?.['it-projects']?.data) ? tenantStore['it-projects'].data : [] }
+
+/** IT 서비스 모듈 규칙. 식품의 인증 만료·안전재고에 대응하는 자리다. */
+const itRulePack = [
+  {
+    id: 'contract-expiry',
+    label: '계약 만료 임박',
+    evaluate({ tenantStore, resolveOwnerById, now }) {
+      const out = []
+      for (const contract of itContracts(tenantStore)) {
+        const days = daysUntil(contract?.endDate, now)
+        if (days === null || days > 30) continue
+        const owner = resolveOwnerById(contract.ownerId)
+        const name = contract.title || contract.client || '계약'
+        out.push(taskProposal({
+          ruleId: 'contract-expiry', ruleLabel: '계약 만료',
+          sourceKey: `sentinel:contract:${contract.id}`,
+          title: `계약 갱신 검토: ${name}`,
+          evidence: `‘${name}’ 계약 종료 ${days < 0 ? `${Math.abs(days)}일 경과` : days === 0 ? '오늘' : `${days}일 전`} · 거래처 ${contract.client || '미지정'}`,
+          ownerId: owner?.id ?? null, owner: owner?.name ?? '',
+          dueIso: seoulDateTimeIso(addDaysKey(now, days < 7 ? 1 : 3), 18), priority: days <= 7 ? '긴급' : '높음', confidence: .9, now,
+        }))
+      }
+      return out
+    },
+  },
+  {
+    id: 'project-overdue',
+    label: '프로젝트 마감 초과',
+    evaluate({ tenantStore, resolveOwnerById, now }) {
+      const out = []
+      for (const project of itProjects(tenantStore)) {
+        if (!['진행 중', '검수'].includes(project?.status)) continue
+        const days = daysUntil(project.dueDate, now)
+        if (days === null || days > 0) continue
+        const owner = resolveOwnerById(project.ownerId)
+        out.push(taskProposal({
+          ruleId: 'project-overdue', ruleLabel: '프로젝트 마감 초과',
+          sourceKey: `sentinel:project:${project.id}`,
+          title: `마감 초과 점검: ${project.name}`,
+          evidence: `‘${project.name}’ 마감 ${days === 0 ? '오늘' : `${Math.abs(days)}일`} 경과 · 상태 ${project.status} · 거래처 ${project.client || '미지정'}`,
+          ownerId: owner?.id ?? null, owner: owner?.name ?? project.owner ?? '',
+          dueIso: seoulDateTimeIso(addDaysKey(now, 1), 18), priority: '긴급', confidence: .85, now,
+        }))
+      }
+      return out
+    },
+  },
+]
+
 export const sentinelRulePacks = Object.freeze({
-  food_manufacturing: foodRulePack,
-  it_services: [], // 1차에서는 코어 규칙 없음. 다음 단계에서 계약 만료·마감 규칙을 등록한다.
+  food_manufacturing: [...foodRulePack, ...coreRulePack],
+  it_services: [...itRulePack, ...coreRulePack],
 })
 
 export function rulePackFor(industryType) {

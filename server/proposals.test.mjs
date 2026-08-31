@@ -6,7 +6,7 @@ import test from 'node:test'
 
 import { createApp } from './app.mjs'
 import { withServer } from './test-server.mjs'
-import { approvalStatistics, evaluateSentinel, isInstructionMessage, proposeTaskFromMessage } from './proposal-engine.mjs'
+import { approvalStatistics, classifyDocument, evaluateSentinel, isInstructionMessage, proposeDocumentClassification, proposeTaskFromMessage } from './proposal-engine.mjs'
 import { CONSENT_TERMS_VERSION } from './policies/consent-terms.mjs'
 
 async function login(origin, email, workspace = 'tenant', password = 'demo1234') {
@@ -53,10 +53,49 @@ test('engine: food sentinel rule pack dedupes and expires', () => {
   const third = evaluateSentinel({ tenantStore, existing: second.proposals, industryType: 'food_manufacturing', accounts, tenantId: 'T', now })
   assert.equal(third.expired, 1)
   assert.equal(third.proposals.find((item) => item.sourceKey === 'sentinel:stock:P-1').status, 'expired')
-  // IT 업종은 규칙팩 없음
-  assert.equal(evaluateSentinel({ tenantStore, existing: [], industryType: 'it_services', accounts, tenantId: 'T', now }).proposals.length, 0)
+  // IT 업종은 코어 규칙(결재 적체·마감 초과)만 받고 식품 규칙은 받지 않는다.
+  const itOnly = evaluateSentinel({ tenantStore, existing: [], industryType: 'it_services', accounts, tenantId: 'T', now })
+  assert.deepEqual(itOnly.proposals.map((item) => item.sourceKey).sort(), ['sentinel:backlog:WK-2', 'sentinel:overdue:WK-1'])
   const stats = approvalStatistics([{ kind: 'sentinel-task', status: 'approved', decidedAt: now.toISOString() }, { kind: 'sentinel-task', status: 'rejected', decidedAt: now.toISOString() }], { now })
   assert.equal(stats.find((row) => row.kind === 'sentinel-task').approvalRate, 50)
+})
+
+test('engine: an IT tenant gets contract-expiry and project-overdue instead of food rules', () => {
+  const now = new Date('2026-08-22T03:00:00.000Z')
+  const tenantStore = {
+    // 식품 키를 함께 두어도 IT 팩은 이를 보지 않는다.
+    'compliance-records': { data: [{ id: 'CR-1', name: 'HACCP 인증', owner: '박지현', expiresAt: '2026-09-10' }] },
+    'product-catalog': { data: [{ id: 'P-1', name: '새우젓', stock: 0, safetyStock: 10 }] },
+    'it-contracts': { data: [{ id: 'CT-1', client: '한국도로공사', title: '유지보수 계약', endDate: '2026-09-10', ownerId: 'U1' }, { id: 'CT-2', client: '먼 거래처', title: '내년 계약', endDate: '2027-06-01' }] },
+    'it-projects': { data: [{ id: 'PJ-1', name: '관제 시뮬레이터', client: '한국도로공사', status: '진행 중', dueDate: '2026-08-19', ownerId: 'U1' }, { id: 'PJ-2', name: '완료 건', client: 'A사', status: '완료', dueDate: '2026-08-01' }] },
+    'work-items': { data: [] },
+  }
+  const accounts = [{ id: 'U1', name: '박지현', tenantId: 'T', approved: true, role: 'tenant-member' }]
+  const result = evaluateSentinel({ tenantStore, existing: [], industryType: 'it_services', accounts, tenantId: 'T', now })
+  assert.deepEqual(result.proposals.map((item) => item.sourceKey).sort(), ['sentinel:contract:CT-1', 'sentinel:project:PJ-1'])
+  assert.equal(result.proposals.find((item) => item.sourceKey === 'sentinel:contract:CT-1').payload.ownerId, 'U1')
+  assert.match(result.proposals.find((item) => item.sourceKey === 'sentinel:project:PJ-1').evidence, /마감 3일 경과/)
+  // 식품 테넌트는 반대로 IT 규칙을 받지 않는다.
+  const food = evaluateSentinel({ tenantStore, existing: [], industryType: 'food_manufacturing', accounts, tenantId: 'T', now })
+  assert.ok(food.proposals.every((item) => !item.sourceKey.startsWith('sentinel:contract:') && !item.sourceKey.startsWith('sentinel:project:')))
+})
+
+test('engine: document classification suggests only categories the industry actually has', () => {
+  const drawing = { id: 'D-1', name: '공장 배치도.pdf', category: '공통자료', tags: [] }
+  assert.equal(classifyDocument(drawing, 'food_manufacturing').category, '공장도면')
+  assert.equal(classifyDocument(drawing, 'it_services'), null, 'IT 고객사에 공장도면을 제안하지 않는다')
+
+  const spec = { id: 'D-2', name: '요구사항 명세서 v2.docx', category: '공통자료', tags: [] }
+  assert.equal(classifyDocument(spec, 'it_services').category, '산출물')
+  assert.equal(classifyDocument(spec, 'food_manufacturing'), null)
+
+  // 코어 분류는 업종과 무관하게 동작한다.
+  const contract = { id: 'D-3', name: 'NDA 협약.pdf', category: '공통자료', tags: [] }
+  for (const industry of ['food_manufacturing', 'it_services']) {
+    assert.equal(classifyDocument(contract, industry).category, '계약 · 거래처')
+  }
+  assert.equal(proposeDocumentClassification(spec, { industryType: 'it_services' }).payload.category, '산출물')
+  assert.equal(proposeDocumentClassification(spec, { industryType: 'food_manufacturing' }), null)
 })
 
 test('document upload and instruction message land in the approval queue; approve / edit(diff) / reject execute correctly', async () => {
