@@ -46,3 +46,6 @@ html[data-theme='dark'] .approval-actions .approve { background: var(--color-suc
 
 .approval-confirm-body { display: grid; gap: var(--space-8); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
 .approval-confirm-body strong { color: var(--ink); font-size: var(--font-15); line-height: 1.5; }
+
+.approval-evidence { display: inline-flex; align-items: center; gap: var(--space-4); margin-top: var(--space-4); padding: var(--space-0); border: none; color: var(--color-primary); background: transparent; font-size: var(--font-11); cursor: pointer; }
+.approval-evidence:hover { text-decoration: underline; }

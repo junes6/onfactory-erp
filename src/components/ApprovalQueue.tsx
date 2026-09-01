@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BookOpen, Check, ClipboardCheck, FileText, Keyboard, MessageCircle, Pencil, Radar, RefreshCw, ShieldAlert, Sparkles, X } from 'lucide-react'
+import { ArrowUpRight, BookOpen, Check, ClipboardCheck, FileText, Keyboard, MessageCircle, Pencil, Radar, RefreshCw, ShieldAlert, Sparkles, X } from 'lucide-react'
 import { formatDateTime } from '../utils/dateTime'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ApprovalQueue.css'
@@ -54,10 +54,24 @@ function confidenceLabel(value: number | null) {
   return { text: `확신도 ${percent}%${value >= .85 ? ' · 높음' : ''}`, high: value >= .85 }
 }
 
-export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingChange }: {
+/**
+ * 제안의 근거 데이터로 가는 링크. 요약만 보고 결정하지 않도록 원본을 한 번에 연다.
+ * 어디로 가야 하는지 알 수 없는 종류는 링크를 만들지 않는다.
+ */
+function evidenceTarget(proposal: Proposal): { page: string; focusId: string; label: string } | null {
+  const payload = proposal.payload as Record<string, string> | undefined
+  if (proposal.kind === 'document-classification' && payload?.documentId) return { page: 'documents', focusId: payload.documentId, label: '원본 문서 열기' }
+  if (proposal.kind === 'lens-task' && payload?.documentId) return { page: 'documents', focusId: payload.documentId, label: '분석한 파일 열기' }
+  if (proposal.kind === 'task-from-message' && payload?.conversationId) return { page: 'messenger', focusId: payload.conversationId, label: '원본 대화 열기' }
+  if (proposal.kind === 'sentinel-task' && payload?.complianceId) return { page: 'compliance', focusId: payload.complianceId, label: '인증 대장 열기' }
+  return null
+}
+
+export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onOpenEvidence, onPendingChange }: {
   workspaceScope?: string
   onToast: (message: string) => void
   onOpenTask: (taskId: string) => void
+  onOpenEvidence?: (page: string, focusId: string) => void
   onPendingChange?: (count: number) => void
 }) {
   const [data, setData] = useState<QueueResponse | null>(null)
@@ -189,6 +203,7 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onPendingCh
                   <div className="approval-row-main">
                     <strong>{item.summary}</strong>
                     <small>{item.evidence}{confidence ? <> · <em className={confidence.high ? 'is-high' : ''}>{confidence.text}</em></> : null}{!pending && <> · {item.status === 'approved' ? '승인' : item.status === 'edited' ? '수정 승인' : item.status === 'rejected' ? '거절' : '해소됨'} {item.decidedByName ? `· ${item.decidedByName}` : ''} {item.decidedAt ? formatDateTime(item.decidedAt) : ''}</>}</small>
+                    {evidenceTarget(item) && <button type="button" className="approval-link approval-evidence" onClick={(event) => { event.stopPropagation(); const target = evidenceTarget(item); if (target) onOpenEvidence?.(target.page, target.focusId) }}>{evidenceTarget(item)?.label} <ArrowUpRight size={12} /></button>}
                     {!pending && item.decisionDiff && <span className="approval-diff">수정: {Object.entries(item.decisionDiff).map(([key, change]) => `${key}: ${String(change.before ?? '—')} → ${String(change.after ?? '—')}`).join(' / ')}</span>}
                   </div>
                   {pending ? <div className="approval-actions">

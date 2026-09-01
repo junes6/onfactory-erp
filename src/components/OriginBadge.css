@@ -1,0 +1,18 @@
+.origin-badge {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  overflow: hidden;
+  padding: var(--space-4) var(--space-8);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  color: var(--muted);
+  background: transparent;
+  font-size: var(--font-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.origin-badge svg { flex: 0 0 auto; }
+.origin-badge.is-link { color: var(--color-primary); border-color: var(--color-primary); cursor: pointer; }
+.origin-badge.is-link:hover { background: var(--color-primary-soft); }

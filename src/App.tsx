@@ -33,6 +33,7 @@ import { IndustryProvider } from './modules/IndustryContext'
 import { NotificationCenter, type NotificationFeed } from './components/NotificationCenter'
 import { useEventStream } from './hooks/useEventStream'
 import { ActivityFeed } from './components/ActivityFeed'
+import { OriginBadge } from './components/OriginBadge'
 import { brandLabelForIndustry, industrySurface, navigationForIndustry, resolveIndustry, routeLabel, routesForIndustry, type TenantRouteId } from './modules/registry'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
@@ -791,9 +792,10 @@ function WorkRuleModal({ assignees, industryType, onClose, onSubmit }: { assigne
   </div>
 }
 
-function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, industryType, workspaceScope, focusId, onToast, onCreate, onTransition, onCreateRule, onToggleRule, onDeleteRule }: {
+function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, industryType, workspaceScope, focusId, onToast, onOpenOrigin, onCreate, onTransition, onCreateRule, onToggleRule, onDeleteRule }: {
   items: WorkItem[]; rules: WorkRule[]; currentUserId: string; canAssignTasks: boolean; assignees: WorkAssignee[]
   industryType?: string
+  onOpenOrigin?: (page: string, focusId: string) => void
   workspaceScope?: string
   focusId?: string
   onToast: (message: string) => void
@@ -974,6 +976,7 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
               <StatusBadge className="status-pill" dot tone={drawerItem.priority === '긴급' ? 'danger' : drawerItem.priority === '높음' ? 'warning' : 'neutral'}>{drawerItem.priority}</StatusBadge>
               <span>{drawerItem.category}</span>
               {drawerItem.ruleId && <span><Repeat2 size={13} /> 반복</span>}
+              <OriginBadge origin={drawerItem.origin} onOpen={(page, focusId) => { setDrawerId(null); onToast('승인 큐에서 원인을 확인하세요.'); onOpenOrigin?.(page, focusId) }} />
             </div>
             <h2 id="workflow-drawer-title">{drawerItem.title}</h2>
           </div>
@@ -2039,7 +2042,7 @@ export default function App() {
     }
     switch (page) {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
-      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} />
+      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onOpenOrigin={(page) => navigate(page as PageId)} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'finance': return <TaxAssetsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} industryType={account?.industryType ?? 'food_manufacturing'} onToast={setToast} />
@@ -2050,7 +2053,7 @@ export default function App() {
       case 'sales': return <SalesChannels onToast={setToast} workspaceScope={workspaceScope} companyName={tenantName} canManage={account?.role === 'tenant-admin'} />
       case 'people': return <PeopleOperationsPage initialTab={peopleInitialTab} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
       case 'judgement': return <PersonalCorePage workspaceScope={workspaceScope} onToast={setToast} />
-      case 'approvals': return <ApprovalQueue workspaceScope={workspaceScope} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onPendingChange={setPendingProposals} />
+      case 'approvals': return <ApprovalQueue workspaceScope={workspaceScope} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenEvidence={(page) => navigate(page as PageId)} onPendingChange={setPendingProposals} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} industryType={account?.industryType ?? 'food_manufacturing'} onAskLens={setLensTarget} onToast={setToast} />
       case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} companyName={tenantName} onAskLens={setLensTarget} onToast={setToast} />
       case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />

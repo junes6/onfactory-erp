@@ -159,7 +159,7 @@ const WORK_ITEM_BASE_FIELDS = [
   'id', 'title', 'description', 'owner', 'requestedBy', 'due', 'priority', 'status', 'category',
 ]
 const WORK_ITEM_ID_FIELDS = ['ownerId', 'requesterId']
-const WORK_ITEM_OPTIONAL_FIELDS = ['attachments', 'completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt']
+const WORK_ITEM_OPTIONAL_FIELDS = ['attachments', 'completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt', 'origin']
 const WORK_ITEM_FIELDS = [...WORK_ITEM_BASE_FIELDS, ...WORK_ITEM_ID_FIELDS, ...WORK_ITEM_OPTIONAL_FIELDS]
 const WORK_ITEM_STATUSES = new Set(['업무요청', '수행중', '결재대기', '결재완료'])
 const WORK_ITEM_PRIORITIES = new Set(['긴급', '높음', '보통'])
@@ -228,6 +228,29 @@ function hasWorkReviewShape(value) {
   return ['reviewedAt', 'reviewerId', 'reviewerName'].every((key) => typeof value[key] === 'string' && value[key])
 }
 
+/**
+ * 출처. "이 업무가 어디서 비롯됐는가"를 담는다.
+ * kind는 화면이 배지 문구를 고르는 데 쓰고, page/focusId는 원인으로 돌아가는 링크다.
+ */
+function hasWorkOriginShape(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const allowed = ['kind', 'label', 'detail', 'page', 'focusId']
+  if (Object.keys(value).some((key) => !allowed.includes(key))) return false
+  if (typeof value.kind !== 'string' || !value.kind) return false
+  return allowed.every((key) => value[key] === undefined || typeof value[key] === 'string')
+}
+
+/** 제안 종류 → 사람이 읽는 출처. 배지 문구와 되짚어 갈 곳을 함께 만든다. */
+function workOriginFromProposal(proposal) {
+  const detail = String(proposal?.evidence ?? '').split('\n')[0].slice(0, 120)
+  const label = proposal?.kind === 'sentinel-task' ? '센티널 경고'
+    : proposal?.kind === 'task-from-message' ? '메신저에서 승격'
+      : proposal?.kind === 'opportunity' ? `외부 기회(${String(proposal.payload?.source ?? '외부').slice(0, 20)})`
+        : proposal?.kind === 'lens-task' ? '문서 렌즈에서 추출'
+          : 'AI 제안에서 생성'
+  return { kind: String(proposal?.kind ?? 'proposal'), label, detail, page: 'approvals', focusId: String(proposal?.id ?? '') }
+}
+
 function hasWorkItemShape(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const keys = Object.keys(value)
@@ -240,6 +263,7 @@ function hasWorkItemShape(value) {
   if (value.completionHistory !== undefined && (!Array.isArray(value.completionHistory) || value.completionHistory.length > 100 || !value.completionHistory.every(hasWorkCompletionShape))) return false
   if (value.review !== undefined && !hasWorkReviewShape(value.review)) return false
   if (value.reviewHistory !== undefined && (!Array.isArray(value.reviewHistory) || value.reviewHistory.length > 100 || !value.reviewHistory.every(hasWorkReviewShape))) return false
+  if (value.origin !== undefined && !hasWorkOriginShape(value.origin)) return false
   return Boolean(value.id) && WORK_ITEM_STATUSES.has(value.status) && WORK_ITEM_PRIORITIES.has(value.priority)
 }
 
@@ -2834,6 +2858,8 @@ export function createApp(options = {}) {
           status: '업무요청',
           category: String(finalPayload.category ?? '일반').slice(0, 20),
           createdAt: now,
+          // 승인 큐를 거쳐 만들어진 업무는 어디서 비롯됐는지 화면에서 되짚을 수 있어야 한다.
+          origin: workOriginFromProposal(proposal),
         }
         const normalized = normalizeAdminWorkItems([workItem], tenantId, operatorAwareAccounts(request.auth))
         if (!normalized) {

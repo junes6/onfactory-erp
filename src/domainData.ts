@@ -68,6 +68,8 @@ export type WorkItem = {
   ruleId?: string
   ruleOccurrence?: string
   createdAt?: string
+  /** 이 업무가 어디서 비롯됐는지. 사람이 직접 만든 업무에는 없다. */
+  origin?: { kind: string; label?: string; detail?: string; page?: string; focusId?: string }
 }
 
 export type WorkRule = {
