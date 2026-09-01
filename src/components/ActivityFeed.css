@@ -1,0 +1,28 @@
+.activity-feed-body { display: grid; gap: var(--space-8); }
+.activity-feed-empty { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.activity-feed-empty-state { min-height: 94px; display: grid; place-items: center; align-content: center; gap: var(--space-4); color: var(--muted); text-align: center; }
+.activity-feed-empty-state strong { color: var(--ink); font-size: var(--font-13); }
+.activity-feed-empty-state span { font-size: var(--font-11); }
+
+.activity-feed-list { display: grid; margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.activity-feed-list > li { border-bottom: var(--hairline) solid var(--line); }
+.activity-feed-list > li:last-child { border-bottom: none; }
+.activity-feed-list button { width: 100%; min-width: 0; min-height: 44px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-8); padding: var(--space-8) var(--space-0); border: none; color: var(--ink); background: transparent; text-align: left; cursor: pointer; }
+.activity-feed-list button:hover .activity-copy strong { color: var(--color-primary); }
+.activity-feed-list button > svg { color: var(--muted); }
+
+.activity-dot { width: 26px; height: 26px; display: grid; place-items: center; border-radius: var(--radius-8); }
+.activity-dot.blue { color: var(--color-primary); background: var(--color-primary-soft); }
+.activity-dot.green { color: var(--color-success-ink); background: var(--color-success-soft); }
+.activity-dot.amber { color: var(--color-warning-ink); background: var(--color-warning-soft); }
+.activity-dot.violet { color: var(--color-violet-ink); background: var(--color-violet-soft); }
+
+.activity-copy { min-width: 0; display: grid; gap: var(--space-4); }
+.activity-copy strong { overflow: hidden; font-size: var(--font-13); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.activity-copy small { overflow: hidden; color: var(--muted); font-size: var(--font-11); text-overflow: ellipsis; white-space: nowrap; }
+.activity-feed-list time { color: var(--muted); font-size: var(--font-11); white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .activity-feed-list button { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .activity-feed-list button > svg { display: none; }
+}

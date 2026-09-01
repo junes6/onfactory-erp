@@ -10,7 +10,7 @@ import './DashboardWorkspace.css'
 import { Button } from './ui/Button'
 import { useIndustrySurface } from '../modules/IndustryContext'
 
-export type DashboardWidgetId = 'summary' | 'ai' | 'schedule' | 'todo' | 'work' | 'links' | 'alert' | 'files' | 'support'
+export type DashboardWidgetId = 'summary' | 'ai' | 'schedule' | 'todo' | 'work' | 'links' | 'alert' | 'files' | 'support' | 'activity'
 export type DashboardWidgetSize = 'half' | 'wide' | 'full'
 
 export type DashboardWidgetPreference = {
@@ -24,6 +24,7 @@ const widgetLabels: Record<DashboardWidgetId, { title: string; description: stri
   ai: { title: 'AI 업무 대화', description: '질문과 업무 지시를 처리합니다.' },
   schedule: { title: '공유 일정', description: '오늘 일정과 월간 달력을 봅니다.' },
   todo: { title: 'To Do List', description: '직접 계획하고 AI가 배정 업무를 자동 정리합니다.' },
+  activity: { title: '지금 회사에서', description: '업무·일지·결재·AI 제안이 시간순으로 쌓입니다.' },
   work: { title: '다음 업무', description: '내가 수행하거나 결재할 업무입니다.' },
   links: { title: '업무 바로가기', description: '자주 쓰는 외부 사이트를 엽니다.' },
   files: { title: '자주 찾는 파일', description: '자주 내려받는 회사 자료를 바로 엽니다.' },
@@ -36,6 +37,7 @@ export const defaultDashboardWidgets: DashboardWidgetPreference[] = [
   { id: 'ai', visible: true, size: 'wide' },
   { id: 'schedule', visible: true, size: 'half' },
   { id: 'todo', visible: true, size: 'half' },
+  { id: 'activity', visible: true, size: 'half' },
   { id: 'links', visible: true, size: 'half' },
   { id: 'support', visible: true, size: 'wide' },
   { id: 'files', visible: true, size: 'half' },

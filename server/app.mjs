@@ -30,6 +30,7 @@ import {
 } from './notifications.mjs'
 import { registerNotificationRoutes } from './notification-routes.mjs'
 import { createEventStream } from './event-stream.mjs'
+import { buildActivityFeed } from './activity-feed.mjs'
 import { sendPush, vapidSettings } from './web-push.mjs'
 import { BillingServiceError, createBillingService, createMemoryBillingRepository } from './billing-service.mjs'
 import { attachBlocksToLatestUserMessage, ChatAttachmentError, normalizeChatAttachmentRequest, resolveChatAttachments } from './chat-attachments.mjs'
@@ -3186,6 +3187,16 @@ export function createApp(options = {}) {
   const events = createEventStream()
   events.start()
   app.locals.events = events
+
+  app.get('/api/activity', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+    if (!request.auth.tenantId) {
+      response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } })
+      return
+    }
+    const limit = Math.min(40, Math.max(1, Number.parseInt(String(request.query?.limit ?? '12'), 10) || 12))
+    // 권한 필터는 buildActivityFeed 안에서 끝난다. 화면이 숨기는 방식이 아니다.
+    response.json({ items: buildActivityFeed(workspaceStore.tenants[request.auth.tenantId] ?? {}, request.auth, { limit }) })
+  })
 
   app.get('/api/events', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
     if (!request.auth.tenantId) {

@@ -32,6 +32,7 @@ import { PersonalTodoWidget } from './components/PersonalTodoWidget'
 import { IndustryProvider } from './modules/IndustryContext'
 import { NotificationCenter, type NotificationFeed } from './components/NotificationCenter'
 import { useEventStream } from './hooks/useEventStream'
+import { ActivityFeed } from './components/ActivityFeed'
 import { brandLabelForIndustry, industrySurface, navigationForIndustry, resolveIndustry, routeLabel, routesForIndustry, type TenantRouteId } from './modules/registry'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
@@ -253,6 +254,7 @@ const dashboardWidgetLabels: Record<DashboardWidgetPreference['id'], string> = {
   files: '자주 찾는 파일',
   schedule: '공유 일정',
   todo: 'To Do List',
+  activity: '지금 회사에서',
   work: '다음 업무',
   links: '업무 바로가기',
   alert: '중요 알림',
@@ -422,6 +424,8 @@ function AIHome({ workItems, products, salesChannels, itProjects, itContracts, c
       content = <SharedCalendarPreview events={calendarEvents} onOpen={() => onNavigate('schedule')} />
     } else if (preference.id === 'todo') {
       content = <PersonalTodoWidget workspaceScope={workspaceScope} onNavigate={onNavigate} onToast={onToast} />
+    } else if (preference.id === 'activity') {
+      content = <ActivityFeed workspaceScope={workspaceScope} onOpen={(page, focusId) => { if (focusId) onOpenTask?.(focusId); onNavigate(page as PageId) }} />
     } else if (preference.id === 'links') {
       content = <QuickLinksWidget scope={`${companyName}:${currentUserId}`} onToast={onToast} />
     } else if (preference.id === 'files') {
