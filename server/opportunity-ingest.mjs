@@ -109,6 +109,48 @@ export function normalizeOpportunitySettings(value, industryType) {
   }
 }
 
+export const ELIGIBILITY_VERDICTS = Object.freeze(['eligible', 'ineligible', 'unclear'])
+
+/**
+ * 워커의 자격 판정. 셋 중 하나이며 근거 문장이 반드시 함께 온다.
+ * 근거 없는 판정은 신뢰할 수 없으므로 판정만 있고 근거가 없으면 통째로 버린다.
+ */
+function normalizeEligibility(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const verdict = plainText(value.verdict, 20)
+  if (!ELIGIBILITY_VERDICTS.includes(verdict)) return null
+  const reasons = Array.isArray(value.reasons)
+    ? value.reasons.map((reason) => plainText(reason, 200)).filter(Boolean).slice(0, 10)
+    : []
+  if (!reasons.length) return null
+  const unmet = Array.isArray(value.unmet) ? value.unmet.map((item) => plainText(item, 120)).filter(Boolean).slice(0, 10) : []
+  return { verdict, reasons, unmet }
+}
+
+/** 제출 서류 체크리스트. 보유·미보유·갱신 필요 세 상태와 충족률. */
+function normalizeDocumentChecklist(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const items = Array.isArray(value.items) ? value.items : []
+  const rows = items.map((item) => {
+    const name = plainText(item?.name, 120)
+    const state = plainText(item?.state, 20)
+    if (!name || !['held', 'missing', 'renew'].includes(state)) return null
+    return { name, state, note: plainText(item?.note, 160), documentId: plainText(item?.documentId, 120) }
+  }).filter(Boolean).slice(0, 40)
+  if (!rows.length) return null
+  const held = rows.filter((row) => row.state === 'held').length
+  return { items: rows, held, total: rows.length }
+}
+
+/** 초안 문서 참조. 기업 자료실에 올라간 파일을 가리킨다. */
+function normalizeDraftRef(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const documentId = plainText(value.documentId, 120)
+  const name = plainText(value.name, 160)
+  if (!documentId && !name) return null
+  return { documentId, name, sections: Math.max(0, Math.min(50, Number(value.sections) || 0)), needsInput: Math.max(0, Math.min(50, Number(value.needsInput) || 0)) }
+}
+
 /** 워커가 보낸 한 건을 저장 가능한 모양으로 검증한다. 필수는 공고번호·제목·대상 테넌트다. */
 export function normalizeIngestItem(value) {
   const noticeNo = plainText(value?.noticeNo ?? value?.notice_no, 80)
@@ -133,6 +175,10 @@ export function normalizeIngestItem(value) {
     scoreScale: scored?.scale ?? null,
     rawScore: scored?.raw ?? null,
     rationale: plainText(value?.rationale ?? value?.reason, 500),
+    // P6 워커가 함께 보내는 판정 결과. 없으면 지금까지와 똑같이 동작한다.
+    eligibility: normalizeEligibility(value?.eligibility),
+    documents: normalizeDocumentChecklist(value?.documents),
+    draft: normalizeDraftRef(value?.draft),
   }
 }
 
@@ -207,6 +253,9 @@ export function opportunityRecord(item, settings, receivedAt) {
     scoreScale: item.scoreScale ?? null,
     rawScore: item.rawScore ?? null,
     rationale: item.rationale,
+    eligibility: item.eligibility ?? null,
+    documents: item.documents ?? null,
+    draft: item.draft ?? null,
     status: verdict.status,
     statusReason: verdict.reason,
     receivedAt,
@@ -237,6 +286,24 @@ export function ingestResultLine(item, { outcome, settings = null, reason = '' }
   }
 }
 
+const ELIGIBILITY_LABEL = Object.freeze({ eligible: '자격 충족', ineligible: '자격 미달', unclear: '판단 불가' })
+
+/** 카드에서 한 줄로 읽는 자격 판정. 근거를 함께 붙여 점수만 남지 않게 한다. */
+function eligibilityLine(record) {
+  if (!record.eligibility) return ''
+  const { verdict, reasons, unmet } = record.eligibility
+  const head = `${ELIGIBILITY_LABEL[verdict] ?? verdict}: ${reasons.slice(0, 2).join(' / ')}`
+  return unmet.length ? `${head} · 확인 필요 ${unmet.join(', ')}` : head
+}
+
+/** 서류 충족률. "몇 개 중 몇 개를 이미 갖고 있는가"가 지원 여부 판단의 핵심이다. */
+function documentLine(record) {
+  if (!record.documents) return ''
+  const { held, total, items } = record.documents
+  const missing = items.filter((item) => item.state !== 'held').map((item) => item.name).slice(0, 3)
+  return `제출서류 ${held}/${total} 보유${missing.length ? ` · 준비 필요 ${missing.join(', ')}` : ''}`
+}
+
 /** 승인 큐에 올릴 제안. 승인하면 기존 흐름대로 검토 업무가 만들어진다. */
 export function opportunityProposal(record, { now, proposalId }) {
   const detail = [
@@ -251,10 +318,17 @@ export function opportunityProposal(record, { now, proposalId }) {
     confidence: record.score,
     sourceKey: `opportunity:${record.key}`,
     summary: `${record.title} 검토`,
-    evidence: [detail, record.rationale, record.link].filter(Boolean).join('\n'),
+    evidence: [detail, eligibilityLine(record), documentLine(record), record.rationale, record.link].filter(Boolean).join('\n'),
     payload: {
       title: `${record.title} 검토`,
-      description: [detail, record.rationale, record.link && `공고 링크: ${record.link}`].filter(Boolean).join('\n'),
+      description: [
+        detail,
+        eligibilityLine(record),
+        documentLine(record),
+        record.rationale,
+        record.link && `공고 링크: ${record.link}`,
+        record.draft?.name && `신청서 초안: ${record.draft.name}${record.draft.needsInput ? ` (확인 필요 ${record.draft.needsInput}곳)` : ''}`,
+      ].filter(Boolean).join('\n'),
       // 마감 3일 전을 검토 기한으로 둔다. 마감이 없으면 결정 라우트의 기본값(+2일)을 쓴다.
       due: record.deadline ? new Date(Date.parse(`${record.deadline}T09:00:00+09:00`) - 3 * 24 * 60 * 60 * 1_000).toISOString() : '',
       priority: '보통',
@@ -263,6 +337,9 @@ export function opportunityProposal(record, { now, proposalId }) {
       noticeNo: record.noticeNo,
       source: record.source,
       link: record.link,
+      eligibility: record.eligibility ?? null,
+      documents: record.documents ?? null,
+      draft: record.draft ?? null,
     },
     createdAt: now,
     createdBy: 'opportunity-ingest',
