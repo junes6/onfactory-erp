@@ -158,6 +158,7 @@ function shutdown(signal) {
   if (shuttingDown) return
   shuttingDown = true
   app.locals.scheduler.stop()
+  app.locals.events.stop()
   console.log(`[server] ${signal} received; shutting down`)
   server.close(async () => {
     try {

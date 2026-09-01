@@ -29,6 +29,7 @@ import {
   shouldPush, subscriptionsFor,
 } from './notifications.mjs'
 import { registerNotificationRoutes } from './notification-routes.mjs'
+import { createEventStream } from './event-stream.mjs'
 import { sendPush, vapidSettings } from './web-push.mjs'
 import { BillingServiceError, createBillingService, createMemoryBillingRepository } from './billing-service.mjs'
 import { attachBlocksToLatestUserMessage, ChatAttachmentError, normalizeChatAttachmentRequest, resolveChatAttachments } from './chat-attachments.mjs'
@@ -2680,6 +2681,7 @@ export function createApp(options = {}) {
     writeProposals(tenantId, [proposal, ...existing], proposal.createdBy)
     scheduleAuditCommit()
     notifyProposal(tenantId, proposal)
+    events.publish(tenantId, 'proposal', { pending: proposalsOf(tenantId).filter((item) => item?.status === 'pending').length, added: proposal.id })
     return true
   }
   const runSentinel = (tenantId, now = new Date()) => {
@@ -3180,6 +3182,24 @@ export function createApp(options = {}) {
   const pushQueue = []
   let pushDraining = false
 
+  // 실시간 스트림. 폴링을 대체하며, 끊긴 동안의 변경은 재연결 시 한 번에 따라잡는다.
+  const events = createEventStream()
+  events.start()
+  app.locals.events = events
+
+  app.get('/api/events', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+    if (!request.auth.tenantId) {
+      response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } })
+      return
+    }
+    // 응답을 압축·버퍼링하면 스트림이 아니라 한 덩어리가 된다.
+    response.setHeader('content-encoding', 'identity')
+    request.socket?.setTimeout?.(0)
+    request.socket?.setNoDelay?.(true)
+    request.socket?.setKeepAlive?.(true)
+    events.connect({ request, response, tenantId: request.auth.tenantId, accountId: request.auth.id })
+  })
+
   const notificationSettingsRecord = (tenantId) => {
     const record = workspaceStore.tenants[tenantId]?.[NOTIFICATION_SETTINGS_KEY]?.data
     return record && typeof record === 'object' && !Array.isArray(record) ? record : {}
@@ -3247,7 +3267,9 @@ export function createApp(options = {}) {
     tenantStore[NOTIFICATIONS_KEY] = { data: rows, updatedAt: now.toISOString(), updatedBy: 'system:notify' }
     scheduleAuditCommit()
     queuePush(tenantId, accepted)
-    app.locals.onNotifications?.(tenantId, accepted)
+    for (const item of accepted) {
+      events.publish(tenantId, 'notification', { id: item.id, type: item.type, title: item.title, page: item.page, focusId: item.focusId }, { accountId: item.recipientId })
+    }
     return accepted
   }
   app.locals.notify = notify
@@ -6209,6 +6231,7 @@ export function createApp(options = {}) {
       return
     }
     scheduleSentinel(request.auth.tenantId)
+    events.publish(request.auth.tenantId, 'work', { id: next.id, status: next.status, title: next.title })
     // 결재 흐름의 다음 사람에게 알린다. 승인·반려는 담당자에게, 완료 보고는 지시자에게.
     if (action === 'submit') {
       notify(request.auth.tenantId, [{
@@ -6646,8 +6669,8 @@ export function createApp(options = {}) {
     response.set('ETag', `"${version}"`)
     if (SENTINEL_TRIGGER_KEYS.has(key)) scheduleSentinel(request.auth.tenantId)
     // 새로 배정된 업무와 새 멘션은 이 경로로만 들어온다. 이전 값과 비교해야 "새 것"을 알 수 있다.
-    if (key === 'work-items') notifyNewAssignments(request.auth, rowsBeforeWrite, record.data)
-    if (key === 'messenger-conversations') notifyMentions(request.auth, rowsBeforeWrite, record.data)
+    if (key === 'work-items') { notifyNewAssignments(request.auth, rowsBeforeWrite, record.data); events.publish(request.auth.tenantId, 'work', { key, version }) }
+    if (key === 'messenger-conversations') { notifyMentions(request.auth, rowsBeforeWrite, record.data); events.publish(request.auth.tenantId, 'message', { key, version }) }
     response.json({ updatedAt: record.updatedAt, version })
   })
 

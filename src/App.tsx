@@ -31,6 +31,7 @@ import { SupportProgramsWidget } from './components/SupportProgramsWidget'
 import { PersonalTodoWidget } from './components/PersonalTodoWidget'
 import { IndustryProvider } from './modules/IndustryContext'
 import { NotificationCenter, type NotificationFeed } from './components/NotificationCenter'
+import { useEventStream } from './hooks/useEventStream'
 import { brandLabelForIndustry, industrySurface, navigationForIndustry, resolveIndustry, routeLabel, routesForIndustry, type TenantRouteId } from './modules/registry'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
@@ -1428,14 +1429,12 @@ export default function App() {
       setNotificationFeed(await response.json() as NotificationFeed)
     } catch { /* 다음 갱신에서 다시 시도한다 */ }
   }, [authStatus, mode, workspaceScope])
-  useEffect(() => {
-    void loadNotifications()
-    // P3에서 이벤트 스트림으로 바뀐다. 그전까지는 창이 앞으로 올 때와 주기적으로 확인한다.
-    const timer = window.setInterval(() => { void loadNotifications() }, 45_000)
-    const onFocus = () => { void loadNotifications() }
-    window.addEventListener('focus', onFocus)
-    return () => { window.clearInterval(timer); window.removeEventListener('focus', onFocus) }
-  }, [loadNotifications])
+  useEffect(() => { void loadNotifications() }, [loadNotifications])
+  // 알림·승인 대기 수는 서버가 밀어 준다. 주기 폴링 없이 즉시 반영된다.
+  useEventStream(authStatus === 'signed-in' && mode === 'tenant', (event) => {
+    if (event.kind === 'notification' || event.kind === 'resync') void loadNotifications()
+    if (event.kind === 'proposal' && typeof event.data.pending === 'number') setPendingProposals(event.data.pending)
+  })
   useEffect(() => {
     // 푸시 알림을 눌렀을 때 이미 열려 있는 앱이 새로고침 없이 해당 화면으로 이동한다.
     if (!('serviceWorker' in navigator)) return

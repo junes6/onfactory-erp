@@ -52,6 +52,7 @@ import {
 } from '../utils/documentAttachments'
 import './CollaborationSuite.css'import { Button } from './ui/Button'
 import { useIndustrySurface } from '../modules/IndustryContext'
+import { useEventStream } from '../hooks/useEventStream'
 
 
 type ToastHandler = (message: string) => void
@@ -322,6 +323,7 @@ export function MessengerDrawer({
     return () => { active = false }
   }, [open])
 
+  const messengerRefreshRef = useRef<(() => void) | null>(null)
   useEffect(() => {
     if (!open) return
     let active = true
@@ -338,9 +340,15 @@ export function MessengerDrawer({
         })
         .catch(() => undefined)
     }
-    const interval = window.setInterval(refresh, 5_000)
-    return () => { active = false; window.clearInterval(interval) }
+    refresh()
+    // 5초 폴링을 서버 이벤트 스트림으로 대체했다. 새 메시지가 있을 때만 다시 읽는다.
+    messengerRefreshRef.current = refresh
+    return () => { active = false; messengerRefreshRef.current = null }
   }, [open, setConversations, workspaceScope])
+
+  useEventStream(open, (event) => {
+    if (event.kind === 'message' || event.kind === 'resync') messengerRefreshRef.current?.()
+  })
 
   useEffect(() => {
     onUnreadChange?.(unreadTotal)
