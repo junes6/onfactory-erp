@@ -194,7 +194,6 @@ html[data-theme='dark'] .nav-list button.active em { background: var(--color-pri
 .notification-panel > header { min-height: 78px; display: flex; align-items: center; justify-content: space-between; gap: var(--space-16); padding: var(--space-12) var(--space-16); border-bottom: var(--hairline) solid var(--line); }
 .notification-panel h2 { margin: var(--space-0); font-size: var(--font-22); }
 .notification-panel header p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); }
-.notification-panel header button { border: none; color: var(--forest); background: transparent; font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
 .notification-list { padding: var(--space-4); }
 .notification-list > button { width: 100%; display: flex; align-items: flex-start; gap: var(--space-12); padding: var(--space-12) var(--space-12); border: none; border-radius: var(--radius-8); background: transparent; text-align: left; cursor: pointer; }
 .notification-list > button:hover { background: var(--color-blue-soft); }

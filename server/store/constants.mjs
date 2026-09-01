@@ -46,6 +46,10 @@ export const WORKSPACE_TABLES = Object.freeze({
   'opportunity-settings': 'opportunity_settings',
   // R11-C: 대표 브리핑 스냅샷
   'digests': 'digests',
+  // P2: 알림 센터 (알림 · 유형별 설정 · 웹푸시 구독)
+  'notifications': 'notifications',
+  'notification-settings': 'notification_settings',
+  'push-subscriptions': 'push_subscriptions',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))
@@ -59,6 +63,8 @@ export const WORKSPACE_SHAPES = Object.freeze({
   'performance-settings': 'singleton',
   'attendance-records': 'singleton',
   'opportunity-settings': 'singleton',
+  // 계정별 설정을 한 레코드에 담는다 (배열이 아니다).
+  'notification-settings': 'singleton',
 })
 
 export const ARRAY_WORKSPACE_KEYS = new Set(

@@ -23,6 +23,13 @@ import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
 import { registerPersonalCoreRoutes } from './personal-core-routes.mjs'
 import { backupSettings, BACKUP_STATUS_KEY, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
 import { createScheduler, SCHEDULER_RUNS_KEY, SCHEDULER_STATE_KEY } from './scheduler.mjs'
+import {
+  addNotifications, buildNotification, NOTIFICATIONS_KEY, NOTIFICATION_SETTINGS_KEY,
+  normalizeNotifications, pushPayload, PUSH_SUBSCRIPTIONS_KEY, removeSubscriptions,
+  shouldPush, subscriptionsFor,
+} from './notifications.mjs'
+import { registerNotificationRoutes } from './notification-routes.mjs'
+import { sendPush, vapidSettings } from './web-push.mjs'
 import { BillingServiceError, createBillingService, createMemoryBillingRepository } from './billing-service.mjs'
 import { attachBlocksToLatestUserMessage, ChatAttachmentError, normalizeChatAttachmentRequest, resolveChatAttachments } from './chat-attachments.mjs'
 import { registerPerformanceRoutes } from './performance-routes.mjs'
@@ -121,7 +128,10 @@ const WORKSPACE_STORE_KEYS = new Set([
   'it-clients', 'it-support-programs', 'project-spaces', 'project-posts',
   'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses', 'opportunities', 'opportunity-settings',
   'attendance-records', 'personal-todos', 'digests',
+  'notifications', 'notification-settings', 'push-subscriptions',
 ])
+// 알림·알림설정·푸시구독은 "내 것만" 나가야 하므로 전용 라우트로만 연다.
+const NOTIFICATION_KEYS = new Set(['notifications', 'notification-settings', 'push-subscriptions'])
 // 프로젝트 공간은 멤버십 기반이라 전용 라우트(/api/projects)로만 읽고 쓴다.
 const PROJECT_KEYS = new Set(['project-spaces', 'project-posts'])
 const PROJECT_ROLES = new Set(['owner', 'editor', 'viewer'])
@@ -2669,6 +2679,7 @@ export function createApp(options = {}) {
     if (existing.some((item) => item?.sourceKey === proposal.sourceKey && item.status === 'pending')) return false
     writeProposals(tenantId, [proposal, ...existing], proposal.createdBy)
     scheduleAuditCommit()
+    notifyProposal(tenantId, proposal)
     return true
   }
   const runSentinel = (tenantId, now = new Date()) => {
@@ -3161,6 +3172,153 @@ export function createApp(options = {}) {
     }
     response.json({ digest, edition, date: digest.date, isToday: true, history: digestSummaries(digestsOf(request.auth.tenantId)) })
   })
+
+  // ------------------------------------------------------------------
+  // 알림 센터 — "무슨 일이 나에게 일어났는가". 사람이 읽어야 하는 사실만 남긴다.
+  // ------------------------------------------------------------------
+  const vapid = vapidSettings(options.env ?? process.env)
+  const pushQueue = []
+  let pushDraining = false
+
+  const notificationSettingsRecord = (tenantId) => {
+    const record = workspaceStore.tenants[tenantId]?.[NOTIFICATION_SETTINGS_KEY]?.data
+    return record && typeof record === 'object' && !Array.isArray(record) ? record : {}
+  }
+  const pushSubscriptionsOf = (tenantId) => {
+    const rows = workspaceStore.tenants[tenantId]?.[PUSH_SUBSCRIPTIONS_KEY]?.data
+    return Array.isArray(rows) ? rows : []
+  }
+
+  /** 만료된 구독은 조용히 지운다. 사라진 기기에 계속 보내면 큐가 막힌다. */
+  const dropSubscription = (tenantId, endpoint) => {
+    const tenantStore = workspaceStore.tenants[tenantId]
+    if (!tenantStore) return
+    tenantStore[PUSH_SUBSCRIPTIONS_KEY] = {
+      data: removeSubscriptions(pushSubscriptionsOf(tenantId), [endpoint]),
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'system:push',
+    }
+    scheduleAuditCommit()
+  }
+
+  const drainPushQueue = async () => {
+    if (pushDraining) return
+    pushDraining = true
+    try {
+      while (pushQueue.length) {
+        const job = pushQueue.shift()
+        // 한 기기의 실패가 다음 기기 발송을 막지 않는다.
+        const result = await sendPush(job.subscription, job.payload, { vapid })
+        if (result.outcome === 'expired') dropSubscription(job.tenantId, job.subscription.endpoint)
+      }
+    } finally { pushDraining = false }
+  }
+
+  const queuePush = (tenantId, notifications) => {
+    if (!vapid.configured || !notifications.length) return
+    const settingsRecord = notificationSettingsRecord(tenantId)
+    const subscriptions = pushSubscriptionsOf(tenantId)
+    for (const notification of notifications) {
+      if (!shouldPush(notification, settingsRecord)) continue
+      for (const subscription of subscriptionsFor(subscriptions, notification.recipientId)) {
+        pushQueue.push({ tenantId, subscription, payload: pushPayload(notification) })
+      }
+    }
+    void drainPushQueue()
+  }
+
+  /**
+   * 알림 발행. 자기 행동은 자기에게 알리지 않는다(actorId).
+   * 저장 실패해도 원래 작업을 되돌리지 않는다 — 알림을 못 보낸 것이 업무를 막을 이유는 없다.
+   */
+  const notify = (tenantId, drafts, { now = new Date() } = {}) => {
+    if (!tenantId) return []
+    const built = []
+    for (const draft of drafts ?? []) {
+      if (!draft?.recipientId || draft.recipientId === draft.actorId) continue
+      try { built.push(buildNotification({ ...draft, now })) }
+      catch { /* 초안 한 건이 잘못돼도 나머지는 나간다 */ }
+    }
+    if (!built.length) return []
+    const tenantStore = workspaceStore.tenants[tenantId] ??= {}
+    const existing = normalizeNotifications(tenantStore[NOTIFICATIONS_KEY]?.data ?? []) ?? []
+    const { rows, accepted } = addNotifications(existing, built, { settingsRecord: notificationSettingsRecord(tenantId), now })
+    if (!accepted.length) return []
+    tenantStore[NOTIFICATIONS_KEY] = { data: rows, updatedAt: now.toISOString(), updatedBy: 'system:notify' }
+    scheduleAuditCommit()
+    queuePush(tenantId, accepted)
+    app.locals.onNotifications?.(tenantId, accepted)
+    return accepted
+  }
+  app.locals.notify = notify
+
+  /** 이전 목록에 없던 업무 중 나 아닌 사람에게 배정된 것. 지시받은 사람만 알림을 받는다. */
+  const notifyNewAssignments = (auth, previousData, nextData) => {
+    const known = new Set((Array.isArray(previousData) ? previousData : []).map((item) => item?.id))
+    notify(auth.tenantId, (Array.isArray(nextData) ? nextData : [])
+      .filter((item) => item?.id && !known.has(item.id) && item.ownerId)
+      .map((item) => ({
+        type: 'task-assigned', recipientId: item.ownerId, actorId: auth.id,
+        title: `새 업무: ${item.title}`,
+        body: `${item.requestedBy || auth.name}님이 지시했습니다.${item.due ? ` 마감 ${String(item.due).slice(0, 10)}` : ''}`,
+        page: 'tasks', focusId: item.id,
+        source: { kind: 'work-item', id: item.id, label: '업무' },
+      })))
+  }
+
+  /**
+   * 대화에 새로 붙은 메시지에서 @이름을 찾아 그 사람에게 알린다.
+   * 참여자 중에서만 찾으므로 다른 고객사 사람이 불려 나올 수 없다.
+   */
+  const notifyMentions = (auth, previousData, nextData) => {
+    const seen = new Map()
+    for (const conversation of Array.isArray(previousData) ? previousData : []) {
+      seen.set(conversation?.id, new Set((conversation?.messages ?? []).map((message) => message?.id)))
+    }
+    const roster = accounts.filter((account) => account.tenantId === auth.tenantId && account.approved !== false)
+    const drafts = []
+    for (const conversation of Array.isArray(nextData) ? nextData : []) {
+      const known = seen.get(conversation?.id) ?? new Set()
+      for (const message of conversation?.messages ?? []) {
+        if (!message?.id || known.has(message.id)) continue
+        const body = String(message.text ?? '')
+        if (!body.includes('@')) continue
+        for (const account of roster) {
+          if (account.id === auth.id || !body.includes(`@${account.name}`)) continue
+          drafts.push({
+            type: 'mention', recipientId: account.id, actorId: auth.id,
+            title: `${auth.name}님이 회원님을 언급했습니다`,
+            body: body.slice(0, 200),
+            page: 'messenger', focusId: conversation.id,
+            source: { kind: 'message', id: conversation.id, label: '메신저' },
+          })
+        }
+      }
+    }
+    notify(auth.tenantId, drafts)
+  }
+
+  const tenantAdminIds = (tenantId) => accounts
+    .filter((account) => account.tenantId === tenantId && account.role === 'tenant-admin' && account.approved !== false)
+    .map((account) => account.id)
+
+  /** 승인 큐에 올라온 제안을 관리자에게 알린다. 유형에 따라 문구가 달라진다. */
+  const notifyProposal = (tenantId, proposal) => {
+    if (!proposal) return
+    const type = proposal.kind === 'sentinel-task' ? 'sentinel-warning'
+      : proposal.kind === 'opportunity' ? 'opportunity-new'
+        : 'proposal-pending'
+    notify(tenantId, tenantAdminIds(tenantId).map((recipientId) => ({
+      type,
+      recipientId,
+      actorId: null,
+      title: proposal.summary,
+      body: type === 'opportunity-new' ? '승인 큐에서 검토해 주세요.' : String(proposal.evidence ?? '').split('\n')[0],
+      page: 'approvals',
+      focusId: proposal.id,
+      source: { kind: 'proposal', id: proposal.id, label: '승인 큐' },
+    })))
+  }
 
   // ------------------------------------------------------------------
   // 내장 스케줄러 — 사용자 접속과 무관하게 도는 정기 작업.
@@ -6051,6 +6209,24 @@ export function createApp(options = {}) {
       return
     }
     scheduleSentinel(request.auth.tenantId)
+    // 결재 흐름의 다음 사람에게 알린다. 승인·반려는 담당자에게, 완료 보고는 지시자에게.
+    if (action === 'submit') {
+      notify(request.auth.tenantId, [{
+        type: 'approval-requested', recipientId: next.requesterId, actorId: request.auth.id,
+        title: `결재 요청: ${next.title}`,
+        body: `${request.auth.name}님이 완료 보고를 올렸습니다.`,
+        page: 'tasks', focusId: next.id,
+        source: { kind: 'work-item', id: next.id, label: '업무' },
+      }])
+    } else if (action === 'request-changes') {
+      notify(request.auth.tenantId, [{
+        type: 'changes-requested', recipientId: next.ownerId, actorId: request.auth.id,
+        title: `보완 요청: ${next.title}`,
+        body: next.review?.requestedChanges ?? '',
+        page: 'tasks', focusId: next.id,
+        source: { kind: 'work-item', id: next.id, label: '업무' },
+      }])
+    }
     response.json({ item: next, updatedAt: now, version: workspaceRecordVersion(record) })
   })
 
@@ -6194,6 +6370,10 @@ export function createApp(options = {}) {
       response.status(403).json({ error: { code: 'DIGEST_ROUTE_REQUIRED', message: '브리핑은 AI 업무허브의 브리핑 카드에서만 조회할 수 있습니다.' } })
       return
     }
+    if (NOTIFICATION_KEYS.has(key)) {
+      response.status(403).json({ error: { code: 'NOTIFICATION_ROUTE_REQUIRED', message: '알림은 알림 센터에서만 조회·변경할 수 있습니다.' } })
+      return
+    }
     if (key === 'personal-todos') {
       response.status(403).json({ error: { code: 'PERSONAL_TODO_ROUTE_REQUIRED', message: '개인 할 일은 내 할 일 전용 기능에서만 조회할 수 있습니다.' } })
       return
@@ -6272,6 +6452,10 @@ export function createApp(options = {}) {
       response.status(403).json({ error: { code: 'DIGEST_ROUTE_REQUIRED', message: '브리핑은 브리핑 화면에서만 생성됩니다.' } })
       return
     }
+    if (NOTIFICATION_KEYS.has(key)) {
+      response.status(403).json({ error: { code: 'NOTIFICATION_ROUTE_REQUIRED', message: '알림은 알림 센터에서만 조회·변경할 수 있습니다.' } })
+      return
+    }
     if (key === 'opportunities' || key === 'opportunity-settings') {
       response.status(403).json({ error: { code: 'OPPORTUNITY_ROUTE_REQUIRED', message: '외부 기회 신호는 인제스트 API와 감시 설정 화면에서만 변경할 수 있습니다.' } })
       return
@@ -6287,6 +6471,8 @@ export function createApp(options = {}) {
 
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const currentRecord = tenantStore[key]
+    // 알림은 "무엇이 새로 생겼는가"를 알아야 하므로 병합 전 값을 여기서 잡아 둔다.
+    const rowsBeforeWrite = Array.isArray(currentRecord?.data) ? currentRecord.data : []
     const currentVersion = workspaceRecordVersion(currentRecord)
     const suppliedVersion = String(request.get('if-match') || '').trim().replace(/^W\//, '').replace(/^"|"$/g, '')
     if (suppliedVersion && suppliedVersion !== currentVersion) {
@@ -6459,6 +6645,9 @@ export function createApp(options = {}) {
     const version = workspaceRecordVersion(record)
     response.set('ETag', `"${version}"`)
     if (SENTINEL_TRIGGER_KEYS.has(key)) scheduleSentinel(request.auth.tenantId)
+    // 새로 배정된 업무와 새 멘션은 이 경로로만 들어온다. 이전 값과 비교해야 "새 것"을 알 수 있다.
+    if (key === 'work-items') notifyNewAssignments(request.auth, rowsBeforeWrite, record.data)
+    if (key === 'messenger-conversations') notifyMentions(request.auth, rowsBeforeWrite, record.data)
     response.json({ updatedAt: record.updatedAt, version })
   })
 
@@ -6471,6 +6660,15 @@ export function createApp(options = {}) {
     accounts,
     commitWorkspaceStore,
     ...(typeof options.attendanceClock === 'function' ? { clock: options.attendanceClock } : {}),
+  })
+
+  registerNotificationRoutes({
+    app,
+    requireAuth,
+    requireMatchingWorkspaceIdentity,
+    workspaceStore,
+    commitWorkspaceStore,
+    vapid,
   })
 
   registerPersonalTodoRoutes({

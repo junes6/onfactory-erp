@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, BarChart3, BookOpen, Boxes, Building2, Check,
   CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCheck, Clock3,
@@ -30,6 +30,7 @@ import { ApprovalQueue } from './components/ApprovalQueue'
 import { SupportProgramsWidget } from './components/SupportProgramsWidget'
 import { PersonalTodoWidget } from './components/PersonalTodoWidget'
 import { IndustryProvider } from './modules/IndustryContext'
+import { NotificationCenter, type NotificationFeed } from './components/NotificationCenter'
 import { brandLabelForIndustry, industrySurface, navigationForIndustry, resolveIndustry, routeLabel, routesForIndustry, type TenantRouteId } from './modules/registry'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
@@ -1416,12 +1417,41 @@ export default function App() {
   const [lensTarget, setLensTarget] = useState<LensTarget | null>(null)
   const [navEditorOpen, setNavEditorOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const noticeIds = ['primary', 'secondary', 'tertiary'] as const
-  const [readNoticeIds, setReadNoticeIds] = useState<string[]>([])
-  // 3번째 줄은 "현재 상태를 불러왔습니다" 류의 알림이라 처리할 일이 없다.
-  // 이걸 배지에 세면 아무것도 할 게 없는 날에도 빨간 숫자가 남아 사람이 알림을 무시하게 된다.
-  const actionableNoticeIds = noticeIds.filter((id) => id !== 'tertiary')
-  const unread = actionableNoticeIds.filter((id) => !readNoticeIds.includes(id)).length
+  // 벨 배지는 실제 알림에서만 온다. 고정 슬롯을 세던 시절에는 아무 할 일이 없어도 빨간 숫자가 남았다.
+  const [notificationFeed, setNotificationFeed] = useState<NotificationFeed | null>(null)
+  const unread = notificationFeed?.unread ?? 0
+  const loadNotifications = useCallback(async () => {
+    if (mode !== 'tenant' || authStatus !== 'signed-in') { setNotificationFeed(null); return }
+    try {
+      const response = await fetch('/api/notifications', { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+      if (!response.ok) return
+      setNotificationFeed(await response.json() as NotificationFeed)
+    } catch { /* 다음 갱신에서 다시 시도한다 */ }
+  }, [authStatus, mode, workspaceScope])
+  useEffect(() => {
+    void loadNotifications()
+    // P3에서 이벤트 스트림으로 바뀐다. 그전까지는 창이 앞으로 올 때와 주기적으로 확인한다.
+    const timer = window.setInterval(() => { void loadNotifications() }, 45_000)
+    const onFocus = () => { void loadNotifications() }
+    window.addEventListener('focus', onFocus)
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', onFocus) }
+  }, [loadNotifications])
+  useEffect(() => {
+    // 푸시 알림을 눌렀을 때 이미 열려 있는 앱이 새로고침 없이 해당 화면으로 이동한다.
+    if (!('serviceWorker' in navigator)) return
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { kind?: string; url?: string } | null
+      if (data?.kind !== 'notification-click' || !data.url) return
+      const params = new URL(data.url, window.location.origin).searchParams
+      const page = params.get('page')
+      const focus = params.get('focus')
+      if (focus) setWorkFocusId(focus)
+      if (page) navigate(page as PageId)
+      void loadNotifications()
+    }
+    navigator.serviceWorker.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage)
+  }) // navigate는 매 렌더 새로 만들어지므로 의존성 배열을 두지 않는다.
   const notificationWrapRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!notificationsOpen) return
@@ -1971,7 +2001,7 @@ export default function App() {
     setTaskDraft(null)
     setSupportTenant(null)
     setPlatformFocusId(undefined)
-    setReadNoticeIds([])
+    setNotificationFeed(null)
     setMessengerUnread(4)
     setToast('')
     setAccount(null)
@@ -2078,22 +2108,14 @@ export default function App() {
             {mode === 'tenant' && <button type="button" className={'top-icon-button messenger-trigger ' + (messengerOpen ? 'active' : '')} aria-label={`사내 메신저 열기, 읽지 않은 대화 ${messengerUnread}개`} aria-controls="company-messenger" aria-expanded={messengerOpen} onClick={() => { setMessengerOpen((value) => !value); setNotificationsOpen(false) }}><ChatBubbleIcon />{messengerUnread > 0 && <span>{messengerUnread}</span>}</button>}
             <div className="notification-wrap" ref={notificationWrapRef}>
               <button type="button" className={'top-icon-button ' + (notificationsOpen ? 'active' : '')} aria-label={'알림 ' + unread + '개'} aria-controls="notification-panel" aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((value) => !value); setMessengerOpen(false) }}><NotificationBellIcon />{unread > 0 && <span>{unread}</span>}</button>
-              {notificationsOpen && <section className="notification-panel" id="notification-panel">
-                <header><div><h2>알림</h2><p>{unread > 0 ? `읽지 않은 알림 ${unread}개` : '모든 알림을 읽었습니다.'}</p></div><button type="button" disabled={unread === 0} onClick={() => setReadNoticeIds([...actionableNoticeIds])}>모두 읽음</button></header>
-                <div className="notification-list">
-                  {([
-                    { id: 'primary', tone: 'red', icon: <AlertTriangle size={17} />, title: mode === 'tenant' ? primaryTenantNotice.title : primaryPlatformNotice.title, detail: mode === 'tenant' ? primaryTenantNotice.detail : primaryPlatformNotice.detail, open: () => navigate(mode === 'tenant' ? primaryTenantNotice.page : 'support') },
-                    { id: 'secondary', tone: 'amber', icon: mode === 'tenant' ? secondaryTenantNotice.icon : <Package size={17} />, title: mode === 'tenant' ? secondaryTenantNotice.title : secondaryPlatformNotice.title, detail: mode === 'tenant' ? secondaryTenantNotice.detail : secondaryPlatformNotice.detail, open: () => navigate(mode === 'tenant' ? secondaryTenantNotice.page : 'integrations') },
-                    { id: 'tertiary', tone: 'green', icon: <CheckCircle2 size={17} />, title: mode === 'tenant' ? moduleConnectivityNotice.title : '플랫폼 운영 데이터를 불러왔습니다', detail: mode === 'tenant' ? moduleConnectivityNotice.detail : '표시된 값은 현재 워크스페이스에서 받은 데이터 기준입니다.', open: undefined as (() => void) | undefined },
-                  ]).map((notice) => {
-                    // 정보성 줄은 읽음/안읽음 상태를 갖지 않고, 누를 곳도 없으니 버튼으로 만들지 않는다.
-                    const informational = notice.id === 'tertiary'
-                    const isRead = informational || readNoticeIds.includes(notice.id)
-                    if (informational) return <div key={notice.id} className="is-read" aria-label={notice.title}><span className={`notice-icon ${notice.tone}`}>{notice.icon}</span><div><strong>{notice.title}</strong><p>{notice.detail}</p><small>현재 상태</small></div></div>
-                    return <button type="button" key={notice.id} className={isRead ? 'is-read' : 'is-unread'} aria-label={`${isRead ? '읽음' : '읽지 않음'} · ${notice.title}`} onClick={() => { setReadNoticeIds((current) => current.includes(notice.id) ? current : [...current, notice.id]); notice.open?.(); setNotificationsOpen(false) }}><span className={`notice-icon ${notice.tone}`}>{notice.icon}</span><div><strong>{notice.title}</strong><p>{notice.detail}</p><small>{isRead ? '읽음' : '읽지 않음 · 현재 상태'}</small></div><i className="notice-state" aria-hidden="true" /></button>
-                  })}
-                </div>
-              </section>}
+              {notificationsOpen && notificationFeed && <NotificationCenter
+                workspaceScope={workspaceScope}
+                feed={notificationFeed}
+                onReload={loadNotifications}
+                onNavigate={(page, focusId) => { if (focusId) setWorkFocusId(focusId); navigate(page as PageId) }}
+                onToast={setToast}
+                onClose={() => setNotificationsOpen(false)}
+              />}
             </div>
           </div>
         </header>
