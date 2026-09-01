@@ -22,6 +22,7 @@ import { registerAttendanceRoutes } from './attendance-routes.mjs'
 import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
 import { registerPersonalCoreRoutes } from './personal-core-routes.mjs'
 import { backupSettings, BACKUP_STATUS_KEY, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
+import { createScheduler, SCHEDULER_RUNS_KEY, SCHEDULER_STATE_KEY } from './scheduler.mjs'
 import { BillingServiceError, createBillingService, createMemoryBillingRepository } from './billing-service.mjs'
 import { attachBlocksToLatestUserMessage, ChatAttachmentError, normalizeChatAttachmentRequest, resolveChatAttachments } from './chat-attachments.mjs'
 import { registerPerformanceRoutes } from './performance-routes.mjs'
@@ -3159,6 +3160,138 @@ export function createApp(options = {}) {
       return
     }
     response.json({ digest, edition, date: digest.date, isToday: true, history: digestSummaries(digestsOf(request.auth.tenantId)) })
+  })
+
+  // ------------------------------------------------------------------
+  // 내장 스케줄러 — 사용자 접속과 무관하게 도는 정기 작업.
+  // 화면을 열 때 계산하지 않는다. 브리핑은 미리 만들어 두고, 센티널은 스스로 돈다.
+  // ------------------------------------------------------------------
+  const tenantIdsForSchedule = () => [...new Set([
+    ...Object.keys(workspaceStore.tenants ?? {}),
+    ...(workspaceStore.platform.tenants ?? []).map((tenant) => tenant?.id).filter(Boolean),
+  ])]
+
+  /** 마감이 임박했거나 이미 지난 업무. 센티널 제안과 별개로 "지금 무엇이 급한가"를 센다. */
+  const workDeadlineSnapshot = (tenantId, now) => {
+    const items = Array.isArray(workspaceStore.tenants[tenantId]?.['work-items']?.data)
+      ? workspaceStore.tenants[tenantId]['work-items'].data
+      : []
+    const horizon = now.getTime() + 24 * 60 * 60 * 1_000
+    let dueSoon = 0
+    let overdue = 0
+    for (const item of items) {
+      if (!item || item.status === '결재완료') continue
+      const due = Date.parse(item.due)
+      if (!Number.isFinite(due)) continue
+      if (due < now.getTime()) overdue += 1
+      else if (due <= horizon) dueSoon += 1
+    }
+    return { dueSoon, overdue }
+  }
+
+  const scheduler = createScheduler({
+    readState: () => workspaceStore.platform[SCHEDULER_STATE_KEY] ?? {},
+    writeState: (state) => { workspaceStore.platform[SCHEDULER_STATE_KEY] = state },
+    readRuns: () => workspaceStore.platform[SCHEDULER_RUNS_KEY] ?? [],
+    writeRuns: (runs) => { workspaceStore.platform[SCHEDULER_RUNS_KEY] = runs },
+    commit: () => commitWorkspaceStore(),
+  })
+
+  scheduler.register({
+    id: 'sentinel-sweep',
+    label: '센티널 전 규칙 평가',
+    description: '전 고객사의 생존 센티널 규칙을 평가해 승인 큐에 제안을 올리고, 해소된 제안은 만료 처리합니다.',
+    spec: { every: 'hour' },
+    run: ({ now }) => {
+      const results = app.locals.runSentinelForAllTenants(now)
+      const created = results.reduce((sum, item) => sum + item.created, 0)
+      const expired = results.reduce((sum, item) => sum + item.expired, 0)
+      return { detail: `고객사 ${results.length}곳 · 새 제안 ${created}건 · 해소 ${expired}건`, created, expired }
+    },
+  })
+
+  scheduler.register({
+    id: 'work-deadline-watch',
+    label: '마감 임박·지연 업무 점검',
+    description: '24시간 내 마감과 이미 지난 마감을 고객사별로 셉니다.',
+    spec: { every: 'hour', minute: 5 },
+    run: ({ now }) => {
+      const rows = tenantIdsForSchedule().map((tenantId) => ({ tenantId, ...workDeadlineSnapshot(tenantId, now) }))
+      const dueSoon = rows.reduce((sum, row) => sum + row.dueSoon, 0)
+      const overdue = rows.reduce((sum, row) => sum + row.overdue, 0)
+      app.locals.onWorkDeadlineSweep?.(rows, now)
+      return { detail: `마감 임박 ${dueSoon}건 · 마감 초과 ${overdue}건`, rows }
+    },
+  })
+
+  const registerDigestJob = (edition, spec, label) => scheduler.register({
+    id: `digest-${edition}`,
+    label,
+    description: '고객사별 브리핑을 미리 만들어 둡니다. 화면을 열 때 계산하지 않습니다.',
+    spec,
+    run: async ({ now }) => {
+      const failures = []
+      let written = 0
+      for (const tenantId of tenantIdsForSchedule()) {
+        try {
+          // 아직 아무것도 쓰지 않은 신규 고객사도 브리핑을 받는다 (GET /api/digest와 같은 규칙).
+          const digest = buildDigest(workspaceStore.tenants[tenantId] ?? {}, { now, edition, generatedBy: '스케줄러' })
+          await persistDigest(tenantId, digest, 'system:scheduler')
+          written += 1
+        } catch (error) {
+          // 한 고객사의 실패가 나머지 고객사의 브리핑을 막지 않는다.
+          failures.push(`${tenantId}: ${error?.message ?? error}`)
+        }
+      }
+      if (failures.length && !written) throw new Error(`브리핑 생성 실패 — ${failures.join(' / ')}`)
+      return { detail: `${written}개 고객사 생성${failures.length ? ` · 실패 ${failures.length}건` : ''}`, written, failures }
+    },
+  })
+  registerDigestJob('morning', { every: 'day', hour: 7 }, '아침 브리핑 생성')
+  registerDigestJob('evening', { every: 'day', hour: 18, minute: 30 }, '저녁 브리핑 생성')
+
+  scheduler.register({
+    id: 'backup-mirror',
+    label: '백업 이중화',
+    description: 'NAS 세대 보관과 클라우드 미러를 실행합니다.',
+    spec: { every: 'day', hour: 3 },
+    run: async ({ now }) => {
+      const result = await app.locals.runBackupCycle(now)
+      if (result?.skipped) return { detail: result.reason ?? '백업이 꺼져 있습니다.' }
+      if (!result?.ok) throw new Error(result?.nas?.error || result?.cloud?.error || '백업에 실패했습니다.')
+      return { detail: `${result.generation} · NAS ${Math.round(result.nas.bytes / 1024)}KB${result.cloud?.ok ? ` · 클라우드 ${result.cloud.objects}개` : ''}` }
+    },
+  })
+
+  app.locals.scheduler = scheduler
+
+  app.get('/api/platform/scheduler', requireAuth, requirePlatformOperator, (request, response) => {
+    response.json({
+      jobs: scheduler.listJobs(),
+      runs: (workspaceStore.platform[SCHEDULER_RUNS_KEY] ?? []).slice(0, 60),
+    })
+  })
+
+  app.post('/api/platform/scheduler/:jobId/run', requireAuth, requirePlatformOperator, async (request, response) => {
+    const jobId = String(request.params.jobId ?? '')
+    if (!scheduler.has(jobId)) {
+      response.status(404).json({ error: { code: 'SCHEDULER_JOB_NOT_FOUND', message: '등록되지 않은 정기 작업입니다.' } })
+      return
+    }
+    const result = await scheduler.runJob(jobId, { trigger: 'manual', actor: request.auth.name })
+    if (result.skipped) {
+      response.status(409).json({ error: { code: 'SCHEDULER_JOB_RUNNING', message: result.reason ?? '이미 실행 중입니다.' } })
+      return
+    }
+    appendPlatformAudit(workspaceStore.platform, {
+      tenantId: null,
+      event: '정기 작업 수동 실행',
+      scope: `${jobId} · ${result.ok ? '완료' : '실패'}`,
+      actor: request.auth.name,
+      result: result.ok ? '완료' : '실패',
+      reference: jobId,
+    })
+    response.json({ ok: result.ok, detail: result.detail ?? result.error ?? '', jobs: scheduler.listJobs(), runs: (workspaceStore.platform[SCHEDULER_RUNS_KEY] ?? []).slice(0, 60) })
   })
 
   // ------------------------------------------------------------------

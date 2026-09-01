@@ -326,3 +326,29 @@ html[data-theme='dark'] .pc-assistant { background: var(--color-gray-50); }
 html[data-theme='dark'] .pc-briefing-chips em.is-info { color: var(--ink); }
 
 .pc-backup-detail { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--pc-muted); font-size: var(--font-13); }
+
+/* 정기 작업 패널 */
+.pc-scheduler-empty { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.pc-scheduler-list { display: grid; gap: var(--space-8); }
+.pc-scheduler-job { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-8); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.pc-scheduler-job.is-failing { border-color: var(--color-danger); }
+.pc-scheduler-copy { min-width: 0; display: grid; gap: var(--space-4); }
+.pc-scheduler-copy strong { color: var(--ink); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.pc-scheduler-copy small { color: var(--color-primary); font-size: var(--font-11); }
+.pc-scheduler-copy p { margin: var(--space-0); color: var(--muted); font-size: var(--font-11); line-height: 1.5; }
+.pc-scheduler-last { color: var(--muted); font-size: var(--font-11); line-height: 1.5; }
+.pc-scheduler-last em { color: var(--color-danger); font-style: normal; }
+.pc-scheduler-history { padding-top: var(--space-8); border-top: var(--hairline) solid var(--line); }
+.pc-scheduler-history > summary { color: var(--muted); font-size: var(--font-11); cursor: pointer; }
+.pc-scheduler-history ul { display: grid; gap: var(--space-4); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
+.pc-scheduler-history li { min-width: 0; display: grid; grid-template-columns: auto auto auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); padding: var(--space-4) var(--space-0); border-bottom: var(--hairline) solid var(--line); color: var(--muted); font-size: var(--font-11); }
+.pc-scheduler-history li:last-child { border-bottom: none; }
+.pc-scheduler-history li.is-failed .pc-scheduler-history-detail { color: var(--color-danger); }
+.pc-scheduler-history-label { color: var(--ink); font-weight: var(--weight-medium); }
+.pc-scheduler-history-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .pc-scheduler-job { grid-template-columns: minmax(0, 1fr) auto; }
+  .pc-scheduler-history li { grid-template-columns: minmax(0, 1fr) auto; }
+  .pc-scheduler-history-trigger, .pc-scheduler-history-duration { display: none; }
+}

@@ -19,6 +19,7 @@ import {
   LockKeyhole,
   MessageCircle,
   Paperclip,
+  PlayCircle,
   Plus,
   RefreshCw,
   Search,
@@ -972,6 +973,104 @@ function BackupPanel() {
   </Panel>
 }
 
+type SchedulerJob = {
+  id: string
+  label: string
+  description: string
+  schedule: string
+  disabled: boolean
+  lastRunAt: string | null
+  lastStatus: 'ok' | 'failed' | null
+  lastDurationMs: number | null
+  lastDetail: string
+  consecutiveFailures: number
+  nextRunAt: string | null
+  running: boolean
+}
+type SchedulerRun = { id: string; jobId: string; label: string; trigger: 'schedule' | 'manual'; actor: string; at: string; status: 'ok' | 'failed'; durationMs: number; detail: string }
+
+const durationLabel = (ms: number | null) => (ms === null ? '—' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}초`)
+
+/**
+ * 정기 작업 패널. "언제 무엇이 돌았고 다음은 언제인가"를 한 화면에서 보고, 필요하면 즉시 실행한다.
+ * 스케줄러는 접속과 무관하게 돌기 때문에, 돌았다는 증거를 여기서 확인할 수 있어야 한다.
+ */
+function SchedulerPanel({ onToast }: { onToast: (message: string) => void }) {
+  const [jobs, setJobs] = useState<SchedulerJob[]>([])
+  const [runs, setRuns] = useState<SchedulerRun[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    try {
+      const body = await platformJson<{ jobs: SchedulerJob[]; runs: SchedulerRun[] }>('/api/platform/scheduler')
+      setJobs(body.jobs)
+      setRuns(body.runs)
+      setError('')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '정기 작업 상태를 불러오지 못했습니다.')
+    } finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => {
+    void load()
+    const timer = window.setInterval(() => { void load() }, 30_000)
+    return () => window.clearInterval(timer)
+  }, [load])
+
+  const runNow = async (job: SchedulerJob) => {
+    setBusyId(job.id)
+    try {
+      const body = await platformJson<{ ok: boolean; detail: string; jobs: SchedulerJob[]; runs: SchedulerRun[] }>(`/api/platform/scheduler/${encodeURIComponent(job.id)}/run`, { method: 'POST' })
+      setJobs(body.jobs)
+      setRuns(body.runs)
+      onToast(body.ok ? `${job.label} 실행 완료 — ${body.detail}` : `${job.label} 실패 — ${body.detail}`)
+    } catch (reason) {
+      onToast(reason instanceof Error ? reason.message : '정기 작업을 실행하지 못했습니다.')
+    } finally { setBusyId(null) }
+  }
+
+  const failing = jobs.filter((job) => job.consecutiveFailures > 0).length
+  return <Panel
+    title="정기 작업"
+    subtitle="서버 기동과 함께 시작되어 사용자 접속과 무관하게 실행됩니다."
+    tools={<Badge tone={failing ? 'danger' : 'success'}>{failing ? `실패 ${failing}건` : '정상'}</Badge>}
+  >
+    {loading && <p className="pc-scheduler-empty">정기 작업 상태를 확인하는 중입니다.</p>}
+    {!loading && error && <div className="pc-form-note"><AlertTriangle size={17} /><span>{error}</span></div>}
+    {!loading && !error && <div className="pc-scheduler-list">{jobs.map((job) => <article key={job.id} className={`pc-scheduler-job${job.consecutiveFailures ? ' is-failing' : ''}`}>
+      <div className="pc-scheduler-copy">
+        <strong>{job.label}</strong>
+        <small>{job.schedule} · 다음 {job.nextRunAt ? formatDateTime(job.nextRunAt) : '—'}</small>
+        {job.description && <p>{job.description}</p>}
+        <span className="pc-scheduler-last">
+          {job.lastRunAt
+            ? <>마지막 성공 {formatDateTime(job.lastRunAt)} · {durationLabel(job.lastDurationMs)}{job.lastDetail ? ` · ${job.lastDetail}` : ''}</>
+            : '아직 실행된 적 없음'}
+          {job.consecutiveFailures > 0 && <em> · 연속 실패 {job.consecutiveFailures}회</em>}
+        </span>
+      </div>
+      <Badge tone={job.consecutiveFailures ? 'danger' : job.lastStatus === 'ok' ? 'success' : 'neutral'}>
+        {job.running ? '실행 중' : job.consecutiveFailures ? '실패' : job.lastStatus === 'ok' ? '정상' : '대기'}
+      </Badge>
+      <Button tone="secondary" size="sm" type="button" disabled={busyId === job.id || job.running} onClick={() => void runNow(job)}>
+        <PlayCircle size={16} /> {busyId === job.id ? '실행 중' : '지금 실행'}
+      </Button>
+    </article>)}</div>}
+    {!loading && !error && runs.length > 0 && <details className="pc-scheduler-history">
+      <summary>실행 이력 {runs.length}건</summary>
+      <ul>{runs.map((run) => <li key={run.id} className={run.status === 'failed' ? 'is-failed' : ''}>
+        <span className="pc-scheduler-history-at">{formatDateTime(run.at)}</span>
+        <span className="pc-scheduler-history-label">{run.label}</span>
+        <span className="pc-scheduler-history-trigger">{run.trigger === 'manual' ? `수동 · ${run.actor}` : '자동'}</span>
+        <span className="pc-scheduler-history-detail">{run.detail || (run.status === 'ok' ? '완료' : '실패')}</span>
+        <span className="pc-scheduler-history-duration">{durationLabel(run.durationMs)}</span>
+      </li>)}</ul>
+    </details>}
+  </Panel>
+}
+
 function IntegrationsView({ scopedIntegrations, onScope, onOpenDialog, props }: SectionProps) {
   const { tenants } = usePlatformData()
   const [status, setStatus] = useState<'all' | IntegrationState['status']>('all')
@@ -1274,7 +1373,7 @@ export function PlatformConsole(props: PlatformConsoleProps) {
         {props.section === 'platform' && <Overview {...sectionProps} />}
         {props.section === 'tenants' && <TenantsView {...sectionProps} />}
         {props.section === 'support' && <SupportView {...sectionProps} />}
-        {props.section === 'integrations' && <><IntegrationsView {...sectionProps} /><BackupPanel /></>}
+        {props.section === 'integrations' && <><IntegrationsView {...sectionProps} /><SchedulerPanel onToast={props.onToast} /><BackupPanel /></>}
         {props.section === 'audit' && <AuditView {...sectionProps} />}
       </div>
       {dialog && <PlatformDialog dialog={dialog} scope={scope} onClose={() => setDialog(null)} onScope={changeScope} onSectionChange={props.onSectionChange} onToast={props.onToast} />}

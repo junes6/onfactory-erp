@@ -7,7 +7,7 @@ import { createPostgresBillingRepository } from './billing-repository.mjs'
 import { createBillingService, createMemoryBillingRepository } from './billing-service.mjs'
 import { performanceMaintenanceErrors, runPerformanceMonthlyMaintenance } from './performance-maintenance.mjs'
 import { initializeRuntimeStore } from './store/index.mjs'
-import { backupSettings, millisecondsUntilNextRun } from './backup-mirror.mjs'
+import { backupSettings } from './backup-mirror.mjs'
 
 // .env.local is already covered by the project's *.local gitignore rule.
 config({ path: '.env.local', quiet: true })
@@ -55,21 +55,29 @@ function previousBillingMonth(now = new Date()) {
   return `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
-async function runBillingMaintenance() {
-  const now = new Date()
-  const tenantIds = new Set([
-    ...Object.keys(runtimeStore.workspaceStore.tenants ?? {}),
-    ...(runtimeStore.workspaceStore.platform?.tenants ?? []).map((tenant) => tenant.id),
-  ])
-  const operator = { id: 'system:billing-month-close', role: 'platform-operator', tenantId: null }
-  const maintenanceErrors = []
+const scheduleTenantIds = () => new Set([
+  ...Object.keys(runtimeStore.workspaceStore.tenants ?? {}),
+  ...(runtimeStore.workspaceStore.platform?.tenants ?? []).map((tenant) => tenant.id).filter(Boolean),
+])
+
+/** 사용량 정산. 예약 후 확정되지 못한 호출을 정리한다. */
+async function reconcileUsage() {
+  const failures = []
+  const tenantIds = scheduleTenantIds()
   for (const tenantId of tenantIds) {
-    const collector = { id: 'system:billing-reconciliation', role: 'system', trusted: true, tenantId }
     try {
-      await billingService.reconcilePendingUsageBatch(collector, { tenantId })
-    } catch (error) {
-      maintenanceErrors.push(Object.assign(error instanceof Error ? error : new Error(String(error)), { tenantId, operation: 'billing-reconciliation' }))
-    }
+      await billingService.reconcilePendingUsageBatch({ id: 'system:billing-reconciliation', role: 'system', trusted: true, tenantId }, { tenantId })
+    } catch (error) { failures.push(`${tenantId}: ${error?.message ?? error}`) }
+  }
+  if (failures.length === tenantIds.size && tenantIds.size > 0) throw new Error(`정산 실패 — ${failures.join(' / ')}`)
+  return { detail: `고객사 ${tenantIds.size}곳 정산${failures.length ? ` · 실패 ${failures.length}건` : ''}` }
+}
+
+/** 저장 용량 일별 스냅샷. 월 청구의 원료다. */
+async function snapshotStorage(now) {
+  const failures = []
+  const tenantIds = scheduleTenantIds()
+  for (const tenantId of tenantIds) {
     try {
       const documents = runtimeStore.workspaceStore.tenants?.[tenantId]?.['company-documents']?.data ?? []
       const bytes = documents.reduce((sum, document) => sum + Math.max(0, Number(document?.size || 0)), 0)
@@ -77,10 +85,21 @@ async function runBillingMaintenance() {
         { id: 'system:storage-snapshot', role: 'system', trusted: true, tenantId },
         { tenantId, bytes: Math.trunc(bytes), objectCount: documents.length, measuredAt: now },
       )
-      await billingService.createMonthlySnapshot(operator, { tenantId, month: previousBillingMonth(now) })
-    } catch (error) {
-      maintenanceErrors.push(Object.assign(error instanceof Error ? error : new Error(String(error)), { tenantId, operation: 'billing-snapshot' }))
-    }
+    } catch (error) { failures.push(`${tenantId}: ${error?.message ?? error}`) }
+  }
+  if (failures.length === tenantIds.size && tenantIds.size > 0) throw new Error(`용량 스냅샷 실패 — ${failures.join(' / ')}`)
+  return { detail: `고객사 ${tenantIds.size}곳 기록${failures.length ? ` · 실패 ${failures.length}건` : ''}` }
+}
+
+/** 월 1회: 전월 청구 스냅샷과 성과 리포트. */
+async function closeMonth(now) {
+  const month = previousBillingMonth(now)
+  const tenantIds = scheduleTenantIds()
+  const operator = { id: 'system:billing-month-close', role: 'platform-operator', tenantId: null }
+  const failures = []
+  for (const tenantId of tenantIds) {
+    try { await billingService.createMonthlySnapshot(operator, { tenantId, month }) }
+    catch (error) { failures.push(`${tenantId}: ${error?.message ?? error}`) }
   }
   const performanceResults = await runPerformanceMonthlyMaintenance({
     workspaceStore: runtimeStore.workspaceStore,
@@ -92,42 +111,42 @@ async function runBillingMaintenance() {
     billingService,
     clock: () => now,
   })
-  maintenanceErrors.push(...performanceMaintenanceErrors(performanceResults))
-  if (maintenanceErrors.length) throw new AggregateError(maintenanceErrors, '정기 유지관리 일부 작업이 실패했습니다.')
+  const performanceFailures = performanceMaintenanceErrors(performanceResults)
+  if (failures.length === tenantIds.size && tenantIds.size > 0) throw new Error(`${month} 청구 스냅샷 실패 — ${failures.join(' / ')}`)
+  return { detail: `${month} 마감 · 고객사 ${tenantIds.size}곳 · 성과 리포트 ${performanceResults.length}건${failures.length + performanceFailures.length ? ` · 실패 ${failures.length + performanceFailures.length}건` : ''}` }
 }
 
-void runBillingMaintenance().catch((error) => console.warn('[billing] maintenance deferred', { message: error?.message }))
+// 청구·성과는 저장소를 아는 이쪽에서 등록한다. 센티널·브리핑·백업은 app.mjs가 이미 등록했다.
+app.locals.scheduler.register({
+  id: 'usage-reconcile',
+  label: '사용량 정산',
+  description: '예약 후 확정되지 못한 AI 호출을 정리합니다.',
+  spec: { every: 'hour', minute: 10 },
+  run: () => reconcileUsage(),
+})
+app.locals.scheduler.register({
+  id: 'storage-snapshot',
+  label: '저장 용량 스냅샷',
+  description: '고객사별 저장 용량을 일 1회 기록합니다.',
+  spec: { every: 'day', hour: 2 },
+  run: ({ now }) => snapshotStorage(now),
+})
+app.locals.scheduler.register({
+  id: 'billing-month-close',
+  label: '월간 청구·성과 마감',
+  description: '전월 청구 스냅샷과 직원 성과 리포트를 만듭니다.',
+  spec: { every: 'month', day: 1, hour: 4 },
+  run: ({ now }) => closeMonth(now),
+})
 
-// 생존 센티널: 부팅 10초 후 1회, 이후 24시간마다. (데이터 변경 시 즉시 평가는 app.mjs 훅이 담당)
-const sentinelBootTimer = setTimeout(() => {
-  try { const results = app.locals.runSentinelForAllTenants?.() ?? []; console.log(`[sentinel] boot evaluation: ${results.length} tenants`) } catch (error) { console.warn('[sentinel] boot evaluation failed', { message: error?.message }) }
-}, 10_000)
-sentinelBootTimer.unref?.()
-const sentinelDailyTimer = setInterval(() => {
-  try { app.locals.runSentinelForAllTenants?.() } catch (error) { console.warn('[sentinel] daily evaluation failed', { message: error?.message }) }
-}, 24 * 60 * 60 * 1_000)
-sentinelDailyTimer.unref?.()
-const billingMaintenanceTimer = setInterval(() => {
-  void runBillingMaintenance().catch((error) => console.warn('[billing] maintenance failed', { message: error?.message }))
-}, 60 * 60 * 1_000)
-billingMaintenanceTimer.unref?.()
-
-// 백업 이중화: 지정한 시각(KST)에 첫 실행, 이후 BACKUP_INTERVAL_HOURS마다.
+// 백업 주기를 환경변수로 바꿔 둔 배포는 그 값을 존중한다 (기본은 매일 03:00).
 const backupSchedule = backupSettings(process.env)
-let backupTimer = null
-let backupIntervalTimer = null
-if (backupSchedule.enabled) {
-  const firstRun = millisecondsUntilNextRun(backupSchedule)
-  console.log(`[backup] scheduled in ${Math.round(firstRun / 60_000)}분 (매 ${backupSchedule.intervalHours}시간, 세대 ${backupSchedule.retention}개 보관)`)
-  backupTimer = setTimeout(() => {
-    void app.locals.runBackupCycle?.().catch((error) => console.warn('[backup] cycle failed', { message: error?.message }))
-    backupIntervalTimer = setInterval(() => {
-      void app.locals.runBackupCycle?.().catch((error) => console.warn('[backup] cycle failed', { message: error?.message }))
-    }, backupSchedule.intervalHours * 60 * 60 * 1_000)
-    backupIntervalTimer.unref?.()
-  }, firstRun)
-  backupTimer.unref?.()
+if (!backupSchedule.enabled) {
+  console.log('[scheduler] 백업 미러는 BACKUP_ENABLED=1일 때만 실행됩니다.')
 }
+
+app.locals.scheduler.start()
+console.log(`[scheduler] ${app.locals.scheduler.listJobs().length}개 정기 작업 등록 — 접속과 무관하게 실행됩니다.`)
 
 const server = app.listen(port, host, () => {
   const mode = process.env.ANTHROPIC_API_KEY?.trim() ? 'Claude' : 'demo'
@@ -138,9 +157,7 @@ let shuttingDown = false
 function shutdown(signal) {
   if (shuttingDown) return
   shuttingDown = true
-  clearInterval(billingMaintenanceTimer)
-  if (backupTimer) clearTimeout(backupTimer)
-  if (backupIntervalTimer) clearInterval(backupIntervalTimer)
+  app.locals.scheduler.stop()
   console.log(`[server] ${signal} received; shutting down`)
   server.close(async () => {
     try {
