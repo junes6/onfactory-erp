@@ -37,10 +37,16 @@ test('support program feed requires an authenticated matching tenant and clamps 
   })
 })
 
+/**
+ * 마감일은 오늘 기준으로 만든다. 고정 날짜를 쓰면 그날이 지나는 순간 두 건 다
+ * "마감됨"으로 묶여 정렬 의미가 사라지고, 코드는 멀쩡한데 테스트만 썩는다.
+ */
+const daysFromToday = (days) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)
+
 test('the feed ranks by relevance to the tenant watch profile and explains each score', async () => {
   const items = [
-    { id: 'a', source: 'bizinfo', sourceLabel: '기업마당', title: '축산 분뇨처리 개선 지원', agency: 'A', summary: '', endsOn: '2026-09-02', detailUrl: 'https://www.bizinfo.go.kr/x' },
-    { id: 'b', source: 'g2b', sourceLabel: '나라장터', title: '수산물 납품 용역 입찰', agency: 'B', summary: '', endsOn: '2026-11-30', detailUrl: 'https://www.g2b.go.kr/y' },
+    { id: 'a', source: 'bizinfo', sourceLabel: '기업마당', title: '축산 분뇨처리 개선 지원', agency: 'A', summary: '', endsOn: daysFromToday(7), detailUrl: 'https://www.bizinfo.go.kr/x' },
+    { id: 'b', source: 'g2b', sourceLabel: '나라장터', title: '수산물 납품 용역 입찰', agency: 'B', summary: '', endsOn: daysFromToday(90), detailUrl: 'https://www.g2b.go.kr/y' },
   ]
   const supportProgramService = { sources: ['kstartup', 'bizinfo', 'g2b', 'ulsan'], list: async () => ({ items, syncedAt: null, stale: false, sources: {}, officialLinks: [] }) }
   await withServer(createApp({ apiKey: '', supportProgramService }), async (origin) => {
