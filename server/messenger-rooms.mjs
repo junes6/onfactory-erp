@@ -102,7 +102,10 @@ export function registerMessengerRoomRoutes({
     return Array.isArray(record?.data) ? record.data : []
   }
 
-  const tenantAccounts = (tenantId) => accounts.filter((account) => account.tenantId === tenantId)
+  // 초대할 수 있는 사람. 비활성(퇴사) 계정은 새로 부르지 않는다 —
+  // 이미 있는 방의 기록은 그대로 두되 새 방에 넣지는 않는다.
+  const tenantAccounts = (tenantId) => accounts.filter((account) => account.tenantId === tenantId
+    && account.approved && account.approvalStatus !== 'inactive')
 
   /** 방을 찾고 볼 수 있는지까지 확인한다. 못 찾은 것과 못 보는 것을 응답에서 구분하지 않는다. */
   const locate = (request, response) => {

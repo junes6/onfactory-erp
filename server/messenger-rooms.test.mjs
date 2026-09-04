@@ -299,3 +299,97 @@ test('메시지를 보내면 @멘션 알림이 실제로 나간다', async () =>
     assert.match(mention.title, /언급/)
   })
 })
+
+// ─────────────────────── 비활성(퇴사) 계정 ───────────────────────
+
+test('비활성 계정은 로그인이 막히되 남긴 대화는 그대로 남고 목록에도 남는다', async () => {
+  await withApp(async (origin) => {
+    const admin = await signIn(origin, ADMIN)
+    const park = await signIn(origin, PARK)
+    const room = await makeRoom(origin, admin.headers, { name: '인수인계', participantIds: [park.account.id] })
+    await send(origin, park.headers, room.id, { text: '제가 맡던 일 정리했습니다' })
+
+    const deactivated = await fetch(`${origin}/api/admin/accounts/${park.account.id}/status`, {
+      method: 'POST', headers: admin.headers, body: JSON.stringify({ status: 'inactive' }),
+    })
+    assert.equal(deactivated.status, 200)
+    assert.equal((await deactivated.json()).account.status, '비활성')
+
+    const blocked = await fetch(`${origin}/api/auth/login`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspace: 'tenant', ...PARK }),
+    })
+    assert.equal(blocked.status, 403)
+    assert.equal((await blocked.json()).error.code, 'ACCOUNT_INACTIVE', '반려와 구분되는 사유를 알려 준다')
+
+    const stored = await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: admin.headers })).json()
+    const kept = stored.data.find((item) => item.id === room.id)
+    assert.equal(kept.messages.length, 1, '퇴사자의 메시지를 지우지 않는다')
+    assert.equal(kept.messages[0].senderName, park.account.name)
+
+    const directory = await (await fetch(`${origin}/api/directory`, { headers: admin.headers })).json()
+    const listed = directory.members.find((member) => member.id === park.account.id)
+    assert.ok(listed, '목록에서 지우면 그 사람의 말풍선이 이름 없는 기록이 된다')
+    assert.equal(listed.active, false, '화면이 비활성 표시를 할 수 있어야 한다')
+  })
+})
+
+test('비활성 계정은 새 그룹방에 초대되지 않는다', async () => {
+  await withApp(async (origin) => {
+    const admin = await signIn(origin, ADMIN)
+    const park = await signIn(origin, PARK)
+    await fetch(`${origin}/api/admin/accounts/${park.account.id}/status`, {
+      method: 'POST', headers: admin.headers, body: JSON.stringify({ status: 'inactive' }),
+    })
+    const response = await fetch(`${origin}/api/messenger/conversations/group`, {
+      method: 'POST', headers: admin.headers, body: JSON.stringify({ name: '새 방', participantIds: [park.account.id] }),
+    })
+    assert.equal(response.status, 400)
+    assert.equal((await response.json()).error.code, 'INVALID_PARTICIPANT')
+  })
+})
+
+test('되살리면 다시 들어올 수 있고, 마지막 관리자와 본인은 비활성화할 수 없다', async () => {
+  await withApp(async (origin) => {
+    const admin = await signIn(origin, ADMIN)
+    const park = await signIn(origin, PARK)
+
+    const self = await fetch(`${origin}/api/admin/accounts/${admin.account.id}/status`, {
+      method: 'POST', headers: admin.headers, body: JSON.stringify({ status: 'inactive' }),
+    })
+    assert.equal(self.status, 409, '스스로를 잠그면 들어올 사람이 없어진다')
+    assert.equal((await self.json()).error.code, 'CANNOT_DEACTIVATE_SELF')
+
+    await fetch(`${origin}/api/admin/accounts/${park.account.id}/status`, {
+      method: 'POST', headers: admin.headers, body: JSON.stringify({ status: 'inactive' }),
+    })
+    const restored = await fetch(`${origin}/api/admin/accounts/${park.account.id}/status`, {
+      method: 'POST', headers: admin.headers, body: JSON.stringify({ status: 'active' }),
+    })
+    assert.equal(restored.status, 200)
+    assert.equal((await restored.json()).account.status, '활성')
+
+    const back = await fetch(`${origin}/api/auth/login`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspace: 'tenant', ...PARK }),
+    })
+    assert.equal(back.status, 200, '다시 근무하면 그대로 되살아난다')
+  })
+})
+
+test('비활성 처리는 감사 기록에 남는다', async () => {
+  await withApp(async (origin) => {
+    const admin = await signIn(origin, ADMIN)
+    const park = await signIn(origin, PARK)
+    await fetch(`${origin}/api/admin/accounts/${park.account.id}/status`, {
+      method: 'POST', headers: admin.headers, body: JSON.stringify({ status: 'inactive' }),
+    })
+    const operator = await fetch(`${origin}/api/auth/login`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workspace: 'platform', email: 'operator@onfactory.co.kr', password: 'demo1234' }),
+    })
+    const state = await (await fetch(`${origin}/api/platform/state`, { headers: { cookie: operator.headers.get('set-cookie') } })).json()
+    const entry = (state.auditEvents ?? []).find((item) => item.event === '계정 비활성화')
+    assert.ok(entry, '누가 누구를 언제 비활성화했는지 남아야 한다')
+    assert.equal(entry.actor, admin.account.name)
+    assert.match(entry.scope, new RegExp(park.account.name))
+  })
+})

@@ -1824,8 +1824,9 @@ export function createApp(options = {}) {
       ?? workspaceStore.platform.tenants.find((tenant) => tenant?.id === account.tenantId)?.isDemo
     ))
     const persistedDecision = workspaceStore.accountApprovals[account.id]
-    if (persistedDecision === 'approved' || persistedDecision === 'rejected') {
+    if (['approved', 'rejected', 'inactive'].includes(persistedDecision)) {
       account.approvalStatus = persistedDecision
+      // 비활성은 '승인된 적 없음'이 아니라 '더는 들어올 수 없음'이다. 로그인만 막고 기록은 남긴다.
       account.approved = persistedDecision === 'approved'
     }
     const persistedCredential = workspaceStore.accountCredentials[account.id]
@@ -2556,7 +2557,7 @@ export function createApp(options = {}) {
     const staleDay = activity.lastActivityAt ? Date.now() - Date.parse(activity.lastActivityAt) > 24 * 60 * 60 * 1_000 : false
     const tenantAccounts = accounts.filter((account) => account.tenantId === tenant.id && account.role !== 'platform-operator')
     const admins = tenantAccounts.filter((account) => account.role === 'tenant-admin').map((account) => ({ id: account.id, name: account.name, email: account.email, mustChangePassword: Boolean(account.mustChangePassword), temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt ?? null }))
-    const pendingAccounts = tenantAccounts.filter((account) => !account.approved && account.approvalStatus !== 'rejected').length
+    const pendingAccounts = tenantAccounts.filter((account) => !account.approved && !['rejected', 'inactive'].includes(account.approvalStatus)).length
     const proposals = proposalsOf(tenant.id)
     const pendingProposals = proposals.filter((item) => item?.status === 'pending').length
     const sentinelAlerts = proposals.filter((item) => item?.status === 'pending' && item.kind === 'sentinel-task').length
@@ -4385,8 +4386,14 @@ export function createApp(options = {}) {
       return
     }
     if (!account.approved) {
-      const rejected = account.approvalStatus === 'rejected'
-      response.status(403).json({ error: { code: rejected ? 'ACCOUNT_REJECTED' : 'ACCOUNT_PENDING', message: rejected ? '관리자가 반려한 계정입니다. 회사 관리자에게 문의해 주세요.' : '관리자 승인 대기 중인 계정입니다.' } })
+      // 왜 못 들어오는지를 정확히 말해야 사람이 다음 행동을 안다.
+      // 반려·대기·비활성은 각각 문의할 곳이 다르다.
+      const reason = account.approvalStatus === 'rejected'
+        ? { code: 'ACCOUNT_REJECTED', message: '관리자가 반려한 계정입니다. 회사 관리자에게 문의해 주세요.' }
+        : account.approvalStatus === 'inactive'
+          ? { code: 'ACCOUNT_INACTIVE', message: '비활성 처리된 계정입니다. 다시 근무하시게 되면 회사 관리자가 활성화할 수 있습니다.' }
+          : { code: 'ACCOUNT_PENDING', message: '관리자 승인 대기 중인 계정입니다.' }
+      response.status(403).json({ error: reason })
       return
     }
     if (account.mustChangePassword && (!account.temporaryPasswordExpiresAt || Date.parse(account.temporaryPasswordExpiresAt) <= Date.now())) {
@@ -4478,14 +4485,18 @@ export function createApp(options = {}) {
       response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 구성원을 조회할 수 있습니다.' } })
       return
     }
+    // 비활성(퇴사) 계정도 내려보낸다. 목록에서 지워 버리면 그 사람이 남긴 대화가
+    // 이름 없는 말풍선이 되고, 화면은 "누가 한 말인지 모르는 기록"을 갖게 된다.
+    // 새 대화 상대로는 고르지 못하게 active:false만 붙여 화면이 구분하게 한다.
     const members = accounts
-      .filter((account) => account.tenantId === request.auth.tenantId && account.approved)
+      .filter((account) => account.tenantId === request.auth.tenantId && (account.approved || account.approvalStatus === 'inactive'))
       .map((account) => ({
         id: account.id,
         name: account.name,
         team: account.team || '미지정',
         role: account.jobRole || (account.role === 'tenant-admin' ? '운영 관리자' : '일반 사용자'),
         status: account.id === request.auth.id ? 'online' : 'offline',
+        active: account.approvalStatus !== 'inactive',
       }))
     members.unshift({
       id: DEVELOPER_OPERATIONS_ID,
@@ -5066,8 +5077,10 @@ export function createApp(options = {}) {
   }
 
   app.get('/api/admin/accounts', requireAuth, requireTenantAdmin, (request, response) => {
+    // 관리자도 함께 보여 준다. 비활성화된 관리자가 목록에서 사라지면 되살릴 방법이 없다.
+    // 승인 대기가 위로 오는 정렬은 그대로라 화면의 우선순위는 바뀌지 않는다.
     const scopedAccounts = accounts
-      .filter((account) => account.tenantId === request.auth.tenantId && account.role === 'tenant-member')
+      .filter((account) => account.tenantId === request.auth.tenantId && ['tenant-member', 'tenant-admin'].includes(account.role))
       .sort((left, right) => Number(left.approved) - Number(right.approved))
       .map((account) => ({
         id: account.id,
@@ -5075,14 +5088,80 @@ export function createApp(options = {}) {
         email: account.email,
         team: account.team,
         role: account.jobRole,
+        accountRole: account.role,
         requested: account.requested,
-        status: account.approved ? '활성' : account.approvalStatus === 'rejected' ? '반려' : '승인대기',
+        status: account.approved ? '활성' : account.approvalStatus === 'rejected' ? '반려' : account.approvalStatus === 'inactive' ? '비활성' : '승인대기',
         onboardingStatus: account.mustChangePassword
           ? (account.temporaryPasswordExpiresAt && Date.parse(account.temporaryPasswordExpiresAt) > Date.now() ? '초기설정대기' : '초기암호만료')
           : account.approved ? '설정완료' : '승인대기',
         temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt || null,
       }))
     response.json({ accounts: scopedAccounts })
+  })
+
+  /**
+   * 계정 비활성화·재활성화.
+   *
+   * 퇴사한 사람의 계정을 지우지 않는 이유: 그 사람이 남긴 대화·업무·일지가 전부
+   * 이름 없는 기록이 되기 때문이다. 로그인만 막고 목록에는 '비활성'으로 남긴다.
+   * 반려(rejected)와는 다르다 — 반려는 애초에 들어온 적이 없는 계정이다.
+   */
+  app.post('/api/admin/accounts/:id/status', requireAuth, requireTenantAdmin, async (request, response) => {
+    const wanted = request.body?.status
+    if (!['active', 'inactive'].includes(wanted)) {
+      response.status(400).json({ error: { code: 'INVALID_ACCOUNT_STATUS', message: '활성 또는 비활성 중 하나를 선택해 주세요.' } })
+      return
+    }
+    const account = accounts.find((candidate) => candidate.id === request.params.id && candidate.tenantId === request.auth.tenantId)
+    if (!account) {
+      response.status(404).json({ error: { code: 'ACCOUNT_NOT_FOUND', message: '대상 계정을 찾을 수 없습니다.' } })
+      return
+    }
+    if (account.id === request.auth.id) {
+      response.status(409).json({ error: { code: 'CANNOT_DEACTIVATE_SELF', message: '본인 계정은 비활성화할 수 없습니다.' } })
+      return
+    }
+    // 관리자를 전부 비활성화하면 그 회사에 들어갈 수 있는 사람이 없어진다.
+    const remainingAdmins = accounts.filter((candidate) => candidate.tenantId === request.auth.tenantId
+      && candidate.role === 'tenant-admin' && candidate.approved && candidate.id !== account.id).length
+    if (wanted === 'inactive' && account.role === 'tenant-admin' && remainingAdmins === 0) {
+      response.status(409).json({ error: { code: 'LAST_ADMIN_REQUIRED', message: '마지막 관리자는 비활성화할 수 없습니다. 다른 관리자를 먼저 지정해 주세요.' } })
+      return
+    }
+    if (wanted === 'inactive' && !account.approved && account.approvalStatus !== 'inactive') {
+      response.status(409).json({ error: { code: 'ACCOUNT_NOT_ACTIVE', message: '승인된 계정만 비활성화할 수 있습니다.' } })
+      return
+    }
+    const previous = { approvalStatus: account.approvalStatus, approved: account.approved, decision: workspaceStore.accountApprovals[account.id], audits: workspaceStore.platform.auditEvents }
+    account.approvalStatus = wanted === 'inactive' ? 'inactive' : 'approved'
+    account.approved = wanted === 'active'
+    workspaceStore.accountApprovals[account.id] = account.approvalStatus
+    appendPlatformAudit(workspaceStore.platform, {
+      tenantId: request.auth.tenantId,
+      event: wanted === 'inactive' ? '계정 비활성화' : '계정 재활성화',
+      scope: `${account.name} (${account.email})`,
+      actor: request.auth.name,
+      reference: account.id,
+    })
+    // 비활성화하면 그 계정의 열린 세션도 끊는다. 안 끊으면 로그인만 막고 이미 들어와 있는 창은 계속 돈다.
+    if (wanted === 'inactive') {
+      for (const [token, session] of sessions.entries()) {
+        if (session?.accountId === account.id) sessions.delete(token)
+      }
+    }
+    try {
+      await commitWorkspaceStore()
+      await sessions.flush?.()
+    } catch {
+      account.approvalStatus = previous.approvalStatus
+      account.approved = previous.approved
+      if (previous.decision) workspaceStore.accountApprovals[account.id] = previous.decision
+      else delete workspaceStore.accountApprovals[account.id]
+      workspaceStore.platform.auditEvents = previous.audits
+      response.status(500).json({ error: { code: 'ACCOUNT_STATUS_WRITE_FAILED', message: '계정 상태를 저장하지 못했습니다.' } })
+      return
+    }
+    response.json({ account: { id: account.id, name: account.name, status: account.approved ? '활성' : '비활성', approvalStatus: account.approvalStatus } })
   })
 
   app.post('/api/admin/accounts/:id/decision', requireAuth, requireTenantAdmin, async (request, response) => {
