@@ -272,6 +272,22 @@ export function MessengerDrawer({
   const [listMode, setListMode] = useState<MessengerListMode>('recent')
   const [mobilePane, setMobilePane] = useState<'list' | 'chat'>('list')
   const [showConversationMenu, setShowConversationMenu] = useState(false)
+  /** 방별 알림 세기와 그 밖의 알림 설정. 저장은 알림 설정 한 곳에서만 한다. */
+  const [roomAlertModes, setRoomAlertModes] = useState<Record<string, 'all' | 'mention' | 'off'>>({})
+  const [notificationSettings, setNotificationSettings] = useState<Record<string, unknown>>({})
+  useEffect(() => {
+    if (!workspaceScope) return
+    let alive = true
+    fetch('/api/notifications', { headers: { 'x-workspace-identity': workspaceScope } })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { settings?: Record<string, unknown> } | null) => {
+        if (!alive || !body?.settings) return
+        setNotificationSettings(body.settings)
+        setRoomAlertModes((body.settings.rooms as Record<string, 'all' | 'mention' | 'off'>) ?? {})
+      })
+      .catch(() => undefined)
+    return () => { alive = false }
+  }, [workspaceScope])
   const [conversationAction, setConversationAction] = useState<'leave' | 'delete' | null>(null)
   const [conversationActionPending, setConversationActionPending] = useState(false)
   const messageEndRef = useRef<HTMLDivElement>(null)
@@ -343,7 +359,33 @@ export function MessengerDrawer({
     return others.length > 0 ? `${others.length}명 읽음` : '안 읽음'
   }
 
-  const roomMuted = (selectedConversation.mutedFor ?? []).some((id) => currentIdentityIds.includes(id))
+  /**
+   * 이 방의 알림 세기.
+   *
+   * 값은 알림 설정(rooms)에 있다. 방 데이터의 mutedFor는 예전 방식이라,
+   * 아직 설정으로 옮기지 않은 방은 그것을 '끔'으로 읽어 준다 — 껐던 방이
+   * 갑자기 울리기 시작하는 일이 없어야 한다.
+   */
+  const legacyMuted = (selectedConversation.mutedFor ?? []).some((id) => currentIdentityIds.includes(id))
+  const roomAlertMode: 'all' | 'mention' | 'off' = roomAlertModes[selectedConversation.id] ?? (legacyMuted ? 'off' : 'all')
+
+  const setRoomAlertMode = async (conversationId: string, mode: 'all' | 'mention' | 'off') => {
+    setRoomAlertModes((current) => ({ ...current, [conversationId]: mode }))
+    setShowConversationMenu(false)
+    try {
+      const response = await fetch('/api/notifications/settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}) },
+        body: JSON.stringify({ settings: { ...notificationSettings, rooms: { ...roomAlertModes, [conversationId]: mode } } }),
+      })
+      if (!response.ok) throw new Error('저장 실패')
+      const body = await response.json() as { settings?: { rooms?: Record<string, 'all' | 'mention' | 'off'> } }
+      setRoomAlertModes(body.settings?.rooms ?? {})
+      onToast(mode === 'off' ? '이 방 알림을 껐습니다.' : mode === 'mention' ? '이 방은 멘션만 알립니다.' : '이 방 알림을 모두 받습니다.')
+    } catch {
+      onToast('알림 설정을 바꾸지 못했습니다.')
+    }
+  }
 
   const pinnedMessages = (selectedConversation.pinnedMessageIds ?? [])
     .map((id) => selectedConversation.messages.find((item) => item.id === id))
@@ -797,9 +839,27 @@ export function MessengerDrawer({
                       {activeConversation.kind === 'group' && (activeConversation.ownerId === currentUserId || canManage) && (
                         <button type="button" onClick={() => { setGroupDialog('manage'); setShowConversationMenu(false) }}><Users size={17} /> 방 이름·참여자 관리</button>
                       )}
-                      <button type="button" onClick={() => { void callRoom('/mute', { method: 'POST', body: JSON.stringify({ muted: !roomMuted }) }, '알림 설정을 바꾸지 못했습니다.'); setShowConversationMenu(false) }}>
-                        {roomMuted ? <Bell size={17} /> : <BellOff size={17} />} {roomMuted ? '이 방 알림 켜기' : '이 방 알림 끄기'}
-                      </button>
+                      {/*
+                        R15-I: 방마다 알림 세기를 셋 중에서 고른다. 끄기만 있으면
+                        "시끄럽지만 내 이름 부르면 봐야 하는 방"을 다룰 방법이 없다.
+                        고른 값은 알림 설정 한 곳에 저장되고, 푸시 판정이 그것만 본다.
+                      */}
+                      <div className="messenger-room-alert" role="group" aria-label="이 방 알림">
+                        <span>{roomAlertMode === 'off' ? <BellOff size={17} /> : <Bell size={17} />} 이 방 알림</span>
+                        <div>
+                          {(['all', 'mention', 'off'] as const).map((mode) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              className={roomAlertMode === mode ? 'is-active' : undefined}
+                              aria-pressed={roomAlertMode === mode}
+                              onClick={() => { void setRoomAlertMode(activeConversation.id, mode) }}
+                            >
+                              {mode === 'all' ? '모두' : mode === 'mention' ? '멘션만' : '끔'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                       <button type="button" onClick={() => { setConversationAction('leave'); setShowConversationMenu(false) }}><LogOut size={17} /> 대화방 나가기</button>
                       {canManage && <button className="danger" type="button" onClick={() => { setConversationAction('delete'); setShowConversationMenu(false) }}><Trash2 size={17} /> 대화방 삭제</button>}
                     </div>

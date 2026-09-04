@@ -27,6 +27,8 @@ export const NOTIFICATION_TYPES = Object.freeze({
   'proposal-pending': { label: '승인 대기', pushByDefault: false, page: 'approvals' },
   'sentinel-warning': { label: '센티널 경고', pushByDefault: false, page: 'approvals' },
   'opportunity-new': { label: '새 기회', pushByDefault: false, page: 'approvals' },
+  // 방해 금지 시간에 참아 둔 알림을 아침에 한 건으로 묶어 전한다.
+  'quiet-digest': { label: '아침 요약', pushByDefault: true, page: 'ai' },
 })
 
 export const NOTIFICATION_TYPE_IDS = Object.freeze(Object.keys(NOTIFICATION_TYPES))
@@ -107,6 +109,10 @@ export function defaultNotificationSettings() {
   return {
     muted: [],
     push: NOTIFICATION_TYPE_IDS.filter((id) => NOTIFICATION_TYPES[id].pushByDefault),
+    // R15-I: 밤에는 울리지 않는다. 아침에 한 건으로 묶어 전한다.
+    quietHours: { ...DEFAULT_QUIET_HOURS },
+    urgentTypes: [...DEFAULT_URGENT_TYPES],
+    rooms: {},
   }
 }
 
@@ -118,6 +124,9 @@ export function normalizeNotificationSettings(value) {
     // 전부 끄는 것도 사용자의 선택이므로 빈 배열을 존중한다.
     muted: list(value.muted, base.muted),
     push: list(value.push, base.push),
+    quietHours: normalizeQuietHours(value.quietHours ?? base.quietHours),
+    urgentTypes: list(value.urgentTypes, base.urgentTypes),
+    rooms: normalizeRoomModes(value.rooms),
   }
 }
 
@@ -222,3 +231,184 @@ export const removeSubscriptions = (rows, endpoints) => {
 
 export const subscriptionsFor = (rows, accountId) =>
   (Array.isArray(rows) ? rows : []).filter((row) => row?.accountId === accountId)
+
+// ---------------------------------------------------------------------------
+// R15-I: 방해 금지 시간 · 긴급 예외 · 방별 제어
+// ---------------------------------------------------------------------------
+
+/**
+ * 밤에는 울리지 않는다.
+ *
+ * 기본은 22시부터 아침 7시까지다. 이 시간에 온 알림은 사라지지 않고 쌓였다가
+ * 아침에 한 건으로 묶여 온다 — 밤새 온 것을 아침에 스무 번 울리게 하면
+ * 방해 금지를 켠 의미가 없다.
+ */
+export const DEFAULT_QUIET_HOURS = Object.freeze({ enabled: true, start: '22:00', end: '07:00' })
+
+/**
+ * 방해 금지 시간에도 지나가는 유형.
+ *
+ * 사람을 깨울 만한 것만 남긴다. "보완 요청"은 내 결재가 막혀 있다는 뜻이고,
+ * "결재 요청"은 남이 나를 기다린다는 뜻이라 아침까지 미루면 하루가 밀린다.
+ */
+export const DEFAULT_URGENT_TYPES = Object.freeze(['changes-requested', 'approval-requested'])
+
+/** 방마다 정하는 알림 세기. */
+export const ROOM_MODES = Object.freeze(['all', 'mention', 'off'])
+export const ROOM_MODE_LABELS = Object.freeze({ all: '모든 메시지', mention: '멘션만', off: '끔' })
+
+const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/
+
+export function normalizeTimeOfDay(value, fallback) {
+  const text = String(value ?? '').trim()
+  return TIME_PATTERN.test(text) ? text : fallback
+}
+
+export function normalizeQuietHours(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...DEFAULT_QUIET_HOURS }
+  return {
+    enabled: value.enabled !== false,
+    start: normalizeTimeOfDay(value.start, DEFAULT_QUIET_HOURS.start),
+    end: normalizeTimeOfDay(value.end, DEFAULT_QUIET_HOURS.end),
+  }
+}
+
+export function normalizeRoomModes(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out = {}
+  for (const [id, mode] of Object.entries(value).slice(0, 500)) {
+    if (!ROOM_MODES.includes(mode)) continue
+    // 'all'은 기본값이라 굳이 적어 두지 않는다. 설정이 쓸데없이 커진다.
+    if (mode === 'all') continue
+    out[String(id).slice(0, 120)] = mode
+  }
+  return out
+}
+
+/**
+ * 서울 기준 시각 문자열(HH:MM). 알림 시간대는 사용자의 하루를 따라가야 한다.
+ *
+ * 읽을 수 없는 시각이면 빈 문자열을 돌려준다. 여기서 예외가 나면 알림 발송
+ * 전체가 멈추는데, 시계가 이상하다고 알림을 못 보내는 편이 더 나쁘다.
+ */
+export function seoulTimeOfDay(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date)
+}
+
+/**
+ * 지금이 방해 금지 시간인가.
+ *
+ * 22:00–07:00처럼 자정을 넘는 구간이 기본이라, 단순 비교로는 판정할 수 없다.
+ * 시작이 끝보다 늦으면 "밤을 넘는 구간"으로 본다.
+ */
+export function inQuietHours(now, quiet) {
+  const settings = normalizeQuietHours(quiet)
+  if (!settings.enabled) return false
+  if (settings.start === settings.end) return false
+  const at = typeof now === 'string' ? now : seoulTimeOfDay(now)
+  // 시각을 읽지 못했으면 조용한 시간이 아니라고 본다 — 참았다가 아침에도 안 보내는 것보다 낫다.
+  if (!TIME_PATTERN.test(at)) return false
+  return settings.start > settings.end
+    ? at >= settings.start || at < settings.end
+    : at >= settings.start && at < settings.end
+}
+
+/** 방해 금지가 끝나는 순간(다음 아침). 요약을 언제 보낼지 정하는 데 쓴다. */
+export function quietEndsAt(now, quiet) {
+  const settings = normalizeQuietHours(quiet)
+  if (!settings.enabled) return null
+  const [hour, minute] = settings.end.split(':').map(Number)
+  const seoulNow = new Date(now.getTime() + 9 * 60 * 60 * 1_000)
+  const end = new Date(Date.UTC(seoulNow.getUTCFullYear(), seoulNow.getUTCMonth(), seoulNow.getUTCDate(), hour, minute) - 9 * 60 * 60 * 1_000)
+  return end.getTime() > now.getTime() ? end : new Date(end.getTime() + 24 * 60 * 60 * 1_000)
+}
+
+/**
+ * 이 알림을 지금 울려도 되는가.
+ *
+ * @returns {'send' | 'hold' | 'skip'} hold는 아침 요약으로 미룬다는 뜻이다.
+ */
+export function pushDecision(notification, settingsRecord, now = new Date()) {
+  const settings = settingsFor(settingsRecord, notification.recipientId)
+  if (settings.muted.includes(notification.type)) return 'skip'
+  if (!settings.push.includes(notification.type)) return 'skip'
+
+  // 방별 설정이 유형 설정보다 세다. 특정 방을 껐으면 그 방 것은 울리지 않는다.
+  const roomId = notification.source?.kind === 'message' ? notification.source.id : ''
+  const mode = roomId ? (settings.rooms?.[roomId] ?? 'all') : 'all'
+  if (mode === 'off') return 'skip'
+  if (mode === 'mention' && notification.type !== 'mention') return 'skip'
+
+  if (!inQuietHours(now, settings.quietHours)) return 'send'
+  return settings.urgentTypes.includes(notification.type) ? 'send' : 'hold'
+}
+
+/**
+ * 아침 요약 한 건.
+ *
+ * 밤새 조용히 지나간 것을 유형별로 세어 한 줄로 만든다. 무엇을 셀지는
+ * collectQuietDigest가 정한다 — "그 시간에 왔고 아직 안 읽은 것"이다.
+ * 실제로 눌러 본 알림까지 아침에 다시 세면 요약이 부풀려진다.
+ */
+export function buildQuietDigest({ held, recipientId, now = new Date(), newNotificationId: makeId = newNotificationId }) {
+  if (!held.length) return null
+  const counts = new Map()
+  for (const item of held) counts.set(item.type, (counts.get(item.type) ?? 0) + 1)
+  const parts = [...counts.entries()].map(([type, count]) => `${NOTIFICATION_TYPES[type]?.label ?? type} ${count}건`)
+  const newest = held.reduce((latest, item) => (String(item.createdAt) > String(latest.createdAt) ? item : latest), held[0])
+  return {
+    id: makeId(),
+    type: 'quiet-digest',
+    recipientId,
+    actorId: '',
+    title: `밤사이 알림 ${held.length}건`,
+    body: `${parts.join(' · ')}. 가장 최근: ${String(newest.title ?? '').slice(0, 60)}`,
+    page: NOTIFICATION_TYPES[newest.type]?.page ?? 'ai',
+    focusId: String(newest.focusId ?? ''),
+    source: null,
+    readAt: null,
+    createdAt: now.toISOString(),
+  }
+}
+
+/**
+ * 아침에 묶어 보낼 알림을 고른다.
+ *
+ * 방해 금지 시간 안에 왔고, 아직 읽지 않았고, 긴급 예외가 아닌 것. 이미 읽은
+ * 알림까지 세면 "밤사이 12건"이라고 해 놓고 열면 아무것도 없는 일이 생긴다.
+ * 요약 자체는 세지 않는다 — 요약의 요약이 쌓인다.
+ */
+export function collectQuietDigest(rows, { recipientId, settings, windowStart, windowEnd }) {
+  const from = windowStart.toISOString()
+  const to = windowEnd.toISOString()
+  return (Array.isArray(rows) ? rows : []).filter((row) => row?.recipientId === recipientId
+    && row.type !== 'quiet-digest'
+    && !row.readAt
+    && !settings.urgentTypes.includes(row.type)
+    && String(row.createdAt) >= from
+    && String(row.createdAt) < to)
+}
+
+/**
+ * 이번 아침의 조용한 시간대는 언제부터 언제까지였나.
+ *
+ * 방금 끝난 구간을 돌려준다. 자정을 넘는 구간이 기본이라 시작은 대개 어제다.
+ */
+export function lastQuietWindow(now, quiet) {
+  const settings = normalizeQuietHours(quiet)
+  if (!settings.enabled) return null
+  const [endHour, endMinute] = settings.end.split(':').map(Number)
+  const [startHour, startMinute] = settings.start.split(':').map(Number)
+  const seoulNow = new Date(now.getTime() + 9 * 60 * 60 * 1_000)
+  const dayStart = Date.UTC(seoulNow.getUTCFullYear(), seoulNow.getUTCMonth(), seoulNow.getUTCDate()) - 9 * 60 * 60 * 1_000
+  let end = new Date(dayStart + (endHour * 60 + endMinute) * 60_000)
+  if (end.getTime() > now.getTime()) end = new Date(end.getTime() - 24 * 60 * 60 * 1_000)
+  // 끝나는 날의 자정을 기준으로 센다. 자정을 넘는 구간이면 시작은 그 전날이다.
+  const endMidnight = end.getTime() - (endHour * 60 + endMinute) * 60_000
+  const startOffset = (startHour * 60 + startMinute) * 60_000
+  const start = settings.start > settings.end
+    ? new Date(endMidnight - 24 * 60 * 60 * 1_000 + startOffset)
+    : new Date(endMidnight + startOffset)
+  return { start, end }
+}

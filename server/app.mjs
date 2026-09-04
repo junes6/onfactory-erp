@@ -44,7 +44,9 @@ import { createScheduler, SCHEDULER_RUNS_KEY, SCHEDULER_STATE_KEY } from './sche
 import {
   addNotifications, buildNotification, NOTIFICATIONS_KEY, NOTIFICATION_SETTINGS_KEY,
   normalizeNotifications, pushPayload, PUSH_SUBSCRIPTIONS_KEY, removeSubscriptions,
-  shouldPush, subscriptionsFor,
+  subscriptionsFor,
+  // R15-I: 방해 금지 시간 · 아침 요약
+  buildQuietDigest, collectQuietDigest, lastQuietWindow, pushDecision, settingsFor,
 } from './notifications.mjs'
 import { registerNotificationRoutes } from './notification-routes.mjs'
 import { createEventStream } from './event-stream.mjs'
@@ -3265,6 +3267,7 @@ export function createApp(options = {}) {
   const vapid = vapidSettings(options.env ?? process.env)
   const pushQueue = []
   let pushDraining = false
+  let pushRetryTimer = null
 
   // 실시간 스트림. 폴링을 대체하며, 끊긴 동안의 변경은 재연결 시 한 번에 따라잡는다.
   const events = createEventStream()
@@ -3315,6 +3318,9 @@ export function createApp(options = {}) {
     scheduleAuditCommit()
   }
 
+  /** 한 건을 몇 번까지 다시 보낼지. 무한히 다시 보내면 큐가 영영 비지 않는다. */
+  const PUSH_MAX_ATTEMPTS = 3
+
   const drainPushQueue = async () => {
     if (pushDraining) return
     pushDraining = true
@@ -3323,7 +3329,20 @@ export function createApp(options = {}) {
         const job = pushQueue.shift()
         // 한 기기의 실패가 다음 기기 발송을 막지 않는다.
         const result = await sendPush(job.subscription, job.payload, { vapid })
-        if (result.outcome === 'expired') dropSubscription(job.tenantId, job.subscription.endpoint)
+        if (result.outcome === 'expired') { dropSubscription(job.tenantId, job.subscription.endpoint); continue }
+        // 'retry'는 서버가 아니라 그물망 문제다(연결 끊김 등). 결과를 버리면
+        // 알림이 조용히 사라지므로 몇 번 더 시도한다.
+        if (result.outcome !== 'retry') continue
+        const attempts = (job.attempts ?? 0) + 1
+        if (attempts >= PUSH_MAX_ATTEMPTS) {
+          console.warn('[push] 재시도를 포기했습니다', { endpoint: job.subscription.endpoint.slice(0, 40), attempts, reason: result.reason })
+          continue
+        }
+        pushRetryTimer = setTimeout(() => {
+          pushQueue.push({ ...job, attempts })
+          void drainPushQueue()
+        }, 2_000 * attempts)
+        if (typeof pushRetryTimer.unref === 'function') pushRetryTimer.unref()
       }
     } finally { pushDraining = false }
   }
@@ -3333,7 +3352,9 @@ export function createApp(options = {}) {
     const settingsRecord = notificationSettingsRecord(tenantId)
     const subscriptions = pushSubscriptionsOf(tenantId)
     for (const notification of notifications) {
-      if (!shouldPush(notification, settingsRecord)) continue
+      // 'hold'는 방해 금지 시간이라 지금 울리지 않는다는 뜻이다. 알림 자체는 이미
+      // 저장돼 있고, 아침 요약이 묶어서 전한다.
+      if (pushDecision(notification, settingsRecord) !== 'send') continue
       for (const subscription of subscriptionsFor(subscriptions, notification.recipientId)) {
         pushQueue.push({ tenantId, subscription, payload: pushPayload(notification) })
       }
@@ -7265,6 +7286,57 @@ export function createApp(options = {}) {
     ...(typeof options.aiConversationClock === 'function' ? { clock: options.aiConversationClock } : {}),
   })
   app.locals.sweepConversationTrash = sweepConversationTrash
+
+  /**
+   * 아침 요약.
+   *
+   * 방해 금지 시간이 끝난 뒤 한 번, 밤사이 조용히 지나간 알림을 한 건으로 묶어 보낸다.
+   * 사람마다 방해 금지 시간을 다르게 둘 수 있으므로 계정별로 따로 센다.
+   * 같은 아침에 두 번 보내지 않도록, 그 구간이 끝난 뒤 만들어진 요약이 이미 있으면 건너뛴다.
+   */
+  const sendQuietDigests = async (now = new Date()) => {
+    let sent = 0
+    for (const [tenantId, tenantStore] of Object.entries(workspaceStore.tenants ?? {})) {
+      const rows = Array.isArray(tenantStore?.[NOTIFICATIONS_KEY]?.data) ? tenantStore[NOTIFICATIONS_KEY].data : []
+      if (rows.length === 0) continue
+      const settingsRecord = notificationSettingsRecord(tenantId)
+      const recipients = [...new Set(rows.map((row) => row?.recipientId).filter(Boolean))]
+      const added = []
+      for (const recipientId of recipients) {
+        const settings = settingsFor(settingsRecord, recipientId)
+        const window = lastQuietWindow(now, settings.quietHours)
+        if (!window || now.getTime() < window.end.getTime()) continue
+        const alreadySent = rows.some((row) => row?.recipientId === recipientId
+          && row.type === 'quiet-digest'
+          && String(row.createdAt) >= window.end.toISOString())
+        if (alreadySent) continue
+        const held = collectQuietDigest(rows, { recipientId, settings, windowStart: window.start, windowEnd: window.end })
+        const digest = buildQuietDigest({ held, recipientId, now })
+        if (digest) added.push(digest)
+      }
+      if (added.length === 0) continue
+      tenantStore[NOTIFICATIONS_KEY] = { data: [...added, ...rows].slice(0, 5_000), updatedAt: now.toISOString(), updatedBy: 'system:quiet-digest' }
+      sent += added.length
+      queuePush(tenantId, added)
+      for (const item of added) {
+        events.publish(tenantId, 'notification', { id: item.id, type: item.type, title: item.title, page: item.page, focusId: item.focusId }, { accountId: item.recipientId })
+      }
+    }
+    if (sent) { try { await commitWorkspaceStore() } catch { /* 요약을 못 적어도 원래 알림은 그대로 있다 */ } }
+    return { sent }
+  }
+  app.locals.sendQuietDigests = sendQuietDigests
+
+  scheduler.register({
+    id: 'quiet-hours-digest',
+    label: '아침 요약 보내기',
+    description: '방해 금지 시간에 조용히 지나간 알림을 아침에 한 건으로 묶어 전합니다.',
+    spec: { every: 'hour', minute: 5 },
+    run: async ({ now }) => {
+      const { sent } = await sendQuietDigests(now)
+      return { detail: sent ? `${sent}명에게 아침 요약을 보냈습니다.` : '묶어 보낼 알림이 없었습니다.' }
+    },
+  })
 
   scheduler.register({
     id: 'ai-conversation-trash-sweep',

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, BellOff, CheckCircle2, ClipboardCheck, ListChecks, MessageCircle, Radar, Settings2, ShieldAlert, Smartphone } from 'lucide-react'
+import { AlertTriangle, BellOff, CheckCircle2, ClipboardCheck, ListChecks, MessageCircle, Moon, Radar, Settings2, ShieldAlert, Smartphone, Sparkles } from 'lucide-react'
 import { formatDateTime, formatListDateTime } from '../utils/dateTime'
 import { Button, IconButton } from './ui/Button'
 import './NotificationCenter.css'
 
 export type NotificationType =
   | 'task-assigned' | 'approval-requested' | 'changes-requested'
-  | 'mention' | 'proposal-pending' | 'sentinel-warning' | 'opportunity-new'
+  | 'mention' | 'proposal-pending' | 'sentinel-warning' | 'opportunity-new' | 'quiet-digest'
 
 export type AppNotification = {
   id: string
@@ -20,7 +20,16 @@ export type AppNotification = {
   createdAt: string
 }
 
-type NotificationSettings = { muted: NotificationType[]; push: NotificationType[] }
+type QuietHours = { enabled: boolean; start: string; end: string }
+type NotificationSettings = {
+  muted: NotificationType[]
+  push: NotificationType[]
+  /** R15-I: 이 시간에는 울리지 않고 아침에 한 건으로 묶어 보낸다. */
+  quietHours: QuietHours
+  /** 방해 금지 시간에도 지나가는 유형. */
+  urgentTypes: NotificationType[]
+  rooms: Record<string, 'all' | 'mention' | 'off'>
+}
 type TypeMeta = { id: NotificationType; label: string; pushByDefault: boolean }
 type PushDevice = { id: string; endpoint: string; userAgent: string; createdAt: string }
 
@@ -40,6 +49,7 @@ const typeIcon: Record<NotificationType, typeof ListChecks> = {
   'proposal-pending': ClipboardCheck,
   'sentinel-warning': ShieldAlert,
   'opportunity-new': Radar,
+  'quiet-digest': Moon,
 }
 
 const typeTone: Record<NotificationType, string> = {
@@ -50,6 +60,7 @@ const typeTone: Record<NotificationType, string> = {
   'proposal-pending': 'blue',
   'sentinel-warning': 'amber',
   'opportunity-new': 'green',
+  'quiet-digest': 'violet',
 }
 
 /** base64url 공개키 → Uint8Array. 브라우저 구독 API가 요구하는 형식이다. */
@@ -155,14 +166,47 @@ export function NotificationCenter({ workspaceScope, feed, onReload, onNavigate,
 
     {settingsOpen && <div className="notification-settings">
       <p className="notification-settings-note">유형별로 화면 표시와 푸시를 따로 정합니다. 끈 유형은 아예 쌓이지 않습니다.</p>
+
+      {/* R15-I: 밤에는 울리지 않고, 아침에 한 건으로 묶어 전한다. */}
+      <div className="notification-quiet">
+        <label className="notification-quiet-toggle">
+          <input
+            type="checkbox"
+            checked={feed.settings.quietHours?.enabled !== false}
+            disabled={busy}
+            onChange={(event) => void saveSettings({ ...feed.settings, quietHours: { ...feed.settings.quietHours, enabled: event.target.checked } })}
+          />
+          <span><Moon size={15} /> 방해 금지 시간</span>
+        </label>
+        <div className="notification-quiet-range">
+          <input
+            type="time"
+            value={feed.settings.quietHours?.start ?? '22:00'}
+            disabled={busy || feed.settings.quietHours?.enabled === false}
+            aria-label="방해 금지 시작"
+            onChange={(event) => void saveSettings({ ...feed.settings, quietHours: { ...feed.settings.quietHours, start: event.target.value } })}
+          />
+          <span>부터</span>
+          <input
+            type="time"
+            value={feed.settings.quietHours?.end ?? '07:00'}
+            disabled={busy || feed.settings.quietHours?.enabled === false}
+            aria-label="방해 금지 끝"
+            onChange={(event) => void saveSettings({ ...feed.settings, quietHours: { ...feed.settings.quietHours, end: event.target.value } })}
+          />
+          <span>까지</span>
+        </div>
+        <p>이 시간에 온 알림은 사라지지 않고 쌓였다가 아침에 한 건으로 묶여 옵니다. 아래에서 고른 유형만 그때도 울립니다.</p>
+      </div>
       <table>
-        <thead><tr><th scope="col">유형</th><th scope="col">받기</th><th scope="col">푸시</th></tr></thead>
+        <thead><tr><th scope="col">유형</th><th scope="col">받기</th><th scope="col">푸시</th><th scope="col">밤에도</th></tr></thead>
         <tbody>{feed.types.map((type) => {
           const muted = feed.settings.muted.includes(type.id)
           return <tr key={type.id}>
             <th scope="row">{type.label}</th>
             <td><label><input type="checkbox" checked={!muted} disabled={busy} onChange={() => void saveSettings({ ...feed.settings, muted: toggle(feed.settings.muted, type.id) })} /><span className="sr-only">{type.label} 받기</span></label></td>
             <td><label><input type="checkbox" checked={feed.settings.push.includes(type.id)} disabled={busy || muted} onChange={() => void saveSettings({ ...feed.settings, push: toggle(feed.settings.push, type.id) })} /><span className="sr-only">{type.label} 푸시</span></label></td>
+            <td><label><input type="checkbox" checked={(feed.settings.urgentTypes ?? []).includes(type.id)} disabled={busy || muted || feed.settings.quietHours?.enabled === false} onChange={() => void saveSettings({ ...feed.settings, urgentTypes: toggle(feed.settings.urgentTypes ?? [], type.id) })} /><span className="sr-only">{type.label}은 방해 금지 시간에도 알림</span></label></td>
           </tr>
         })}</tbody>
       </table>

@@ -17,3 +17,11 @@
 .notification-empty { min-height: 120px; display: grid; place-items: center; align-content: center; gap: var(--space-4); color: var(--muted); text-align: center; }
 .notification-empty strong { color: var(--ink); font-size: var(--font-13); }
 .notification-empty span { font-size: var(--font-11); }
+
+/* R15-I: 방해 금지 시간 */
+.notification-quiet { padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); margin-bottom: var(--space-12); }
+.notification-quiet-toggle { display: flex; align-items: center; gap: var(--space-8); font-size: var(--font-13); }
+.notification-quiet-toggle > span { display: inline-flex; align-items: center; gap: var(--space-4); }
+.notification-quiet-range { display: flex; align-items: center; gap: var(--space-8); margin-top: var(--space-8); font-size: var(--font-13); color: var(--muted); }
+.notification-quiet-range input { padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); font: inherit; font-size: var(--font-13); }
+.notification-quiet p { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-11); }

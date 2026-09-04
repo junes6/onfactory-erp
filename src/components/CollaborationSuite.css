@@ -2034,3 +2034,13 @@ html[data-theme='dark'] :is(.journal-file-block,.journal-comment-composer textar
 .messenger-check.on { border-color: var(--color-primary); background: var(--color-primary); }
 
 .messenger-list-label { display: grid; grid-template-columns: 1fr auto; gap: var(--space-8); align-items: center; }
+
+/* R15-I: 방마다 알림 세기 — 끄기만으로는 "시끄럽지만 이름 부르면 봐야 하는 방"을 다룰 수 없다. */
+.messenger-room-alert { padding: var(--space-8) var(--space-12); border-top: var(--hairline) solid var(--line); }
+.messenger-room-alert > span { display: flex; align-items: center; gap: var(--space-8); color: var(--muted); font-size: var(--font-11); }
+.messenger-room-alert > div { display: flex; gap: var(--space-4); margin-top: var(--space-8); }
+.messenger-room-alert button {
+  flex: 1; padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8); background: var(--color-surface); color: var(--ink); font: inherit; font-size: var(--font-11); cursor: pointer;
+}
+.messenger-room-alert button.is-active { color: var(--forest-dark); background: var(--lime); border-color: transparent; }

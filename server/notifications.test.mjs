@@ -40,9 +40,11 @@ async function login(origin, email) {
 
 const draft = (overrides = {}) => buildNotification({ type: 'task-assigned', recipientId: 'U1', title: '새 업무', ...overrides })
 
-test('only the four immediate types are pushed by default; the rest are opt-in', () => {
+test('only the immediate types are pushed by default; the rest are opt-in', () => {
   const settings = defaultNotificationSettings()
-  assert.deepEqual(settings.push.sort(), ['approval-requested', 'changes-requested', 'mention', 'task-assigned'].sort())
+  // R15-I의 아침 요약이 더해졌다. 밤사이 참아 둔 것을 전하는 유일한 통로라 기본으로 켠다 —
+  // 이것까지 꺼져 있으면 방해 금지 시간에 온 알림을 영영 모르게 된다.
+  assert.deepEqual(settings.push.sort(), ['approval-requested', 'changes-requested', 'mention', 'quiet-digest', 'task-assigned'].sort())
   assert.deepEqual(settings.muted, [])
   for (const type of ['proposal-pending', 'sentinel-warning', 'opportunity-new']) {
     assert.equal(shouldPush(draft({ type, recipientId: 'U1' }), {}), false, `${type}은 사용자가 직접 켜야 한다`)
