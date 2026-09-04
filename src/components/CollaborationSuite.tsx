@@ -29,6 +29,11 @@ import {
   UserRound,
   Users,
   WandSparkles,
+  Bell,
+  BellOff,
+  CornerUpLeft,
+  Pin,
+  PinOff,
   X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -50,7 +55,9 @@ import {
   type StoredDocumentAttachment,
   uploadDocumentAttachments,
 } from '../utils/documentAttachments'
-import './CollaborationSuite.css'import { Button } from './ui/Button'
+import './CollaborationSuite.css'
+import { Button, IconButton } from './ui/Button'
+import { GroupRoomDialog, MentionSuggestions, MessageActionBar, QuotedMessage, ReactionRow, RoomSearchPanel } from './MessengerExtras'
 import { useIndustrySurface } from '../modules/IndustryContext'
 import { useEventStream } from '../hooks/useEventStream'
 
@@ -174,6 +181,8 @@ type Person = {
   role: string
   status: 'online' | 'away' | 'offline'
   system?: boolean
+  /** 비활성(퇴사) 계정. 기록은 남기되 새 대화 상대로는 고르지 않는다. */
+  active?: boolean
 }
 
 type ChatMessage = {
@@ -185,6 +194,11 @@ type ChatMessage = {
   readBy?: string[]
   createdAt?: string
   attachments?: StoredDocumentAttachment[]
+  replyTo?: string
+  reactions?: { emoji: string; by: string[] }[]
+  editedAt?: string
+  deletedAt?: string
+  deletedBy?: string
 }
 
 type Conversation = {
@@ -207,9 +221,23 @@ type Conversation = {
   systemChannel?: 'developer-support'
   supportRequesterId?: string
   supportTicketId?: string
+  /** 자유 생성 그룹방. 이 표시가 있어야 이름 변경·초대·방장 위임이 열린다. */
+  kind?: 'group'
+  icon?: string
+  ownerId?: string
+  createdBy?: string
+  createdAt?: string
+  pinnedMessageIds?: string[]
+  mutedFor?: string[]
 }
 
 type MessengerListMode = 'recent' | 'teams' | 'people'
+
+/**
+ * 한 번에 그리는 메시지 수. 방 하나에 5,000건까지 쌓일 수 있어 전부 그리면 화면이 멈춘다.
+ * 위로 올라가면 이만큼씩 더 편다.
+ */
+const MESSAGE_WINDOW = 60
 
 function legacyParticipantIds(conversation: Conversation): string[] {
   if (Array.isArray(conversation.participantIds) && conversation.participantIds.length > 0) return conversation.participantIds
@@ -244,6 +272,18 @@ export function MessengerDrawer({
   const [conversationAction, setConversationAction] = useState<'leave' | 'delete' | null>(null)
   const [conversationActionPending, setConversationActionPending] = useState(false)
   const messageEndRef = useRef<HTMLDivElement>(null)
+  // ── A절 확장 ──
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
+  const [roomSearchOpen, setRoomSearchOpen] = useState(false)
+  const [roomSearchQuery, setRoomSearchQuery] = useState('')
+  const [groupDialog, setGroupDialog] = useState<'create' | 'manage' | null>(null)
+  const [groupPending, setGroupPending] = useState(false)
+  const [mentionState, setMentionState] = useState<{ query: string; index: number } | null>(null)
+  // 방이 길어지면 전부 그리지 않는다. 위로 올라가면 한 페이지씩 더 편다.
+  const [visibleCount, setVisibleCount] = useState(MESSAGE_WINDOW)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const messageRefs = useRef<Record<string, HTMLElement | null>>({})
 
   const directoryIdentity = directory.find((person) => person.accountId === currentUserId || person.id === currentUserId)
     ?? directory.find((person) => person.name === currentUserName && sameDepartment(person.team, currentUserTeam))
@@ -288,6 +328,57 @@ export function MessengerDrawer({
   }
   const unreadTotal = myConversations.reduce((sum, item) => sum + unreadForConversation(item), 0)
   const normalizedQuery = query.trim().toLowerCase()
+
+  /**
+   * 내가 보낸 메시지를 몇 명이 읽었는가.
+   * 1:1은 읽음/안 읽음으로 충분하지만 여러 명인 방에서는 그 표기가 늘 "안 읽음"으로 굳는다.
+   * 인원이 많은 방에서 "누가 안 읽었나"까지 펼치면 그 자체가 압박이 되므로 수만 센다.
+   */
+  const readCountFor = (item: ChatMessage) => {
+    const others = (item.readBy ?? []).filter((readerId) => !currentIdentityIds.includes(readerId))
+    if (selectedConversation.type === 'direct') return others.length > 0 ? '읽음' : '안 읽음'
+    return others.length > 0 ? `${others.length}명 읽음` : '안 읽음'
+  }
+
+  const roomMuted = (selectedConversation.mutedFor ?? []).some((id) => currentIdentityIds.includes(id))
+
+  const pinnedMessages = (selectedConversation.pinnedMessageIds ?? [])
+    .map((id) => selectedConversation.messages.find((item) => item.id === id))
+    .filter((item): item is ChatMessage => Boolean(item) && !item!.deletedAt)
+
+  const visibleMessages = selectedConversation.messages.slice(Math.max(0, selectedConversation.messages.length - visibleCount))
+  const hiddenMessageCount = Math.max(0, selectedConversation.messages.length - visibleMessages.length)
+
+  const roomSearchMatches = roomSearchQuery.trim().length >= 2
+    ? selectedConversation.messages
+      .filter((item) => !item.deletedAt && item.text.toLowerCase().includes(roomSearchQuery.trim().toLowerCase()))
+      .slice(-100)
+      .reverse()
+    : []
+
+  /** 방에 있는 사람 중 @로 부를 수 있는 후보. 비활성 계정은 부르지 않는다. */
+  const mentionCandidates = mentionState
+    ? directory
+      .filter((person) => !person.system && person.active !== false && person.id !== currentUserId)
+      .filter((person) => !mentionState.query || person.name.toLowerCase().includes(mentionState.query.toLowerCase()))
+      .slice(0, 6)
+    : []
+
+  const jumpToMessage = (messageId: string) => {
+    // 창 밖에 있으면 먼저 그 지점까지 펼친다. 안 그러면 눌러도 아무 일도 안 일어난다.
+    const index = selectedConversation.messages.findIndex((item) => item.id === messageId)
+    if (index >= 0) {
+      const needed = selectedConversation.messages.length - index
+      if (needed > visibleCount) setVisibleCount(needed + 10)
+    }
+    setRoomSearchOpen(false)
+    window.setTimeout(() => {
+      const node = messageRefs.current[messageId]
+      node?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      node?.classList.add('is-jumped')
+      window.setTimeout(() => node?.classList.remove('is-jumped'), 1_600)
+    }, 60)
+  }
 
   const filteredConversations = myConversations.filter((item) => {
     if (listMode === 'teams' && item.type !== 'team') return false
@@ -424,7 +515,7 @@ export function MessengerDrawer({
           'content-type': 'application/json',
           ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}),
         },
-        body: JSON.stringify({ text, attachments: activePendingAttachments }),
+        body: JSON.stringify({ text, attachments: activePendingAttachments, ...(replyTo ? { replyTo: replyTo.id } : {}) }),
       })
       const body = await response.json().catch(() => null) as { conversation?: Conversation; error?: { message?: string } } | null
       if (!response.ok || !body?.conversation) {
@@ -433,6 +524,8 @@ export function MessengerDrawer({
       }
       await replaceConversationLocally(body.conversation)
       setMessage('')
+      setReplyTo(null)
+      setMentionState(null)
       setPendingAttachments((current) => {
         const next = { ...current }
         delete next[activeConversation.id]
@@ -442,6 +535,73 @@ export function MessengerDrawer({
       onToast('메신저 서버에 연결하지 못해 메시지를 보내지 않았습니다.')
     } finally {
       setMessageSending(false)
+    }
+  }
+
+  /** 메신저 전용 라우트 호출. 성공하면 서버가 돌려준 대화로 화면을 맞춘다. */
+  const callRoom = async (path: string, init: RequestInit, failure: string) => {
+    try {
+      const response = await fetch(`/api/messenger/conversations/${encodeURIComponent(activeConversation?.id ?? '')}${path}`, {
+        ...init,
+        headers: {
+          ...(init.body ? { 'content-type': 'application/json' } : {}),
+          ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}),
+        },
+      })
+      const body = await response.json().catch(() => null) as { conversation?: Conversation; error?: { message?: string } } | null
+      if (!response.ok) {
+        onToast(body?.error?.message ?? failure)
+        return null
+      }
+      if (body?.conversation) await replaceConversationLocally(body.conversation)
+      else messengerRefreshRef.current?.()
+      return body
+    } catch {
+      onToast('메신저 서버에 연결하지 못했습니다.')
+      return null
+    }
+  }
+
+  const toggleReaction = (messageId: string, emoji: string) =>
+    void callRoom(`/messages/${encodeURIComponent(messageId)}/reactions`, { method: 'POST', body: JSON.stringify({ emoji }) }, '반응을 남기지 못했습니다.')
+
+  const togglePin = (messageId: string, pinned: boolean) =>
+    void callRoom(`/messages/${encodeURIComponent(messageId)}/pin`, { method: 'POST', body: JSON.stringify({ pinned }) }, '고정을 바꾸지 못했습니다.')
+      .then((body) => { if (body) onToast(pinned ? '공지로 고정했습니다.' : '고정을 해제했습니다.') })
+
+  const removeMessage = (messageId: string) =>
+    void callRoom(`/messages/${encodeURIComponent(messageId)}`, { method: 'DELETE' }, '메시지를 삭제하지 못했습니다.')
+      .then((body) => { if (body) onToast('메시지를 삭제했습니다. 자리는 "삭제된 메시지"로 남습니다.') })
+
+  const submitEdit = async () => {
+    if (!editing?.text.trim()) return
+    const body = await callRoom(`/messages/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify({ text: editing.text.trim() }) }, '메시지를 수정하지 못했습니다.')
+    if (body) { setEditing(null); onToast('메시지를 수정했습니다.') }
+  }
+
+  const createGroupRoom = async (payload: { name: string; icon: string; participantIds: string[] }) => {
+    setGroupPending(true)
+    try {
+      const response = await fetch('/api/messenger/conversations/group', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}) },
+        body: JSON.stringify(payload),
+      })
+      const body = await response.json().catch(() => null) as { conversation?: Conversation; error?: { message?: string } } | null
+      if (!response.ok || !body?.conversation) {
+        onToast(body?.error?.message ?? '대화방을 만들지 못했습니다.')
+        return
+      }
+      await replaceConversationLocally(body.conversation)
+      setSelectedId(body.conversation.id)
+      setListMode('recent')
+      setGroupDialog(null)
+      setMobilePane('chat')
+      onToast(`"${body.conversation.name}" 방을 만들었습니다.`)
+    } catch {
+      onToast('메신저 서버에 연결하지 못했습니다.')
+    } finally {
+      setGroupPending(false)
     }
   }
 
@@ -586,7 +746,10 @@ export function MessengerDrawer({
                 </>
               ) : (
                 <>
-                  <div className="messenger-list-label">{listMode === 'teams' ? '팀 대화' : '최근 대화'} {filteredConversations.length}개</div>
+                  <div className="messenger-list-label">
+                    <span>{listMode === 'teams' ? '팀 대화' : '최근 대화'} {filteredConversations.length}개</span>
+                    <Button tone="quiet" size="sm" onClick={() => setGroupDialog('create')}><Plus size={15} /> 새 그룹방</Button>
+                  </div>
                   {filteredConversations.map((conversation) => (
                     <button
                       className={'messenger-conversation-row' + (conversation.id === selectedId ? ' active' : '')}
@@ -624,9 +787,16 @@ export function MessengerDrawer({
               <div><strong>{conversationName(selectedConversation)}</strong><span>{selectedConversation.systemChannel === 'developer-support' ? '요청자와 개발운영진만 보는 공식 1:1 지원 채널' : conversationSubtitle(selectedConversation)}</span></div>
               {activeConversation && activeConversation.systemChannel !== 'developer-support' && (
                 <div className="messenger-room-actions">
+                  <IconButton tone="quiet" aria-label="이 방에서 검색" onClick={() => { setRoomSearchOpen((open) => !open); setRoomSearchQuery('') }}><Search size={19} /></IconButton>
                   <button type="button" aria-label="대화방 관리" aria-expanded={showConversationMenu} onClick={() => setShowConversationMenu((current) => !current)}><MoreHorizontal size={20} /></button>
                   {showConversationMenu && (
                     <div className="messenger-room-menu">
+                      {activeConversation.kind === 'group' && (activeConversation.ownerId === currentUserId || canManage) && (
+                        <button type="button" onClick={() => { setGroupDialog('manage'); setShowConversationMenu(false) }}><Users size={17} /> 방 이름·참여자 관리</button>
+                      )}
+                      <button type="button" onClick={() => { void callRoom('/mute', { method: 'POST', body: JSON.stringify({ muted: !roomMuted }) }, '알림 설정을 바꾸지 못했습니다.'); setShowConversationMenu(false) }}>
+                        {roomMuted ? <Bell size={17} /> : <BellOff size={17} />} {roomMuted ? '이 방 알림 켜기' : '이 방 알림 끄기'}
+                      </button>
                       <button type="button" onClick={() => { setConversationAction('leave'); setShowConversationMenu(false) }}><LogOut size={17} /> 대화방 나가기</button>
                       {canManage && <button className="danger" type="button" onClick={() => { setConversationAction('delete'); setShowConversationMenu(false) }}><Trash2 size={17} /> 대화방 삭제</button>}
                     </div>
@@ -635,23 +805,108 @@ export function MessengerDrawer({
               )}
             </header>
 
+            {roomSearchOpen && activeConversation && (
+              <RoomSearchPanel
+                query={roomSearchQuery}
+                matches={roomSearchMatches}
+                onQueryChange={setRoomSearchQuery}
+                onJump={jumpToMessage}
+                onClose={() => { setRoomSearchOpen(false); setRoomSearchQuery('') }}
+              />
+            )}
+
+            {pinnedMessages.length > 0 && (
+              <div className="messenger-pinned" aria-label="고정된 공지">
+                <Pin size={15} aria-hidden="true" />
+                <ul>
+                  {pinnedMessages.map((item) => (
+                    <li key={item.id}>
+                      <button type="button" onClick={() => jumpToMessage(item.id)}>
+                        <strong>{item.senderName}</strong>
+                        <span>{item.text.length > 70 ? `${item.text.slice(0, 69)}…` : item.text}</span>
+                      </button>
+                      <IconButton tone="quiet" size="sm" aria-label="고정 해제" onClick={() => togglePin(item.id, false)}><PinOff size={14} /></IconButton>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <div className="messenger-messages" aria-live="polite">
+              {hiddenMessageCount > 0 && (
+                <div className="messenger-load-older">
+                  <Button tone="quiet" size="sm" onClick={() => setVisibleCount((count) => count + MESSAGE_WINDOW)}>
+                    이전 메시지 {hiddenMessageCount}건 더 보기
+                  </Button>
+                </div>
+              )}
               <div className="messenger-date-divider"><span>오늘</span></div>
               {selectedConversation.messages.length === 0 && (
                 <div className="collab-empty"><MessageCircle size={32} /><strong>첫 메시지를 보내세요</strong><span>업무 내용과 파일을 안전하게 공유할 수 있습니다.</span></div>
               )}
-              {selectedConversation.messages.map((item) => {
+              {visibleMessages.map((item) => {
                 const mine = currentIdentityIds.includes(item.senderId) || item.senderId === 'me'
+                const quoted = item.replyTo ? selectedConversation.messages.find((candidate) => candidate.id === item.replyTo) : undefined
+                const senderInactive = !mine && directory.find((person) => person.id === item.senderId || person.accountId === item.senderId)?.active === false
+                const receipts = readCountFor(item)
+                const pinned = (selectedConversation.pinnedMessageIds ?? []).includes(item.id)
+                const removed = Boolean(item.deletedAt)
                 return (
-                  <article className={'messenger-message' + (mine ? ' mine' : '')} key={item.id}>
+                  <article
+                    className={'messenger-message' + (mine ? ' mine' : '') + (removed ? ' removed' : '')}
+                    key={item.id}
+                    ref={(node) => { messageRefs.current[item.id] = node }}
+                  >
                     {!mine && <Avatar name={item.senderName} compact />}
                     <div>
-                      {!mine && <strong>{item.senderName}</strong>}
+                      {!mine && <strong>{item.senderName}{senderInactive && <span className="messenger-inactive-tag">비활성</span>}</strong>}
+                      {quoted && <QuotedMessage senderName={quoted.senderName} text={quoted.deletedAt ? '삭제된 메시지' : quoted.text} onJump={() => jumpToMessage(quoted.id)} />}
                       <div className="messenger-bubble-row">
-                        {mine && <span className="messenger-message-meta"><small>{selectedConversation.type === 'direct' && item.readBy?.some((readerId) => !currentIdentityIds.includes(readerId)) ? '읽음' : '안 읽음'}</small><time>{item.time}</time></span>}
-                        <p>{item.text}</p>
+                        {mine && (
+                          <span className="messenger-message-meta">
+                            <small>{receipts}</small>
+                            <time>{item.time}</time>
+                          </span>
+                        )}
+                        {editing?.id === item.id ? (
+                          <span className="messenger-edit-box">
+                            <label>
+                              <span className="sr-only">메시지 수정</span>
+                              <textarea
+                                rows={2}
+                                value={editing.text}
+                                autoFocus
+                                onChange={(event) => setEditing({ id: item.id, text: event.target.value })}
+                                onKeyDown={(event) => {
+                                  if (event.nativeEvent.isComposing) return
+                                  if (event.key === 'Escape') setEditing(null)
+                                  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submitEdit() }
+                                }}
+                              />
+                            </label>
+                            <span className="messenger-edit-actions">
+                              <Button tone="quiet" size="sm" onClick={() => setEditing(null)}>취소</Button>
+                              <Button tone="primary" size="sm" onClick={() => void submitEdit()}>저장</Button>
+                            </span>
+                          </span>
+                        ) : (
+                          <p>{item.text}{item.editedAt && !removed && <span className="messenger-edited">수정됨</span>}</p>
+                        )}
                         {!mine && <time>{item.time}</time>}
                       </div>
+                      {!removed && editing?.id !== item.id && (
+                        <MessageActionBar
+                          canEdit={mine}
+                          canDelete={mine || canManage || selectedConversation.ownerId === currentUserId}
+                          pinned={pinned}
+                          onReply={() => { setReplyTo(item); composerRef.current?.focus() }}
+                          onReact={(emoji) => toggleReaction(item.id, emoji)}
+                          onPin={() => togglePin(item.id, !pinned)}
+                          onEdit={() => setEditing({ id: item.id, text: item.text })}
+                          onDelete={() => removeMessage(item.id)}
+                        />
+                      )}
+                      <ReactionRow reactions={item.reactions} currentIdentityIds={currentIdentityIds} onToggle={(emoji) => toggleReaction(item.id, emoji)} />
                       {item.attachments && item.attachments.length > 0 && (
                         <div className="messenger-message-attachments" aria-label="메시지 첨부파일">
                           {item.attachments.map((attachment) => (
@@ -675,6 +930,26 @@ export function MessengerDrawer({
             </div>
 
             <form className="messenger-composer" onSubmit={sendMessage}>
+              {replyTo && (
+                <div className="messenger-reply-strip">
+                  <CornerUpLeft size={15} aria-hidden="true" />
+                  <span><strong>{replyTo.senderName}</strong>에게 답장 · {replyTo.text.length > 50 ? `${replyTo.text.slice(0, 49)}…` : replyTo.text}</span>
+                  <IconButton tone="quiet" size="sm" aria-label="답장 취소" onClick={() => setReplyTo(null)}><X size={15} /></IconButton>
+                </div>
+              )}
+              {mentionState && mentionCandidates.length > 0 && (
+                <MentionSuggestions
+                  people={mentionCandidates}
+                  query={mentionState.query}
+                  activeIndex={mentionState.index}
+                  onPick={(person) => {
+                    // 서버는 본문의 `@이름` 문자열로 알림 대상을 찾는다. 그 형태를 정확히 만들어 준다.
+                    setMessage((current) => current.replace(/@([^\s@]*)$/, `@${person.name} `))
+                    setMentionState(null)
+                    composerRef.current?.focus()
+                  }}
+                />
+              )}
               {activePendingAttachments.length > 0 && (
                 <div className="messenger-pending-attachments" aria-label="전송 대기 첨부파일">
                   {activePendingAttachments.map((attachment) => (
@@ -691,19 +966,45 @@ export function MessengerDrawer({
               <label>
                   <span className="sr-only">{conversationName(selectedConversation)}에게 메시지 작성</span>
                 <textarea
+                  ref={composerRef}
                   rows={1}
                   disabled={!activeConversation}
                   value={message}
-                  onChange={(event) => setMessage(event.target.value)}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setMessage(value)
+                    // 마지막 @ 뒤에 공백이 없으면 아직 이름을 고르는 중이다.
+                    const trailing = value.match(/@([^\s@]*)$/)
+                    setMentionState(trailing ? { query: trailing[1], index: 0 } : null)
+                  }}
                   onKeyDown={(event) => {
                     // 한글 조합 중의 Enter는 글자 확정용이다. 막지 않으면 조합 중인 낱말이 그대로 전송된다.
                     if (event.nativeEvent.isComposing) return
+                    if (mentionState && mentionCandidates.length > 0) {
+                      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                        event.preventDefault()
+                        const step = event.key === 'ArrowDown' ? 1 : -1
+                        setMentionState({ ...mentionState, index: (mentionState.index + step + mentionCandidates.length) % mentionCandidates.length })
+                        return
+                      }
+                      if (event.key === 'Enter' || event.key === 'Tab') {
+                        event.preventDefault()
+                        const picked = mentionCandidates[mentionState.index]
+                        if (picked) {
+                          setMessage((current) => current.replace(/@([^\s@]*)$/, `@${picked.name} `))
+                          setMentionState(null)
+                        }
+                        return
+                      }
+                      if (event.key === 'Escape') { setMentionState(null); return }
+                    }
+                    if (event.key === 'Escape' && replyTo) { setReplyTo(null); return }
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault()
                       event.currentTarget.form?.requestSubmit()
                     }
                   }}
-                  placeholder={activeConversation ? '메시지를 입력하세요' : '직원 목록에서 새 대화를 시작하세요'}
+                  placeholder={activeConversation ? '메시지를 입력하세요 (@로 사람을 부를 수 있습니다)' : '직원 목록에서 새 대화를 시작하세요'}
                 />
               </label>
               <button className="send" type="submit" aria-label="메시지 보내기" disabled={!activeConversation || !message.trim() || messageSending || attachmentUploading}><Send size={20} /></button>
@@ -711,6 +1012,27 @@ export function MessengerDrawer({
           </section>
         </div>
       </div>
+      {groupDialog && (
+        <GroupRoomDialog
+          mode={groupDialog}
+          people={directory}
+          currentUserId={currentUserId}
+          room={groupDialog === 'manage' && activeConversation ? activeConversation : undefined}
+          pending={groupPending}
+          onSubmit={(payload) => {
+            if (groupDialog === 'create') { void createGroupRoom(payload); return }
+            void callRoom('', { method: 'PATCH', body: JSON.stringify({ name: payload.name, icon: payload.icon }) }, '방 정보를 저장하지 못했습니다.')
+              .then((body) => { if (body) { setGroupDialog(null); onToast('방 정보를 저장했습니다.') } })
+          }}
+          onInvite={(ids) => void callRoom('/participants', { method: 'POST', body: JSON.stringify({ participantIds: ids }) }, '초대하지 못했습니다.')
+            .then((body) => { if (body) onToast(`${ids.length}명을 초대했습니다.`) })}
+          onRemove={(id) => void callRoom(`/participants/${encodeURIComponent(id)}`, { method: 'DELETE' }, '내보내지 못했습니다.')
+            .then((body) => { if (body) onToast('참여자를 내보냈습니다.') })}
+          onTransfer={(id) => void callRoom('/owner', { method: 'POST', body: JSON.stringify({ ownerId: id }) }, '방장을 위임하지 못했습니다.')
+            .then((body) => { if (body) onToast('방장을 위임했습니다.') })}
+          onClose={() => setGroupDialog(null)}
+        />
+      )}
       {conversationAction && activeConversation && (
         <ConversationActionDialog
           action={conversationAction}
