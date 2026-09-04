@@ -19,6 +19,7 @@ import express from 'express'
 
 import { registerBillingRoutes } from './billing-routes.mjs'
 import { registerAttendanceRoutes } from './attendance-routes.mjs'
+import { registerMessengerRoomRoutes } from './messenger-rooms.mjs'
 import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
 import { registerPersonalCoreRoutes } from './personal-core-routes.mjs'
 import { backupSettings, BACKUP_STATUS_KEY, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
@@ -189,10 +190,13 @@ const DEVELOPER_OPERATIONS_NAME = '개발운영진'
 const DEVELOPER_SUPPORT_CHANNEL = 'developer-support'
 const CONVERSATION_FIELDS = ['id', 'type', 'name', 'subtitle', 'unread', 'lastMessage', 'lastTime', 'messages']
 const MESSAGE_FIELDS = ['id', 'senderId', 'senderName', 'text', 'time']
-const MESSAGE_OPTIONAL_FIELDS = ['readBy', 'createdAt', 'attachments']
+// 답장·반응·수정흔적·삭제흔적. 전부 선택 필드라 옛 메시지는 그대로 통과한다.
+const MESSAGE_OPTIONAL_FIELDS = ['readBy', 'createdAt', 'attachments', 'replyTo', 'reactions', 'editedAt', 'deletedAt', 'deletedBy']
 const CONVERSATION_OPTIONAL_FIELDS = [
   'memberId', 'participantIds', 'hiddenFor', 'lineageId', 'generation', 'lifecycle', 'closedAt', 'deletedAt',
   'systemChannel', 'supportRequesterId', 'supportTicketId',
+  // 자유 생성 그룹방. kind가 'group'인 방만 이름 변경·초대·방장 위임을 허용한다.
+  'kind', 'icon', 'ownerId', 'createdBy', 'createdAt', 'pinnedMessageIds', 'mutedFor',
 ]
 const CONVERSATION_LIFECYCLES = new Set(['active', 'closed', 'deleted'])
 const PLATFORM_TICKET_PRIORITIES = new Set(['P1', 'P2', 'P3'])
@@ -1040,6 +1044,15 @@ function hasMessageShape(value) {
         && typeof attachment.id === 'string' && attachment.id.startsWith('DOC-')
         && typeof attachment.name === 'string' && attachment.name.trim().length > 0 && attachment.name.length <= 180
         && typeof attachment.size === 'string' && attachment.size.length <= 40)))
+    && (value.replyTo === undefined || (typeof value.replyTo === 'string' && value.replyTo.length > 0 && value.replyTo.length <= 120))
+    && (value.editedAt === undefined || (typeof value.editedAt === 'string' && !Number.isNaN(Date.parse(value.editedAt))))
+    && (value.deletedAt === undefined || (typeof value.deletedAt === 'string' && !Number.isNaN(Date.parse(value.deletedAt))))
+    && (value.deletedBy === undefined || typeof value.deletedBy === 'string')
+    && (value.reactions === undefined || (Array.isArray(value.reactions) && value.reactions.length <= 12
+      && value.reactions.every((reaction) => hasExactFields(reaction, ['emoji', 'by'])
+        && typeof reaction.emoji === 'string' && reaction.emoji.length > 0 && reaction.emoji.length <= 16
+        && Array.isArray(reaction.by) && reaction.by.length > 0 && reaction.by.length <= 2_000
+        && reaction.by.every((id) => typeof id === 'string' && id))))
 }
 
 function isDeveloperSupportConversation(conversation) {
@@ -1078,6 +1091,13 @@ function hasConversationShape(value) {
   if (value.systemChannel !== undefined && value.systemChannel !== DEVELOPER_SUPPORT_CHANNEL) return false
   if (value.supportRequesterId !== undefined && typeof value.supportRequesterId !== 'string') return false
   if (value.supportTicketId !== undefined && typeof value.supportTicketId !== 'string') return false
+  if (value.kind !== undefined && value.kind !== 'group') return false
+  if (value.icon !== undefined && (typeof value.icon !== 'string' || value.icon.length > 8)) return false
+  if (value.ownerId !== undefined && typeof value.ownerId !== 'string') return false
+  if (value.createdBy !== undefined && typeof value.createdBy !== 'string') return false
+  if (value.createdAt !== undefined && (typeof value.createdAt !== 'string' || Number.isNaN(Date.parse(value.createdAt)))) return false
+  if (value.pinnedMessageIds !== undefined && (!Array.isArray(value.pinnedMessageIds) || value.pinnedMessageIds.length > 20 || value.pinnedMessageIds.some((id) => typeof id !== 'string'))) return false
+  if (value.mutedFor !== undefined && (!Array.isArray(value.mutedFor) || value.mutedFor.some((id) => typeof id !== 'string'))) return false
   return hasDeveloperSupportConversationIntegrity(value)
     && Array.isArray(value.messages) && value.messages.every(hasMessageShape)
 }
@@ -4746,6 +4766,13 @@ export function createApp(options = {}) {
     }
     const createdAt = new Date().toISOString()
     const sentAt = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(createdAt))
+    // 답장은 같은 방의 살아 있는 메시지만 가리킬 수 있다. 없는 id를 받아 두면
+    // 화면에서 인용문이 빈 칸으로 뜨고 원문으로 이동도 되지 않는다.
+    const replyTo = String(request.body?.replyTo ?? '').trim()
+    if (replyTo && !previous.messages.some((item) => item?.id === replyTo && !item?.deletedAt)) {
+      response.status(400).json({ error: { code: 'INVALID_REPLY_TARGET', message: '답장할 메시지를 찾을 수 없습니다.' } })
+      return
+    }
     const message = {
       id: `m-${Date.now()}-${randomBytes(3).toString('hex')}`,
       senderId: request.auth.id,
@@ -4755,6 +4782,7 @@ export function createApp(options = {}) {
       createdAt,
       readBy: [request.auth.id],
       ...(attachments.length ? { attachments } : {}),
+      ...(replyTo ? { replyTo } : {}),
     }
     const conversation = {
       ...previous,
@@ -4858,6 +4886,11 @@ export function createApp(options = {}) {
         : []
       enqueueProposal(request.auth.tenantId, proposeTaskFromMessage({ message, conversation, recipients }))
     } catch { /* 제안 실패가 메시지 전송을 막지 않는다 */ }
+    // 이 두 줄이 없어서, 화면이 쓰는 전송 경로로 보낸 메시지는 상대에게 실시간으로 닿지도
+    // 않았고 @멘션 알림도 나가지 않았다. 알림·SSE는 일반 저장 경로에만 붙어 있었는데
+    // 클라이언트는 그 경로를 쓰지 않는다.
+    events.publish(request.auth.tenantId, 'message', { key: 'messenger-conversations', conversationId: conversation.id })
+    try { notifyMentions(request.auth, conversations, [conversation]) } catch { /* 알림 실패가 전송을 되돌리지 않는다 */ }
     response.status(201).json({ conversation, message })
   })
 
@@ -6711,6 +6744,18 @@ export function createApp(options = {}) {
     response.json({ updatedAt: record.updatedAt, version })
   })
 
+  registerMessengerRoomRoutes({
+    app,
+    requireAuth,
+    requireMatchingWorkspaceIdentity,
+    workspaceStore,
+    accounts,
+    commitConversationData,
+    isConversationVisibleToMember,
+    isDeveloperSupportConversation,
+    notify,
+    events,
+  })
   registerAttendanceRoutes({
     app,
     requireAuth,
