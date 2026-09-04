@@ -207,7 +207,7 @@ const sharedDocumentCategories = ['공통자료', '세무·회계', '지식재�
 
 const industrySurfaces: Readonly<Record<TenantIndustryType, IndustrySurface>> = {
   food_manufacturing: {
-    globalSearchPlaceholder: '제품·업무·LOT 통합 검색',
+    globalSearchPlaceholder: '업무·문서·일지·대화 검색 (/)',
     librarySearchPlaceholder: '예: 최근 자가품질검사 성적서 찾아줘',
     documentCategories: [...sharedDocumentCategories, '식품안전·인증', '제품·표시사항', '생산·품질', '재고·물류', '판매·계약'],
     workCategories: ['제품', '생산', '재고', '품질', '일반'],
@@ -233,7 +233,7 @@ const industrySurfaces: Readonly<Record<TenantIndustryType, IndustrySurface>> = 
     },
   },
   it_services: {
-    globalSearchPlaceholder: '프로젝트·업무·산출물 통합 검색',
+    globalSearchPlaceholder: '업무·문서·일지·대화 검색 (/)',
     librarySearchPlaceholder: '예: 최근 프로젝트 계약서 최종본 찾아줘',
     documentCategories: [...sharedDocumentCategories, '프로젝트', '산출물', '계약·거래처', '제안·견적', '검수·유지보수'],
     workCategories: ['프로젝트', '산출물', '계약', '검수', '일반'],

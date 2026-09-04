@@ -21,6 +21,7 @@ import { registerBillingRoutes } from './billing-routes.mjs'
 import { registerAttendanceRoutes } from './attendance-routes.mjs'
 import { registerMessengerRoomRoutes } from './messenger-rooms.mjs'
 import { registerOversightRoutes } from './oversight-routes.mjs'
+import { registerGlobalSearchRoute } from './global-search.mjs'
 import { registerAiConversationRoutes, CONVERSATIONS_KEY as AI_CONVERSATIONS_KEY, autoTitle, buildContext, messagesToFold, extractiveSummary, MAX_MESSAGE_LENGTH as AI_MAX_MESSAGE_LENGTH } from './ai-conversations.mjs'
 import {
   advanceRuleDate as advanceSchedule,
@@ -7241,6 +7242,16 @@ export function createApp(options = {}) {
       return null
     }
   }
+
+  registerGlobalSearchRoute({
+    app,
+    requireAuth,
+    requireMatchingWorkspaceIdentity,
+    workspaceStore,
+    accounts,
+    canReadDocument,
+    isConversationVisibleToMember,
+  })
 
   const sweepConversationTrash = registerAiConversationRoutes({
     app,

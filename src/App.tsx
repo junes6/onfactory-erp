@@ -8,6 +8,7 @@ import {
   Briefcase, FileStack, FileSignature, FolderKanban, Landmark, Award, ExternalLink,
 } from 'lucide-react'
 import AIChat from './components/AIChat'
+import GlobalSearch from './components/GlobalSearch'
 import { MobileMoreSheet, MobileTabBar, MobileTaskList, MobileToday, TODAY_TASK_LIMIT, type MobileTab } from './components/MobileShell'
 import { ChatBubbleIcon, NotificationBellIcon, BrandMark } from './components/AppIcons'
 import { LoginPage, PasswordChangePage, ProfileEditor, SettingsDrawer, type AccentChoice, type EasyModeChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
@@ -1676,9 +1677,15 @@ export default function App() {
   /** 아래 탭 막대를 쓰는 조건. 운영자 콘솔은 작은 화면 대상이 아니라 제외한다. */
   const phoneShell = isPhone && mode === 'tenant' && authStatus === 'signed-in'
 
-  // 휴대폰으로 들어오면 채팅부터 연다. 탭을 눌러 나가면 다시 열지 않는다.
+  /**
+   * 휴대폰으로 들어오면 채팅부터 연다. 탭을 눌러 나가면 다시 열지 않는다.
+   *
+   * 넓은 화면으로 바뀌면 닫는다. 창을 늘리거나 화면을 돌렸을 때 아래 탭이 열어 둔
+   * 채팅이 그대로 남으면, 데스크톱에서 아무도 열지 않은 서랍이 떠 있게 된다.
+   */
   useEffect(() => {
-    if (phoneShell && mobileTab === 'chat') setMessengerOpen(true)
+    if (!phoneShell) { if (mobileTab === 'chat') setMessengerOpen(false); return }
+    if (mobileTab === 'chat') setMessengerOpen(true)
   }, [phoneShell, mobileTab])
 
   useEffect(() => {
@@ -2311,15 +2318,33 @@ export default function App() {
         <header className="topbar">
           <div className="topbar-left"><button className="menu-button" type="button" aria-label="메뉴 열기" aria-controls="main-navigation" aria-expanded={mobileNav} onClick={() => setMobileNav(true)}><Menu size={22} /></button><div className="breadcrumb"><span>{mode === 'platform' ? BRAND.platformOperatorLabel : tenantName}</span><strong>{mode === 'platform' ? platformPageTitles[page as PlatformSection | 'billing'] : tenantNav.find((item) => item.id === page)?.label ?? routeLabel(page as TenantRouteId)}</strong></div></div>
           <div className="topbar-actions">
+            {/*
+              고객사 화면의 검색은 서버가 한다(R15-G). 문서 공개 범위·메신저 참여자·
+              AI 대화 소유 같은 권한 규칙을 화면에서 다시 짜면 언젠가 한 곳이 어긋난다.
+              운영자 콘솔은 고객사·티켓만 보므로 예전 그대로 화면에서 거른다.
+            */}
+            {mode === 'tenant' ? (
+              <GlobalSearch
+                workspaceScope={workspaceScope}
+                placeholder={tenantSurface.globalSearchPlaceholder}
+                onOpen={(hit) => {
+                  if (hit.type === 'task') setWorkFocusId(hit.focusId)
+                  else if (hit.type === 'message' || hit.type === 'conversation') { setMessengerOpen(hit.type === 'message'); if (hit.type === 'message') return }
+                  else setPlatformFocusId(hit.focusId)
+                  navigate(hit.page as PageId)
+                }}
+              />
+            ) : (
             <div className="global-search">
               <Search size={19} />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={mode === 'platform' ? '고객사·CS 티켓 검색' : tenantSurface.globalSearchPlaceholder} role="combobox" aria-expanded={searchResults.length > 0} aria-controls="search-results" aria-autocomplete="list" />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="고객사·CS 티켓 검색" role="combobox" aria-expanded={searchResults.length > 0} aria-controls="search-results" aria-autocomplete="list" />
               {query && <button type="button" aria-label="검색어 지우기" onClick={() => setQuery('')}><X size={16} /></button>}
               {searchResults.length > 0 && <div className="search-popover" id="search-results" role="listbox">{searchResults.map((result) => {
                 const Icon = result.icon
                 return <button role="option" aria-selected="false" type="button" key={result.id} onClick={() => { setPlatformFocusId(result.id); navigate(result.page) }}><span><Icon size={17} /></span><div><strong>{result.title}</strong><small>{result.meta}</small></div><ArrowRight size={15} /></button>
               })}</div>}
             </div>
+            )}
             {mode === 'tenant' && <button type="button" className={'top-icon-button messenger-trigger ' + (messengerOpen ? 'active' : '')} aria-label={`사내 메신저 열기, 읽지 않은 대화 ${messengerUnread}개`} aria-controls="company-messenger" aria-expanded={messengerOpen} onClick={() => { setMessengerOpen((value) => !value); setNotificationsOpen(false) }}><ChatBubbleIcon />{messengerUnread > 0 && <span>{messengerUnread}</span>}</button>}
             <div className="notification-wrap" ref={notificationWrapRef}>
               <button type="button" className={'top-icon-button ' + (notificationsOpen ? 'active' : '')} aria-label={'알림 ' + unread + '개'} aria-controls="notification-panel" aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((value) => !value); setMessengerOpen(false) }}><NotificationBellIcon />{unread > 0 && <span>{unread}</span>}</button>
