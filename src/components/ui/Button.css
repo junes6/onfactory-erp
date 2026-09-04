@@ -76,3 +76,9 @@ html[data-theme='dark'] :is(.ui-button.is-ghost, .ui-icon-button) { background: 
 html[data-easy-mode='on'] .app-shell .ui-button { min-height: 52px; padding-inline: var(--space-24); font-size: var(--font-15); }
 html[data-easy-mode='on'] .app-shell .ui-button.is-quiet { padding-inline: var(--space-12); }
 html[data-easy-mode='on'] .app-shell .ui-icon-button { width: 48px; height: 48px; }
+
+/* 휴대폰에서는 손가락 과녁을 44px 아래로 내리지 않는다. 크기 정의는 여기 한 곳에만 둔다. */
+@media (max-width: 768px) {
+  .ui-button { min-height: 44px; }
+  .ui-button.is-sm { min-height: 44px; }
+}

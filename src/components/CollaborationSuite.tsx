@@ -4,6 +4,7 @@ import {
   BookOpenCheck,
   Building2,
   CalendarDays,
+  Camera,
   Check,
   CheckCircle2,
   ChevronLeft,
@@ -266,6 +267,7 @@ export function MessengerDrawer({
   const [attachmentUploading, setAttachmentUploading] = useState(false)
   const [pendingAttachments, setPendingAttachments] = useState<Record<string, StoredDocumentAttachment[]>>({})
   const attachmentInputRef = useRef<HTMLInputElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
   const [listMode, setListMode] = useState<MessengerListMode>('recent')
   const [mobilePane, setMobilePane] = useState<'list' | 'chat'>('list')
   const [showConversationMenu, setShowConversationMenu] = useState(false)
@@ -962,6 +964,13 @@ export function MessengerDrawer({
                 </div>
               )}
               <input ref={attachmentInputRef} className="sr-only" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt" onChange={(event) => void chooseAttachment(event)} />
+              {/*
+                현장에서 올리는 것은 거의 사진이다. 파일 선택창을 먼저 띄우면 앨범을 뒤져야 하니
+                휴대폰에서는 카메라 단추를 앞에 둔다. capture는 이 입력에만 붙인다 —
+                파일 입력에 붙이면 앨범과 문서를 아예 고를 수 없게 된다.
+              */}
+              <input ref={cameraInputRef} className="sr-only" type="file" accept="image/*" capture="environment" onChange={(event) => void chooseAttachment(event)} />
+              <button type="button" className="composer-camera" aria-label="사진 찍어 보내기" disabled={!activeConversation || attachmentUploading || messageSending} onClick={() => cameraInputRef.current?.click()}><Camera size={20} /></button>
               <button type="button" aria-label="파일 첨부" disabled={!activeConversation || attachmentUploading || messageSending} onClick={() => attachmentInputRef.current?.click()}>{attachmentUploading ? <Upload size={20} /> : <Paperclip size={20} />}</button>
               <label>
                   <span className="sr-only">{conversationName(selectedConversation)}에게 메시지 작성</span>

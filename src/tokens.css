@@ -190,3 +190,18 @@ html[data-font-size='large'] { --font-22: 25px; --font-15: 17px; --font-13: 15px
 html[data-font-size='extra'] { --font-22: 28px; --font-15: 19px; --font-13: 17px; --font-11: 15px; }
 html[data-easy-mode='on'][data-font-size='large'] { --font-22: 29px; --font-15: 20px; --font-13: 18px; --font-11: 16px; }
 html[data-easy-mode='on'][data-font-size='extra'] { --font-22: 32px; --font-15: 22px; --font-13: 20px; --font-11: 17px; }
+
+/*
+ * 휴대폰에서는 본문을 16px 아래로 두지 않는다.
+ * 15px 이하 입력칸에 손을 대면 iOS 사파리가 화면을 확대해 버리고, 그 확대는
+ * 사용자가 직접 되돌려야 한다. 글자 크기 설정을 따로 올린 사람은 그 값이 이미
+ * 더 크므로 건드리지 않는다.
+ */
+@media (max-width: 768px) {
+  html:not([data-font-size='large']):not([data-font-size='extra']) {
+    --font-22: 24px;
+    --font-15: 16px;
+    --font-13: 14px;
+    --font-11: 12px;
+  }
+}

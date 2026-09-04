@@ -8,6 +8,7 @@ import {
   Briefcase, FileStack, FileSignature, FolderKanban, Landmark, Award, ExternalLink,
 } from 'lucide-react'
 import AIChat from './components/AIChat'
+import { MobileMoreSheet, MobileTabBar, MobileTaskList, MobileToday, TODAY_TASK_LIMIT, type MobileTab } from './components/MobileShell'
 import { ChatBubbleIcon, NotificationBellIcon, BrandMark } from './components/AppIcons'
 import { LoginPage, PasswordChangePage, ProfileEditor, SettingsDrawer, type AccentChoice, type EasyModeChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
 import { ProjectSpacesPage } from './components/ProjectSpaces'
@@ -1557,6 +1558,14 @@ export default function App() {
   const [page, setPage] = useState<PageId>('ai')
   const [mobileNav, setMobileNav] = useState(false)
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 1024)
+  /**
+   * 휴대폰인가. 태블릿(<=1024)까지 묶던 isMobile과 따로 둔다 — 아래 탭 막대는
+   * 한 손으로 드는 화면에만 필요하고, 태블릿에서는 옆 메뉴가 그대로 낫다.
+   */
+  const [isPhone, setIsPhone] = useState(() => window.innerWidth <= 768)
+  /** 휴대폰에서 처음 들어오는 곳은 채팅이다. 현장에서 앱을 여는 이유가 대개 "누가 뭐라고 했나"다. */
+  const [mobileTab, setMobileTab] = useState<MobileTab>('chat')
+  const [moreSheetOpen, setMoreSheetOpen] = useState(false)
   const [messengerOpen, setMessengerOpen] = useState(false)
   const [messengerUnread, setMessengerUnread] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -1664,8 +1673,16 @@ export default function App() {
   const [easyMode, setEasyMode] = useState<EasyModeChoice>(() => (window.localStorage.getItem('onfactory-easy-mode') as EasyModeChoice | null) ?? 'standard')
   const easyHomeActive = mode === 'tenant' && page === 'ai' && easyMode === 'easy'
 
+  /** 아래 탭 막대를 쓰는 조건. 운영자 콘솔은 작은 화면 대상이 아니라 제외한다. */
+  const phoneShell = isPhone && mode === 'tenant' && authStatus === 'signed-in'
+
+  // 휴대폰으로 들어오면 채팅부터 연다. 탭을 눌러 나가면 다시 열지 않는다.
   useEffect(() => {
-    const resize = () => setIsMobile(window.innerWidth <= 1024)
+    if (phoneShell && mobileTab === 'chat') setMessengerOpen(true)
+  }, [phoneShell, mobileTab])
+
+  useEffect(() => {
+    const resize = () => { setIsMobile(window.innerWidth <= 1024); setIsPhone(window.innerWidth <= 768) }
     window.addEventListener('resize', resize)
     return () => window.removeEventListener('resize', resize)
   }, [])
@@ -2185,6 +2202,45 @@ export default function App() {
     }
   }
 
+  /**
+   * 휴대폰에서 네 칸이 보여 주는 것.
+   *
+   * 채팅은 이미 있는 메신저를 전체 화면으로 띄우므로 여기서는 자리만 비운다.
+   * 더보기도 시트를 여는 동작이라 화면 자체는 직전 탭을 그대로 둔다.
+   */
+  const renderMobileTab = () => {
+    const todayIso = new Date().toISOString().slice(0, 10)
+    if (mobileTab === 'today') {
+      return (
+        <MobileToday
+          userName={account?.name ?? ''}
+          tasks={scopedWorkItems.filter((item) => item.status !== '결재완료')}
+          events={dashboardCalendarEvents.filter((event) => event.date.slice(0, 10) === todayIso).map((event) => ({ id: event.id, title: event.title, date: event.date, owner: event.department }))}
+          alerts={(notificationFeed?.items ?? []).filter((item) => !item.readAt).map((item) => ({ id: item.id, title: item.title, createdAt: item.createdAt }))}
+          onOpenTask={(task) => { setWorkFocusId(task.id); setMobileTab('tasks') }}
+          onGoTasks={() => setMobileTab('tasks')}
+          onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }}
+        />
+      )
+    }
+    if (mobileTab === 'tasks') {
+      // 상세를 열어야 하는 업무는 기존 업무 화면으로 넘긴다. 작은 화면용으로 상세를 새로 만들면
+      // 결재·증빙 같은 것이 두 곳에서 갈라진다.
+      if (workFocusId) {
+        return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onOpenOrigin={(target) => navigate(target as PageId)} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
+      }
+      return (
+        <MobileTaskList
+          tasks={scopedWorkItems}
+          onAdvance={(task) => advanceTask(task)}
+          onOpenTask={(task) => setWorkFocusId(task.id)}
+        />
+      )
+    }
+    if (mobileTab === 'chat') return <div className="mobile-chat-placeholder" aria-hidden="true" />
+    return renderPage()
+  }
+
   const renderPage = () => {
     if (mode === 'platform' && account?.role === 'platform-operator') {
       if (page === 'billing') return <BillingDashboard mode="platform" tenantOptions={platformTenants.map((tenant) => ({ id: tenant.id, name: tenant.name }))} onToast={setToast} />
@@ -2278,10 +2334,45 @@ export default function App() {
             </div>
           </div>
         </header>
-        <main id="main-content" className="main-content" tabIndex={-1}>{renderPage()}</main>
+        <main id="main-content" className="main-content" tabIndex={-1}>{phoneShell ? renderMobileTab() : renderPage()}</main>
       </div>
 
-      <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => setMessengerOpen(false)} onToast={setToast} onUnreadChange={setMessengerUnread} />
+      {phoneShell && (
+        <MobileTabBar
+          active={mobileTab}
+          taskCount={scopedWorkItems.filter((item) => item.status !== '결재완료').length}
+          chatUnread={messengerUnread}
+          alertCount={notificationFeed?.unread ?? 0}
+          onChange={(tab) => {
+            if (tab === 'more') { setMoreSheetOpen(true); return }
+            setMoreSheetOpen(false)
+            setMobileTab(tab)
+            // 업무 탭으로 돌아올 때는 목록부터 보여 준다. 지난번에 열어 둔 상세가
+            // 그대로 뜨면 "업무"를 눌렀는데 남의 업무 하나가 나오는 것처럼 보인다.
+            if (tab !== 'tasks') setWorkFocusId('')
+            setMessengerOpen(tab === 'chat')
+          }}
+        />
+      )}
+      {phoneShell && (
+        <MobileMoreSheet
+          open={moreSheetOpen}
+          userName={account?.name ?? ''}
+          userRole={account?.jobRole ?? (account?.role === 'tenant-admin' ? '회사 관리자' : '일반 직원')}
+          onClose={() => setMoreSheetOpen(false)}
+          onPick={(id) => {
+            setMoreSheetOpen(false)
+            if (id === 'settings') { setSettingsOpen(true); return }
+            setMessengerOpen(false)
+            // 고른 화면은 '더보기' 탭 아래에 그대로 머문다. 여기서 '오늘'로 되돌리면
+            // 방금 고른 화면이 아니라 오늘 화면이 뜬다.
+            setMobileTab('more')
+            navigate(id as PageId)
+          }}
+        />
+      )}
+
+      <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => { setMessengerOpen(false); if (phoneShell && mobileTab === 'chat') setMobileTab('today') }} onToast={setToast} onUnreadChange={setMessengerUnread} />
       {lensTarget && <LensPanel target={lensTarget} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} onClose={() => setLensTarget(null)} onToast={setToast} onPendingChange={setPendingProposals} />}
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? BRAND.name} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
       {profileOpen && account && <ProfileEditor account={account} onClose={() => setProfileOpen(false)} onToast={setToast} onSaved={(next) => { setAccount((current) => current ? { ...current, ...next } as AuthAccount : current) }} />}

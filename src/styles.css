@@ -2942,3 +2942,91 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
 @media (max-width: 900px) {
   .ai-conversation-list { inset: 69px var(--space-8) var(--space-8); }
 }
+
+/* ------------------------------------------------------------------ */
+/* R15-F: 휴대폰 — 아래 탭 네 칸, 한 줄 목록, 손가락에 맞는 크기          */
+/* ------------------------------------------------------------------ */
+
+.mobile-tabbar {
+  /* 메신저 오버레이(z-index 200) 위에 남아야 한다. 채팅 중에도 다른 탭으로 갈 수 있어야 하기 때문이다. */
+  position: fixed; z-index: 260; right: 0; bottom: 0; left: 0;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  border-top: var(--hairline) solid var(--line); background: var(--color-surface);
+}
+/* 홈 인디케이터 영역만큼 아래를 띄운다. spacing 토큰으로는 표현할 수 없어 높이로 만든다. */
+.mobile-tabbar::after { content: ""; position: absolute; right: 0; bottom: 0; left: 0; height: env(safe-area-inset-bottom); background: var(--color-surface); }
+.mobile-tabbar button {
+  /* 손가락으로 누르는 과녁은 44px보다 작으면 안 된다. */
+  min-height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-4);
+  border: 0; background: none; color: var(--muted); font: inherit; font-size: var(--font-11); cursor: pointer;
+}
+.mobile-tabbar button.is-active { color: var(--forest-dark); }
+.mobile-tab-icon { position: relative; display: block; }
+.mobile-tab-icon em {
+  position: absolute; top: -6px; left: 12px; min-width: 17px; padding: var(--space-0) var(--space-4);
+  border-radius: var(--radius-8); background: var(--color-danger-ink); color: var(--color-white);
+  font-size: var(--font-11); font-style: normal; font-weight: var(--weight-medium); line-height: 17px; text-align: center;
+}
+.mobile-tab-label { font-size: var(--font-11); }
+
+.mobile-today, .mobile-task-page { display: flex; flex-direction: column; gap: var(--space-12); }
+.mobile-today-greeting, .mobile-page-title { margin: var(--space-0); font-size: var(--font-22); font-weight: var(--weight-medium); }
+.mobile-card { padding: var(--space-16); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--color-surface); }
+.mobile-card h2 { display: flex; align-items: center; gap: var(--space-8); margin: var(--space-0) var(--space-0) var(--space-12); font-size: var(--font-15); font-weight: var(--weight-medium); }
+.mobile-empty { margin: var(--space-0); color: var(--muted); font-size: var(--font-15); }
+
+.mobile-line-list { margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.mobile-line-list > li {
+  display: flex; align-items: center; gap: var(--space-8);
+  min-height: 56px; padding: var(--space-8) var(--space-0); border-bottom: var(--hairline) solid var(--line);
+}
+.mobile-line-list > li:last-child { border-bottom: 0; }
+.mobile-line-open {
+  flex: 1; min-width: 0; display: block; padding: var(--space-0);
+  border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer;
+}
+/* 목록에서 줄이 흐르지 않게 한 줄로 자른다. 제목이 두 줄이 되면 훑을 수가 없다. */
+.mobile-line-open strong { display: block; font-size: var(--font-15); font-weight: var(--weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-line-open small { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); }
+.mobile-done summary { padding: var(--space-12) var(--space-0); color: var(--muted); font-size: var(--font-15); cursor: pointer; }
+
+.mobile-sheet {
+  position: fixed; z-index: 130; right: 0; bottom: 0; left: 0;
+  padding: var(--space-16);
+  border-top: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--color-surface);
+}
+/* 시트가 아래 탭 막대에 가리지 않도록 그만큼 자리를 비운다. */
+.mobile-sheet-spacer { height: calc(60px + env(safe-area-inset-bottom)); }
+.mobile-sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-12); }
+.mobile-sheet-head strong { display: block; font-size: var(--font-15); font-weight: var(--weight-medium); }
+.mobile-sheet-head small { color: var(--muted); font-size: var(--font-13); }
+.mobile-sheet-close { min-width: 44px; min-height: 44px; display: grid; place-items: center; border: 0; background: none; color: var(--ink); cursor: pointer; }
+.mobile-sheet-list { margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.mobile-sheet-list button {
+  width: 100%; min-height: 56px; display: flex; align-items: center; gap: var(--space-12);
+  padding: var(--space-8) var(--space-0); border: 0; border-bottom: var(--hairline) solid var(--line);
+  background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.mobile-sheet-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius-8); color: var(--forest-dark); background: var(--lime); }
+.mobile-sheet-copy { flex: 1; min-width: 0; }
+.mobile-sheet-copy strong { display: block; font-size: var(--font-15); font-weight: var(--weight-medium); }
+.mobile-sheet-copy small { color: var(--muted); font-size: var(--font-13); }
+.mobile-sheet-note { margin: var(--space-12) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.mobile-chat-placeholder { min-height: 1px; }
+
+@media (max-width: 768px) {
+  /* 본문 글자는 16px 아래로 내리지 않는다. 그보다 작으면 iOS가 입력할 때 화면을 확대한다. */
+  body { font-size: var(--font-15); }
+  .app-shell:has(.mobile-tabbar) .main-content::after { content: ""; display: block; height: calc(72px + env(safe-area-inset-bottom)); }
+  /* 아래 탭이 있는 화면에서는 햄버거 메뉴를 감춘다. 같은 곳으로 가는 길이 둘이면 헷갈린다. */
+  .app-shell:has(.mobile-tabbar) .menu-button { display: none; }
+  /* 메신저는 화면 높이를 못박고 있어서 bottom만으로는 아래 탭 위로 올라오지 않는다. */
+  .app-shell:has(.mobile-tabbar) .messenger-drawer { bottom: calc(56px + env(safe-area-inset-bottom)); height: auto; }
+  /* 어둡게 덮는 막도 탭 막대는 덮지 않는다. */
+  .app-shell:has(.mobile-tabbar) .collab-overlay-backdrop { bottom: calc(56px + env(safe-area-inset-bottom)); height: auto; }
+  /* 손가락 과녁 최소 크기. 공용 버튼의 크기는 Button.css에서 함께 올린다. */
+  .mobile-line-list button.mobile-line-open { min-height: 44px; }
+  /* 390px에서 가로로 밀리지 않게 한다. 넘치는 표는 표 안에서만 스크롤한다. */
+  html, body { max-width: 100%; overflow-x: hidden; }
+  table { display: block; max-width: 100%; overflow-x: auto; }
+}
