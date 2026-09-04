@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, ArrowUp, BookOpen, CheckCircle2, ClipboardPlus, FileText, LoaderCircle, Paperclip, Sparkles, X } from 'lucide-react'
+import { AlertCircle, ArrowUp, BookOpen, CheckCircle2, ClipboardPlus, FileText, FolderPlus, Gavel, History, LoaderCircle, Paperclip, Sparkles, X } from 'lucide-react'
+import AIConversationList from './AIConversationList'
 import { assistantExperienceForIndustry } from '../modules/registry'
 import { aiTaskDraftFromAnswer } from '../utils/aiTaskDraft'
 import { formatDateTime } from '../utils/dateTime'
@@ -52,6 +53,13 @@ type AIChatProps = {
   industryType?: string
 }
 
+/** 대화에서 나온 결론을 어디로 올릴 수 있는가. 조사가 갈리므로 붙인 형태까지 적어 둔다. */
+const PROMOTIONS = {
+  task: { noun: '업무', to: '업무로' },
+  decision: { noun: '결정', to: '결정으로' },
+  document: { noun: '자료', to: '자료로' },
+} as const
+
 const MAX_CHAT_FILES = 5
 const MAX_CHAT_FILE_BYTES = 10 * 1024 * 1024
 const MAX_CHAT_TOTAL_BYTES = 10 * 1024 * 1024
@@ -87,7 +95,16 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
   const [attachments, setAttachments] = useState<SelectedAttachment[]>([])
   const [attachmentNotice, setAttachmentNotice] = useState('')
   const [apiMode, setApiMode] = useState<'checking' | 'claude' | 'demo'>('checking')
+  /** 지금 보고 있는 대화. 비어 있으면 첫 질문을 보낼 때 서버에 하나 만든다. */
+  const [conversationId, setConversationId] = useState('')
+  const [conversationScope, setConversationScope] = useState<{ kind: string; label: string }>({ kind: 'all', label: '전체' })
+  const [listVersion, setListVersion] = useState(0)
+  const [foldedNote, setFoldedNote] = useState('')
+  const [promotedBy, setPromotedBy] = useState<Record<string, string[]>>({})
+  const [promoting, setPromoting] = useState('')
+  const [historyOpen, setHistoryOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const sectionRef = useRef<HTMLElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -96,6 +113,75 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
       .then((data) => setApiMode(data.claude ? 'claude' : 'demo'))
       .catch(() => setApiMode('demo'))
   }, [])
+
+  const welcomeMessage = (): ChatMessage => ({
+    id: 'welcome',
+    role: 'assistant',
+    content: assistantExperience.welcome,
+    mode: 'demo',
+    createdAt: new Date().toISOString(),
+  })
+
+  /** 대화를 고르면 서버에 쌓인 기록을 그대로 불러온다. */
+  const openConversation = async (id: string) => {
+    setConversationId(id)
+    setFoldedNote('')
+    if (!workspaceScope) return
+    try {
+      const response = await fetch(`/api/ai/conversations/${id}`, { headers: { 'x-workspace-identity': workspaceScope } })
+      if (!response.ok) { setMessages([welcomeMessage()]); return }
+      const body = await response.json() as { conversation: { messages: ChatMessage[]; scope: { kind: string; label: string }; summary: string; promoted?: { kind: string; messageId: string }[] } }
+      setMessages(body.conversation.messages.length ? body.conversation.messages : [welcomeMessage()])
+      setConversationScope(body.conversation.scope ?? { kind: 'all', label: '전체' })
+      const marks: Record<string, string[]> = {}
+      for (const stamp of body.conversation.promoted ?? []) {
+        marks[stamp.messageId] = [...(marks[stamp.messageId] ?? []), stamp.kind]
+      }
+      setPromotedBy(marks)
+      if (body.conversation.summary) setFoldedNote('앞부분은 요약으로 접혀 있습니다. 원문은 이 대화에 그대로 남아 있습니다.')
+    } catch {
+      setMessages([welcomeMessage()])
+    }
+  }
+
+  /** 대화가 없으면 만들어서 그 id를 돌려준다. */
+  const ensureConversation = async () => {
+    if (conversationId) return conversationId
+    if (!workspaceScope) return ''
+    try {
+      const response = await fetch('/api/ai/conversations', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-workspace-identity': workspaceScope },
+        body: JSON.stringify({}),
+      })
+      if (!response.ok) return ''
+      const body = await response.json() as { conversation: { id: string } }
+      setConversationId(body.conversation.id)
+      return body.conversation.id
+    } catch {
+      return ''
+    }
+  }
+
+  /** 결론을 업무·결정·자료로 올린다. */
+  const promote = async (message: ChatMessage, kind: 'task' | 'decision' | 'document') => {
+    if (!conversationId || !workspaceScope) return
+    setPromoting(`${message.id}:${kind}`)
+    try {
+      const response = await fetch(`/api/ai/conversations/${conversationId}/promote`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-workspace-identity': workspaceScope },
+        body: JSON.stringify({ kind, messageId: message.id }),
+      })
+      const body = await response.json().catch(() => null) as { created?: { label?: string }; error?: { message?: string } } | null
+      if (!response.ok) { setAttachmentNotice(body?.error?.message ?? '올리지 못했습니다.'); return }
+      setPromotedBy((current) => ({ ...current, [message.id]: [...(current[message.id] ?? []), kind] }))
+      setAttachmentNotice(`${PROMOTIONS[kind].to} 올렸습니다: ${body?.created?.label ?? ''}`)
+      setListVersion((version) => version + 1)
+    } finally {
+      setPromoting('')
+    }
+  }
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -201,10 +287,12 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
     setAttachmentNotice('')
     setSending(true)
     try {
+      const activeConversation = await ensureConversation()
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}) },
         body: JSON.stringify({
+          ...(activeConversation ? { conversationId: activeConversation } : {}),
           messages: nextMessages.filter((message) => message.id !== 'welcome').map(({ role, content, attachments: messageAttachments }) => ({
             role,
             content,
@@ -221,6 +309,10 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
         attachmentMode?: 'content' | 'metadata'
         attachmentsProcessed?: number
         personalContext?: PersonalContextInjection
+        conversationSaved?: boolean
+        conversationId?: string
+        messageId?: string
+        contextFolded?: number
         error?: { message?: string }
       }
       if (!response.ok) throw new Error(data.error?.message || 'AI 요청을 처리하지 못했습니다.')
@@ -234,7 +326,9 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
           ? `${serverText}\n\n첨부 파일은 문서 ID와 메타정보로 전달됐지만, 서버가 본문 판독 완료를 확인하지 않았습니다.`
           : serverText
       setMessages((current) => [...current, {
-        id: String(Date.now() + 1),
+        // 서버가 대화에 적은 id를 그대로 쓴다. 화면에서만 만든 id로는 그 답을
+        // 업무·결정·자료로 올릴 때 서버가 어느 답인지 찾지 못한다.
+        id: data.messageId ?? String(Date.now() + 1),
         role: 'assistant',
         content: responseText,
         model: data.model,
@@ -244,6 +338,9 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
         createdAt: new Date().toISOString(),
       }])
       setApiMode(data.mode === 'claude' ? 'claude' : 'demo')
+      if (data.conversationSaved) setListVersion((version) => version + 1)
+      if (data.conversationSaved === false) setAttachmentNotice('답은 받았지만 대화 기록에 남기지 못했습니다. 새로 고치면 이 답이 사라집니다.')
+      if (data.contextFolded) setFoldedNote(`대화가 길어져 앞부분 ${data.contextFolded}건을 요약으로 접어 보냈습니다.`)
     } catch (error) {
       setMessages((current) => [...current, {
         id: String(Date.now() + 1),
@@ -258,16 +355,44 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
   }
 
   return (
-    <section className={'ai-chat ' + (compact ? 'compact' : '')} aria-label="Claude AI 채팅">
+    <section ref={sectionRef} className={'ai-chat ' + (compact ? 'compact' : '')} aria-label="Claude AI 채팅">
       <div className="ai-chat-head dashboard-section-header">
         <div className="ai-chat-identity dashboard-section-title">
           <span className="claude-mark"><Sparkles size={20} /></span>
           <div><strong>AI 업무 대화</strong><span>{BRAND.assistantLabel}</span></div>
         </div>
+        {/* 이 화면은 위젯 한 칸이라 목록을 늘 펼쳐 두면 대화가 좁아진다. 필요할 때만 연다. */}
+        {workspaceScope && (
+          <button
+            type="button"
+            className={historyOpen ? 'ai-chat-history-toggle is-open' : 'ai-chat-history-toggle'}
+            aria-expanded={historyOpen}
+            onClick={() => {
+              const opening = !historyOpen
+              setHistoryOpen(opening)
+              // 목록은 대화 위에 겹쳐 뜬다. 화면이 아래로 밀려 있으면 목록 윗머리(새 대화·검색)가
+              // 상단 고정 막대에 가려지므로, 열 때 대화 카드를 먼저 화면에 올린다.
+              if (opening) sectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+            }}
+          >
+            <History size={15} /> 지난 대화
+          </button>
+        )}
+        <span className="ai-chat-scope" title="이 대화가 무엇을 보고 있는지">{conversationScope.label}</span>
         <span className={'connection-pill ' + apiMode}>
           <i />{apiMode === 'claude' ? 'Claude 연결됨' : apiMode === 'checking' ? '연결 확인 중' : '데모 모드'}
         </span>
       </div>
+      {foldedNote && <p className="ai-chat-folded">{foldedNote}</p>}
+      {historyOpen && workspaceScope && (
+        <AIConversationList
+          workspaceScope={workspaceScope}
+          activeId={conversationId}
+          refreshKey={listVersion}
+          onSelect={(id) => { void openConversation(id); setHistoryOpen(false) }}
+          onCreated={(id) => { setConversationId(id); setMessages([welcomeMessage()]); setPromotedBy({}); setFoldedNote(''); setHistoryOpen(false) }}
+        />
+      )}
 
       <div className="ai-chat-messages" ref={scrollRef}>
         {messages.map((message, index) => (
@@ -294,6 +419,26 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
                   }}>
                     <ClipboardPlus size={14} /> 이 내용으로 업무 만들기
                   </button>
+                )}
+                {/* 대화에서 나온 결론이 대화 안에만 남으면 아무 일도 일어나지 않는다. */}
+                {conversationId && message.role === 'assistant' && index > 0 && (
+                  <div className="message-promotions">
+                    {(['task', 'decision', 'document'] as const).map((kind) => {
+                      const done = (promotedBy[message.id] ?? []).includes(kind)
+                      const Icon = kind === 'task' ? ClipboardPlus : kind === 'decision' ? Gavel : FolderPlus
+                      return (
+                        <button
+                          key={kind}
+                          type="button"
+                          className={done ? 'message-action is-done' : 'message-action'}
+                          disabled={done || promoting === `${message.id}:${kind}`}
+                          onClick={() => void promote(message, kind)}
+                        >
+                          <Icon size={13} /> {done ? `${PROMOTIONS[kind].to} 올림` : PROMOTIONS[kind].to}
+                        </button>
+                      )
+                    })}
+                  </div>
                 )}
               </div>
               <div className="chat-message-meta">{message.model && <small>{message.model}</small>}<time dateTime={message.createdAt}>{formatDateTime(message.createdAt)}</time></div>

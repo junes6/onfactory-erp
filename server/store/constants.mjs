@@ -50,6 +50,8 @@ export const WORKSPACE_TABLES = Object.freeze({
   'notifications': 'notifications',
   'notification-settings': 'notification_settings',
   'push-subscriptions': 'push_subscriptions',
+  // R15-E: AI 대화 히스토리 (계정 소유·테넌트 격리)
+  'ai-conversations': 'ai_conversations',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

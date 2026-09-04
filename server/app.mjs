@@ -21,6 +21,7 @@ import { registerBillingRoutes } from './billing-routes.mjs'
 import { registerAttendanceRoutes } from './attendance-routes.mjs'
 import { registerMessengerRoomRoutes } from './messenger-rooms.mjs'
 import { registerOversightRoutes } from './oversight-routes.mjs'
+import { registerAiConversationRoutes, CONVERSATIONS_KEY as AI_CONVERSATIONS_KEY, autoTitle, buildContext, messagesToFold, extractiveSummary, MAX_MESSAGE_LENGTH as AI_MAX_MESSAGE_LENGTH } from './ai-conversations.mjs'
 import {
   advanceRuleDate as advanceSchedule,
   applyHolidayPolicy,
@@ -7054,6 +7055,216 @@ export function createApp(options = {}) {
     appendPlatformAudit,
     persistAccountProfile,
   })
+
+  /**
+   * 대화에서 나온 결론을 업무·결정·자료로 올린다.
+   *
+   * 셋 다 이미 있는 저장소에 그대로 넣는다. AI 대화용 별도 업무나 별도 자료를
+   * 만들면 사람이 두 곳을 봐야 하기 때문이다. 다만 어디서 왔는지는 남긴다.
+   */
+  const conclusionOrigin = (conversation) => ({
+    kind: 'ai-conversation',
+    label: 'AI 대화에서 승격',
+    detail: String(conversation.title ?? '').slice(0, 120),
+    page: 'assistant',
+    focusId: String(conversation.id ?? ''),
+  })
+
+  const createTaskFromConclusion = async ({ auth, conversation, message, title }) => {
+    const now = new Date().toISOString()
+    const workItem = {
+      id: `WK-${Date.now().toString().slice(-8)}`,
+      title: (title || autoTitle(message.content)).slice(0, 120),
+      description: String(message.content).slice(0, 2_000),
+      owner: auth.name,
+      ownerId: auth.id,
+      requestedBy: auth.name,
+      requesterId: auth.id,
+      due: new Date(Date.now() + 2 * 24 * 60 * 60 * 1_000).toISOString(),
+      priority: '보통',
+      status: '업무요청',
+      category: '일반',
+      createdAt: now,
+      origin: conclusionOrigin(conversation),
+    }
+    const normalized = normalizeAdminWorkItems([workItem], auth.tenantId, operatorAwareAccounts(auth))
+    if (!normalized) throw new Error('업무 정보를 확인해 주세요.')
+    const tenantStore = workspaceStore.tenants[auth.tenantId] ??= {}
+    const previous = tenantStore['work-items']
+    const current = Array.isArray(previous?.data) ? previous.data : []
+    tenantStore['work-items'] = { data: [normalized[0], ...current].slice(0, 1_000), updatedAt: now, updatedBy: auth.id }
+    try {
+      await commitWorkspaceStore()
+    } catch (error) {
+      if (previous) tenantStore['work-items'] = previous
+      throw new Error('업무를 저장하지 못했습니다.')
+    }
+    return { id: normalized[0].id, label: normalized[0].title, kind: 'work-item' }
+  }
+
+  /**
+   * 결정으로 올린다.
+   *
+   * 이 제품에서 "결정"은 사람이 판단을 내린 제안이다. 그래서 승인 큐에 새로
+   * 올려 두 번 판단하게 하는 대신, 이미 결정된 것으로 기록한다 — 대화에서
+   * 결론을 내린 순간이 곧 판단한 순간이기 때문이다.
+   */
+  const createDecisionFromConclusion = async ({ auth, conversation, message, title }) => {
+    const now = new Date().toISOString()
+    const decision = {
+      id: `PRP-AIC-${Date.now().toString(36)}`,
+      kind: 'ai-conclusion',
+      status: 'approved',
+      confidence: 1,
+      sourceKey: `aic:${conversation.id}:${message.id}`,
+      summary: (title || autoTitle(message.content)).slice(0, 200),
+      evidence: String(message.content).slice(0, 2_000),
+      payload: { conversationId: conversation.id, messageId: message.id, scope: conversation.scope },
+      createdAt: now,
+      createdBy: auth.id,
+      decidedAt: now,
+      decidedBy: auth.id,
+      decidedByName: auth.name,
+    }
+    const existing = proposalsOf(auth.tenantId)
+    if (existing.some((item) => item?.sourceKey === decision.sourceKey)) {
+      throw new Error('이미 결정으로 올린 답입니다.')
+    }
+    writeProposals(auth.tenantId, [decision, ...existing], auth.id)
+    try {
+      await commitWorkspaceStore()
+    } catch {
+      throw new Error('결정을 저장하지 못했습니다.')
+    }
+    return { id: decision.id, label: decision.summary, kind: 'decision' }
+  }
+
+  const createDocumentFromConclusion = async ({ auth, conversation, message, title }) => {
+    if (!documentStorage) throw new Error('파일 저장소가 설정되지 않았습니다.')
+    const name = `${(title || autoTitle(message.content)).slice(0, 120)}.md`
+    const body = Buffer.from(
+      `# ${title || conversation.title}\n\n${message.content}\n\n---\n출처: AI 대화 「${conversation.title}」 · ${new Date().toISOString().slice(0, 10)}\n`,
+      'utf8',
+    )
+    const id = `DOC-${Date.now()}-${randomBytes(4).toString('hex')}`
+    const document = {
+      id,
+      tenantId: auth.tenantId,
+      name,
+      originalName: name,
+      mime: 'text/markdown',
+      size: body.length,
+      category: '공통자료',
+      visibility: 'all',
+      departments: [],
+      allowedUserIds: [],
+      tags: ['ai-conversation'],
+      summary: String(message.content).replace(/\s+/g, ' ').slice(0, 300),
+      uploadedAt: new Date().toISOString(),
+      uploadedById: auth.id,
+      uploadedByName: auth.name,
+      storage: documentStorage.backend,
+    }
+    const stored = await putTenantDocument(documentStorage, { tenantId: auth.tenantId, id, body, contentType: document.mime })
+    Object.assign(document, stored)
+    const documents = Array.isArray(documentRecord(auth.tenantId)?.data) ? [...documentRecord(auth.tenantId).data] : []
+    documents.unshift(document)
+    await persistDocumentList(auth.tenantId, documents, auth.id)
+    return { id: document.id, label: document.name, kind: 'document' }
+  }
+
+  const conversationsOfTenant = (tenantId) => {
+    const record = workspaceStore.tenants[tenantId]?.[AI_CONVERSATIONS_KEY]
+    return Array.isArray(record?.data) ? record.data : []
+  }
+
+  /** 대화는 계정 소유다. 남의 대화 id를 넣으면 없는 것으로 본다. */
+  const loadOwnConversation = (auth, conversationId) => {
+    if (!auth?.tenantId || !conversationId) return null
+    return conversationsOfTenant(auth.tenantId)
+      .find((item) => item.id === conversationId && item.ownerId === auth.id && !item.deletedAt) ?? null
+  }
+
+  /** 길어진 대화의 앞부분을 한 덩이 요약으로 접는다. */
+  const summarizeFolded = async (folded) => {
+    if (!client) return extractiveSummary(folded)
+    try {
+      const result = await client.messages.create({
+        model,
+        max_tokens: 400,
+        system: '아래 대화의 앞부분을 한국어 5줄 이내로 요약한다. 오간 말에 없는 내용은 넣지 않는다. 결정된 것과 남은 질문을 우선 담는다.',
+        messages: [{ role: 'user', content: folded.map((message) => `${message.role === 'user' ? '질문' : '답'}: ${message.content}`).join('\n\n').slice(0, 12_000) }],
+      })
+      const text = (result.content ?? []).map((block) => (block?.type === 'text' ? block.text : '')).join('').trim()
+      return text || extractiveSummary(folded)
+    } catch {
+      // 요약에 실패했다고 대화를 잃을 수는 없다. 지어내지 않는 방식으로 대신한다.
+      return extractiveSummary(folded)
+    }
+  }
+
+  /**
+   * 오간 한 쌍을 대화에 적는다.
+   *
+   * 답을 받은 것만 적는다. 질문만 남기면 다음 요청에서 질문이 연달아 두 번
+   * 가게 되고, 사용자는 답이 없는 줄을 다시 보게 된다.
+   */
+  const recordExchange = async ({ auth, conversation, asked, answered }) => {
+    const conversations = conversationsOfTenant(auth.tenantId)
+    const index = conversations.findIndex((item) => item.id === conversation.id)
+    if (index < 0) return null
+
+    const next = { ...conversations[index], messages: [...conversations[index].messages, asked, answered] }
+    if (next.titleSource !== 'manual' && next.title === '새 대화') next.title = autoTitle(asked.content)
+
+    const folded = messagesToFold(next)
+    if (folded) {
+      next.summary = await summarizeFolded(folded)
+      next.summarizedThrough = folded.length
+      // 접은 앞부분은 대화에서 지운다. 지우지 않으면 저장 용량이 끝없이 는다.
+      next.messages = next.messages.slice(folded.length)
+    }
+    next.updatedAt = new Date().toISOString()
+
+    const tenantStore = workspaceStore.tenants[auth.tenantId] ??= {}
+    const previous = tenantStore[AI_CONVERSATIONS_KEY]
+    tenantStore[AI_CONVERSATIONS_KEY] = {
+      data: conversations.map((item, itemIndex) => (itemIndex === index ? next : item)),
+      updatedAt: next.updatedAt,
+      updatedBy: auth.id,
+    }
+    try {
+      await commitWorkspaceStore()
+      return next
+    } catch {
+      if (previous) tenantStore[AI_CONVERSATIONS_KEY] = previous
+      return null
+    }
+  }
+
+  const sweepConversationTrash = registerAiConversationRoutes({
+    app,
+    requireAuth,
+    requireMatchingWorkspaceIdentity,
+    workspaceStore,
+    commitWorkspaceStore,
+    createTaskFromConclusion,
+    createDecisionFromConclusion,
+    createDocumentFromConclusion,
+    ...(typeof options.aiConversationClock === 'function' ? { clock: options.aiConversationClock } : {}),
+  })
+  app.locals.sweepConversationTrash = sweepConversationTrash
+
+  scheduler.register({
+    id: 'ai-conversation-trash-sweep',
+    label: 'AI 대화 휴지통 비우기',
+    description: '지운 지 30일이 지난 AI 대화를 완전히 없앱니다. 그 전에는 휴지통에서 되살릴 수 있습니다.',
+    spec: { every: 'day', hour: 4, minute: 10 },
+    run: async ({ now }) => {
+      const { removed } = await sweepConversationTrash(now)
+      return { detail: removed ? `${removed}건을 완전히 지웠습니다.` : '지울 것이 없었습니다.' }
+    },
+  })
   registerMessengerRoomRoutes({
     app,
     requireAuth,
@@ -7143,7 +7354,7 @@ export function createApp(options = {}) {
   })
 
   app.post('/api/chat', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
-    const messages = normalizeMessages(request.body?.messages)
+    let messages = normalizeMessages(request.body?.messages)
     const usageFeature = normalizeChatUsageFeature(request.body?.feature)
     let requestedAttachments
     try { requestedAttachments = normalizeChatAttachmentRequest(request.body?.attachments) }
@@ -7161,6 +7372,29 @@ export function createApp(options = {}) {
         },
       })
       return
+    }
+
+    /**
+     * R15-E: 대화를 지정하면 맥락을 서버에 쌓인 기록에서 만든다.
+     *
+     * 클라이언트가 보낸 배열을 그대로 쓰면 두 가지가 곤란하다. 길이에 상한이
+     * 없어 대화가 길어질수록 매 요청이 무거워지고, 지난 대화를 고쳐 보낼 수 있어
+     * "이렇게 답했잖아"를 만들어 낼 수 있다. 새 질문 하나만 받는다.
+     */
+    const conversation = loadOwnConversation(request.auth, request.body?.conversationId)
+    let askedMessage = null
+    let contextInfo = null
+    if (conversation) {
+      const latestAsk = [...messages].reverse().find((message) => message.role === 'user')
+      askedMessage = {
+        id: `MSG-${Date.now()}-${randomBytes(3).toString('hex')}`,
+        role: 'user',
+        content: String(latestAsk?.content ?? '').slice(0, AI_MAX_MESSAGE_LENGTH),
+        createdAt: new Date().toISOString(),
+        ...(requestedAttachments.length ? { attachments: requestedAttachments } : {}),
+      }
+      contextInfo = buildContext({ ...conversation, messages: [...conversation.messages, askedMessage] })
+      messages = contextInfo.messages
     }
 
     const requestedTenant = typeof request.body?.context?.company === 'string' ? request.body.context.company.trim() : ''
@@ -7188,13 +7422,40 @@ export function createApp(options = {}) {
       accessibleDocuments,
     }
 
+    /** 답을 대화에 적고, 화면이 바로 반영할 수 있게 대화 상태를 함께 돌려준다. */
+    const persistTurn = async (text, mode, usedModel, sourcePrompt) => {
+      if (!conversation || !askedMessage) return {}
+      const answered = {
+        id: `MSG-${Date.now()}-${randomBytes(3).toString('hex')}`,
+        role: 'assistant',
+        content: String(text ?? '').slice(0, AI_MAX_MESSAGE_LENGTH),
+        model: usedModel,
+        mode,
+        ...(sourcePrompt ? { sourcePrompt: String(sourcePrompt).slice(0, 2_000) } : {}),
+        createdAt: new Date().toISOString(),
+      }
+      const saved = await recordExchange({ auth: request.auth, conversation, asked: askedMessage, answered })
+      if (!saved) return { conversationSaved: false }
+      return {
+        conversationSaved: true,
+        conversationId: saved.id,
+        conversationTitle: saved.title,
+        messageId: answered.id,
+        // 앞부분을 접었으면 몇 건을 접었는지 화면에 알려 준다. 조용히 사라지면 안 된다.
+        contextFolded: contextInfo?.foldedCount ?? 0,
+      }
+    }
+
     if (!client) {
+      const text = demoText(messages, accessibleDocuments)
+      const stored = await persistTurn(text, 'demo', model)
       response.json({
-        text: demoText(messages, accessibleDocuments),
+        text,
         model,
         mode: 'demo',
         attachmentMode: 'metadata',
         attachmentsProcessed: 0,
+        ...stored,
       })
       return
     }
@@ -7289,6 +7550,7 @@ export function createApp(options = {}) {
         }
       }
 
+      const stored = await persistTurn(text, 'claude', result.model || model, askedMessage?.content)
       response.json({
         text,
         model: result.model || model,
@@ -7299,6 +7561,7 @@ export function createApp(options = {}) {
         attachmentsProcessed: attachmentResult.contentDocuments,
         // 무엇을 근거로 답했는지 접어서 보여 줄 수 있도록 주입 내역을 그대로 돌려준다.
         personalContext: { injected: personalContext.injected, dropped: personalContext.dropped, used: personalContext.used, tokenBudget: personalContext.tokenBudget },
+        ...stored,
       })
     } catch (error) {
       if (!providerSucceeded && usageReservation && usageActor) {
