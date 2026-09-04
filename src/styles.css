@@ -2864,3 +2864,37 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
 .chat-injection strong { color: var(--color-primary); }
 .chat-injection li li { color: var(--subtle); line-height: 1.5; }
 .chat-injection small { display: block; margin-top: var(--space-4); color: var(--subtle); font-size: var(--font-11); }
+
+/* ── R15-C 반복 업무 확장 ─────────────────────────────────────── */
+
+/* 이행률이 낮은 규칙은 눈에 띄어야 목록을 훑지 않는다. */
+.recurring-rule-grid > article.is-warning { border-color: var(--color-warning); }
+.recurring-rule-grid > article.is-critical { border-color: var(--color-danger); background: var(--color-danger-soft); }
+.recurring-rule-grid dt small { color: var(--muted); font-weight: var(--weight-regular); }
+
+.workflow-rotation,
+.workflow-checklist { display: grid; gap: var(--space-8); }
+.workflow-rotation legend,
+.workflow-checklist legend { font-size: var(--font-13); color: var(--muted); }
+.workflow-rotation p,
+.workflow-checklist p { margin: var(--space-0); font-size: var(--font-11); color: var(--muted); }
+.workflow-rotation-item { display: flex; gap: var(--space-8); align-items: center; min-height: 32px; }
+
+.workflow-checklist-add { display: grid; grid-template-columns: 1fr auto; gap: var(--space-8); }
+.workflow-checklist-items { display: grid; gap: var(--space-4); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.workflow-checklist-items li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-8);
+  align-items: center;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+  padding: var(--space-4) var(--space-8);
+  font-size: var(--font-13);
+}
+
+/* 회차에 펼쳐지는 점검 항목 */
+.workflow-checklist-run { display: grid; gap: var(--space-4); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.workflow-checklist-run label { display: flex; gap: var(--space-8); align-items: center; min-height: 40px; cursor: pointer; }
+.workflow-checklist-run span.is-done { color: var(--muted); text-decoration: line-through; }

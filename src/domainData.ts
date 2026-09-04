@@ -63,6 +63,8 @@ export type WorkItem = {
   attachments?: WorkEvidence[]
   completion?: WorkCompletion
   completionHistory?: WorkCompletion[]
+  /** 반복 규칙이 붙여 준 점검 항목. 전부 done이어야 완료 보고를 받는다. */
+  checklist?: { id: string; label: string; done: boolean }[]
   review?: WorkReview
   reviewHistory?: WorkReview[]
   ruleId?: string
@@ -80,9 +82,9 @@ export type WorkRule = {
   ownerId: string
   requester: string
   requesterId: string
-  frequency: 'weekly' | 'monthly'
+  frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly'
   interval: number
-  monthlyMode?: 'day-of-month' | 'last-weekday'
+  monthlyMode?: 'day-of-month' | 'last-weekday' | 'last-business-day'
   weekday?: number
   monthDay?: number
   nextRun: string
@@ -92,6 +94,15 @@ export type WorkRule = {
   active: boolean
   createdAt: string
   lastGeneratedAt?: string
+  /** 공휴일·주말과 겹쳤을 때: 그대로 / 앞당김 / 미룸 / 건너뜀 */
+  holidayPolicy?: 'none' | 'before' | 'after' | 'skip'
+  /** 매 회차에 체크박스로 펼쳐지는 점검 항목. 전부 마쳐야 완료 보고가 된다. */
+  checklist?: { id: string; label: string }[]
+  assignMode?: 'fixed' | 'rotation'
+  rotation?: string[]
+  rotationIndex?: number
+  remindAfterMinutes?: number
+  escalateAfterMinutes?: number
 }
 
 export type TenantIndustryType = 'food_manufacturing' | 'it_services'

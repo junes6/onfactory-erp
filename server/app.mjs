@@ -21,6 +21,20 @@ import { registerBillingRoutes } from './billing-routes.mjs'
 import { registerAttendanceRoutes } from './attendance-routes.mjs'
 import { registerMessengerRoomRoutes } from './messenger-rooms.mjs'
 import { registerOversightRoutes } from './oversight-routes.mjs'
+import {
+  advanceRuleDate as advanceSchedule,
+  applyHolidayPolicy,
+  ASSIGN_MODES,
+  checklistBlockers,
+  complianceRate,
+  expandChecklist,
+  HOLIDAY_POLICIES,
+  overdueStage,
+  ownerForOccurrence,
+  lastBusinessDayOfMonth,
+  WORK_RULE_FREQUENCIES as SCHEDULE_FREQUENCIES,
+  WORK_RULE_MONTHLY_MODES as SCHEDULE_MONTHLY_MODES,
+} from './work-rule-schedule.mjs'
 import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
 import { registerPersonalCoreRoutes } from './personal-core-routes.mjs'
 import { backupSettings, BACKUP_STATUS_KEY, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
@@ -161,12 +175,12 @@ const WORK_ITEM_BASE_FIELDS = [
   'id', 'title', 'description', 'owner', 'requestedBy', 'due', 'priority', 'status', 'category',
 ]
 const WORK_ITEM_ID_FIELDS = ['ownerId', 'requesterId']
-const WORK_ITEM_OPTIONAL_FIELDS = ['attachments', 'completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt', 'origin']
+const WORK_ITEM_OPTIONAL_FIELDS = ['attachments', 'completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt', 'origin', 'checklist']
 const WORK_ITEM_FIELDS = [...WORK_ITEM_BASE_FIELDS, ...WORK_ITEM_ID_FIELDS, ...WORK_ITEM_OPTIONAL_FIELDS]
 const WORK_ITEM_STATUSES = new Set(['업무요청', '수행중', '결재대기', '결재완료'])
 const WORK_ITEM_PRIORITIES = new Set(['긴급', '높음', '보통'])
-const WORK_RULE_FREQUENCIES = new Set(['weekly', 'monthly'])
-const WORK_RULE_MONTHLY_MODES = new Set(['day-of-month', 'last-weekday'])
+const WORK_RULE_FREQUENCIES = new Set(SCHEDULE_FREQUENCIES)
+const WORK_RULE_MONTHLY_MODES = new Set(SCHEDULE_MONTHLY_MODES)
 const LEAVE_TYPES = new Set(['연차', '반차', '병가', '경조휴가', '공가', '기타'])
 const LEAVE_ACCRUAL_MODES = new Set(['monthly', 'yearly', 'manual'])
 const LEAVE_LEDGER_TYPES = new Set(['발생', '사용', '부여', '차감', '리뉴얼'])
@@ -360,17 +374,34 @@ function migrateLegacyWorkItemIds(workspaceStore, accounts) {
 function hasWorkRuleShape(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const requiredStrings = ['id', 'title', 'description', 'owner', 'ownerId', 'requester', 'requesterId', 'frequency', 'nextRun', 'dueTime', 'priority', 'category', 'createdAt']
-  const allowed = [...requiredStrings, 'interval', 'weekday', 'monthDay', 'monthlyMode', 'active', 'lastGeneratedAt']
+  const allowed = [
+    ...requiredStrings, 'interval', 'weekday', 'monthDay', 'monthlyMode', 'active', 'lastGeneratedAt',
+    // R15-C: 공휴일 처리·체크리스트·순번 배정·미이행 감시
+    'holidayPolicy', 'checklist', 'assignMode', 'rotation', 'rotationIndex', 'remindAfterMinutes', 'escalateAfterMinutes',
+  ]
   if (Object.keys(value).some((key) => !allowed.includes(key)) || requiredStrings.some((key) => typeof value[key] !== 'string' || !value[key])) return false
   if (!WORK_RULE_FREQUENCIES.has(value.frequency) || !WORK_ITEM_PRIORITIES.has(value.priority)) return false
   if (!Number.isInteger(value.interval) || value.interval < 1 || value.interval > 12 || typeof value.active !== 'boolean') return false
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value.nextRun) || !/^\d{2}:\d{2}$/.test(value.dueTime)) return false
   if (value.frequency === 'weekly' && (!Number.isInteger(value.weekday) || value.weekday < 0 || value.weekday > 6)) return false
-  if (value.frequency === 'monthly') {
+  if (['monthly', 'quarterly', 'yearly'].includes(value.frequency)) {
     const monthlyMode = value.monthlyMode ?? 'day-of-month'
     if (!WORK_RULE_MONTHLY_MODES.has(monthlyMode)) return false
     if (monthlyMode === 'day-of-month' && (!Number.isInteger(value.monthDay) || value.monthDay < 1 || value.monthDay > 31)) return false
     if (monthlyMode === 'last-weekday' && (!Number.isInteger(value.weekday) || value.weekday < 0 || value.weekday > 6)) return false
+  }
+  if (value.holidayPolicy !== undefined && !HOLIDAY_POLICIES.includes(value.holidayPolicy)) return false
+  if (value.assignMode !== undefined && !ASSIGN_MODES.includes(value.assignMode)) return false
+  if (value.rotation !== undefined && (!Array.isArray(value.rotation) || value.rotation.length > 50 || value.rotation.some((id) => typeof id !== 'string' || !id))) return false
+  if (value.rotationIndex !== undefined && (!Number.isInteger(value.rotationIndex) || value.rotationIndex < 0)) return false
+  for (const key of ['remindAfterMinutes', 'escalateAfterMinutes']) {
+    if (value[key] !== undefined && (!Number.isInteger(value[key]) || value[key] < 0 || value[key] > 20_160)) return false
+  }
+  if (value.checklist !== undefined) {
+    if (!Array.isArray(value.checklist) || value.checklist.length > 30) return false
+    if (!value.checklist.every((item) => hasExactFields(item, ['id', 'label'])
+      && typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 40
+      && typeof item.label === 'string' && item.label.trim().length > 0 && item.label.length <= 120)) return false
   }
   return value.lastGeneratedAt === undefined || typeof value.lastGeneratedAt === 'string'
 }
@@ -421,10 +452,17 @@ function lastWeekdayOfMonth(year, month, weekday) {
 
 function firstRuleDateOnOrAfter(anchorDate, frequency, { weekday, monthDay, monthlyMode }) {
   const anchor = new Date(`${anchorDate}T00:00:00Z`)
-  if (frequency === 'weekly') {
+  // 매일은 시작일 그대로가 첫 회차다.
+  if (frequency === 'daily') return anchorDate
+  if (['weekly', 'biweekly'].includes(frequency)) {
     const daysAhead = (weekday - anchor.getUTCDay() + 7) % 7
     anchor.setUTCDate(anchor.getUTCDate() + daysAhead)
     return isoDate(anchor)
+  }
+  if (monthlyMode === 'last-business-day') {
+    let occurrence = lastBusinessDayOfMonth(anchor.getUTCFullYear(), anchor.getUTCMonth())
+    if (occurrence < anchorDate) occurrence = lastBusinessDayOfMonth(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1)
+    return occurrence
   }
 
   if (monthlyMode === 'last-weekday') {
@@ -444,17 +482,9 @@ function firstRuleDateOnOrAfter(anchorDate, frequency, { weekday, monthDay, mont
   return isoDate(occurrence)
 }
 
+/** 주기 계산은 work-rule-schedule.mjs 한 곳에 있다. 여기서는 그대로 넘긴다. */
 function advanceRuleDate(rule, currentDate) {
-  const date = new Date(`${currentDate}T00:00:00Z`)
-  if (rule.frequency === 'weekly') date.setUTCDate(date.getUTCDate() + 7 * rule.interval)
-  else {
-    const targetMonth = date.getUTCMonth() + rule.interval
-    if (rule.monthlyMode === 'last-weekday') return isoDate(lastWeekdayOfMonth(date.getUTCFullYear(), targetMonth, rule.weekday))
-    date.setUTCMonth(targetMonth, 1)
-    const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate()
-    date.setUTCDate(Math.min(rule.monthDay, lastDay))
-  }
-  return isoDate(date)
+  return advanceSchedule(rule, currentDate)
 }
 
 function normalizeEvidence(value) {
@@ -3466,6 +3496,75 @@ export function createApp(options = {}) {
     },
   })
 
+  /**
+   * 반복 업무 미이행 감시.
+   *
+   * 만들어 놓고 아무도 손대지 않은 업무는 조용히 사라진다. 지정한 시간까지 착수되지
+   * 않으면 담당자에게, 더 지나면 관리자에게 올린다. 같은 업무로 두 번 이상 보채지
+   * 않도록 어느 단계까지 알렸는지 기억한다.
+   */
+  const overdueNotified = new Map()
+  const sweepUnstartedRuleTasks = (now = new Date()) => {
+    const rows = []
+    for (const tenantId of tenantIdsForSchedule()) {
+      const tenantStore = workspaceStore.tenants[tenantId] ?? {}
+      const rules = Array.isArray(tenantStore['work-rules']?.data) ? tenantStore['work-rules'].data : []
+      const tasks = Array.isArray(tenantStore['work-items']?.data) ? tenantStore['work-items'].data : []
+      if (!rules.length || !tasks.length) continue
+      const ruleById = new Map(rules.map((rule) => [rule?.id, rule]))
+      const drafts = []
+      let reminded = 0
+      let escalated = 0
+      for (const task of tasks) {
+        const rule = ruleById.get(task?.ruleId)
+        if (!rule) continue
+        const stage = overdueStage(task, rule, now.getTime())
+        if (stage === 'none') continue
+        // 'remind'까지 알린 업무를 다시 remind로 보채지 않는다. escalate는 한 번 더 나간다.
+        if (overdueNotified.get(task.id) === stage || (overdueNotified.get(task.id) === 'escalate')) continue
+        overdueNotified.set(task.id, stage)
+        if (stage === 'remind') {
+          reminded += 1
+          drafts.push({
+            type: 'task-assigned', recipientId: task.ownerId, actorId: 'system',
+            title: `아직 시작하지 않은 반복 업무: ${task.title}`,
+            body: `${rule.remindAfterMinutes}분이 지났는데 아직 착수 표시가 없습니다.`,
+            page: 'tasks', focusId: task.id,
+            source: { kind: 'work-item', id: task.id, label: '반복 업무' },
+          })
+        } else {
+          escalated += 1
+          for (const adminId of tenantAdminIds(tenantId)) {
+            drafts.push({
+              type: 'changes-requested', recipientId: adminId, actorId: 'system',
+              title: `반복 업무 미착수: ${task.title}`,
+              body: `${task.owner}님에게 배정된 업무가 ${rule.escalateAfterMinutes}분째 시작되지 않았습니다.`,
+              page: 'tasks', focusId: task.id,
+              source: { kind: 'work-item', id: task.id, label: '반복 업무' },
+            })
+          }
+        }
+      }
+      if (drafts.length) notify(tenantId, drafts)
+      if (reminded || escalated) rows.push({ tenantId, reminded, escalated })
+    }
+    return rows
+  }
+  app.locals.sweepUnstartedRuleTasks = sweepUnstartedRuleTasks
+
+  scheduler.register({
+    id: 'work-rule-overdue-watch',
+    label: '반복 업무 미착수 감시',
+    description: '지정한 시간까지 착수되지 않은 반복 업무를 담당자에게 알리고, 더 지나면 관리자에게 올립니다.',
+    spec: { every: 'hour', minute: 20 },
+    run: ({ now }) => {
+      const rows = sweepUnstartedRuleTasks(now)
+      const reminded = rows.reduce((sum, row) => sum + row.reminded, 0)
+      const escalated = rows.reduce((sum, row) => sum + row.escalated, 0)
+      return { detail: `담당자 알림 ${reminded}건 · 관리자 에스컬레이션 ${escalated}건`, rows }
+    },
+  })
+
   const registerDigestJob = (edition, spec, label) => scheduler.register({
     id: `digest-${edition}`,
     label,
@@ -4311,30 +4410,41 @@ export function createApp(options = {}) {
       let occurrence = rule.nextRun
       let iterations = 0
       let generatedForRule = false
+      let rotationIndex = Number.isInteger(rule.rotationIndex) ? rule.rotationIndex : 0
       while (occurrence <= today && iterations < 24) {
-        const taskId = `WK-R-${rule.id.replace(/[^A-Za-z0-9-]/g, '').slice(0, 40)}-${occurrence.replaceAll('-', '')}`
-        if (!taskIds.has(taskId)) {
-          const task = {
-            id: taskId,
-            title: rule.title,
-            description: rule.description,
-            owner: rule.owner,
-            ownerId: rule.ownerId,
-            requestedBy: rule.requester,
-            requesterId: rule.requesterId,
-            due: seoulLocalDateTimeToUtcIso(occurrence, rule.dueTime),
-            priority: rule.priority,
-            status: '업무요청',
-            category: rule.category,
-            ruleId: rule.id,
-            ruleOccurrence: occurrence,
-            createdAt: generatedAt,
+        // 공휴일 정책은 만들 때 한 번만 적용한다. 주기는 원래 자리(occurrence)에서 계속 센다.
+        const placed = applyHolidayPolicy(occurrence, rule.holidayPolicy ?? 'none')
+        if (placed.date) {
+          const taskId = `WK-R-${rule.id.replace(/[^A-Za-z0-9-]/g, '').slice(0, 40)}-${occurrence.replaceAll('-', '')}`
+          if (!taskIds.has(taskId)) {
+            const assigneeId = ownerForOccurrence(rule, rotationIndex)
+            const assignee = accounts.find((account) => account.id === assigneeId && account.tenantId === tenantId)
+            const checklist = expandChecklist(rule)
+            const task = {
+              id: taskId,
+              title: rule.title,
+              description: placed.moved ? `${rule.description}\n※ ${placed.reason}` : rule.description,
+              owner: assignee?.name ?? rule.owner,
+              ownerId: assignee?.id ?? rule.ownerId,
+              requestedBy: rule.requester,
+              requesterId: rule.requesterId,
+              due: seoulLocalDateTimeToUtcIso(placed.date, rule.dueTime),
+              priority: rule.priority,
+              status: '업무요청',
+              category: rule.category,
+              ruleId: rule.id,
+              ruleOccurrence: occurrence,
+              createdAt: generatedAt,
+              ...(checklist.length ? { checklist } : {}),
+            }
+            if (hasWorkItemShape(task)) {
+              tasks.push(task)
+              taskIds.add(taskId)
+              created.push(task)
+            }
           }
-          if (hasWorkItemShape(task)) {
-            tasks.push(task)
-            taskIds.add(taskId)
-            created.push(task)
-          }
+          // 순번은 실제로 만든 회차에서만 넘어간다. 건너뛴 회차까지 세면 담당자가 한 명씩 밀린다.
+          rotationIndex += 1
         }
         generatedForRule = true
         occurrence = advanceRuleDate(rule, occurrence)
@@ -4342,7 +4452,7 @@ export function createApp(options = {}) {
       }
       if (!generatedForRule) return rule
       changed = true
-      return { ...rule, nextRun: occurrence, lastGeneratedAt: generatedAt }
+      return { ...rule, nextRun: occurrence, lastGeneratedAt: generatedAt, rotationIndex }
     })
     if (!changed) return { created, rules }
 
@@ -6318,6 +6428,13 @@ export function createApp(options = {}) {
     if (action === 'accept' && isOwner && previous.status === '업무요청') {
       next = { ...previous, status: '수행중' }
     } else if (action === 'submit' && isOwner && previous.status === '수행중') {
+      // 체크리스트가 남아 있으면 완료 보고를 받지 않는다. 결재 상태머신은 그대로이고,
+      // 결재대기로 넘어가기 전에 조건을 하나 더 보는 것뿐이다.
+      const remaining = checklistBlockers(previous)
+      if (remaining.length) {
+        response.status(409).json({ error: { code: 'CHECKLIST_INCOMPLETE', message: `점검 항목 ${remaining.length}건이 남아 있습니다: ${remaining.slice(0, 3).join(', ')}${remaining.length > 3 ? ' 외' : ''}` } })
+        return
+      }
       const summary = String(request.body?.completion?.summary ?? '').trim()
       const evidence = normalizeEvidence(request.body?.completion?.evidence)
       if (summary.length < 3 || summary.length > 2_000 || !evidence) {
@@ -6407,6 +6524,77 @@ export function createApp(options = {}) {
     response.json({ item: next, updatedAt: now, version: workspaceRecordVersion(record) })
   })
 
+  /**
+   * 체크리스트 한 항목 켜고 끄기. 담당자 본인만 할 수 있다.
+   * 결재 상태는 건드리지 않는다 — 이 값은 완료 보고를 받을지 말지의 조건일 뿐이다.
+   */
+  app.post('/api/work-items/:id/checklist', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
+    const tasks = Array.isArray(tenantStore['work-items']?.data) ? tenantStore['work-items'].data : []
+    const previous = tasks.find((task) => task?.id === request.params.id)
+    if (!previous || !Array.isArray(previous.checklist)) {
+      response.status(404).json({ error: { code: 'CHECKLIST_NOT_FOUND', message: '점검 항목이 있는 업무를 찾을 수 없습니다.' } })
+      return
+    }
+    if (previous.ownerId !== request.auth.id) {
+      response.status(403).json({ error: { code: 'CHECKLIST_FORBIDDEN', message: '담당자만 점검 항목을 체크할 수 있습니다.' } })
+      return
+    }
+    if (['결재대기', '결재완료'].includes(previous.status)) {
+      response.status(409).json({ error: { code: 'CHECKLIST_LOCKED', message: '완료 보고한 업무의 점검 항목은 바꿀 수 없습니다.' } })
+      return
+    }
+    const itemId = String(request.body?.itemId ?? '')
+    const done = request.body?.done === true
+    if (!previous.checklist.some((item) => item?.id === itemId)) {
+      response.status(400).json({ error: { code: 'CHECKLIST_ITEM_NOT_FOUND', message: '점검 항목을 찾을 수 없습니다.' } })
+      return
+    }
+    const next = { ...previous, checklist: previous.checklist.map((item) => (item.id === itemId ? { ...item, done } : item)) }
+    const previousRecord = tenantStore['work-items']
+    tenantStore['work-items'] = { data: tasks.map((task) => (task.id === next.id ? next : task)), updatedAt: new Date().toISOString(), updatedBy: request.auth.id }
+    workspaceStore.tenants[request.auth.tenantId] = tenantStore
+    try {
+      await commitWorkspaceStore()
+    } catch {
+      if (previousRecord) tenantStore['work-items'] = previousRecord
+      response.status(500).json({ error: { code: 'CHECKLIST_WRITE_FAILED', message: '점검 항목을 저장하지 못했습니다.' } })
+      return
+    }
+    events.publish(request.auth.tenantId, 'work', { key: 'work-items', taskId: next.id })
+    response.json({ task: next, remaining: checklistBlockers(next) })
+  })
+
+  /**
+   * 규칙별 이행률. 낮은 것이 위로 오도록 정렬해서 준다 —
+   * 관리자가 목록을 훑으며 문제를 찾는 대신 맨 위만 보면 되게 한다.
+   */
+  app.get('/api/work-rules/compliance', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, (request, response) => {
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
+    const rules = Array.isArray(tenantStore['work-rules']?.data) ? tenantStore['work-rules'].data : []
+    const tasks = Array.isArray(tenantStore['work-items']?.data) ? tenantStore['work-items'].data : []
+    const todayKey = koreaDate()
+    const rows = rules.map((rule) => ({
+      id: rule.id,
+      title: rule.title,
+      owner: rule.owner,
+      frequency: rule.frequency,
+      active: rule.active !== false,
+      assignMode: rule.assignMode ?? 'fixed',
+      holidayPolicy: rule.holidayPolicy ?? 'none',
+      checklistCount: Array.isArray(rule.checklist) ? rule.checklist.length : 0,
+      nextRun: rule.nextRun,
+      ...complianceRate(rule.id, tasks, { todayKey }),
+    })).sort((left, right) => {
+      // 판단할 회차가 없는 규칙(rate null)은 문제가 아니라 아직 이른 것이므로 뒤로 보낸다.
+      if (left.rate === null && right.rate === null) return left.title.localeCompare(right.title, 'ko')
+      if (left.rate === null) return 1
+      if (right.rate === null) return -1
+      return left.rate - right.rate
+    })
+    response.json({ rules: rows, window: rows[0]?.window ?? 12, todayKey })
+  })
+
   app.post('/api/work-rules', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
     const ownerId = String(request.body?.ownerId ?? '')
     const owner = accounts.find((account) => account.id === ownerId && account.tenantId === request.auth.tenantId && account.approved)
@@ -6419,14 +6607,35 @@ export function createApp(options = {}) {
     const priority = String(request.body?.priority ?? '')
     const category = String(request.body?.category ?? '').trim()
     const anchor = validIsoDate(anchorDate) ? new Date(`${anchorDate}T00:00:00Z`) : null
-    const monthlyMode = frequency === 'monthly' ? String(request.body?.monthlyMode ?? 'day-of-month') : undefined
+    const monthly = ['monthly', 'quarterly', 'yearly'].includes(frequency)
+    const monthlyMode = monthly ? String(request.body?.monthlyMode ?? 'day-of-month') : undefined
+    // R15-C: 공휴일 처리·체크리스트·순번 배정·미이행 감시
+    const holidayPolicy = HOLIDAY_POLICIES.includes(request.body?.holidayPolicy) ? request.body.holidayPolicy : 'none'
+    const assignMode = ASSIGN_MODES.includes(request.body?.assignMode) ? request.body.assignMode : 'fixed'
+    const rotation = Array.isArray(request.body?.rotation)
+      ? request.body.rotation.map((id) => String(id)).filter((id) => accounts.some((account) => account.id === id && account.tenantId === request.auth.tenantId))
+      : []
+    const checklist = (Array.isArray(request.body?.checklist) ? request.body.checklist : [])
+      .map((item, index) => ({ id: `CK-${index + 1}`, label: String(item?.label ?? item ?? '').replace(/\s+/g, ' ').trim().slice(0, 120) }))
+      .filter((item) => item.label)
+      .slice(0, 30)
+    const minutes = (value) => {
+      const parsed = Number(value)
+      return Number.isInteger(parsed) && parsed >= 0 && parsed <= 20_160 ? parsed : 0
+    }
+    const remindAfterMinutes = minutes(request.body?.remindAfterMinutes)
+    const escalateAfterMinutes = minutes(request.body?.escalateAfterMinutes)
+    if (assignMode === 'rotation' && rotation.length < 2) {
+      response.status(400).json({ error: { code: 'INVALID_ROTATION', message: '순번 배정은 같은 회사 구성원 2명 이상이 필요합니다.' } })
+      return
+    }
     const weekday = Number(request.body?.weekday ?? anchor?.getUTCDay())
     const monthDay = Number(request.body?.monthDay ?? anchor?.getUTCDate())
     if (!owner || !WORK_RULE_FREQUENCIES.has(frequency) || !Number.isInteger(interval) || interval < 1 || interval > 12
       || title.length < 2 || title.length > 200 || description.length < 2 || description.length > 2_000
       || !anchor || !/^\d{2}:\d{2}$/.test(dueTime)
       || (frequency === 'weekly' && (!Number.isInteger(weekday) || weekday < 0 || weekday > 6))
-      || (frequency === 'monthly' && (!WORK_RULE_MONTHLY_MODES.has(monthlyMode)
+      || (monthly && (!WORK_RULE_MONTHLY_MODES.has(monthlyMode)
         || (monthlyMode === 'day-of-month' && (!Number.isInteger(monthDay) || monthDay < 1 || monthDay > 31))
         || (monthlyMode === 'last-weekday' && (!Number.isInteger(weekday) || weekday < 0 || weekday > 6))))
       || !WORK_ITEM_PRIORITIES.has(priority) || !category) {
@@ -6441,12 +6650,18 @@ export function createApp(options = {}) {
       requester: request.auth.name, requesterId: request.auth.id,
       frequency,
       interval,
-      ...(frequency === 'weekly'
+      ...(['weekly', 'biweekly'].includes(frequency)
         ? { weekday }
-        : monthlyMode === 'last-weekday'
-          ? { monthlyMode, weekday }
-          : { monthlyMode, monthDay }),
+        : monthly
+          ? (monthlyMode === 'last-weekday' ? { monthlyMode, weekday } : monthlyMode === 'last-business-day' ? { monthlyMode } : { monthlyMode, monthDay })
+          : {}),
       nextRun, dueTime, priority, category, active: true, createdAt: now,
+      holidayPolicy,
+      assignMode,
+      ...(rotation.length ? { rotation, rotationIndex: 0 } : {}),
+      ...(checklist.length ? { checklist } : {}),
+      ...(remindAfterMinutes ? { remindAfterMinutes } : {}),
+      ...(escalateAfterMinutes ? { escalateAfterMinutes } : {}),
     }
     if (!hasWorkRuleShape(rule)) {
       response.status(400).json({ error: { code: 'INVALID_WORK_RULE', message: '반복 주기 값을 확인해 주세요.' } })

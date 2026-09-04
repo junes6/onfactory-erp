@@ -604,13 +604,40 @@ const explicitCompletionCriteria = (item: WorkItem) => {
 }
 const workWeekdayNames = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일']
 
+/** 규칙 카드에 한 줄로 적는 주기 설명. 공휴일 처리도 붙여 준다 — 그것까지가 "언제 도는가"다. */
+/** 이행률 표기. 판단할 회차가 없으면 0%가 아니라 "아직 없음"이다. */
+function complianceLabel(entry?: { rate: number | null; done: number; total: number }) {
+  if (!entry || entry.rate === null) return '아직 없음'
+  return `${Math.round(entry.rate * 100)}% (${entry.done}/${entry.total})`
+}
+/** 낮은 이행률은 눈에 띄어야 한다. 60% 미만은 경고, 30% 미만은 위험. */
+function complianceTone(rate?: number | null) {
+  if (rate === undefined || rate === null) return undefined
+  if (rate < 0.3) return 'is-critical'
+  if (rate < 0.6) return 'is-warning'
+  return undefined
+}
+
 function workRuleScheduleLabel(rule: WorkRule) {
-  const interval = rule.frequency === 'weekly'
-    ? (rule.interval === 1 ? '매주' : `${rule.interval}주마다`)
-    : (rule.interval === 1 ? '매월' : `${rule.interval}개월마다`)
-  if (rule.frequency === 'weekly') return `${interval} ${workWeekdayNames[rule.weekday ?? 0]}`
-  if (rule.monthlyMode === 'last-weekday') return `${interval} 마지막 주 ${workWeekdayNames[rule.weekday ?? 1]}`
-  return `${interval} ${rule.monthDay ?? 1}일`
+  const every = (unit: string) => (rule.interval === 1 ? `매${unit}` : `${rule.interval}${unit}마다`)
+  const base = (() => {
+    switch (rule.frequency) {
+      case 'daily': return every('일')
+      case 'weekly': return `${every('주')} ${workWeekdayNames[rule.weekday ?? 0]}`
+      case 'biweekly': return `격주 ${workWeekdayNames[rule.weekday ?? 0]}`
+      case 'quarterly': return `분기 ${rule.monthlyMode === 'last-business-day' ? '마지막 영업일' : `${rule.monthDay ?? 1}일`}`
+      case 'yearly': return `연 1회 ${rule.monthDay ?? 1}일`
+      default:
+        if (rule.monthlyMode === 'last-weekday') return `${every('월')} 마지막 주 ${workWeekdayNames[rule.weekday ?? 1]}`
+        if (rule.monthlyMode === 'last-business-day') return `${every('월')} 마지막 영업일`
+        return `${every('월')} ${rule.monthDay ?? 1}일`
+    }
+  })()
+  const policy = rule.holidayPolicy && rule.holidayPolicy !== 'none'
+    ? ` · 공휴일 ${rule.holidayPolicy === 'before' ? '앞당김' : rule.holidayPolicy === 'after' ? '미룸' : '건너뜀'}`
+    : ''
+  const rotation = rule.assignMode === 'rotation' ? ' · 순번 배정' : ''
+  return `${base}${policy}${rotation}`
 }
 
 function fileSizeLabel(size: number) {
@@ -743,29 +770,63 @@ function WorkReviewModal({ item, industryType, workspaceScope, onToast, onClose,
   </div>
 }
 
+type RuleFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly'
+type RuleMonthlyMode = 'day-of-month' | 'last-weekday' | 'last-business-day'
+
+const RULE_FREQUENCY_LABELS: Record<RuleFrequency, string> = {
+  daily: '매일', weekly: '매주', biweekly: '격주', monthly: '매월', quarterly: '분기', yearly: '연 1회',
+}
+/** 공휴일과 겹쳤을 때 어떻게 할지는 회사마다 다르다. 우리가 대신 정하지 않는다. */
+const HOLIDAY_POLICY_LABELS: Record<string, string> = {
+  none: '그대로 진행', before: '앞당김 (직전 근무일)', after: '미룸 (다음 근무일)', skip: '건너뜀',
+}
+
 function WorkRuleModal({ assignees, industryType, onClose, onSubmit }: { assignees: WorkAssignee[]; industryType?: string; onClose: () => void; onSubmit: (input: Record<string, unknown>) => Promise<boolean> }) {
   const dialogRef = useDialogFocus()
-  const [frequency, setFrequency] = useState<'weekly' | 'monthly'>('weekly')
-  const [monthlyMode, setMonthlyMode] = useState<'day-of-month' | 'last-weekday'>('day-of-month')
+  const [frequency, setFrequency] = useState<RuleFrequency>('weekly')
+  const [monthlyMode, setMonthlyMode] = useState<RuleMonthlyMode>('day-of-month')
   const [weekday, setWeekday] = useState(3)
   const [monthDay, setMonthDay] = useState(1)
+  const [holidayPolicy, setHolidayPolicy] = useState('none')
+  const [assignMode, setAssignMode] = useState<'fixed' | 'rotation'>('fixed')
+  const [rotation, setRotation] = useState<string[]>([])
+  const [checklist, setChecklist] = useState<string[]>([])
+  const [checklistDraft, setChecklistDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const today = seoulDateInputValue()
   const ruleSurface = industrySurface(industryType)
+  const usesWeekday = ['weekly', 'biweekly'].includes(frequency)
+  const usesMonth = ['monthly', 'quarterly', 'yearly'].includes(frequency)
+  const intervalUnit = frequency === 'daily' ? '일' : usesWeekday ? (frequency === 'biweekly' ? '격주 단위' : '주') : frequency === 'quarterly' ? '분기' : frequency === 'yearly' ? '년' : '개월'
+
+  const toggleRotation = (id: string) => setRotation((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
+  const addChecklistItem = () => {
+    const label = checklistDraft.trim()
+    if (!label || checklist.length >= 30) return
+    setChecklist((current) => [...current, label])
+    setChecklistDraft('')
+  }
+
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section ref={dialogRef} className="modal-card workflow-modal" role="dialog" aria-modal="true" aria-labelledby="rule-modal-title">
-      <header><div><span className="eyebrow">RECURRING WORK</span><h2 id="rule-modal-title">반복 업무 규칙 만들기</h2><p>매주 또는 매월 자동으로 업무를 생성합니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
+      <header><div><span className="eyebrow">RECURRING WORK</span><h2 id="rule-modal-title">반복 업무 규칙 만들기</h2><p>정해진 주기마다 업무를 자동으로 만듭니다. 공휴일과 겹칠 때의 처리도 함께 정합니다.</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
       <form onSubmit={async (event) => {
         event.preventDefault()
         const input: Record<string, unknown> = Object.fromEntries(new FormData(event.currentTarget).entries())
         input.frequency = frequency
         input.interval = Number(input.interval)
         input.startAt = seoulLocalToUtcIso(String(input.startDate ?? ''), String(input.dueTime ?? '00:00'))
-        if (frequency === 'weekly') input.weekday = weekday
-        else {
+        input.holidayPolicy = holidayPolicy
+        input.assignMode = assignMode
+        if (assignMode === 'rotation') input.rotation = rotation
+        if (checklist.length) input.checklist = checklist.map((label) => ({ label }))
+        input.remindAfterMinutes = Number(input.remindAfterMinutes ?? 0)
+        input.escalateAfterMinutes = Number(input.escalateAfterMinutes ?? 0)
+        if (usesWeekday) input.weekday = weekday
+        else if (usesMonth) {
           input.monthlyMode = monthlyMode
           if (monthlyMode === 'last-weekday') input.weekday = weekday
-          else input.monthDay = monthDay
+          else if (monthlyMode === 'day-of-month') input.monthDay = monthDay
         }
         setBusy(true)
         if (await onSubmit(input)) onClose()
@@ -776,23 +837,45 @@ function WorkRuleModal({ assignees, industryType, onClose, onSubmit }: { assigne
           <label className="form-field full"><span>업무 설명</span><textarea name="description" rows={3} required placeholder="담당자가 매회 확인할 완료 기준" /></label>
           <label className="form-field"><span>담당자</span><select name="ownerId" required>{assignees.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
           <label className="form-field"><span>업무 구분</span><select name="category" defaultValue="일반">{ruleSurface.workCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
-          <label className="form-field"><span>반복 주기</span><select value={frequency} onChange={(event) => setFrequency(event.target.value as 'weekly' | 'monthly')}><option value="weekly">주간</option><option value="monthly">월간</option></select></label>
-          <label className="form-field"><span>반복 간격</span><select name="interval" defaultValue="1"><option value="1">{frequency === 'weekly' ? '매주' : '매월'}</option><option value="2">{frequency === 'weekly' ? '2주마다' : '2개월마다'}</option><option value="3">{frequency === 'weekly' ? '3주마다' : '3개월마다'}</option></select></label>
-          {frequency === 'monthly' && <label className="form-field full"><span>월간 실행 방식</span><select value={monthlyMode} onChange={(event) => setMonthlyMode(event.target.value as 'day-of-month' | 'last-weekday')}><option value="day-of-month">매월 특정일</option><option value="last-weekday">매월 마지막 주 특정 요일</option></select></label>}
-          {(frequency === 'weekly' || monthlyMode === 'last-weekday') && <label className="form-field"><span>{frequency === 'weekly' ? '실행 요일' : '마지막 주 실행 요일'}</span><select value={weekday} onChange={(event) => setWeekday(Number(event.target.value))}>{workWeekdayNames.map((day, index) => <option value={index} key={day}>{day}</option>)}</select></label>}
-          {frequency === 'monthly' && monthlyMode === 'day-of-month' && <label className="form-field"><span>실행일</span><input type="number" min={1} max={31} value={monthDay} onChange={(event) => setMonthDay(Number(event.target.value))} required /></label>}
+
+          <label className="form-field"><span>반복 주기</span><select value={frequency} onChange={(event) => setFrequency(event.target.value as RuleFrequency)}>{(Object.keys(RULE_FREQUENCY_LABELS) as RuleFrequency[]).map((key) => <option value={key} key={key}>{RULE_FREQUENCY_LABELS[key]}</option>)}</select></label>
+          <label className="form-field"><span>반복 간격</span><select name="interval" defaultValue="1">{[1, 2, 3, 4, 6, 12].map((value) => <option value={value} key={value}>{value === 1 ? `매 ${intervalUnit}` : `${value}${intervalUnit}마다`}</option>)}</select></label>
+          {usesMonth && <label className="form-field full"><span>실행 방식</span><select value={monthlyMode} onChange={(event) => setMonthlyMode(event.target.value as RuleMonthlyMode)}><option value="day-of-month">특정일</option><option value="last-weekday">마지막 주 특정 요일</option><option value="last-business-day">마지막 영업일 (주말·공휴일 제외)</option></select></label>}
+          {(usesWeekday || (usesMonth && monthlyMode === 'last-weekday')) && <label className="form-field"><span>{usesWeekday ? '실행 요일' : '마지막 주 실행 요일'}</span><select value={weekday} onChange={(event) => setWeekday(Number(event.target.value))}>{workWeekdayNames.map((day, index) => <option value={index} key={day}>{day}</option>)}</select></label>}
+          {usesMonth && monthlyMode === 'day-of-month' && <label className="form-field"><span>실행일</span><input type="number" min={1} max={31} value={monthDay} onChange={(event) => setMonthDay(Number(event.target.value))} required /></label>}
+
+          <label className="form-field full"><span>공휴일·주말과 겹칠 때</span><select value={holidayPolicy} onChange={(event) => setHolidayPolicy(event.target.value)}>{Object.entries(HOLIDAY_POLICY_LABELS).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
+
           <label className="form-field"><span>적용 시작일</span><input name="startDate" type="date" min={today} defaultValue={today} required /></label>
           <label className="form-field"><span>마감 시간</span><input name="dueTime" type="time" defaultValue="17:00" required /></label>
           <label className="form-field"><span>우선순위</span><select name="priority" defaultValue="보통"><option>긴급</option><option>높음</option><option>보통</option></select></label>
-          <p className="workflow-rule-hint full"><CalendarDays size={16} /> 시작일 이후 첫 {frequency === 'weekly' ? workWeekdayNames[weekday] : monthlyMode === 'last-weekday' ? `마지막 주 ${workWeekdayNames[weekday]}` : `${monthDay}일`}부터 자동 생성됩니다.</p>
+
+          <label className="form-field"><span>담당자 지정 방식</span><select value={assignMode} onChange={(event) => setAssignMode(event.target.value as 'fixed' | 'rotation')}><option value="fixed">고정</option><option value="rotation">순번 배정</option></select></label>
+          {assignMode === 'rotation' && <fieldset className="form-field full workflow-rotation"><legend>순번 명단 (2명 이상)</legend>
+            {assignees.map((item) => <label key={item.id} className="workflow-rotation-item"><input type="checkbox" checked={rotation.includes(item.id)} onChange={() => toggleRotation(item.id)} /><span>{item.name}</span></label>)}
+            <p>회차마다 이 순서대로 담당자가 돌아갑니다. 건너뛴 회차는 순번을 넘기지 않습니다.</p>
+          </fieldset>}
+
+          <fieldset className="form-field full workflow-checklist"><legend>점검 항목 (선택)</legend>
+            <p>항목을 넣으면 매 회차에 체크박스로 펼쳐지고, 전부 마쳐야 완료 보고를 할 수 있습니다.</p>
+            <div className="workflow-checklist-add">
+              <input value={checklistDraft} maxLength={120} placeholder="예: 금속검출기 시험편 통과" onChange={(event) => setChecklistDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addChecklistItem() } }} />
+              <Button tone="ghost" type="button" onClick={addChecklistItem} disabled={!checklistDraft.trim()}>추가</Button>
+            </div>
+            {checklist.length > 0 && <ol className="workflow-checklist-items">{checklist.map((label, index) => <li key={`${label}-${index}`}><span>{label}</span><IconButton tone="quiet" size="sm" type="button" aria-label={`${label} 삭제`} onClick={() => setChecklist((current) => current.filter((_, position) => position !== index))}><X size={14} /></IconButton></li>)}</ol>}
+          </fieldset>
+
+          <label className="form-field"><span>미착수 알림 (분)</span><input name="remindAfterMinutes" type="number" min={0} max={20160} defaultValue={0} /></label>
+          <label className="form-field"><span>관리자 보고 (분)</span><input name="escalateAfterMinutes" type="number" min={0} max={20160} defaultValue={0} /></label>
+          <p className="workflow-rule-hint full"><CalendarDays size={16} /> 0이면 감시하지 않습니다. 지정한 시간까지 착수 표시가 없으면 담당자에게, 다음 단계에서 관리자에게 알립니다.</p>
         </div>
-        <footer><Button tone="ghost" type="button" onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={busy || assignees.length === 0}><Repeat2 size={18} /> 규칙 생성</Button></footer>
+        <footer><Button tone="ghost" type="button" onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={busy || assignees.length === 0 || (assignMode === 'rotation' && rotation.length < 2)}><Repeat2 size={18} /> 규칙 생성</Button></footer>
       </form>
     </section>
   </div>
 }
 
-function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, industryType, workspaceScope, focusId, onToast, onOpenOrigin, onCreate, onTransition, onCreateRule, onToggleRule, onDeleteRule }: {
+function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, industryType, workspaceScope, focusId, onToast, onOpenOrigin, onCreate, onTransition, onCreateRule, onToggleRule, onDeleteRule, onToggleChecklist }: {
   items: WorkItem[]; rules: WorkRule[]; currentUserId: string; canAssignTasks: boolean; assignees: WorkAssignee[]
   industryType?: string
   onOpenOrigin?: (page: string, focusId: string) => void
@@ -804,6 +887,7 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
   onCreateRule: (input: Record<string, unknown>) => Promise<boolean>
   onToggleRule: (rule: WorkRule) => Promise<boolean>
   onDeleteRule: (rule: WorkRule) => Promise<boolean>
+  onToggleChecklist: (taskId: string, itemId: string, done: boolean) => Promise<boolean>
 }) {
   const [boardTab, setBoardTab] = useState<'board' | 'rules'>('board')
   const [scopeFilter, setScopeFilter] = useState<'all' | 'mine' | 'requested'>('all')
@@ -887,6 +971,41 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
     ...drawerCompletionHistory.map((completion) => ({ kind: 'completion' as const, at: completion.submittedAt, completion })),
     ...drawerReviewHistory.map((review) => ({ kind: 'review' as const, at: review.reviewedAt, review })),
   ].sort((left, right) => left.at.localeCompare(right.at))
+  /**
+   * 규칙별 이행률(최근 12회). 서버가 낮은 순으로 정렬해 준다 —
+   * 관리자가 목록을 훑으며 문제를 찾는 대신 맨 위만 보면 되게 한다.
+   */
+  const [compliance, setCompliance] = useState<Record<string, { rate: number | null; done: number; total: number }>>({})
+  useEffect(() => {
+    if (!canAssignTasks || !workspaceScope) return
+    let active = true
+    fetch('/api/work-rules/compliance', { headers: { 'x-workspace-identity': workspaceScope } })
+      .then((response) => response.ok ? response.json() : null)
+      .then((body: { rules?: { id: string; rate: number | null; done: number; total: number }[] } | null) => {
+        if (!active || !body?.rules) return
+        setCompliance(Object.fromEntries(body.rules.map((row) => [row.id, { rate: row.rate, done: row.done, total: row.total }])))
+      })
+      .catch(() => undefined)
+    return () => { active = false }
+  }, [canAssignTasks, workspaceScope, rules.length])
+
+  /** 이행률이 낮은 규칙을 위로. 판단할 회차가 없는 규칙은 문제가 아니라 아직 이른 것이므로 뒤로 보낸다. */
+  const rulesByCompliance = [...rules].sort((left, right) => {
+    const leftRate = compliance[left.id]?.rate ?? null
+    const rightRate = compliance[right.id]?.rate ?? null
+    if (leftRate === null && rightRate === null) return 0
+    if (leftRate === null) return 1
+    if (rightRate === null) return -1
+    return leftRate - rightRate
+  })
+
+  const [checklistBusy, setChecklistBusy] = useState('')
+  const toggleChecklistItem = async (task: WorkItem, itemId: string, done: boolean) => {
+    setChecklistBusy(itemId)
+    try { await onToggleChecklist(task.id, itemId, done) }
+    finally { setChecklistBusy('') }
+  }
+
   const drawerAction = drawerItem ? primaryAction(drawerItem) : null
   const drawerGuide = !drawerItem ? ''
     : drawerItem.status === '결재완료' ? '이 업무는 승인까지 끝났습니다.'
@@ -965,7 +1084,7 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
       })}
     </div>}
 
-    {boardTab === 'rules' && canAssignTasks && <section className="panel recurring-work-panel"><header><div><span className="eyebrow">RECURRING RULES</span><h2>반복 업무 규칙</h2><p>도래한 규칙은 요청됨 단계에 자동 생성됩니다.</p></div><Button tone="secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Plus size={17} /> 규칙 추가</Button></header><div className="recurring-rule-grid">{rules.map((rule) => <article key={rule.id}><div><span className={`rule-state ${rule.active ? 'active' : 'paused'}`}>{rule.active ? '활성' : '중지'}</span><strong>{rule.title}</strong><p>{rule.description}</p></div><dl><div><dt>주기</dt><dd>{workRuleScheduleLabel(rule)}</dd></div><div><dt>담당자</dt><dd>{rule.owner}</dd></div><div><dt>다음 실행</dt><dd>{formatWorkRuleRun(rule.nextRun, rule.dueTime)}</dd></div></dl><div className="recurring-rule-actions"><Button tone="ghost" type="button" onClick={() => void onToggleRule(rule)}>{rule.active ? <PauseCircle size={17} /> : <PlayCircle size={17} />}{rule.active ? ' 일시 중지' : ' 다시 활성화'}</Button><Button tone="danger" type="button" onClick={() => void onDeleteRule(rule)}><Trash2 size={17} /> 삭제</Button></div></article>)}{rules.length === 0 && <div className="empty-state"><Repeat2 size={30} /><h3>반복 규칙이 없습니다</h3><p>매주·매월 반복되는 점검을 자동화해 보세요.</p></div>}</div></section>}
+    {boardTab === 'rules' && canAssignTasks && <section className="panel recurring-work-panel"><header><div><span className="eyebrow">RECURRING RULES</span><h2>반복 업무 규칙</h2><p>도래한 규칙은 요청됨 단계에 자동 생성됩니다.</p></div><Button tone="secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Plus size={17} /> 규칙 추가</Button></header><div className="recurring-rule-grid">{rulesByCompliance.map((rule) => <article key={rule.id} className={complianceTone(compliance[rule.id]?.rate)}><div><span className={`rule-state ${rule.active ? 'active' : 'paused'}`}>{rule.active ? '활성' : '중지'}</span><strong>{rule.title}</strong><p>{rule.description}</p></div><dl><div><dt>주기</dt><dd>{workRuleScheduleLabel(rule)}</dd></div><div><dt>담당자</dt><dd>{rule.owner}{rule.assignMode === 'rotation' ? ` 외 ${(rule.rotation?.length ?? 1) - 1}명 순번` : ''}</dd></div><div><dt>다음 실행</dt><dd>{formatWorkRuleRun(rule.nextRun, rule.dueTime)}</dd></div><div><dt>이행률<small> 최근 12회</small></dt><dd>{complianceLabel(compliance[rule.id])}</dd></div>{rule.checklist?.length ? <div><dt>점검 항목</dt><dd>{rule.checklist.length}개</dd></div> : null}</dl><div className="recurring-rule-actions"><Button tone="ghost" type="button" onClick={() => void onToggleRule(rule)}>{rule.active ? <PauseCircle size={17} /> : <PlayCircle size={17} />}{rule.active ? ' 일시 중지' : ' 다시 활성화'}</Button><Button tone="danger" type="button" onClick={() => void onDeleteRule(rule)}><Trash2 size={17} /> 삭제</Button></div></article>)}{rules.length === 0 && <div className="empty-state"><Repeat2 size={30} /><h3>반복 규칙이 없습니다</h3><p>매주·매월 반복되는 점검을 자동화해 보세요.</p></div>}</div></section>}
 
     {drawerItem && <div className="workflow-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDrawerId(null) }}>
       <aside ref={drawerRef} className="workflow-drawer" role="dialog" aria-modal="true" aria-labelledby="workflow-drawer-title">
@@ -989,6 +1108,26 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
             {drawerChangeRequested && <p className="workflow-drawer-revision"><AlertTriangle size={15} /> {drawerItem.review?.requestedChanges || drawerItem.review?.comment || '요청자가 보완 내용을 남기지 않았습니다.'}</p>}
             {drawerAction && <Button tone="primary" type="button" onClick={drawerAction.run}>{drawerAction.label} <ArrowRight size={16} /></Button>}
           </section>
+          {drawerItem.checklist?.length ? <section className="workflow-drawer-block" aria-label="점검 항목">
+            <span>점검 항목 <small>{drawerItem.checklist.filter((entry) => entry.done).length}/{drawerItem.checklist.length}</small></span>
+            <ul className="workflow-checklist-run">
+              {drawerItem.checklist.map((entry) => {
+                const editable = drawerItem.ownerId === currentUserId && !['결재대기', '결재완료'].includes(drawerItem.status)
+                return <li key={entry.id}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={entry.done}
+                      disabled={!editable || checklistBusy === entry.id}
+                      onChange={() => void toggleChecklistItem(drawerItem, entry.id, !entry.done)}
+                    />
+                    <span className={entry.done ? 'is-done' : undefined}>{entry.label}</span>
+                  </label>
+                </li>
+              })}
+            </ul>
+            {drawerItem.checklist.some((entry) => !entry.done) && <p className="workflow-drawer-timeline-empty">전 항목을 마쳐야 완료 보고를 할 수 있습니다.</p>}
+          </section> : null}
           {explicitCompletionCriteria(drawerItem) && <section className="workflow-drawer-block" aria-label="완료 기준"><span>완료 기준</span><p>{explicitCompletionCriteria(drawerItem)}</p></section>}
           {drawerItem.attachments?.length ? <section className="workflow-drawer-block" aria-label="지시 첨부"><span>지시 첨부</span><div className="workflow-drawer-files">{drawerItem.attachments.map((file) => <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('첨부 파일을 다운로드하지 못했습니다.') }}><Paperclip size={13} /> {file.name} · {file.size}</button>)}</div></section> : null}
           <section className="workflow-drawer-block" aria-label="진행 이력">
@@ -1929,6 +2068,20 @@ export default function App() {
       return true
     } catch { setToast('업무 처리 서버에 연결할 수 없습니다.'); return false }
   }
+  /** 점검 항목 하나 켜고 끄기. 결재 상태는 건드리지 않고 이 값만 바꾼다. */
+  const toggleChecklistItem = async (taskId: string, itemId: string, done: boolean) => {
+    if (!workspaceScope) return false
+    try {
+      const response = await fetch(`/api/work-items/${encodeURIComponent(taskId)}/checklist`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-workspace-identity': workspaceScope },
+        body: JSON.stringify({ itemId, done }),
+      })
+      const body = await response.json() as { task?: WorkItem; error?: { message?: string } }
+      if (!response.ok || !body.task) { setToast(body.error?.message || '점검 항목을 저장하지 못했습니다.'); return false }
+      await setWorkItems((current) => current.map((item) => item.id === taskId ? body.task! : item), { persist: false })
+      return true
+    } catch { setToast('업무 처리 서버에 연결할 수 없습니다.'); return false }
+  }
   const advanceTask = (item: WorkItem) => {
     if (item.status === '업무요청') { void transitionTask(item.id, 'accept'); return }
     // 목록으로 보내고 "어느 버튼을 누르라"고 안내하면, 그 버튼 이름이 화면과 달라지는 순간 막다른 길이 된다.
@@ -2042,7 +2195,7 @@ export default function App() {
     }
     switch (page) {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
-      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onOpenOrigin={(page) => navigate(page as PageId)} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} />
+      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onOpenOrigin={(page) => navigate(page as PageId)} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
       case 'finance': return <TaxAssetsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} industryType={account?.industryType ?? 'food_manufacturing'} onToast={setToast} />
