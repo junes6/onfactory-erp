@@ -1,0 +1,146 @@
+.oversight { display: grid; gap: var(--space-16); }
+
+.oversight-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-12);
+  align-items: center;
+}
+.oversight-head strong { display: block; }
+.oversight-head span { color: var(--muted); font-size: var(--font-13); }
+.oversight-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-8);
+  background: var(--color-blue-soft);
+  color: var(--color-blue);
+}
+
+/* 열람이 기록된다는 사실은 여는 사람이 먼저 봐야 한다. */
+.oversight-notice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-8);
+  align-items: center;
+  margin: var(--space-0);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: var(--color-warning-soft);
+  padding: var(--space-12);
+  font-size: var(--font-13);
+  color: var(--ink);
+}
+
+.oversight-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) 1fr;
+  gap: var(--space-16);
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .oversight-body { grid-template-columns: 1fr; }
+}
+
+.oversight-rooms h4,
+.oversight-reader h4,
+.oversight-grants h4,
+.oversight-audit h4 { margin: var(--space-0) var(--space-0) var(--space-8); font-size: var(--font-13); color: var(--muted); }
+
+.oversight-rooms ul,
+.oversight-grants ul,
+.oversight-audit ul { display: grid; gap: var(--space-4); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+
+.oversight-rooms button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-8);
+  align-items: center;
+  width: 100%;
+  min-height: 52px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+  padding: var(--space-8) var(--space-12);
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.oversight-rooms button.active { border-color: var(--color-blue); background: var(--color-blue-soft); }
+.oversight-rooms small,
+.oversight-grants small,
+.oversight-audit small { display: block; color: var(--muted); font-size: var(--font-11); }
+.oversight-room-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-8);
+  background: var(--color-gray-50);
+  color: var(--muted);
+}
+
+.oversight-reader {
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+  padding: var(--space-16);
+  min-height: 220px;
+}
+.oversight-participants { margin: var(--space-0) var(--space-0) var(--space-12); color: var(--muted); font-size: var(--font-13); }
+.oversight-messages { display: grid; gap: var(--space-8); margin: var(--space-0); padding: var(--space-0); list-style: none; max-height: 420px; overflow-y: auto; }
+.oversight-messages li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-4) var(--space-8);
+  border-bottom: var(--hairline) solid var(--line);
+  padding-bottom: var(--space-8);
+}
+.oversight-messages strong { font-size: var(--font-13); }
+.oversight-messages p { grid-column: 1 / -1; margin: var(--space-0); font-size: var(--font-15); }
+.oversight-messages time { color: var(--muted); font-size: var(--font-11); }
+.oversight-messages li.removed p { color: var(--subtle); font-style: italic; }
+
+.oversight-grants li,
+.oversight-audit li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-8);
+  align-items: center;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+  padding: var(--space-8) var(--space-12);
+}
+.oversight-audit li { grid-template-columns: auto 1fr auto; }
+.oversight-audit-event {
+  border-radius: var(--radius-8);
+  background: var(--color-blue-soft);
+  padding: var(--space-4) var(--space-8);
+  font-size: var(--font-11);
+  color: var(--color-blue);
+}
+.oversight-audit time { color: var(--muted); font-size: var(--font-11); }
+
+.oversight-empty { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); }
+
+.oversight-error {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-8);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+  padding: var(--space-32);
+  text-align: center;
+  color: var(--muted);
+}
+
+.oversight-skeleton { display: grid; gap: var(--space-8); }
+.oversight-skeleton span {
+  display: block;
+  height: 52px;
+  border-radius: var(--radius-8);
+  background: var(--color-gray-50);
+}

@@ -20,6 +20,7 @@ import express from 'express'
 import { registerBillingRoutes } from './billing-routes.mjs'
 import { registerAttendanceRoutes } from './attendance-routes.mjs'
 import { registerMessengerRoomRoutes } from './messenger-rooms.mjs'
+import { registerOversightRoutes } from './oversight-routes.mjs'
 import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
 import { registerPersonalCoreRoutes } from './personal-core-routes.mjs'
 import { backupSettings, BACKUP_STATUS_KEY, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
@@ -1497,6 +1498,9 @@ function safeAccount(account) {
     bio: account.bio ?? '',
     isDemo: Boolean(account.isDemo),
     requiresPasswordChange: Boolean(account.mustChangePassword),
+    // 업무 채널 감독 열람 권한. 역할이 아니라 계정에 붙는 별도 표시라 여기서 함께 내보낸다.
+    // 화면도 이 값을 알아야 열람 메뉴를 보여 줄지 정할 수 있다.
+    oversight: account.oversight === true,
   }
 }
 
@@ -5089,6 +5093,7 @@ export function createApp(options = {}) {
         team: account.team,
         role: account.jobRole,
         accountRole: account.role,
+        oversight: account.oversight === true,
         requested: account.requested,
         status: account.approved ? '활성' : account.approvalStatus === 'rejected' ? '반려' : account.approvalStatus === 'inactive' ? '비활성' : '승인대기',
         onboardingStatus: account.mustChangePassword
@@ -6823,6 +6828,17 @@ export function createApp(options = {}) {
     response.json({ updatedAt: record.updatedAt, version })
   })
 
+  registerOversightRoutes({
+    app,
+    requireAuth,
+    requireTenantAdmin,
+    requireMatchingWorkspaceIdentity,
+    workspaceStore,
+    accounts,
+    commitWorkspaceStore,
+    appendPlatformAudit,
+    persistAccountProfile,
+  })
   registerMessengerRoomRoutes({
     app,
     requireAuth,

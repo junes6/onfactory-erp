@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { CONSENT_ITEM_IDS } from './policies/consent-terms.mjs'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -2597,7 +2598,7 @@ test('platform operations persist tenants, administrator credentials, CS evidenc
       const tenantPayload = {
         companyName: '동해수산가공', industry: '수산식품 제조', plan: 'Growth',
         adminName: '이운영', adminEmail: administratorEmail, targetDate: '2026-09-01',
-        consents: { dataAccess: true, privacyOutsourcing: true, aiProcessing: true },
+        consents: Object.fromEntries(CONSENT_ITEM_IDS.map((id) => [id, true])),
       }
       // 동의 3항 없이는 생성 불가
       const withoutConsent = await fetch(`${origin}/api/platform/tenants`, {

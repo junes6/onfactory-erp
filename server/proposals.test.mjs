@@ -7,7 +7,7 @@ import test from 'node:test'
 import { createApp } from './app.mjs'
 import { withServer } from './test-server.mjs'
 import { approvalStatistics, classifyDocument, evaluateSentinel, isInstructionMessage, proposeDocumentClassification, proposeTaskFromMessage } from './proposal-engine.mjs'
-import { CONSENT_TERMS_VERSION } from './policies/consent-terms.mjs'
+import { CONSENT_ITEM_IDS, CONSENT_TERMS_VERSION } from './policies/consent-terms.mjs'
 
 async function login(origin, email, workspace = 'tenant', password = 'demo1234') {
   const response = await fetch(`${origin}/api/auth/login`, {
@@ -220,17 +220,17 @@ test('tenant consent is stored on creation, visible to the tenant admin, and re-
   await withServer(createApp({ apiKey: '', initialWorkspaceStore: store, onWorkspaceStoreChange: () => {} }), async (origin) => {
     const terms = await readJson(await fetch(`${origin}/api/consent-terms`))
     assert.equal(terms.version, CONSENT_TERMS_VERSION)
-    assert.equal(terms.items.length, 3)
+    assert.equal(terms.items.length, CONSENT_ITEM_IDS.length, '공개 약관은 정책이 요구하는 항목을 빠짐없이 보여 준다')
     const operator = await login(origin, 'operator@onfactory.co.kr', 'platform')
     const created = await readJson(await fetch(`${origin}/api/platform/tenants`, {
       method: 'POST', headers: jsonHeaders(operator.cookie),
-      body: JSON.stringify({ companyName: '동의테스트식품', industry: '식품 제조', plan: 'Growth', adminName: '최동의', adminEmail: 'admin@consent.test', targetDate: '2026-10-01', consentVersion: CONSENT_TERMS_VERSION, consents: { dataAccess: true, privacyOutsourcing: true, aiProcessing: true } }),
+      body: JSON.stringify({ companyName: '동의테스트식품', industry: '식품 제조', plan: 'Growth', adminName: '최동의', adminEmail: 'admin@consent.test', targetDate: '2026-10-01', consentVersion: CONSENT_TERMS_VERSION, consents: Object.fromEntries(CONSENT_ITEM_IDS.map((id) => [id, true])) }),
     }))
     assert.ok(created.tenant?.id, JSON.stringify(created))
     const stored = store.platform.tenants.find((tenant) => tenant.id === created.tenant.id)
     assert.equal(stored.consent.version, CONSENT_TERMS_VERSION)
     assert.equal(stored.consent.agreedBy.id, 'USR-ONFACTORY-OPS')
-    assert.equal(stored.consent.items.length, 3)
+    assert.equal(stored.consent.items.length, CONSENT_ITEM_IDS.length)
 
     // 기존(동의 없는) 테넌트 관리자 → 재동의 필요
     const admin = await login(origin, 'admin@sunsea.co.kr')
@@ -238,7 +238,7 @@ test('tenant consent is stored on creation, visible to the tenant admin, and re-
     assert.equal(before.needsReconsent, true)
     const partial = await fetch(`${origin}/api/tenant/consent`, { method: 'POST', headers: jsonHeaders(admin.cookie), body: JSON.stringify({ consents: { dataAccess: true } }) })
     assert.equal(partial.status, 400)
-    const agree = await readJson(await fetch(`${origin}/api/tenant/consent`, { method: 'POST', headers: jsonHeaders(admin.cookie), body: JSON.stringify({ consents: { dataAccess: true, privacyOutsourcing: true, aiProcessing: true } }) }))
+    const agree = await readJson(await fetch(`${origin}/api/tenant/consent`, { method: 'POST', headers: jsonHeaders(admin.cookie), body: JSON.stringify({ consents: Object.fromEntries(CONSENT_ITEM_IDS.map((id) => [id, true])) }) }))
     assert.equal(agree.needsReconsent, false)
     assert.equal(agree.consent.agreedBy.id, 'USR-SUNSEA-ADMIN')
     const member = await login(origin, 'jihyun.park@sunsea.co.kr')

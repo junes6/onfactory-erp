@@ -10,6 +10,7 @@ import { AttendancePanel } from './AttendancePanel'
 import { BarChart3 } from 'lucide-react'
 import { formatDateLabel, formatDateTime, seoulDateInputValue } from '../utils/dateTime'
 import './PeopleOperations.css'import { Button, IconButton } from './ui/Button'
+import { OversightPanel } from './OversightPanel'
 import { BRAND } from '../brand'
 
 
@@ -22,8 +23,10 @@ type PeopleOperationsProps = {
   currentUserName: string
   currentUserTeam: string
   workspaceScope?: string
+  /** 업무 채널 감독 열람 권한. 관리자가 아니어도 지정받으면 켜진다. */
+  canOversee?: boolean
 }
-type PeopleTab = 'members' | 'attendance' | 'leave' | 'leave-admin' | 'accounts' | 'performance'
+type PeopleTab = 'members' | 'attendance' | 'leave' | 'leave-admin' | 'accounts' | 'performance' | 'oversight'
 type LeaveStatus = '결재대기' | '승인' | '반려'
 type AccountStatus = '승인대기' | '활성' | '반려'
 
@@ -164,7 +167,7 @@ function StateBadge({ children, tone = 'neutral' }: { children: string; tone?: s
   return <span className={'people-state-badge ' + tone}><i />{children}</span>
 }
 
-export function PeopleOperationsPage({ onToast, canManage, currentUserId, currentUserName, currentUserTeam, workspaceScope, initialTab, onOpenTask }: PeopleOperationsProps) {
+export function PeopleOperationsPage({ onToast, canManage, currentUserId, currentUserName, currentUserTeam, workspaceScope, initialTab, onOpenTask, canOversee = false }: PeopleOperationsProps) {
   const [tab, setTab] = useState<PeopleTab>(initialTab && canManage ? initialTab : canManage ? 'members' : 'leave')
   useEffect(() => { if (initialTab && canManage) setTab(initialTab) }, [initialTab, canManage])
   const [leaves, setLeaves] = useWorkspaceState<LeaveRequest[]>('leave-requests', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isLeaveRequestList })
@@ -672,6 +675,7 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       <button type="button" role="tab" aria-selected={tab === 'leave'} onClick={() => setTab('leave')}><CalendarDays size={18} /> 휴가 {pendingLeaves > 0 && <em>{pendingLeaves}</em>}</button>
       {canManage && <button type="button" role="tab" aria-selected={tab === 'leave-admin'} onClick={() => setTab('leave-admin')}><Settings2 size={18} /> 휴가 정책 · 원장</button>}
       {canManage && <button type="button" role="tab" aria-selected={tab === 'accounts'} onClick={() => setTab('accounts')}><KeyRound size={18} /> 계정 · 권한 {pendingAccounts > 0 && <em>{pendingAccounts}</em>}</button>}
+      {canOversee && <button type="button" role="tab" aria-selected={tab === 'oversight'} onClick={() => setTab('oversight')}><ShieldCheck size={18} /> 대화 열람</button>}
       <button type="button" role="tab" aria-selected={tab === 'performance'} onClick={() => setTab('performance')}><BarChart3 size={18} /> {canManage ? '직원 성과' : '내 성과'}</button>
     </div>
 
@@ -731,6 +735,7 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       </div>
     </section>}
 
+    {canOversee && tab === 'oversight' && <section className="people-content-card" role="tabpanel"><OversightPanel canManageGrants={canManage} workspaceScope={workspaceScope} onToast={onToast} /></section>}
     {tab === 'performance' && <section className="people-content-card people-performance" role="tabpanel"><PerformanceReports workspaceScope={workspaceScope ?? ''} canManage={canManage} onToast={onToast} onOpenTask={(taskId) => onOpenTask?.(taskId)} /></section>}
     {canManage && tab === 'accounts' && <section className="people-content-card" role="tabpanel">
       <header><div><h2>신규 계정 · 접근 권한</h2><p>초대 → 관리자 승인 → 1회용 초기 비밀번호 → 본인 비밀번호 설정 순서로 활성화됩니다.</p></div><Button tone="primary" type="button" onClick={(event) => openModal('invite', event.currentTarget)}><Send size={17} /> 초대 보내기</Button></header>

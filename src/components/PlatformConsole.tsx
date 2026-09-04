@@ -129,7 +129,8 @@ type PlatformTenant = Tenant & {
 }
 
 type OnboardingInput = {
-  consents: { dataAccess: boolean; privacyOutsourcing: boolean; aiProcessing: boolean }
+  /** 필수 동의 항목은 서버 정책이 정한다. 이름을 여기 박아 두면 항목이 늘 때 조용히 어긋난다. */
+  consents: Record<string, boolean>
   consentVersion?: string
   companyName: string
   industryType: 'food_manufacturing' | 'it_services'
@@ -338,7 +339,7 @@ function PlatformDialog({
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [dialog, onClose])
 
-  const [consentTerms, setConsentTerms] = useState<{ version: string; items: Array<{ id: 'dataAccess' | 'privacyOutsourcing' | 'aiProcessing'; title: string; summary: string }> } | null>(null)
+  const [consentTerms, setConsentTerms] = useState<{ version: string; items: Array<{ id: string; title: string; summary: string }> } | null>(null)
   useEffect(() => {
     if (dialog.kind !== 'onboarding') return
     let active = true
@@ -351,8 +352,11 @@ function PlatformDialog({
     const companyName = String(form.get('companyName') ?? '').trim()
     const adminEmail = String(form.get('adminEmail') ?? '').trim()
     if (!companyName || !adminEmail) return
-    const consents = { dataAccess: form.get('consent-dataAccess') === 'on', privacyOutsourcing: form.get('consent-privacyOutsourcing') === 'on', aiProcessing: form.get('consent-aiProcessing') === 'on' }
-    if (!consents.dataAccess || !consents.privacyOutsourcing || !consents.aiProcessing) { setError('운영사 데이터 접근·개인정보 처리위탁·AI 처리 3항에 모두 동의해야 고객사를 생성할 수 있습니다.'); return }
+    // 서버가 내려준 항목만큼 읽는다. 이름을 세 개 적어 두면 네 번째 항목이 생겨도 모른 채 지나간다.
+    const consents = Object.fromEntries((consentTerms?.items ?? []).map((item) => [item.id, form.get(`consent-${item.id}`) === 'on']))
+    // 필수 항목은 서버 정책이 정한다. 화면이 개수를 세어 두면 항목이 늘 때 조용히 어긋난다.
+    const missing = (consentTerms?.items ?? []).filter((item) => !consents[item.id])
+    if (missing.length) { setError(`필수 동의 항목에 모두 동의해야 고객사를 생성할 수 있습니다: ${missing.map((item) => item.title).join(', ')}`); return }
     setBusy(true); setError('')
     try {
       const result = await createTenant({ consents, consentVersion: consentTerms?.version, companyName, industryType: String(form.get('industryType') ?? 'food_manufacturing') === 'it_services' ? 'it_services' : 'food_manufacturing', industry: String(form.get('industry') ?? '').trim(), plan: String(form.get('plan') ?? 'Growth'), adminName: String(form.get('adminName') ?? '').trim(), adminEmail, targetDate: String(form.get('targetDate') ?? '') })
@@ -423,8 +427,8 @@ function PlatformDialog({
       <header className="pc-modal-head"><div><span className="pc-modal-kicker">{header[0]}</span><h2 id="pc-modal-title">{header[1]}</h2><p>{header[2]}</p></div><button type="button" className="pc-modal-close" aria-label="닫기" onClick={onClose}><X size={19} /></button></header>
       {dialog.kind === 'onboarding' && (provisioned ? <div className="pc-modal-body"><div className="pc-safe-note"><ShieldCheck size={18} /><span><strong>{provisioned.tenant.name}</strong> 테넌트와 관리자 계정이 생성되었습니다.</span></div><div className="pc-detail-grid"><DetailStat label="테넌트 ID" value={provisioned.tenant.id} /><DetailStat label="관리자 이메일" value={provisioned.tenant.adminEmail ?? '—'} /><DetailStat label="초기 비밀번호" value={<span className="pc-code">{provisioned.onboarding.temporaryPassword}</span>} /><DetailStat label="만료 시각" value={formatDateTime(provisioned.onboarding.expiresAt)} /></div><div className="pc-form-note"><AlertTriangle size={17} /><span>초기 비밀번호는 다시 표시되지 않습니다. 관리자에게 안전하게 전달하고 첫 로그인에서 새 비밀번호로 변경하게 하세요.</span></div><div className="pc-modal-actions"><Button tone="primary" type="button" onClick={onClose}>확인</Button></div></div> : <form className="pc-modal-body" onSubmit={submitOnboarding}>
         <div className="pc-form-grid"><label className="pc-field"><span>고객사명</span><input name="companyName" data-autofocus required minLength={2} maxLength={80} placeholder="예: 동해식품" /></label><label className="pc-field"><span>업종 구분</span><select name="industryType" defaultValue="food_manufacturing"><option value="food_manufacturing">식품제조 (제품·재고·공장·판매·식품안전)</option><option value="it_services">IT 서비스 (프로젝트·산출물·계약)</option></select></label><label className="pc-field"><span>업종 설명</span><input name="industry" required maxLength={120} placeholder="예: 수산가공 · 온라인 유통" /></label><label className="pc-field"><span>요금제</span><select name="plan"><option>Growth</option><option>Enterprise</option><option>Starter</option></select></label><label className="pc-field"><span>목표 오픈일</span><input name="targetDate" type="date" required /></label><label className="pc-field"><span>최초 관리자 이름</span><input name="adminName" required minLength={2} maxLength={40} placeholder="예: 홍길동" /></label><label className="pc-field"><span>최초 관리자 이메일</span><input name="adminEmail" type="email" required placeholder="admin@company.co.kr" /></label></div>
-        <fieldset className="pc-consent"><legend>필수 동의 3항 {consentTerms ? <small>약관 버전 {consentTerms.version}</small> : null}</legend>
-          {(consentTerms?.items ?? [{ id: 'dataAccess' as const, title: '운영사의 데이터 접근·활용 범위', summary: '' }, { id: 'privacyOutsourcing' as const, title: '개인정보 처리위탁', summary: '' }, { id: 'aiProcessing' as const, title: 'AI 처리 사실', summary: '' }]).map((item) => <label key={item.id} className="pc-consent-item"><input type="checkbox" name={`consent-${item.id}`} required /><span><strong>{item.title}</strong>{item.summary && <small>{item.summary}</small>}</span></label>)}
+        <fieldset className="pc-consent"><legend>필수 동의 {consentTerms?.items.length ?? 0}항 {consentTerms ? <small>약관 버전 {consentTerms.version}</small> : null}</legend>
+          {(consentTerms?.items ?? []).map((item) => <label key={item.id} className="pc-consent-item"><input type="checkbox" name={`consent-${item.id}`} required /><span><strong>{item.title}</strong>{item.summary && <small>{item.summary}</small>}</span></label>)}
           <p>고객사 대표·관리자에게 내용을 안내하고 동의를 받은 뒤 체크하세요. 동의 일시·버전·동의자(운영자)가 고객사 레코드에 기록됩니다.</p>
         </fieldset>
         <div className="pc-form-note"><ShieldCheck size={17} /><span>고객사별 격리 저장소와 승인된 최초 관리자 계정을 생성합니다. 초기 비밀번호는 72시간 후 만료됩니다.</span></div>
