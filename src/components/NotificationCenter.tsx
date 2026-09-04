@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, BellOff, CheckCircle2, ClipboardCheck, ListChecks, MessageCircle, Radar, Settings2, ShieldAlert, Smartphone } from 'lucide-react'
-import { formatDateTime } from '../utils/dateTime'
+import { formatDateTime, formatListDateTime } from '../utils/dateTime'
 import { Button, IconButton } from './ui/Button'
 import './NotificationCenter.css'
 
@@ -193,7 +193,7 @@ export function NotificationCenter({ workspaceScope, feed, onReload, onNavigate,
           <div>
             <strong>{item.title}</strong>
             {item.body && <p>{item.body}</p>}
-            <small>{feed.types.find((type) => type.id === item.type)?.label ?? item.type} · {formatDateTime(item.createdAt)}</small>
+            <small>{feed.types.find((type) => type.id === item.type)?.label ?? item.type} · {formatListDateTime(item.createdAt)}</small>
           </div>
           <i className="notice-state" aria-hidden="true" />
         </button>

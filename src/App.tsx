@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import AIChat from './components/AIChat'
 import GlobalSearch from './components/GlobalSearch'
+import Toast, { type ToastMessage } from './components/ui/Toast'
 import { MobileMoreSheet, MobileTabBar, MobileTaskList, MobileToday, TODAY_TASK_LIMIT, type MobileTab } from './components/MobileShell'
 import { ChatBubbleIcon, NotificationBellIcon, BrandMark } from './components/AppIcons'
 import { LoginPage, PasswordChangePage, ProfileEditor, SettingsDrawer, type AccentChoice, type EasyModeChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
@@ -1665,7 +1666,16 @@ export default function App() {
   const [workFocusId, setWorkFocusId] = useState<string>()
   const [platformDirectory, setPlatformDirectory] = useState<PlatformDirectoryState>({ tenants: [], supportTickets: [] })
   const [platformRefreshToken, setPlatformRefreshToken] = useState(0)
-  const [toast, setToast] = useState('')
+  const [toastMessage, setToastMessage] = useState<ToastMessage | null>(null)
+  /**
+   * 알림을 낸다. 문자열이면 그대로, 객체면 되돌리기까지 함께 받는다.
+   * 빈 문자열은 예전부터 "닫기"라는 뜻으로 쓰여 왔으므로 그대로 둔다.
+   */
+  const setToast = (value: string | ToastMessage) => {
+    if (typeof value === 'string') { setToastMessage(value ? { text: value } : null); return }
+    setToastMessage(value)
+  }
+  const toast = toastMessage?.text ?? ''
   // 저장소가 읽기 전용으로 기동됐는지(STORE_READ_ONLY) — 모든 화면 상단에 고정 배너로 알린다.
   const [storeStatus, setStoreStatus] = useState<{ kind: string; readOnly: boolean; fallbackReason: string | null } | null>(null)
   const [theme, setTheme] = useState<ThemeChoice>(() => (window.localStorage.getItem('onfactory-theme') as ThemeChoice | null) ?? 'light')
@@ -2145,11 +2155,25 @@ export default function App() {
       return true
     } catch { setToast('반복 업무 서버에 연결할 수 없습니다.'); return false }
   }
+  /**
+   * 반복 규칙 삭제.
+   *
+   * "정말 하시겠습니까?"를 먼저 묻지 않는다. 대부분 그냥 눌리고, 정작 잘못
+   * 눌렀을 때는 아무 도움이 안 된다. 대신 지운 뒤 5초 동안 되돌릴 수 있게 한다 —
+   * 규칙 하나는 통째로 되살릴 수 있으니 이 방식이 실제로 더 안전하다.
+   */
   const deleteWorkRule = async (rule: WorkRule) => {
-    if (!window.confirm(`‘${rule.title}’ 반복 규칙을 삭제할까요? 이미 생성된 업무와 결재 기록은 유지됩니다.`)) return false
     const result = await setWorkRules((current) => current.filter((item) => item.id !== rule.id))
     if (!result.ok) { setToast(result.message || '반복 업무 규칙을 삭제하지 못했습니다.'); return false }
-    setToast('반복 업무 규칙을 삭제했습니다. 이미 생성된 업무는 그대로 유지됩니다.')
+    setToast({
+      text: `‘${rule.title}’ 규칙을 지웠습니다. 이미 만들어진 업무는 그대로 있습니다.`,
+      undo: {
+        run: async () => {
+          const restored = await setWorkRules((current) => (current.some((item) => item.id === rule.id) ? current : [rule, ...current]))
+          setToast(restored.ok ? `‘${rule.title}’ 규칙을 되살렸습니다.` : { text: '되살리지 못했습니다. 다시 만들어 주세요.', tone: 'error' })
+        },
+      },
+    })
     return true
   }
 
@@ -2404,7 +2428,7 @@ export default function App() {
       <WorkspaceNavigationEditor open={navEditorOpen} source={tenantNavSource} preferences={tenantNavPreferences} onChange={setTenantNavPreferences} onClose={() => setNavEditorOpen(false)} />
       {taskDraft !== null && <TaskModal initialText={taskDraft.title} initialDescription={taskDraft.completionCriteria} requesterName={account?.name ?? '사용자'} requesterId={account?.id ?? ''} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} onClose={() => setTaskDraft(null)} onSave={saveTask} />}
       {supportTenant && <SupportSessionModal tenant={supportTenant} tickets={platformTickets} onClose={() => setSupportTenant(null)} onCreate={createPlatformSupportSession} />}
-      {toast && <div className="toast" role="status"><CheckCircle2 size={19} /><span>{toast}</span><button type="button" aria-label="알림 닫기" onClick={() => setToast('')}><X size={16} /></button></div>}
+      {toastMessage && <Toast message={toastMessage} onClose={() => setToastMessage(null)} />}
     </div>
     </IndustryProvider>
   )

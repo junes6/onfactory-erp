@@ -208,6 +208,9 @@ html[data-theme='dark'] .nav-list button.active em { background: var(--color-pri
 .notice-icon.red { color: var(--color-danger); background: var(--color-danger-soft); }
 .notice-icon.amber { color: var(--color-warning-ink); background: var(--amber-soft); }
 .notice-icon.green { color: var(--color-success-ink); background: var(--color-success-soft); }
+/* 파랑·보라 종류가 화면에 있는데 규칙이 없어 회색으로 떨어지고 있었다. */
+.notice-icon.blue { color: var(--color-blue-deep); background: var(--color-blue-soft); }
+.notice-icon.violet { color: var(--color-violet); background: var(--color-violet-soft); }
 .notification-list > button > div { min-width: 0; flex: 1; }
 .notification-list strong { display: block; font-size: var(--font-15); line-height: 1.45; }
 .notification-list p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); line-height: 1.45; }
@@ -3050,3 +3053,8 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
 .search-empty, .search-hint { margin: var(--space-0); padding: var(--space-12) var(--space-8); color: var(--muted); font-size: var(--font-13); }
 .search-hint { padding: var(--space-8); border-top: var(--hairline) solid var(--line); font-size: var(--font-11); text-align: right; }
 .search-popover { max-height: 70vh; overflow-y: auto; }
+
+/* R15-H: 상태 표현 — 저장 상태 줄과 오류 톤 알림 */
+.journal-save-line { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.journal-save-line small { color: var(--muted); font-size: var(--font-11); }
+.toast.is-error { border-color: var(--color-danger-soft); background: var(--color-danger-soft); color: var(--color-danger-ink); }

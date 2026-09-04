@@ -1,0 +1,41 @@
+/* 불러오는 중 · 비어 있음 · 잘못됨 — 화면마다 다르게 그리지 않도록 한 곳에 둔다. */
+
+.ui-skeleton { display: flex; flex-direction: column; gap: var(--space-12); padding: var(--space-8) var(--space-0); }
+.ui-skeleton-row { display: flex; align-items: center; gap: var(--space-12); }
+.ui-skeleton-lines { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-8); }
+.ui-skeleton-block { display: block; border-radius: var(--radius-8); background: var(--color-gray-100); }
+.ui-skeleton-block.is-lead { width: 36px; height: 36px; flex: 0 0 auto; }
+.ui-skeleton-block.is-title { width: 62%; height: 13px; }
+.ui-skeleton-block.is-meta { width: 38%; height: 11px; }
+.ui-skeleton.is-card .ui-skeleton-row { padding: var(--space-16); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.ui-skeleton.is-text .ui-skeleton-block.is-lead { display: none; }
+
+/*
+ * 숨쉬듯 옅어졌다 짙어진다. 흐르는 빛줄기(shimmer)는 눈이 따라가게 만들어
+ * 정작 내용이 들어왔을 때 알아채기 어렵다.
+ */
+@keyframes ui-skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.ui-skeleton-block { animation: ui-skeleton-pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .ui-skeleton-block { animation: none; } }
+
+.ui-empty {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-8);
+  padding: var(--space-32) var(--space-16); text-align: center;
+}
+.ui-empty-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: var(--radius-8); color: var(--muted); background: var(--color-gray-100); }
+.ui-empty strong { font-size: var(--font-15); font-weight: var(--weight-medium); }
+.ui-empty p { margin: var(--space-0); max-width: 380px; color: var(--muted); font-size: var(--font-13); }
+
+.ui-error {
+  display: flex; align-items: center; gap: var(--space-12);
+  padding: var(--space-16); border: var(--hairline) solid var(--color-danger-soft);
+  border-radius: var(--radius-8); background: var(--color-danger-soft);
+}
+.ui-error-icon { display: grid; place-items: center; width: 40px; height: 40px; flex: 0 0 auto; border-radius: var(--radius-8); color: var(--color-danger-ink); background: var(--color-surface); }
+.ui-error > div { flex: 1; min-width: 0; }
+.ui-error strong { display: block; color: var(--color-danger-ink); font-size: var(--font-15); font-weight: var(--weight-medium); }
+.ui-error p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--color-danger-ink); font-size: var(--font-13); }
+
+.ui-save-state { color: var(--muted); font-size: var(--font-11); white-space: nowrap; }
+.ui-save-state.is-dirty { color: var(--color-warning-ink); }
+.ui-save-state.is-error { color: var(--color-danger-ink); }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, MessageSquarePlus, Pin, RotateCcw, Search, Trash2, X } from 'lucide-react'
 import { Button } from './ui/Button'
+import { EmptyState, ErrorState, Skeleton } from './ui/States'
 
 /**
  * AI 대화 목록.
@@ -41,6 +42,7 @@ export default function AIConversationList({ workspaceScope, activeId, onSelect,
   const [trashCount, setTrashCount] = useState(0)
   const [query, setQuery] = useState('')
   const [showTrash, setShowTrash] = useState(false)
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [renaming, setRenaming] = useState('')
   const [draftTitle, setDraftTitle] = useState('')
   const [busy, setBusy] = useState(false)
@@ -54,11 +56,15 @@ export default function AIConversationList({ workspaceScope, activeId, onSelect,
     if (showTrash) params.set('trash', '1')
     try {
       const response = await fetch(`/api/ai/conversations?${params}`, { headers })
-      if (!response.ok) return
+      if (!response.ok) { setLoadState('error'); return }
       const body = await response.json() as { conversations: ConversationSummary[]; trashCount: number }
       setItems(body.conversations ?? [])
       setTrashCount(body.trashCount ?? 0)
-    } catch { /* 목록을 못 읽어도 대화 자체는 계속할 수 있다 */ }
+      setLoadState('ready')
+    } catch {
+      // 목록을 못 읽어도 대화 자체는 계속할 수 있다. 다만 왜 비었는지는 말해 준다.
+      setLoadState('error')
+    }
   }, [workspaceScope, query, showTrash, refreshKey])
 
   useEffect(() => {
@@ -120,10 +126,17 @@ export default function AIConversationList({ workspaceScope, activeId, onSelect,
         </Button>
       )}
 
+      {loadState === 'loading' && items.length === 0 && <Skeleton rows={3} label="지난 대화를 불러오는 중" />}
+      {loadState === 'error' && (
+        <ErrorState title="지난 대화를 불러오지 못했습니다" detail="연결이 끊겼을 수 있습니다. 지금 나누는 대화는 그대로 이어집니다." onRetry={() => { setLoadState('loading'); void load() }} />
+      )}
       <ul className="ai-conversation-items">
-        {items.length === 0 && (
-          <li className="ai-conversation-empty">
-            {showTrash ? '휴지통이 비어 있습니다.' : query ? '찾는 대화가 없습니다.' : '아직 대화가 없습니다. 새 대화로 시작하세요.'}
+        {loadState === 'ready' && items.length === 0 && (
+          <li>
+            <EmptyState
+              title={showTrash ? '휴지통이 비어 있습니다' : query ? '찾는 대화가 없습니다' : '아직 대화가 없습니다'}
+              description={showTrash ? '지운 대화는 30일 동안 여기 머뭅니다.' : query ? '낱말을 줄이면 더 넓게 찾습니다.' : '새 대화를 눌러 시작하세요. 물어본 것은 이 계정에 그대로 남습니다.'}
+            />
           </li>
         )}
         {items.map((item) => (

@@ -153,3 +153,32 @@ export function formatWorkDue(value: DateValue, now = new Date()) {
 export function formatWorkRuleRun(nextRun: string, dueTime: string) {
   return formatWorkDue(`${nextRun}T${dueTime || '00:00'}:00`)
 }
+
+/**
+ * 목록에서 쓰는 짧은 날짜.
+ *
+ * 사람은 "오늘 14:30"을 볼 때 날짜를 읽지 않는다. 그래서 오늘이면 시각만,
+ * 어제면 "어제"를 붙이고, 그보다 오래되면 날짜만 남긴다. 해가 넘어가면
+ * 연도를 붙인다 — 연도가 없으면 작년 8월 25일과 올해 8월 25일이 같아 보인다.
+ *
+ *   오늘      → 14:30
+ *   어제      → 어제 14:30
+ *   올해      → 8.25
+ *   지난해    → 2025.8.25
+ */
+export function formatListDateTime(value: DateValue, now = new Date(), fallback = '—') {
+  const iso = toIsoUtc(value, now)
+  if (!iso) return typeof value === 'string' && value.trim() ? value : fallback
+  const target = new Date(iso)
+  const { year, month, day, hour, minute } = seoulParts(target)
+  const todayKey = seoulDateKey(now)
+  const targetKey = `${year}-${month}-${day}`
+
+  if (targetKey === todayKey) return `${hour}:${minute}`
+  if (targetKey === shiftDateKey(todayKey, -1)) return `어제 ${hour}:${minute}`
+
+  const thisYear = todayKey.slice(0, 4)
+  const shortMonth = String(Number(month))
+  const shortDay = String(Number(day))
+  return year === thisYear ? `${shortMonth}.${shortDay}` : `${year}.${shortMonth}.${shortDay}`
+}

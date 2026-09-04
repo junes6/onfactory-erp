@@ -40,7 +40,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, ReactNode } from 'react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
-import { formatDateLabel, formatDateTime, formatShortDateTime, formatYearMonthLabel, seoulDateInputValue } from '../utils/dateTime'
+import { SaveState } from './ui/States'
+import { formatDateLabel, formatDateTime, formatListDateTime, formatShortDateTime, formatYearMonthLabel, seoulDateInputValue } from '../utils/dateTime'
 import { dayKind, holidayName, type DayKind } from '../utils/koreanHolidays'
 import {
   canApplyGeneratedJournalDraft,
@@ -1767,6 +1768,8 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState('')
   const [aiDraftBusy, setAiDraftBusy] = useState(false)
   const [autoSaveMessage, setAutoSaveMessage] = useState('30초마다 변경사항을 자동 임시저장합니다.')
+  /** 마지막으로 저장된 시각. 자동 저장이 조용하기만 하면 사용자가 창을 닫지 못한다. */
+  const [lastSavedAt, setLastSavedAt] = useState('')
   const [journalManualSaving, setJournalManualSaving] = useState(false)
   const [completedBlocks, setCompletedBlocks] = useState<string[]>([''])
   const [issueBlocks, setIssueBlocks] = useState<string[]>([])
@@ -2184,6 +2187,7 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
       markJournalDirty(false)
       setEditor(saved)
       setAutoSaveMessage(`${formatShortDateTime(saved.updatedAt)} 자동 저장됨`)
+      setLastSavedAt(formatListDateTime(saved.updatedAt))
       const cleanup = await deleteDocumentAttachments(removedDocumentIds, workspaceScope)
       if (cleanup.failed.length) setSaveError(`자동 저장은 완료했지만 제거한 첨부 ${cleanup.failed.length}개의 원본 정리가 필요합니다.`)
       return true
@@ -2754,7 +2758,10 @@ export function DailyJournalPage({ onToast, currentUserId, currentUserName, curr
           <footer className="journal-editor-footer">
             {canEdit ? (
               <>
-                <span>{autoSaveMessage}</span>
+                <span className="journal-save-line">
+                  <SaveState status={journalSaving ? 'saving' : journalDirty ? 'dirty' : lastSavedAt ? 'saved' : 'idle'} savedAt={lastSavedAt} />
+                  <small>{autoSaveMessage}</small>
+                </span>
                 <div>
                   {editor.status === '임시저장' && <Button tone="danger" type="button" onClick={() => void deleteJournalDraft()} disabled={journalSaving || attachmentBusy}><Trash2 size={18} /> 초안 삭제</Button>}
                   <Button tone="ghost" type="button" onClick={saveDraft} disabled={journalSaving || attachmentBusy}><Save size={18} /> {journalSaving ? '저장 중…' : '임시저장'}</Button>
