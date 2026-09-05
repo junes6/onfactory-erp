@@ -37,6 +37,8 @@ export type WorkCompletion = {
   submittedAt: string
   submittedById: string
   submittedByName: string
+  /** 제출자 역할 스탬프. 'tenant-guest'면 외부 게스트가 낸 완료 보고라 화면이 배지를 붙인다. */
+  submittedByRole?: string
 }
 
 export type WorkReview = {
@@ -72,6 +74,8 @@ export type WorkItem = {
   createdAt?: string
   /** 이 업무가 어디서 비롯됐는지. 사람이 직접 만든 업무에는 없다. */
   origin?: { kind: string; label?: string; detail?: string; page?: string; focusId?: string }
+  /** 프로젝트 귀속. 외부 게스트를 담당자로 두는 업무는 반드시 초대 범위 안의 프로젝트에 묶인다. */
+  projectId?: string
 }
 
 export type WorkRule = {

@@ -81,7 +81,20 @@ type CurrentUserProps = {
   workspaceScope?: string
 }
 
-type MessengerDrawerProps = OverlayProps & CurrentUserProps
+/** 게스트 화면이 넘겨 주는 로스터 항목. /api/projects 응답의 directory(보이는 프로젝트 멤버만)와 같은 모양이다. */
+export type MessengerRosterEntry = { id: string; name: string; team?: string; jobRole?: string; kind?: 'employee' | 'guest' }
+
+type MessengerDrawerProps = OverlayProps & CurrentUserProps & {
+  /**
+   * 있으면 /api/directory를 부르지 않고 이 목록을 쓴다. 게스트 세션에서는 전 직원 목록 조회가
+   * 서버 게이트에 막히고, 막히지 않더라도 외부인에게 직원 명단을 내려 줄 이유가 없다.
+   */
+  rosterOverride?: MessengerRosterEntry[]
+  /** 새 대화·그룹방 만들기·참여자 관리·나가기·삭제·수정·고정을 감춘다. 게스트는 참여 중인 방에서 읽고 쓰기만 한다. */
+  readOnlyRooms?: boolean
+  /** 오버레이가 아니라 화면 안에 그대로 그린다(게스트 채널 탭). 배경 스크림·닫기 버튼·초점 가두기가 빠진다. */
+  embedded?: boolean
+}
 
 type PageProps = CurrentUserProps & {
   onToast: ToastHandler
@@ -181,7 +194,8 @@ type Person = {
   name: string
   team: string
   role: string
-  status: 'online' | 'away' | 'offline'
+  /** 접속 상태. 프로젝트 로스터(rosterOverride)에서 온 사람은 상태를 모르므로 비워 두고, 점도 그리지 않는다. */
+  status?: 'online' | 'away' | 'offline'
   system?: boolean
   /** 비활성(퇴사) 계정. 기록은 남기되 새 대화 상대로는 고르지 않는다. */
   active?: boolean
@@ -257,8 +271,12 @@ export function MessengerDrawer({
   currentUserTeam,
   canManage,
   workspaceScope,
+  rosterOverride,
+  readOnlyRooms = false,
+  embedded = false,
 }: MessengerDrawerProps) {
-  const overlayRef = useOverlayFocus(open, onClose)
+  // 화면 안에 박힌 채널 탭은 대화상자가 아니다. 초점을 가두면 위의 탭 버튼으로 나갈 수 없다.
+  const overlayRef = useOverlayFocus(open && !embedded, onClose)
   const [conversations, setConversations] = useWorkspaceState<Conversation[]>('messenger-conversations', [], { scope: workspaceScope, seedWhenEmpty: false })
   const [directory, setDirectory] = useState<Person[]>([])
   const [selectedId, setSelectedId] = useState('')
@@ -445,6 +463,11 @@ export function MessengerDrawer({
 
   useEffect(() => {
     if (!open) return
+    if (rosterOverride) {
+      // 게스트: 보이는 프로젝트의 멤버만. 상태 점은 모르니 비워 두고, 게스트 자신은 역할 라벨로 구분한다.
+      setDirectory(rosterOverride.map((entry) => ({ id: entry.id, accountId: entry.id, name: entry.name, team: entry.team || '', role: entry.kind === 'guest' ? '게스트' : entry.jobRole || '' })))
+      return
+    }
     let active = true
     fetch('/api/directory')
       .then(async (response) => {
@@ -457,7 +480,7 @@ export function MessengerDrawer({
       })
       .catch(() => undefined)
     return () => { active = false }
-  }, [open])
+  }, [open, rosterOverride])
 
   const messengerRefreshRef = useRef<(() => void) | null>(null)
   useEffect(() => {
@@ -728,36 +751,36 @@ export function MessengerDrawer({
   }
 
   return (
-    <div className="collab-overlay messenger-overlay">
-      <button className="collab-overlay-backdrop" type="button" aria-label="메신저 닫기" onClick={onClose} />
+    <div className={'collab-overlay messenger-overlay' + (embedded ? ' is-embedded' : '')}>
+      {!embedded && <button className="collab-overlay-backdrop" type="button" aria-label="메신저 닫기" onClick={onClose} />}
       <div
         id="company-messenger"
         ref={overlayRef}
-        className={'messenger-drawer ' + (mobilePane === 'list' ? 'show-list' : 'show-chat')}
-        role="dialog"
-        aria-modal="true"
+        className={'messenger-drawer ' + (mobilePane === 'list' ? 'show-list' : 'show-chat') + (embedded ? ' is-embedded' : '')}
+        role={embedded ? 'region' : 'dialog'}
+        aria-modal={embedded ? undefined : true}
         aria-labelledby="messenger-title"
       >
         <header className="messenger-header">
           <div>
-            <span className="collab-kicker">INTERNAL MESSENGER</span>
-            <h2 id="messenger-title">사내 메신저</h2>
+            <span className="collab-kicker">{readOnlyRooms ? 'PROJECT CHANNELS' : 'INTERNAL MESSENGER'}</span>
+            <h2 id="messenger-title">{readOnlyRooms ? '프로젝트 채널' : '사내 메신저'}</h2>
           </div>
           <div className="messenger-header-actions">
-            <span className="messenger-unread-summary">{currentUserTeam} · {canManage ? '관리자' : '직원'} · 읽지 않음 {unreadTotal}개</span>
-            <button type="button" aria-label="메신저 닫기" onClick={onClose}><X size={22} /></button>
+            <span className="messenger-unread-summary">{currentUserTeam} · {readOnlyRooms ? '게스트' : canManage ? '관리자' : '직원'} · 읽지 않음 {unreadTotal}개</span>
+            {!embedded && <button type="button" aria-label="메신저 닫기" onClick={onClose}><X size={22} /></button>}
           </div>
         </header>
 
         <div className="messenger-layout">
           <aside className="messenger-sidebar" aria-label="대화 목록">
             <div className="messenger-sidebar-tools">
-              <Button tone="primary" full
+              {!readOnlyRooms && <Button tone="primary" full
                 type="button"
                 onClick={() => { setListMode('people'); setQuery('') }}
               >
                 <UserPlus size={18} /> 새 대화
-              </Button>
+              </Button>}
               <label className="collab-search messenger-search">
                 <Search size={18} aria-hidden="true" />
                 <span className="sr-only">대화 또는 직원 검색</span>
@@ -773,8 +796,8 @@ export function MessengerDrawer({
 
             <div className="messenger-list-tabs" role="tablist" aria-label="대화 목록 구분">
               <button type="button" role="tab" aria-selected={listMode === 'recent'} onClick={() => setListMode('recent')}>최근</button>
-              <button type="button" role="tab" aria-selected={listMode === 'teams'} onClick={() => setListMode('teams')}>팀</button>
-              <button type="button" role="tab" aria-selected={listMode === 'people'} onClick={() => setListMode('people')}>직원</button>
+              <button type="button" role="tab" aria-selected={listMode === 'teams'} onClick={() => setListMode('teams')}>{readOnlyRooms ? '채널' : '팀'}</button>
+              {!readOnlyRooms && <button type="button" role="tab" aria-selected={listMode === 'people'} onClick={() => setListMode('people')}>직원</button>}
             </div>
 
             <div className="messenger-conversation-list">
@@ -792,8 +815,8 @@ export function MessengerDrawer({
               ) : (
                 <>
                   <div className="messenger-list-label">
-                    <span>{listMode === 'teams' ? '팀 대화' : '최근 대화'} {filteredConversations.length}개</span>
-                    <Button tone="quiet" size="sm" onClick={() => setGroupDialog('create')}><Plus size={15} /> 새 그룹방</Button>
+                    <span>{listMode === 'teams' ? readOnlyRooms ? '프로젝트 채널' : '팀 대화' : '최근 대화'} {filteredConversations.length}개</span>
+                    {!readOnlyRooms && <Button tone="quiet" size="sm" onClick={() => setGroupDialog('create')}><Plus size={15} /> 새 그룹방</Button>}
                   </div>
                   {filteredConversations.map((conversation) => (
                     <button
@@ -836,7 +859,7 @@ export function MessengerDrawer({
                   <button type="button" aria-label="대화방 관리" aria-expanded={showConversationMenu} onClick={() => setShowConversationMenu((current) => !current)}><MoreHorizontal size={20} /></button>
                   {showConversationMenu && (
                     <div className="messenger-room-menu">
-                      {activeConversation.kind === 'group' && (activeConversation.ownerId === currentUserId || canManage) && (
+                      {!readOnlyRooms && activeConversation.kind === 'group' && (activeConversation.ownerId === currentUserId || canManage) && (
                         <button type="button" onClick={() => { setGroupDialog('manage'); setShowConversationMenu(false) }}><Users size={17} /> 방 이름·참여자 관리</button>
                       )}
                       {/*
@@ -860,8 +883,9 @@ export function MessengerDrawer({
                           ))}
                         </div>
                       </div>
-                      <button type="button" onClick={() => { setConversationAction('leave'); setShowConversationMenu(false) }}><LogOut size={17} /> 대화방 나가기</button>
-                      {canManage && <button className="danger" type="button" onClick={() => { setConversationAction('delete'); setShowConversationMenu(false) }}><Trash2 size={17} /> 대화방 삭제</button>}
+                      {/* 게스트의 참여는 초대한 회사가 범위로 정한다. 스스로 나가거나 방을 지우는 길은 두지 않는다. */}
+                      {!readOnlyRooms && <button type="button" onClick={() => { setConversationAction('leave'); setShowConversationMenu(false) }}><LogOut size={17} /> 대화방 나가기</button>}
+                      {!readOnlyRooms && canManage && <button className="danger" type="button" onClick={() => { setConversationAction('delete'); setShowConversationMenu(false) }}><Trash2 size={17} /> 대화방 삭제</button>}
                     </div>
                   )}
                 </div>
@@ -888,7 +912,7 @@ export function MessengerDrawer({
                         <strong>{item.senderName}</strong>
                         <span>{item.text.length > 70 ? `${item.text.slice(0, 69)}…` : item.text}</span>
                       </button>
-                      <IconButton tone="quiet" size="sm" aria-label="고정 해제" onClick={() => togglePin(item.id, false)}><PinOff size={14} /></IconButton>
+                      {!readOnlyRooms && <IconButton tone="quiet" size="sm" aria-label="고정 해제" onClick={() => togglePin(item.id, false)}><PinOff size={14} /></IconButton>}
                     </li>
                   ))}
                 </ul>
@@ -959,8 +983,9 @@ export function MessengerDrawer({
                       </div>
                       {!removed && editing?.id !== item.id && (
                         <MessageActionBar
-                          canEdit={mine}
-                          canDelete={mine || canManage || selectedConversation.ownerId === currentUserId}
+                          canEdit={mine && !readOnlyRooms}
+                          canDelete={(mine || canManage || selectedConversation.ownerId === currentUserId) && !readOnlyRooms}
+                          canPin={!readOnlyRooms}
                           pinned={pinned}
                           onReply={() => { setReplyTo(item); composerRef.current?.focus() }}
                           onReact={(emoji) => toggleReaction(item.id, emoji)}

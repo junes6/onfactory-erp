@@ -990,6 +990,8 @@ html[data-theme='dark'] {
 .task-modal .form-field em { color: var(--danger); font-style: normal; }
 .task-required-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: var(--space-12); }
 .task-required-fields .full { grid-column: 1 / -1; }
+/* 게스트 담당자를 골랐을 때만 나타나는 프로젝트 필수 안내 */
+.task-guest-note { color: var(--muted); font-size: var(--font-13); line-height: 1.5; }
 .task-optional-fields { margin-top: var(--space-4); border-top: var(--hairline) solid var(--line); }
 .task-optional-fields > summary { min-height: 46px; display: flex; align-items: center; gap: var(--space-8); color: var(--ink); font-size: var(--font-15); font-weight: var(--weight-medium); cursor: pointer; list-style: none; }
 .task-optional-fields > summary::-webkit-details-marker { display: none; }

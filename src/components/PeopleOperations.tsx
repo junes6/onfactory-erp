@@ -9,7 +9,9 @@ import { PerformanceReports } from './PerformanceReports'
 import { AttendancePanel } from './AttendancePanel'
 import { BarChart3 } from 'lucide-react'
 import { formatDateLabel, formatDateTime, seoulDateInputValue } from '../utils/dateTime'
-import './PeopleOperations.css'import { Button, IconButton } from './ui/Button'
+import './PeopleOperations.css'
+import { Button, IconButton } from './ui/Button'
+import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import { OversightPanel } from './OversightPanel'
 import { BRAND } from '../brand'
 
@@ -110,7 +112,35 @@ type MemberProfile = {
   email?: string
 }
 
-type PeopleModal = 'leave' | 'invite' | 'adjust' | 'profile' | 'credential'
+type PeopleModal = 'leave' | 'invite' | 'adjust' | 'profile' | 'credential' | 'guest-invite' | 'guest-scope'
+
+/** 외부 게스트 grant — GET /api/admin/guests 한 행. projects는 서버가 이름을 조인해 준 것이고, 없으면 projectIds로 그린다. */
+type GuestStatus = 'invited' | 'active' | 'inactive' | 'revoked' | 'expired'
+type GuestGrant = {
+  id: string
+  accountId: string
+  email: string
+  name: string
+  orgName: string
+  projectIds: string[]
+  projects?: Array<{ id: string; name: string }>
+  status: GuestStatus
+  tokenExpiresAt?: string | null
+  accessExpiresAt?: string | null
+  invitedByName?: string
+  lastActivityAt?: string | null
+  commentCount?: number
+  attachmentCount?: number
+  resendCount?: number
+  createdAt?: string
+  acceptedAt?: string | null
+}
+/** 초대 결과. delivery가 'link-only'면 메일 어댑터가 없어 관리자가 링크를 직접 전달해야 한다. */
+type GuestInvitation = { url: string; expiresAt: string; delivery: 'sent' | 'link-only' }
+type GuestProjectOption = { id: string; name: string; status?: string }
+
+const guestStatusLabel: Record<GuestStatus, string> = { invited: '초대 대기', active: '활성', inactive: '비활성', revoked: '해지', expired: '만료' }
+const guestStatusTone: Record<GuestStatus, StatusBadgeTone> = { invited: 'warning', active: 'success', inactive: 'neutral', revoked: 'danger', expired: 'danger' }
 
 const emptyLeaveManagement: LeaveManagementState = {
   policy: { mode: 'yearly', annualDays: 15, monthlyDays: 1, carryOverLimit: 5, renewalDate: '01-01' },
@@ -189,6 +219,15 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
   const [modal, setModal] = useState<PeopleModal | null>(null)
   const [selectedProfile, setSelectedProfile] = useState<MemberProfile | null>(null)
   const [operatorAccessLog, setOperatorAccessLog] = useState<Array<{ id: string; at: string; event: string; scope: string; actor: string; reference?: string }>>([])
+  // 외부 게스트 — 목록·진행 중인 행·초대 결과 카드·범위 변경 대상. 프로젝트 목록은 모달을 열 때 한 번만 읽는다.
+  const [guests, setGuests] = useState<GuestGrant[]>([])
+  const [guestsState, setGuestsState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [guestBusyId, setGuestBusyId] = useState('')
+  const [guestInviting, setGuestInviting] = useState(false)
+  const [guestInvitation, setGuestInvitation] = useState<{ guest: GuestGrant; invitation: GuestInvitation } | null>(null)
+  const [guestScopeTarget, setGuestScopeTarget] = useState<GuestGrant | null>(null)
+  const [guestProjectOptions, setGuestProjectOptions] = useState<GuestProjectOption[] | null>(null)
+  const [guestProjectPick, setGuestProjectPick] = useState<string[]>([])
   const modalRef = useRef<HTMLElement>(null)
   const modalTriggerRef = useRef<HTMLButtonElement | null>(null)
 
@@ -211,6 +250,8 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
     setEditingLeaveId(null)
     setSelectedProfile(null)
     setIssuedCredential(null)
+    setGuestInvitation(null)
+    setGuestScopeTarget(null)
   }
 
   useEffect(() => {
@@ -256,6 +297,34 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       .catch(() => { if (active) setOperatorAccessLog([]) })
     return () => { active = false }
   }, [canManage, tab])
+
+  const loadGuests = async () => {
+    setGuestsState((current) => current === 'ready' ? current : 'loading')
+    try {
+      const response = await fetch('/api/admin/guests', { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+      const body = await response.json() as { guests?: GuestGrant[]; error?: { message?: string } }
+      if (!response.ok) throw new Error(body.error?.message || '게스트 목록을 불러오지 못했습니다.')
+      setGuests(Array.isArray(body.guests) ? body.guests : [])
+      setGuestsState('ready')
+    } catch { setGuestsState('error') }
+  }
+
+  useEffect(() => {
+    if (!canManage || tab !== 'accounts') return
+    void loadGuests()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManage, tab, workspaceScope])
+
+  useEffect(() => {
+    // 프로젝트 다중 선택지는 게스트 모달을 열 때만 필요하다. 인사 화면 진입마다 읽지 않는다.
+    if ((modal !== 'guest-invite' && modal !== 'guest-scope') || guestProjectOptions !== null) return
+    let active = true
+    fetch('/api/projects', { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+      .then(async (response) => response.ok ? response.json() as Promise<{ projects?: GuestProjectOption[] }> : { projects: [] })
+      .then((body) => { if (active) setGuestProjectOptions((body.projects ?? []).filter((project) => project.status !== 'archived').map((project) => ({ id: project.id, name: project.name }))) })
+      .catch(() => { if (active) setGuestProjectOptions([]) })
+    return () => { active = false }
+  }, [modal, guestProjectOptions, workspaceScope])
 
   useEffect(() => {
     if (!canManage) {
@@ -644,6 +713,126 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
     }
   }
 
+  /** 게스트 라우트 호출 공통. 성공하면 목록을 다시 읽어 서버가 계산한 상태를 그대로 보여 준다. */
+  const callGuestRoute = async <T,>(path: string, init: RequestInit, failure: string): Promise<T | null> => {
+    try {
+      const response = await fetch(`/api/admin/guests${path}`, {
+        ...init,
+        headers: { ...(init.body ? { 'content-type': 'application/json' } : {}), ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}) },
+      })
+      const body = await response.json().catch(() => null) as (T & { error?: { message?: string } }) | null
+      if (!response.ok) { onToast(body?.error?.message ?? failure); return null }
+      await loadGuests()
+      return body
+    } catch { onToast('서버에 연결하지 못했습니다.'); return null }
+  }
+
+  const openGuestInvite = (trigger: HTMLButtonElement) => {
+    setGuestInvitation(null)
+    setGuestProjectPick([])
+    openModal('guest-invite', trigger)
+  }
+  const openGuestScope = (guest: GuestGrant, trigger: HTMLButtonElement) => {
+    setGuestScopeTarget(guest)
+    setGuestProjectPick(guest.projectIds ?? [])
+    openModal('guest-scope', trigger)
+  }
+  const toggleGuestProject = (id: string) => setGuestProjectPick((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])
+
+  const submitGuestInvite = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!canManage || guestInviting) return
+    if (guestProjectPick.length === 0) { onToast('게스트가 볼 프로젝트를 하나 이상 골라 주세요.'); return }
+    const form = new FormData(event.currentTarget)
+    const accessExpiresAt = String(form.get('accessExpiresAt') || '')
+    setGuestInviting(true)
+    const body = await callGuestRoute<{ guest?: GuestGrant; invitation?: GuestInvitation }>('', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: String(form.get('name') || '').trim(),
+        email: String(form.get('email') || '').trim(),
+        orgName: String(form.get('orgName') || '').trim(),
+        projectIds: guestProjectPick,
+        inviteExpiresInDays: Math.min(30, Math.max(1, Number(form.get('inviteExpiresInDays') || 7))),
+        ...(accessExpiresAt ? { accessExpiresAt: new Date(`${accessExpiresAt}T23:59:59+09:00`).toISOString() } : {}),
+      }),
+    }, '게스트 초대를 저장하지 못했습니다.')
+    setGuestInviting(false)
+    if (!body?.guest || !body.invitation) return
+    // 모달을 닫지 않는다 — 링크를 복사해 전달하는 일이 아직 남았다.
+    setGuestInvitation({ guest: body.guest, invitation: body.invitation })
+    onToast(body.invitation.delivery === 'sent' ? '초대 메일을 보냈습니다.' : '초대를 만들었습니다. 링크를 복사해 전달해 주세요.')
+  }
+
+  const resendGuestInvite = async (guest: GuestGrant, trigger: HTMLButtonElement) => {
+    if (guestBusyId) return
+    setGuestBusyId(guest.id)
+    const body = await callGuestRoute<{ guest?: GuestGrant; invitation?: GuestInvitation }>(`/${encodeURIComponent(guest.id)}/resend`, { method: 'POST' }, '초대를 재발송하지 못했습니다.')
+    setGuestBusyId('')
+    if (!body?.invitation) return
+    setGuestInvitation({ guest: body.guest ?? guest, invitation: body.invitation })
+    setGuestProjectPick(guest.projectIds ?? [])
+    openModal('guest-invite', trigger)
+    onToast(body.invitation.delivery === 'sent' ? '초대 메일을 다시 보냈습니다. 이전 링크는 더 쓸 수 없습니다.' : '새 초대 링크를 만들었습니다. 이전 링크는 더 쓸 수 없습니다.')
+  }
+
+  const revokeGuestInvitation = async (guest: GuestGrant) => {
+    if (guestBusyId || !window.confirm(`${guest.name}님에게 보낸 초대 링크를 회수할까요? 링크로 더 들어올 수 없게 됩니다.`)) return
+    setGuestBusyId(guest.id)
+    const body = await callGuestRoute<{ guest?: GuestGrant }>(`/${encodeURIComponent(guest.id)}/revoke-invitation`, { method: 'POST' }, '초대 링크를 회수하지 못했습니다.')
+    setGuestBusyId('')
+    if (body) onToast('초대 링크를 회수했습니다.')
+  }
+
+  const submitGuestScope = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!guestScopeTarget || guestBusyId) return
+    if (guestProjectPick.length === 0) { onToast('프로젝트를 하나 이상 남겨 두어야 합니다. 전부 빼려면 해지를 사용하세요.'); return }
+    const form = new FormData(event.currentTarget)
+    const accessExpiresAt = String(form.get('accessExpiresAt') || '')
+    setGuestBusyId(guestScopeTarget.id)
+    const body = await callGuestRoute<{ guest?: GuestGrant }>(`/${encodeURIComponent(guestScopeTarget.id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        projectIds: guestProjectPick,
+        accessExpiresAt: accessExpiresAt ? new Date(`${accessExpiresAt}T23:59:59+09:00`).toISOString() : null,
+        orgName: String(form.get('orgName') || '').trim(),
+        name: String(form.get('name') || '').trim(),
+      }),
+    }, '게스트 범위를 저장하지 못했습니다.')
+    setGuestBusyId('')
+    if (!body) return
+    closeModal()
+    onToast('게스트 범위를 바꿨습니다. 빠진 프로젝트의 멤버·채널에서도 제외됩니다.')
+  }
+
+  const setGuestStatus = async (guest: GuestGrant, status: 'inactive' | 'active') => {
+    if (guestBusyId) return
+    if (status === 'inactive' && !window.confirm(`${guest.name}님의 접근을 비활성화할까요? 로그인 세션이 모두 끊기고, 재활성하기 전까지 들어올 수 없습니다.`)) return
+    setGuestBusyId(guest.id)
+    const body = await callGuestRoute<{ guest?: GuestGrant }>(`/${encodeURIComponent(guest.id)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, '게스트 상태를 바꾸지 못했습니다.')
+    setGuestBusyId('')
+    if (body) onToast(status === 'inactive' ? '게스트를 비활성화했습니다.' : '게스트를 다시 활성화했습니다.')
+  }
+
+  const revokeGuest = async (guest: GuestGrant) => {
+    if (guestBusyId || !window.confirm(`${guest.name}님(${guest.orgName})의 게스트 접근을 해지할까요?\n\n모든 프로젝트 멤버·채널에서 빠지고 다시 로그인할 수 없습니다. 댓글·첨부 기록은 감사 추적을 위해 남습니다. 되돌릴 수 없습니다.`)) return
+    setGuestBusyId(guest.id)
+    const body = await callGuestRoute<{ guest?: GuestGrant; ok?: boolean }>(`/${encodeURIComponent(guest.id)}`, { method: 'DELETE' }, '게스트를 해지하지 못했습니다.')
+    setGuestBusyId('')
+    if (body) onToast('게스트 접근을 해지했습니다.')
+  }
+
+  const copyInviteLink = (url: string) => {
+    void navigator.clipboard.writeText(url)
+      .then(() => onToast('초대 링크를 클립보드에 복사했습니다.'))
+      .catch(() => onToast('자동 복사에 실패했습니다. 화면의 링크를 직접 복사해 주세요.'))
+  }
+
+  const guestProjectNames = (guest: GuestGrant) => guest.projects?.length
+    ? guest.projects.map((project) => project.name)
+    : (guest.projectIds ?? []).map((id) => guestProjectOptions?.find((project) => project.id === id)?.name ?? id)
+
   return <div className="content-page people-operations-page">
     <header className="page-header">
       <div><span className="eyebrow">PEOPLE & ACCESS</span><h1>{canManage ? '인사 · 조직' : '내 휴가 · 근태'}</h1><p>{canManage ? '구성원, 휴가, 계정 권한을 같은 승인 흐름으로 안전하게 관리합니다.' : `${currentUserTeam} 소속 내 휴가 신청과 결재 상태만 안전하게 확인합니다.`}</p></div>
@@ -747,6 +936,37 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
         {request.status === '승인대기' ? <div className="approval-actions"><Button tone="danger" size="sm" type="button" onClick={(event) => void decideAccount(request.id, '반려', event.currentTarget)}>반려</Button><Button tone="primary" size="sm" type="button" onClick={(event) => void decideAccount(request.id, '활성', event.currentTarget)}><UserCheck size={16} /> 승인</Button></div> : request.status === '활성' ? <div className="account-credential-actions"><span className="approval-result"><ShieldCheck size={17} />{request.onboardingStatus === '설정완료' ? '로그인 가능' : '초기 설정 대기'}</span><Button tone="ghost" size="sm" type="button" disabled={credentialIssuingId === request.id} onClick={(event) => void reissueCredential(request, event.currentTarget)}><RefreshCw size={15} />{credentialIssuingId === request.id ? '발급 중…' : '비밀번호 재설정 발급'}</Button></div> : <span className="approval-result"><ShieldCheck size={17} />접근 불가</span>}
       </article>)}</div>
       <div className="account-safety-note"><AlertTriangle size={19} /><div><strong>초기 비밀번호는 승인 또는 재발급 직후 한 번만 표시됩니다.</strong><p>72시간 후 만료되며 첫 로그인에서 새 비밀번호를 설정하기 전에는 업무 데이터에 접근할 수 없습니다.</p></div></div>
+      {/*
+        외부 게스트는 직원 계정 목록(/api/admin/accounts)에 섞지 않는다. 승인 흐름이 다르고(링크로 스스로 비밀번호 설정),
+        보이는 범위가 프로젝트 단위라서 같은 줄에 두면 "직원 한 명"으로 읽힌다.
+      */}
+      <section className="guest-admin-section" aria-labelledby="guest-admin-title">
+        <div className="people-subsection-head"><div><h3 id="guest-admin-title">외부 게스트</h3><p>거래처 담당자를 초대된 프로젝트의 업무·채널·자료·게시판에만 들여보냅니다. 그 밖의 회사 데이터는 존재조차 보이지 않습니다.</p></div><Button tone="secondary" type="button" onClick={(event) => openGuestInvite(event.currentTarget)}><UserPlus size={17} /> 게스트 초대</Button></div>
+        {guestsState === 'loading' && <div className="people-empty-state"><Users size={22} /><strong>게스트 목록을 불러오는 중</strong></div>}
+        {guestsState === 'error' && <div className="people-empty-state"><AlertTriangle size={22} /><strong>게스트 목록을 불러오지 못했습니다.</strong><span>서버가 준비되면 다시 시도해 주세요.</span><Button tone="ghost" size="sm" type="button" onClick={() => void loadGuests()}>다시 시도</Button></div>}
+        {guestsState === 'ready' && guests.length === 0 && <div className="people-empty-state"><Users size={22} /><strong>초대한 게스트가 없습니다</strong><span>게스트 초대에서 거래처 담당자에게 프로젝트 범위를 정해 링크를 보낼 수 있습니다.</span></div>}
+        {guestsState === 'ready' && guests.length > 0 && <div className="guest-admin-list" role="list">{guests.map((guest) => {
+          const busy = guestBusyId === guest.id
+          const names = guestProjectNames(guest)
+          return <article className="guest-admin-row" role="listitem" key={guest.id}>
+            <span className="person-avatar">{guest.name.slice(0, 1)}</span>
+            <div className="guest-admin-main">
+              <div><strong>{guest.name}</strong><span>{guest.orgName || '거래처 미입력'} · {guest.email}</span></div>
+              <div className="guest-project-chips">{names.length === 0 ? <StatusBadge className="status-pill" tone="neutral">프로젝트 없음</StatusBadge> : names.map((name) => <StatusBadge className="status-pill" tone="info" key={name}>{name}</StatusBadge>)}</div>
+              <small>{guest.lastActivityAt ? `마지막 활동 ${formatDateTime(guest.lastActivityAt)}` : '아직 활동 없음'}{guest.accessExpiresAt ? ` · ${formatDateLabel(guest.accessExpiresAt, true, false)}까지` : ''}{typeof guest.commentCount === 'number' ? ` · 댓글 ${guest.commentCount}` : ''}{typeof guest.attachmentCount === 'number' ? ` · 첨부 ${guest.attachmentCount}` : ''}</small>
+            </div>
+            <StatusBadge className="status-pill" dot tone={guestStatusTone[guest.status] ?? 'neutral'}>{guestStatusLabel[guest.status] ?? guest.status}</StatusBadge>
+            <div className="guest-actions">
+              {guest.status === 'invited' && <><Button tone="quiet" size="sm" type="button" disabled={busy} onClick={(event) => void resendGuestInvite(guest, event.currentTarget)}><RefreshCw size={15} /> 재발송·링크</Button><Button tone="quiet" size="sm" type="button" disabled={busy} onClick={() => void revokeGuestInvitation(guest)}><XCircle size={15} /> 초대 회수</Button></>}
+              {guest.status !== 'revoked' && <Button tone="quiet" size="sm" type="button" disabled={busy} onClick={(event) => openGuestScope(guest, event.currentTarget)}><Settings2 size={15} /> 범위 변경</Button>}
+              {guest.status === 'active' && <Button tone="quiet" size="sm" type="button" disabled={busy} onClick={() => void setGuestStatus(guest, 'inactive')}>비활성</Button>}
+              {(guest.status === 'inactive' || guest.status === 'expired') && <Button tone="quiet" size="sm" type="button" disabled={busy} onClick={() => void setGuestStatus(guest, 'active')}>재활성</Button>}
+              {guest.status !== 'revoked' && <Button tone="danger" size="sm" type="button" disabled={busy} onClick={() => void revokeGuest(guest)}><Trash2 size={15} /> 해지</Button>}
+              {guest.status === 'revoked' && <span className="approval-result"><ShieldCheck size={17} /> 해지됨{guest.acceptedAt ? '' : ' · 미수락'}</span>}
+            </div>
+          </article>
+        })}</div>}
+      </section>
       <section className="operator-access-log" aria-labelledby="operator-access-log-title">
         <div className="people-subsection-head"><div><h3 id="operator-access-log-title">{`운영사(${BRAND.name}) 접속 이력`}</h3><p>플랫폼 운영자가 우리 회사 워크스페이스에 접속·조회·변경한 모든 기록입니다.</p></div><strong>{operatorAccessLog.length}건</strong></div>
         {operatorAccessLog.length === 0
@@ -757,7 +977,7 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
 
     {modal && (modal === 'leave' || canManage) && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeModal()}>
       <section ref={modalRef} className="modal-card people-modal" role="dialog" aria-modal="true" aria-labelledby="people-modal-title" tabIndex={-1}>
-        <header><div><span className="eyebrow">{modal === 'leave' ? 'LEAVE REQUEST' : modal === 'adjust' ? 'LEAVE LEDGER' : modal === 'profile' ? 'MEMBER PROFILE' : modal === 'credential' ? 'ONE-TIME CREDENTIAL' : 'INVITE MEMBER'}</span><h2 id="people-modal-title">{modal === 'leave' ? editingLeaveId ? '휴가 신청 수정' : '휴가 신청' : modal === 'adjust' ? '휴가 부여 · 차감' : modal === 'profile' ? `${selectedProfile?.name ?? '구성원'} 프로필` : modal === 'credential' ? '초기 비밀번호 전달' : '새 구성원 초대'}</h2><p>{modal === 'leave' ? '결재 승인 후 근무표와 휴가 사용량에 반영됩니다.' : modal === 'adjust' ? '직원별 휴가 총량을 조정하고 원장에 사유를 남깁니다.' : modal === 'profile' ? '소속, 접근 권한, 근무 상태와 휴가 현황을 한곳에서 확인합니다.' : modal === 'credential' ? '이 화면을 닫으면 초기 비밀번호를 다시 확인할 수 없습니다.' : '가입 후 관리자가 소속과 권한을 최종 승인합니다.'}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={closeModal}><X size={21} /></IconButton></header>
+        <header><div><span className="eyebrow">{modal === 'leave' ? 'LEAVE REQUEST' : modal === 'adjust' ? 'LEAVE LEDGER' : modal === 'profile' ? 'MEMBER PROFILE' : modal === 'credential' ? 'ONE-TIME CREDENTIAL' : modal === 'guest-invite' ? 'INVITE GUEST' : modal === 'guest-scope' ? 'GUEST SCOPE' : 'INVITE MEMBER'}</span><h2 id="people-modal-title">{modal === 'leave' ? editingLeaveId ? '휴가 신청 수정' : '휴가 신청' : modal === 'adjust' ? '휴가 부여 · 차감' : modal === 'profile' ? `${selectedProfile?.name ?? '구성원'} 프로필` : modal === 'credential' ? '초기 비밀번호 전달' : modal === 'guest-invite' ? guestInvitation ? '초대 링크 전달' : '외부 게스트 초대' : modal === 'guest-scope' ? `${guestScopeTarget?.name ?? '게스트'} 범위 변경` : '새 구성원 초대'}</h2><p>{modal === 'leave' ? '결재 승인 후 근무표와 휴가 사용량에 반영됩니다.' : modal === 'adjust' ? '직원별 휴가 총량을 조정하고 원장에 사유를 남깁니다.' : modal === 'profile' ? '소속, 접근 권한, 근무 상태와 휴가 현황을 한곳에서 확인합니다.' : modal === 'credential' ? '이 화면을 닫으면 초기 비밀번호를 다시 확인할 수 없습니다.' : modal === 'guest-invite' ? guestInvitation ? '게스트는 이 링크에서 비밀번호를 정하고 바로 시작합니다.' : '거래처 담당자에게 지정한 프로젝트만 열어 줍니다. 결재·직원 목록·다른 화면은 보이지 않습니다.' : modal === 'guest-scope' ? '프로젝트를 빼면 그 프로젝트의 멤버·채널에서도 즉시 제외됩니다.' : '가입 후 관리자가 소속과 권한을 최종 승인합니다.'}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={closeModal}><X size={21} /></IconButton></header>
         {modal === 'leave' ? <form onSubmit={submitLeave}>
           <div className="form-grid"><label className="form-field"><span>휴가 유형</span><select name="type" value={leaveType} data-autofocus onChange={(event) => { const next = event.target.value; setLeaveType(next); if (next === '반차') setLeaveEndDate(leaveStartDate) }}><option>연차</option><option>반차</option><option>공가</option><option>병가</option><option>경조휴가</option><option>기타</option></select></label><label className="form-field"><span>결재자</span><select name="approverId" required value={leaveApproverId} onChange={(event) => setLeaveApproverId(event.target.value)}><option value="" disabled>{leaveApprovers.length ? '결재자 선택' : '결재자 불러오는 중…'}</option>{leaveApprovers.map((approver) => <option value={approver.id} key={approver.id}>{approver.name} · {approver.team}</option>)}</select></label></div>
           <div className="form-grid"><label className="form-field"><span>시작일</span><input type="date" value={leaveStartDate} required onChange={(event) => { const next = event.target.value; setLeaveStartDate(next); if (leaveType === '반차' || leaveEndDate < next) setLeaveEndDate(next) }} /></label><label className="form-field"><span>종료일</span><input type="date" value={leaveType === '반차' ? leaveStartDate : leaveEndDate} min={leaveStartDate} disabled={leaveType === '반차'} required onChange={(event) => setLeaveEndDate(event.target.value)} /></label></div>
@@ -783,7 +1003,32 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
           <label><span>1회용 초기 비밀번호</span><div className="credential-code"><code>{issuedCredential.temporaryPassword}</code><button type="button" onClick={() => { void navigator.clipboard.writeText(issuedCredential.temporaryPassword).then(() => onToast('초기 비밀번호를 클립보드에 복사했습니다.')).catch(() => onToast('자동 복사에 실패했습니다. 화면의 비밀번호를 직접 복사해 주세요.')) }}><Copy size={17} /> 복사</button></div></label>
           <p><Clock3 size={17} /> {formatDateTime(issuedCredential.expiresAt)}까지 유효 · 첫 로그인 후 즉시 폐기</p>
           <footer><Button tone="primary" type="button" onClick={closeModal}>전달 완료</Button></footer>
-        </div> : <form onSubmit={submitInvite}>
+        </div> : modal === 'guest-invite' && guestInvitation ? <div className="people-credential-panel guest-invite-result">
+          <div className={guestInvitation.invitation.delivery === 'sent' ? 'credential-warning is-sent' : 'credential-warning'}>{guestInvitation.invitation.delivery === 'sent' ? <CheckCircle2 size={19} /> : <AlertTriangle size={19} />}<div><strong>{guestInvitation.invitation.delivery === 'sent' ? `${guestInvitation.guest.email}로 초대 메일을 보냈습니다.` : '메일 발송 어댑터가 없어 링크를 직접 전달해 주세요.'}</strong><span>{guestInvitation.guest.name} · {guestInvitation.guest.orgName} · {guestProjectNames(guestInvitation.guest).join(', ') || '프로젝트 미지정'}</span></div></div>
+          <label><span>초대 링크</span><div className="credential-code"><input readOnly value={guestInvitation.invitation.url} aria-label="초대 링크" onFocus={(event) => event.currentTarget.select()} /></div></label>
+          <div className="guest-invite-copy"><Button tone="secondary" type="button" onClick={() => copyInviteLink(guestInvitation.invitation.url)}><Copy size={16} /> 링크 복사</Button></div>
+          <p><Clock3 size={17} /> {formatDateTime(guestInvitation.invitation.expiresAt)}까지 유효 · 수락하면 링크는 폐기됩니다</p>
+          <footer><Button tone="primary" type="button" onClick={closeModal}>전달 완료</Button></footer>
+        </div> : modal === 'guest-invite' ? <form onSubmit={submitGuestInvite}>
+          <div className="form-grid"><label className="form-field"><span>이름</span><input name="name" type="text" placeholder="예: 김거래" minLength={2} maxLength={40} data-autofocus required /></label><label className="form-field"><span>이메일</span><input name="email" type="email" placeholder="name@partner.co.kr" required /></label></div>
+          <label className="form-field full"><span>거래처명</span><input name="orgName" type="text" placeholder="예: 한국도로공사" maxLength={80} required /></label>
+          <fieldset className="guest-project-picker"><legend>볼 수 있는 프로젝트 <em>필수</em></legend>
+            {guestProjectOptions === null && <p className="guest-project-picker-note">프로젝트를 불러오는 중…</p>}
+            {guestProjectOptions?.length === 0 && <p className="guest-project-picker-note">진행 중인 프로젝트가 없습니다. 프로젝트를 먼저 만들어 주세요.</p>}
+            {(guestProjectOptions ?? []).map((project) => <label key={project.id}><input type="checkbox" checked={guestProjectPick.includes(project.id)} onChange={() => toggleGuestProject(project.id)} /><span>{project.name}</span></label>)}
+          </fieldset>
+          <div className="form-grid"><label className="form-field"><span>초대 링크 유효기간</span><input name="inviteExpiresInDays" type="number" min={1} max={30} defaultValue={7} required /><small className="guest-field-note">1~30일 · 기본 7일</small></label><label className="form-field"><span>접속 종료일 <em>선택</em></span><input name="accessExpiresAt" type="date" min={seoulDateInputValue()} /><small className="guest-field-note">비우면 해지할 때까지</small></label></div>
+          <div className="modal-note secure"><ShieldCheck size={18} /><p><strong>게스트는 고른 프로젝트 안에서만 움직입니다.</strong><span>업무는 본인 담당 건만, 채널은 참여 중인 방만, 자료는 공유받은 파일만 봅니다. 모든 행위는 "게스트"로 감사 기록에 남습니다.</span></p></div>
+          <footer><Button tone="ghost" type="button" onClick={closeModal} disabled={guestInviting}>취소</Button><Button tone="primary" type="submit" disabled={guestInviting || guestProjectPick.length === 0}><Send size={18} /> {guestInviting ? '초대 만드는 중…' : '초대 보내기'}</Button></footer>
+        </form> : modal === 'guest-scope' && guestScopeTarget ? <form onSubmit={submitGuestScope}>
+          <div className="form-grid"><label className="form-field"><span>이름</span><input name="name" type="text" defaultValue={guestScopeTarget.name} minLength={2} maxLength={40} required /></label><label className="form-field"><span>거래처명</span><input name="orgName" type="text" defaultValue={guestScopeTarget.orgName} maxLength={80} required /></label></div>
+          <fieldset className="guest-project-picker"><legend>볼 수 있는 프로젝트 <em>필수</em></legend>
+            {guestProjectOptions === null && <p className="guest-project-picker-note">프로젝트를 불러오는 중…</p>}
+            {(guestProjectOptions ?? []).map((project) => <label key={project.id}><input type="checkbox" checked={guestProjectPick.includes(project.id)} onChange={() => toggleGuestProject(project.id)} /><span>{project.name}</span></label>)}
+          </fieldset>
+          <label className="form-field full"><span>접속 종료일 <em>선택</em></span><input name="accessExpiresAt" type="date" defaultValue={guestScopeTarget.accessExpiresAt ? seoulDateInputValue(new Date(guestScopeTarget.accessExpiresAt)) : ''} /><small className="guest-field-note">비우면 해지할 때까지 · 지나면 자동으로 만료됩니다</small></label>
+          <footer><Button tone="ghost" type="button" onClick={closeModal} disabled={guestBusyId === guestScopeTarget.id}>취소</Button><Button tone="primary" type="submit" disabled={guestBusyId === guestScopeTarget.id || guestProjectPick.length === 0}><CheckCircle2 size={18} /> {guestBusyId === guestScopeTarget.id ? '저장 중…' : '범위 저장'}</Button></footer>
+        </form> : <form onSubmit={submitInvite}>
           <div className="form-grid"><label className="form-field"><span>이름</span><input name="name" type="text" placeholder="예: 이하늘" minLength={2} maxLength={40} data-autofocus required /></label><label className="form-field"><span>회사 이메일</span><input name="email" type="email" placeholder="name@company.co.kr" required /></label></div>
           <label className="form-field full"><span>직위 <em>선택</em></span><input name="position" type="text" placeholder="예: 대리, 팀장, 연구원" maxLength={40} /></label>
           <div className="modal-note secure"><ShieldCheck size={18} /><p><strong>승인 전에는 업무 데이터에 접근할 수 없습니다.</strong><span>승인 시 72시간 유효한 초기 비밀번호가 한 번 표시되고, 직원은 첫 로그인에서 직접 변경합니다.</span></p></div>

@@ -4,6 +4,7 @@ import { BrandMark } from './AppIcons'
 import { Button, IconButton } from './ui/Button'
 import { BRAND } from '../brand'
 import { useIndustrySurface } from '../modules/IndustryContext'
+import { formatDateTime } from '../utils/dateTime'
 
 export type ThemeChoice = 'light' | 'dark' | 'system'
 export type FontChoice = 'standard' | 'large' | 'extra'
@@ -200,6 +201,7 @@ export function LoginPage({ onLogin, initialError = '' }: LoginPageProps) {
             </ol>
             <div className="pending-account-card"><span className="status-dot" /><div><strong>승인 상태는 회사 관리자에게 확인하세요</strong><p>관리자가 계정을 승인하면 72시간 유효한 초기 비밀번호를 전달합니다.</p></div></div>
             <p className="auth-help">계정이 없다면 회사 관리자에게 구성원 등록과 임시 비밀번호 발급을 요청하세요.</p>
+            <p className="auth-help">거래처 게스트로 초대받았다면 메일의 초대 링크로 들어오세요. 링크에서 비밀번호를 정하면 바로 시작됩니다.</p>
           </>}
         </div>
       </section>
@@ -260,10 +262,107 @@ export function PasswordChangePage({ name, email, onChange, onLogout }: Password
   </main>
 }
 
+type GuestInvitationPreview = { tenantName: string; projectNames: string[]; inviterName: string; maskedEmail: string; expiresAt: string }
+
+type GuestAcceptPageProps = {
+  token: string
+  /** 수락이 끝나면 같은 자격으로 로그인한다. 결과가 ok가 아니면 문구를 그대로 보여 준다. */
+  onAccepted: (credentials: { email: string; password: string }) => Promise<{ ok: boolean; message: string }>
+  onCancel: () => void
+}
+
+/**
+ * 게스트 초대 수락 화면(?guestInvite=<token>).
+ * 토큰 하나로 회사·프로젝트·초대자를 보여 주고, 비밀번호를 정하면 계정이 열린다.
+ * 없는·만료·회수·이미 수락한 토큰은 서버가 전부 같은 404를 주므로 화면도 한 문구로만 답한다 —
+ * 어느 이유인지 구분해 주면 토큰을 찔러 보는 사람에게 힌트가 된다.
+ */
+export function GuestAcceptPage({ token, onAccepted, onCancel }: GuestAcceptPageProps) {
+  const [preview, setPreview] = useState<GuestInvitationPreview | null>(null)
+  const [state, setState] = useState<'loading' | 'ready' | 'invalid' | 'offline'>('loading')
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let active = true
+    setState('loading')
+    fetch(`/api/guest/invitations/${encodeURIComponent(token)}`)
+      .then(async (response) => {
+        if (response.status === 404) { if (active) setState('invalid'); return }
+        if (!response.ok) throw new Error('invitation')
+        const body = await response.json() as GuestInvitationPreview
+        if (!active) return
+        setPreview(body)
+        setState('ready')
+      })
+      .catch(() => { if (active) setState('offline') })
+    return () => { active = false }
+  }, [token])
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (password !== confirm) { setError('비밀번호 확인이 일치하지 않습니다.'); return }
+    setSubmitting(true)
+    setError('')
+    try {
+      const response = await fetch(`/api/guest/invitations/${encodeURIComponent(token)}/accept`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password }),
+      })
+      const body = await response.json() as { email?: string; error?: { message?: string } }
+      if (response.status === 404) { setState('invalid'); return }
+      if (!response.ok || !body.email) { setError(body.error?.message || '초대를 수락하지 못했습니다.'); return }
+      const result = await onAccepted({ email: body.email, password })
+      if (!result.ok) setError(result.message)
+    } catch {
+      setError('인증 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  return <main className="auth-shell">
+    <section className="auth-brand-panel" aria-label={`${BRAND.name} 게스트 초대 안내`}>
+      <div className="auth-brand"><BrandMark size={48} /><div><strong>{BRAND.name}</strong><span>{BRAND.tagline}</span></div></div>
+      <div className="auth-brand-copy"><span className="auth-overline">GUEST INVITATION</span><h1>초대된 프로젝트만,<br />필요한 만큼만.</h1><p>거래처 게스트 계정은 초대한 회사가 지정한 프로젝트의 업무·채널·자료·게시판만 봅니다. 그 밖의 회사 데이터는 존재조차 보이지 않습니다.</p></div>
+      <div className="auth-trust-row"><span><ShieldCheck size={18} /> 프로젝트 범위 격리</span><span><LockKeyhole size={18} /> 비밀번호는 본인만</span></div>
+    </section>
+    <section className="auth-form-panel"><div className="auth-form-card">
+      {state === 'loading' && <header><span className="auth-mobile-brand"><BrandMark size={38} /> {BRAND.name}</span><h2>초대를 확인하고 있습니다…</h2><p>잠시만 기다려 주세요.</p></header>}
+      {state === 'invalid' && <>
+        {/* 같은 문구는 한 화면에 한 번 — 제목은 상황만, 안내 문장은 alert 한 곳에 둔다. */}
+        <header><span className="auth-mobile-brand"><BrandMark size={38} /> {BRAND.name}</span><h2>초대 링크를 확인할 수 없습니다</h2></header>
+        <div className="auth-inline-error" role="alert">유효하지 않은 초대 링크입니다. 초대한 회사에 재발송을 요청하세요.</div>
+        <button className="auth-status-link" type="button" onClick={onCancel}><ArrowLeft size={17} /> 로그인 화면으로</button>
+      </>}
+      {state === 'offline' && <>
+        <header><span className="auth-mobile-brand"><BrandMark size={38} /> {BRAND.name}</span><h2>초대를 확인할 수 없습니다</h2><p>서버에 연결하지 못했습니다. 잠시 후 링크를 다시 열어 주세요.</p></header>
+        <button className="auth-status-link" type="button" onClick={onCancel}><ArrowLeft size={17} /> 로그인 화면으로</button>
+      </>}
+      {state === 'ready' && preview && <>
+        <header><span className="auth-mobile-brand"><BrandMark size={38} /> {BRAND.name}</span><h2>{preview.tenantName}의 프로젝트에 초대받았습니다</h2><p>{preview.inviterName}님이 {preview.maskedEmail}로 보낸 초대입니다.<br />비밀번호를 정하면 바로 시작됩니다.</p></header>
+        <ol className="approval-steps" aria-label="초대된 프로젝트">
+          {preview.projectNames.map((name) => <li className="done" key={name}><span><Check size={17} /></span><div><strong>{name}</strong><p>이 프로젝트의 업무·채널·자료·게시판</p></div></li>)}
+          {preview.projectNames.length === 0 && <li><span>—</span><div><strong>아직 지정된 프로젝트가 없습니다</strong><p>초대한 회사가 범위를 정하면 화면에 나타납니다.</p></div></li>}
+        </ol>
+        <form onSubmit={submit}>
+          <label className="form-field full"><span>비밀번호</span><div className="input-with-icon"><KeyRound size={18} /><input type="password" autoFocus autoComplete="new-password" minLength={10} maxLength={72} value={password} onChange={(event) => setPassword(event.target.value)} required /></div></label>
+          <label className="form-field full"><span>비밀번호 확인</span><div className="input-with-icon"><LockKeyhole size={18} /><input type="password" autoComplete="new-password" minLength={10} maxLength={72} value={confirm} onChange={(event) => setConfirm(event.target.value)} required /></div></label>
+          <PasswordRules value={password} />
+          {error && <div className="auth-inline-error" role="alert">{error}</div>}
+          <button className="auth-submit" type="submit" disabled={submitting}>{submitting ? '계정을 여는 중…' : '비밀번호 설정하고 시작'}</button>
+          <button className="auth-status-link" type="button" onClick={onCancel}>다른 계정으로 로그인</button>
+        </form>
+        <p className="auth-help">초대 링크는 {formatDateTime(preview.expiresAt)}까지 유효합니다.</p>
+      </>}
+    </div></section>
+  </main>
+}
+
 type SettingsDrawerProps = {
   open: boolean
   onClose: () => void
   onEditProfile?: () => void
+  /** 외부 게스트. 쉬운 화면(AI 업무허브 전용)·포인트 컬러(사이드바 색)는 게스트 화면에 없으므로 감춘다. */
+  guestMode?: boolean
   profileName: string
   profileRole: string
   companyName: string
@@ -278,7 +377,7 @@ type SettingsDrawerProps = {
   onLogout: () => void
 }
 
-export function SettingsDrawer({ open, onClose, profileName, profileRole, companyName, theme, fontSize, accent, easyMode, onThemeChange, onFontSizeChange, onAccentChange, onEasyModeChange, onLogout, onEditProfile }: SettingsDrawerProps) {
+export function SettingsDrawer({ open, onClose, profileName, profileRole, companyName, theme, fontSize, accent, easyMode, onThemeChange, onFontSizeChange, onAccentChange, onEasyModeChange, onLogout, onEditProfile, guestMode = false }: SettingsDrawerProps) {
   const drawerRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
@@ -320,7 +419,7 @@ export function SettingsDrawer({ open, onClose, profileName, profileRole, compan
           {([['standard', '기본'], ['large', '크게'], ['extra', '아주 크게']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={fontSize === value} onClick={() => onFontSizeChange(value)}>{label}</button>)}
         </div>
       </section>
-      <section className="setting-section">
+      {!guestMode && <section className="setting-section">
         <div className="setting-section-title"><Palette size={19} /><div><h3>포인트 컬러</h3><p>왼쪽 메뉴·버튼·강조 표시가 함께 바뀝니다.</p></div></div>
         <div className="setting-accent-grid" role="group" aria-label="포인트 컬러 선택">
           {accentOptions.map((option) => (
@@ -330,15 +429,16 @@ export function SettingsDrawer({ open, onClose, profileName, profileRole, compan
             </button>
           ))}
         </div>
-      </section>
-      <section className="setting-section">
+      </section>}
+      {!guestMode && <section className="setting-section">
         <div className="setting-section-title"><Accessibility size={19} /><div><h3>쉬운 화면</h3><p>메인 화면만 큰 바로가기와 지금 할 일 중심으로 단순화합니다. 다른 업무 화면은 기본 배치를 유지합니다.</p></div></div>
         <div className="setting-segmented" role="group" aria-label="쉬운 화면 모드">
           <button type="button" aria-pressed={easyMode === 'standard'} onClick={() => onEasyModeChange('standard')}>기본 화면</button>
           <button type="button" aria-pressed={easyMode === 'easy'} onClick={() => onEasyModeChange('easy')}>쉬운 화면</button>
         </div>
-      </section>
-      <footer><button className="settings-logout" type="button" onClick={onLogout}><LogIn size={18} /> 로그아웃</button></footer>
+      </section>}
+      {/* 게스트 셸은 헤더에 로그아웃이 이미 있다. 같은 버튼을 한 화면에 두 번 두지 않는다. */}
+      {!guestMode && <footer><button className="settings-logout" type="button" onClick={onLogout}><LogIn size={18} /> 로그아웃</button></footer>}
     </aside>
   </>
 }
@@ -361,11 +461,16 @@ export function ProfileEditor({ account, onClose, onSaved, onToast }: { account:
   const [error, setError] = useState('')
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }; document.addEventListener('keydown', onKey); return () => document.removeEventListener('keydown', onKey) }, [onClose])
   const operator = account.role === 'platform-operator'
+  // 게스트의 소속(거래처명)·역할은 초대한 회사가 정한다. 서버가 team을 orgName으로 고정하므로 화면도 보내지 않는다.
+  const guest = account.role === 'tenant-guest'
   const saveProfile = async (event: FormEvent) => {
     event.preventDefault()
     setBusy(true); setError('')
     try {
-      const response = await fetch('/api/me/profile', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: name.trim(), team: team.trim(), jobRole: jobRole.trim(), phone: phone.trim(), bio: bio.trim() }) })
+      const payload = guest
+        ? { name: name.trim(), phone: phone.trim(), bio: bio.trim() }
+        : { name: name.trim(), team: team.trim(), jobRole: jobRole.trim(), phone: phone.trim(), bio: bio.trim() }
+      const response = await fetch('/api/me/profile', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
       const body = await response.json() as { account?: ProfileAccount & Record<string, unknown>; error?: { message?: string } }
       if (!response.ok || !body.account) { setError(body.error?.message || '프로필을 저장하지 못했습니다.'); return }
       onSaved(body.account)
@@ -396,11 +501,11 @@ export function ProfileEditor({ account, onClose, onSaved, onToast }: { account:
           <label className="form-field"><span>연락처</span><div className="input-with-icon"><Phone size={17} /><input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="010-0000-0000" maxLength={30} /></div></label>
         </div>
         <div className="form-grid">
-          <label className="form-field"><span>부서</span><input value={team} onChange={(event) => setTeam(event.target.value)} maxLength={40} placeholder={operator ? BRAND.operatorTeam : industry.examples.department} /></label>
-          <label className="form-field"><span>직책</span><div className="input-with-icon"><Briefcase size={17} /><input value={jobRole} onChange={(event) => setJobRole(event.target.value)} maxLength={40} placeholder="예: 품질 책임자" /></div></label>
+          <label className="form-field"><span>{guest ? '거래처' : '부서'}</span><input value={team} disabled={guest} onChange={(event) => setTeam(event.target.value)} maxLength={40} placeholder={operator ? BRAND.operatorTeam : industry.examples.department} /></label>
+          <label className="form-field"><span>직책</span><div className="input-with-icon"><Briefcase size={17} /><input value={jobRole} disabled={guest} onChange={(event) => setJobRole(event.target.value)} maxLength={40} placeholder="예: 품질 책임자" /></div></label>
         </div>
         <label className="form-field full"><span>한 줄 소개 <em>선택</em></span><input value={bio} onChange={(event) => setBio(event.target.value)} maxLength={200} placeholder="담당 업무나 연락 가능한 시간을 적어 두면 동료가 찾기 쉽습니다." /></label>
-        <p className="profile-editor-note">이메일과 역할(관리자·직원)은 회사 관리자가 관리합니다. 이름·부서·직책은 업무지시·일지·메신저에 바로 반영됩니다.</p>
+        <p className="profile-editor-note">{guest ? '거래처명과 게스트 역할은 초대한 회사가 관리합니다. 이름·연락처·소개만 바꿀 수 있습니다.' : '이메일과 역할(관리자·직원)은 회사 관리자가 관리합니다. 이름·부서·직책은 업무지시·일지·메신저에 바로 반영됩니다.'}</p>
         {error && <div className="auth-inline-error" role="alert">{error}</div>}
         <footer><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>닫기</Button><Button tone="primary" type="submit" disabled={busy || name.trim().length < 2}><Save size={17} /> {busy ? '저장 중…' : '프로필 저장'}</Button></footer>
       </form>

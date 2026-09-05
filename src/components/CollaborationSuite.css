@@ -302,6 +302,18 @@
   from { opacity: 0; transform: translateX(24px); }
 }
 
+/* 게스트 채널 탭 — 같은 메신저를 오버레이가 아니라 화면 안에 그대로 앉힌다. 스크림·슬라이드 애니메이션은 없다. */
+.collab-overlay.is-embedded { position: static; z-index: auto; inset: auto; }
+.messenger-drawer.is-embedded {
+  position: static;
+  inset: auto;
+  width: 100%;
+  height: min(720px, calc(100vh - 220px));
+  min-height: 420px;
+  border: var(--hairline) solid var(--line);
+  animation: none;
+}
+
 .messenger-header {
   min-height: 82px;
   display: flex;

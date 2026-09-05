@@ -22,6 +22,11 @@
 .project-avatar.role-owner { background: var(--color-blue-deep-fill); }
 .project-avatar.role-editor { background: var(--color-success); }
 .project-avatar.role-viewer { background: var(--color-gray-400); }
+/* 외부 게스트 — 아바타는 점선 테두리, 옆에는 같은 모양의 배지. 직원과 한눈에 구분되어야 한다. */
+.project-avatar.is-guest { outline: var(--hairline) dashed var(--color-warning); outline-offset: var(--hairline); background: var(--color-warning); color: var(--color-white); }
+.project-guest-badge { min-height: 22px; }
+.project-roster li.is-guest { background: var(--color-warning-soft); }
+.project-member-guest-link { display: flex; justify-content: flex-end; margin-top: var(--space-4); }
 .project-members .project-avatar { margin-right: calc(var(--space-4) * -1); }
 
 .project-feed { display: flex; flex-direction: column; gap: var(--space-12); }

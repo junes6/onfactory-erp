@@ -63,6 +63,7 @@ export function ReactionRow({
 export function MessageActionBar({
   canEdit,
   canDelete,
+  canPin = true,
   pinned,
   onReply,
   onReact,
@@ -72,6 +73,8 @@ export function MessageActionBar({
 }: {
   canEdit: boolean
   canDelete: boolean
+  /** 고정은 방 공지를 바꾸는 일이다. 게스트처럼 방을 관리할 수 없는 사람에게는 버튼을 두지 않는다. */
+  canPin?: boolean
   pinned: boolean
   onReply: () => void
   onReact: (emoji: string) => void
@@ -101,7 +104,7 @@ export function MessageActionBar({
     <div className="messenger-message-actions" ref={pickerRef}>
       <IconButton tone="quiet" size="sm" aria-label="답장" onClick={onReply}><CornerUpLeft size={15} /></IconButton>
       <IconButton tone="quiet" size="sm" aria-label="반응 남기기" aria-expanded={pickerOpen} onClick={() => setPickerOpen((open) => !open)}><SmilePlus size={15} /></IconButton>
-      <IconButton tone="quiet" size="sm" aria-label={pinned ? '고정 해제' : '공지로 고정'} onClick={onPin}>{pinned ? <PinOff size={15} /> : <Pin size={15} />}</IconButton>
+      {canPin && <IconButton tone="quiet" size="sm" aria-label={pinned ? '고정 해제' : '공지로 고정'} onClick={onPin}>{pinned ? <PinOff size={15} /> : <Pin size={15} />}</IconButton>}
       {canEdit && <IconButton tone="quiet" size="sm" aria-label="메시지 수정" onClick={onEdit}><Pencil size={15} /></IconButton>}
       {canDelete && <IconButton tone="quiet" size="sm" aria-label="메시지 삭제" onClick={onDelete}><Trash2 size={15} /></IconButton>}
       {pickerOpen && (

@@ -12,7 +12,7 @@ import GlobalSearch from './components/GlobalSearch'
 import Toast, { type ToastMessage } from './components/ui/Toast'
 import { MobileMoreSheet, MobileTabBar, MobileTaskList, MobileToday, TODAY_TASK_LIMIT, type MobileTab } from './components/MobileShell'
 import { ChatBubbleIcon, NotificationBellIcon, BrandMark } from './components/AppIcons'
-import { LoginPage, PasswordChangePage, ProfileEditor, SettingsDrawer, type AccentChoice, type EasyModeChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
+import { GuestAcceptPage, LoginPage, PasswordChangePage, ProfileEditor, SettingsDrawer, type AccentChoice, type EasyModeChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
 import { ProjectSpacesPage } from './components/ProjectSpaces'
 import { TaxAssetsPage } from './components/TaxAssets'
 import { IpRightsPage } from './components/IpRights'
@@ -42,7 +42,9 @@ import PlatformConsole, { type PlatformSection } from './components/PlatformCons
 import { StatusBadge } from './components/StatusBadge'
 import { WorkspaceNavigationEditButton, WorkspaceNavigationEditor, usePersonalNavigation } from './components/WorkspaceNavigation'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
-import { deleteDocumentAttachment, deleteDocumentAttachments, uploadDocumentAttachments } from './utils/documentAttachments'
+import { deleteDocumentAttachments, uploadDocumentAttachments } from './utils/documentAttachments'
+import { CompletionModal, useDialogFocus } from './components/CompletionModal'
+import { GuestWorkspace } from './components/GuestWorkspace'
 import { formatDateLabel, formatDateTime, formatMonthLabel, formatWorkDue, formatWorkRuleRun, seoulDateInputValue, seoulDateTimeInputValue, seoulLocalToUtcIso, toIsoUtc } from './utils/dateTime'
 import { dayKind, holidayName } from './utils/koreanHolidays'
 import {
@@ -59,7 +61,9 @@ type PageId = TenantPage | PlatformSection | 'billing'
 type AppMode = 'tenant' | 'platform'
 type NavItem = { id: PageId; label: string; icon: typeof Sparkles; badge?: number }
 type OperatorMode = { operatorId: string; operatorName: string; tenantId: string; tenantName: string; enteredAt: string | null }
-type AuthAccount = { id: string; name: string; email: string; role: 'tenant-admin' | 'tenant-member' | 'platform-operator'; tenantId: string | null; tenantName: string | null; approved: boolean; team?: string; jobRole?: string; requiresPasswordChange?: boolean; industryType?: string; operatorMode?: OperatorMode; oversight?: boolean }
+/** 게스트 세션에만 붙는 범위. 서버 effectiveAuth가 grant에서 계산해 내려준다 — 화면은 이 값을 믿고 프로젝트 셀렉트·배지를 그린다. */
+type GuestScope = { grantId: string; projectIds: string[]; orgName: string; accessExpiresAt: string | null; invitedByName: string }
+type AuthAccount = { id: string; name: string; email: string; role: 'tenant-admin' | 'tenant-member' | 'tenant-guest' | 'platform-operator'; tenantId: string | null; tenantName: string | null; approved: boolean; team?: string; jobRole?: string; requiresPasswordChange?: boolean; industryType?: string; operatorMode?: OperatorMode; oversight?: boolean; guestScope?: GuestScope }
 type AuthStatus = 'checking' | 'signed-out' | 'signed-in'
 type PlatformTicketSummary = { id: string; tenantId: string; tenant: string; title: string; priority: string; status: string; sla: string; owner: string }
 type PlatformDirectoryState = { tenants: Tenant[]; supportTickets: PlatformTicketSummary[] }
@@ -183,44 +187,6 @@ function PageHeader({ eyebrow, title, description, action }: {
       {action && <div className="page-header-actions">{action}</div>}
     </header>
   )
-}
-
-function useDialogFocus(active = true) {
-  const dialogRef = useRef<HTMLElement>(null)
-
-  useEffect(() => {
-    if (!active) return
-    const dialog = dialogRef.current
-    if (!dialog) return
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const selector = 'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
-    const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(selector))
-    const initialFocus = dialog.querySelector<HTMLElement>('[data-autofocus], [autofocus]') ?? focusables[0]
-    window.setTimeout(() => initialFocus?.focus(), 0)
-
-    const trapFocus = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab') return
-      const currentFocusables = Array.from(dialog.querySelectorAll<HTMLElement>(selector))
-      if (currentFocusables.length === 0) return
-      const first = currentFocusables[0]
-      const last = currentFocusables[currentFocusables.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-
-    dialog.addEventListener('keydown', trapFocus)
-    return () => {
-      dialog.removeEventListener('keydown', trapFocus)
-      previousFocus?.focus()
-    }
-  }, [active])
-
-  return dialogRef
 }
 
 function SharedCalendarPreview({ onOpen, events }: { onOpen: () => void; events: DashboardCalendarEvent[] }) {
@@ -592,7 +558,8 @@ function AIHome({ workItems, products, salesChannels, itProjects, itContracts, c
 }
 
 type WorkTransitionAction = 'accept' | 'submit' | 'approve' | 'request-changes'
-type WorkAssignee = { id: string; name: string }
+/** kind는 /api/directory가 준다. 'guest'면 업무 지시 시 프로젝트를 반드시 골라야 하고, 요청자 후보에서는 빠진다. */
+type WorkAssignee = { id: string; name: string; kind?: 'employee' | 'guest' }
 const workStatusLabels: Record<WorkItem['status'], string> = {
   '업무요청': '시작 전',
   '수행중': '진행 중',
@@ -643,10 +610,6 @@ function workRuleScheduleLabel(rule: WorkRule) {
   return `${base}${policy}${rotation}`
 }
 
-function fileSizeLabel(size: number) {
-  return size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / (1024 * 1024)).toFixed(1)} MB`
-}
-
 async function downloadStoredDocument(id: string, name: string, workspaceScope?: string) {
   if (!id.startsWith('DOC-')) return false
   const response = await fetch(`/api/documents/${encodeURIComponent(id)}/download`, { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
@@ -663,95 +626,6 @@ async function downloadStoredDocument(id: string, name: string, workspaceScope?:
 
 async function downloadWorkEvidence(file: WorkEvidence, workspaceScope?: string) {
   return downloadStoredDocument(file.id, file.name, workspaceScope)
-}
-
-function CompletionModal({ item, workspaceScope, onToast, onClose, onSubmit }: { item: WorkItem; workspaceScope?: string; onToast: (message: string) => void; onClose: () => void; onSubmit: (summary: string, evidence: WorkEvidence[]) => Promise<boolean> }) {
-  const dialogRef = useDialogFocus()
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [summary, setSummary] = useState(item.completion?.summary ?? '')
-  const [evidence, setEvidence] = useState<WorkEvidence[]>(() => item.completion?.evidence.map((file) => ({ ...file })) ?? [])
-  const [busy, setBusy] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [uploadError, setUploadError] = useState('')
-  const uploadedIdsRef = useRef(new Set<string>())
-  const removedIdsRef = useRef(new Set<string>())
-  const discardAndClose = async () => {
-    if (busy || uploading) return
-    setBusy(true)
-    const cleanup = await deleteDocumentAttachments(uploadedIdsRef.current, workspaceScope)
-    for (const id of cleanup.deleted) uploadedIdsRef.current.delete(id)
-    if (cleanup.deleted.length) {
-      const deleted = new Set(cleanup.deleted)
-      setEvidence((current) => current.filter((file) => !deleted.has(file.id)))
-    }
-    if (cleanup.failed.length) {
-      const message = `저장하지 않은 증빙 ${cleanup.failed.length}개를 정리하지 못했습니다. 다시 시도해 주세요.`
-      setUploadError(message)
-      onToast(message)
-      setBusy(false)
-      return
-    }
-    onClose()
-  }
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
-    if (summary.trim().length < 3) return
-    setBusy(true)
-    if (await onSubmit(summary.trim(), evidence)) {
-      uploadedIdsRef.current.clear()
-      const cleanup = await deleteDocumentAttachments(removedIdsRef.current, workspaceScope)
-      if (cleanup.failed.length) onToast(`업무는 제출했지만 제거한 증빙 ${cleanup.failed.length}개의 원본 정리에 실패했습니다.`)
-      onClose()
-    } else setBusy(false)
-  }
-  const removeEvidence = async (file: WorkEvidence) => {
-    if (busy || uploading) return
-    if (file.id.startsWith('DOC-') && uploadedIdsRef.current.has(file.id)) {
-      setUploading(true)
-      try {
-        await deleteDocumentAttachment(file.id, workspaceScope)
-        uploadedIdsRef.current.delete(file.id)
-      } catch (error) {
-        const message = error instanceof Error ? error.message : '증빙 파일을 삭제하지 못했습니다.'
-        setUploadError(message)
-        onToast(message)
-        setUploading(false)
-        return
-      }
-      setUploading(false)
-    } else if (file.id.startsWith('DOC-')) removedIdsRef.current.add(file.id)
-    setEvidence((current) => current.filter((item) => item.id !== file.id))
-  }
-  return <div className="modal-backdrop workflow-sheet-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) void discardAndClose() }}>
-    <section ref={dialogRef} className="modal-card workflow-modal workflow-completion-sheet" role="dialog" aria-modal="true" aria-labelledby="completion-modal-title">
-      <header><div><span className="eyebrow">COMPLETE WORK</span><h2 id="completion-modal-title">완료 보고하기</h2><p>{item.title}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" disabled={busy || uploading} onClick={() => void discardAndClose()}><X size={21} /></IconButton></header>
-      <form onSubmit={submit}>
-        <label className="form-field full"><span>무엇을 했나요? <em>필수</em></span><textarea autoFocus data-autofocus rows={3} value={summary} onChange={(event) => setSummary(event.target.value)} placeholder="완료한 내용과 결과를 짧게 적어 주세요." required /></label>
-        <section className="workflow-upload workflow-upload-compact" aria-labelledby="work-evidence-title"><div><h3 id="work-evidence-title">사진·파일 첨부 <small>선택</small></h3><p>필요한 경우에만 사진이나 증빙 파일을 추가하세요.</p></div><input ref={inputRef} className="sr-only" type="file" multiple onChange={async (event) => {
-          const files = Array.from(event.target.files ?? []).slice(0, Math.max(0, 10 - evidence.length)); event.target.value = ''
-          if (!workspaceScope || files.length === 0) return
-          setUploading(true); setUploadError('')
-          const uploaded: WorkEvidence[] = []
-          for (const file of files) {
-            if (file.size > 10 * 1024 * 1024) { setUploadError(`${file.name}: 한 파일은 10MB까지 첨부할 수 있습니다.`); continue }
-            try {
-              const params = new URLSearchParams({ name: file.name, category: '회의·업무일지', visibility: 'restricted', allowedUserIds: [item.ownerId, item.requesterId].filter(Boolean).join(','), tags: `업무증빙,${item.id}`, summary: `${item.title} 완료 증빙자료` })
-              const response = await fetch(`/api/documents?${params}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'x-file-type': file.type || 'application/octet-stream', 'x-file-name': encodeURIComponent(file.name), 'x-workspace-identity': workspaceScope }, body: file })
-              const body = await response.json() as { document?: { id: string }; error?: { message?: string } }
-              if (!response.ok || !body.document) throw new Error(body.error?.message || '업로드 실패')
-              uploaded.push({ id: body.document.id, name: file.name, size: fileSizeLabel(file.size), type: file.type || 'application/octet-stream' })
-              uploadedIdsRef.current.add(body.document.id)
-            } catch (error) { setUploadError(`${file.name}: ${error instanceof Error ? error.message : '업로드 실패'}`) }
-          }
-          setEvidence((current) => [...current, ...uploaded].slice(0, 10)); setUploading(false)
-        }} /><Button tone="secondary" type="button" disabled={uploading || evidence.length >= 10} onClick={() => inputRef.current?.click()}><Paperclip size={17} /> {uploading ? '업로드 중…' : '파일 추가'}</Button></section>
-        {uploadError && <p className="workflow-upload-error" role="alert">{uploadError}</p>}
-        {evidence.length > 0 && <div className="workflow-evidence-list">{evidence.map((file) => <div key={file.id}><FileText size={18} /><span><strong>{file.name}</strong><small>{file.size} · 원본 저장됨</small></span><button type="button" aria-label={`${file.name} 삭제`} disabled={busy || uploading} onClick={() => void removeEvidence(file)}><X size={16} /></button></div>)}</div>}
-        <p className="workflow-submit-guide"><ShieldCheck size={17} /> 제출하면 {item.requestedBy}님에게 확인 요청이 갑니다.</p>
-        <footer><Button tone="ghost" type="button" disabled={busy || uploading} onClick={() => void discardAndClose()}>취소</Button><Button tone="primary" type="submit" disabled={busy || uploading || summary.trim().length < 3}><Check size={18} /> 제출</Button></footer>
-      </form>
-    </section>
-  </div>
 }
 
 function WorkReviewModal({ item, industryType, workspaceScope, onToast, onClose, onSubmit }: { item: WorkItem; industryType?: string; workspaceScope?: string; onToast: (message: string) => void; onClose: () => void; onSubmit: (decision: 'approve' | 'request-changes', comment: string, requestedChanges?: string) => Promise<boolean> }) {
@@ -1137,7 +1011,7 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
             <span>진행 이력 <small>{drawerTimeline.length}</small></span>
             {drawerTimeline.length === 0 ? <p className="workflow-drawer-timeline-empty">아직 제출되거나 검토된 이력이 없습니다.</p> : <div className="workflow-drawer-timeline">
               {drawerTimeline.map((entry, index) => entry.kind === 'completion'
-                ? <div className="workflow-record" key={`completion-${entry.at}-${index}`}><ClipboardCheck size={17} /><div><strong>결과 제출 <time dateTime={entry.completion.submittedAt}>{formatDateTime(entry.completion.submittedAt)}</time></strong><p>{entry.completion.summary}</p><div className="workflow-record-files">{entry.completion.evidence.length === 0 && <span>첨부 증빙 없음</span>}{entry.completion.evidence.map((file) => file.id.startsWith('DOC-') ? <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={12} /> {file.name} · {file.size}</button> : <span key={file.id}><Paperclip size={12} /> {file.name} · {file.size}</span>)}</div></div></div>
+                ? <div className="workflow-record" key={`completion-${entry.at}-${index}`}><ClipboardCheck size={17} /><div><strong>결과 제출 {entry.completion.submittedByRole === 'tenant-guest' && <StatusBadge className="status-pill" tone="warning">게스트</StatusBadge>} <time dateTime={entry.completion.submittedAt}>{formatDateTime(entry.completion.submittedAt)}</time></strong><p>{entry.completion.summary}</p><div className="workflow-record-files">{entry.completion.evidence.length === 0 && <span>첨부 증빙 없음</span>}{entry.completion.evidence.map((file) => file.id.startsWith('DOC-') ? <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={12} /> {file.name} · {file.size}</button> : <span key={file.id}><Paperclip size={12} /> {file.name} · {file.size}</span>)}</div></div></div>
                 : <div className={`workflow-record ${entry.review.decision === 'approved' ? 'approved' : 'changes'}`} key={`review-${entry.at}-${index}`}><ShieldCheck size={17} /><div><strong>{entry.review.decision === 'approved' ? '승인' : '보완 요청'} <time dateTime={entry.review.reviewedAt}>{formatDateTime(entry.review.reviewedAt)}</time></strong><p>{entry.review.requestedChanges || entry.review.comment}</p></div></div>)}
             </div>}
           </section>
@@ -1148,7 +1022,8 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
 
     {dialog?.type === 'completion' && <CompletionModal item={dialog.item} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(summary, evidence) => onTransition(dialog.item.id, 'submit', { completion: { summary, evidence } })} />}
     {dialog?.type === 'review' && <WorkReviewModal item={dialog.item} industryType={industryType} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(decision, comment, requestedChanges) => onTransition(dialog.item.id, decision, { review: { comment, requestedChanges } })} />}
-    {dialog?.type === 'rule' && <WorkRuleModal assignees={assignees} industryType={industryType} onClose={() => setDialog(null)} onSubmit={onCreateRule} />}
+    {/* 반복 규칙이 만드는 업무는 프로젝트가 없다. 게스트를 순번에 넣으면 서버가 GUEST_PROJECT_REQUIRED로 거절하므로 후보에서 뺀다. */}
+    {dialog?.type === 'rule' && <WorkRuleModal assignees={assignees.filter((assignee) => assignee.kind !== 'guest')} industryType={industryType} onClose={() => setDialog(null)} onSubmit={onCreateRule} />}
   </div>
 }
 
@@ -1408,13 +1283,32 @@ function TaskModal({ initialText, initialDescription = '', requesterName, reques
   const [error, setError] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const dialogRef = useDialogFocus()
+  /*
+   * 담당자는 상태로 든다. 외부 게스트를 고르면 프로젝트 선택이 필수로 바뀌어야 하는데,
+   * 제출 시점에만 FormData로 읽으면 그 전환을 화면에 그릴 수 없다.
+   */
+  const [ownerId, setOwnerId] = useState(() => assignees.find((item) => item.id === requesterId)?.id ?? assignees[0]?.id ?? '')
+  const [projectId, setProjectId] = useState('')
+  const [projectOptions, setProjectOptions] = useState<Array<{ id: string; name: string }> | null>(null)
+  const selectedOwner = assignees.find((assignee) => assignee.id === ownerId)
+  const ownerIsGuest = selectedOwner?.kind === 'guest'
+  useEffect(() => {
+    // 게스트를 고른 순간에만 프로젝트 목록을 읽는다. 직원 배정에서는 이 요청이 필요 없다.
+    if (!ownerIsGuest || projectOptions !== null) return
+    let active = true
+    fetch('/api/projects', { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+      .then(async (response) => response.ok ? response.json() as Promise<{ projects?: Array<{ id: string; name: string; status?: string }> }> : { projects: [] })
+      .then((body) => { if (active) setProjectOptions((body.projects ?? []).filter((project) => project.status !== 'archived').map((project) => ({ id: project.id, name: project.name }))) })
+      .catch(() => { if (active) setProjectOptions([]) })
+    return () => { active = false }
+  }, [ownerIsGuest, projectOptions, workspaceScope])
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!title.trim() || busy) return
     const form = new FormData(event.currentTarget)
-    const ownerId = String(form.get('ownerId') || '')
-    const owner = assignees.find((assignee) => assignee.id === ownerId)
+    const owner = selectedOwner
     if (!owner) return
+    if (owner.kind === 'guest' && !projectId) { setError('외부 게스트에게 지시하는 업무는 초대된 프로젝트를 골라야 합니다.'); return }
     const dueLocal = String(form.get('due') || '')
     const due = seoulLocalToUtcIso(dueLocal.slice(0, 10), dueLocal.slice(11, 16)) ?? dueLocal
     setBusy(true)
@@ -1445,6 +1339,7 @@ function TaskModal({ initialText, initialDescription = '', requesterName, reques
         status: '업무요청',
         category: '일반',
         ...(attachments.length ? { attachments } : {}),
+        ...(projectId ? { projectId } : {}),
         createdAt: new Date().toISOString(),
       })
       if (!saved && attachments.length) {
@@ -1467,8 +1362,9 @@ function TaskModal({ initialText, initialDescription = '', requesterName, reques
         <form onSubmit={submit}>
           <div className="task-required-fields">
             <label className="form-field full"><span>무엇을 <em>필수</em></span><input autoFocus data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder={industrySurface(industryType).examples.workTitle} required /></label>
-            <label className="form-field"><span>누가 <em>필수</em></span><select name="ownerId" defaultValue={assignees.find((item) => item.id === requesterId)?.id ?? assignees[0]?.id ?? ''} required><option value="" disabled>직원 선택</option>{assignees.map((assignee) => <option value={assignee.id} key={assignee.id}>{assignee.name}</option>)}</select></label>
+            <label className="form-field"><span>누가 <em>필수</em></span><select name="ownerId" value={ownerId} onChange={(event) => { setOwnerId(event.target.value); setError('') }} required><option value="" disabled>직원 선택</option>{assignees.map((assignee) => <option value={assignee.id} key={assignee.id}>{assignee.kind === 'guest' ? `${assignee.name} (게스트)` : assignee.name}</option>)}</select></label>
             <label className="form-field"><span>언제까지 <em>필수</em></span><input name="due" type="datetime-local" defaultValue={`${seoulDateInputValue()}T18:00`} required /></label>
+            {ownerIsGuest && <label className="form-field full"><span>어느 프로젝트에서 <em>필수</em></span><select name="projectId" value={projectId} onChange={(event) => setProjectId(event.target.value)} required><option value="" disabled>{projectOptions === null ? '프로젝트 불러오는 중…' : projectOptions.length === 0 ? '진행 중인 프로젝트가 없습니다' : '프로젝트 선택'}</option>{(projectOptions ?? []).map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select><small className="task-guest-note">게스트는 초대된 프로젝트 안의 업무만 볼 수 있어 프로젝트를 정해야 합니다.</small></label>}
           </div>
           <details className="task-optional-fields" open={Boolean(initialDescription)}>
             <summary><ChevronDown size={17} /> 선택 항목 <span>우선순위 · 완료 기준 · 첨부</span></summary>
@@ -1481,7 +1377,7 @@ function TaskModal({ initialText, initialDescription = '', requesterName, reques
           </details>
           {error && <p className="workflow-upload-error" role="alert">{error}</p>}
           {assignees.length === 0 && <div className="modal-note"><AlertTriangle size={18} /><p><strong>배정 가능한 직원 정보를 불러오지 못했습니다.</strong><span>직원 계정이 승인됐는지 확인한 뒤 다시 열어 주세요.</span></p></div>}
-          <footer><Button tone="ghost" type="button" disabled={busy} onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={busy || assignees.length === 0 || !title.trim()}><Check size={18} /> {busy ? '저장 중…' : '업무 지시하기'}</Button></footer>
+          <footer><Button tone="ghost" type="button" disabled={busy} onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={busy || assignees.length === 0 || !title.trim() || !ownerId || (ownerIsGuest && !projectId)}><Check size={18} /> {busy ? '저장 중…' : '업무 지시하기'}</Button></footer>
         </form>
       </section>
     </div>
@@ -1535,6 +1431,14 @@ function SupportSessionModal({ tenant, tickets, onClose, onCreate }: {
 export default function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>('checking')
   const [account, setAccount] = useState<AuthAccount | null>(null)
+  /**
+   * 게스트 초대 링크(?guestInvite=<token>)로 들어왔는가. SPA에 라우터가 없어 쿼리로 받는다.
+   * 로그인 상태와 무관하게 수락 화면을 먼저 띄운다 — 다른 계정으로 로그인된 브라우저에서
+   * 링크를 열어도 초대받은 사람이 비밀번호를 정하고 자기 계정으로 들어와야 한다.
+   */
+  const [guestInviteToken, setGuestInviteToken] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get('guestInvite') ?? '' } catch { return '' }
+  })
   // The API scopes workspace data by the authenticated tenant and account role.
   // Match that boundary in the optimistic cache so switching accounts in the
   // same browser can never reuse another employee's filtered response.
@@ -1588,7 +1492,8 @@ export default function App() {
   }, [authStatus, mode, workspaceScope])
   useEffect(() => { void loadNotifications() }, [loadNotifications])
   // 알림·승인 대기 수는 서버가 밀어 준다. 주기 폴링 없이 즉시 반영된다.
-  useEventStream(authStatus === 'signed-in' && mode === 'tenant', (event) => {
+  // 게스트 세션에서는 이 스트림을 열지 않는다 — GuestWorkspace가 자기 구독 하나로 업무·알림 갱신을 함께 처리한다(오리진당 연결 수 절약).
+  useEventStream(authStatus === 'signed-in' && mode === 'tenant' && account?.role !== 'tenant-guest', (event) => {
     if (event.kind === 'notification' || event.kind === 'resync') void loadNotifications()
     if (event.kind === 'proposal' && typeof event.data.pending === 'number') setPendingProposals(event.data.pending)
   })
@@ -1618,19 +1523,27 @@ export default function App() {
     return () => { document.removeEventListener('pointerdown', onPointerDown); document.removeEventListener('keydown', onKey) }
   }, [notificationsOpen])
   const [query, setQuery] = useState('')
+  /**
+   * 외부 게스트 세션인가. 게스트는 전용 화면(GuestWorkspace)만 보고, 이 컴포넌트가
+   * 로그인 직후 돌리는 테넌트 데이터 fetch(work-items·work-rules·directory·일정·업종 모듈)는
+   * 서버 게이트가 전부 403으로 끊는다. 미리 막지 않으면 "공유 데이터를 불러오지 못했습니다"
+   * 토스트가 게스트 첫 화면을 덮는다.
+   */
+  const isGuestSession = account?.role === 'tenant-guest'
+  const tenantDataEnabled = authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange && !isGuestSession
   const [workItems, setWorkItems] = useWorkspaceState<WorkItem[]>('work-items', emptyWorkItems, {
-    enabled: authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange,
+    enabled: tenantDataEnabled,
     scope: workspaceScope,
     seedWhenEmpty: false,
   })
   const [workRules, setWorkRules] = useWorkspaceState<WorkRule[]>('work-rules', emptyWorkRules, {
-    enabled: authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange,
+    enabled: tenantDataEnabled,
     scope: workspaceScope,
     seedWhenEmpty: false,
   })
   // 업종 모듈에 없는 키는 아예 불러오지 않는다. 빈 배열을 들고 있으면 파생 지표가
   // "0건"으로 살아남아 그 업종에 없는 개념을 계속 화면에 보여 준다.
-  const tenantSignedIn = authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange
+  const tenantSignedIn = tenantDataEnabled
   const tenantIndustry = resolveIndustry(account?.industryType)
   const hasFoodModule = tenantIndustry === 'food_manufacturing'
   const hasItModule = tenantIndustry === 'it_services'
@@ -1655,7 +1568,7 @@ export default function App() {
     seedWhenEmpty: false,
   })
   const [dashboardCalendarEvents] = useWorkspaceState<DashboardCalendarEvent[]>('calendar-events', [], {
-    enabled: authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange,
+    enabled: tenantDataEnabled,
     scope: workspaceScope,
     seedWhenEmpty: false,
   })
@@ -1805,7 +1718,7 @@ export default function App() {
   }, [account?.role, authStatus, platformRefreshToken])
 
   useEffect(() => {
-    if (authStatus !== 'signed-in' || account?.requiresPasswordChange || mode !== 'tenant' || !workspaceScope || workRules.length === 0) return
+    if (!tenantDataEnabled || !workspaceScope || workRules.length === 0) return
     let active = true
     const timer = window.setTimeout(() => {
       fetch('/api/work-rules/materialize', { method: 'POST', headers: { 'x-workspace-identity': workspaceScope } })
@@ -1819,10 +1732,10 @@ export default function App() {
         .catch(() => { /* the next workspace read retries materialization */ })
     }, 800)
     return () => { active = false; window.clearTimeout(timer) }
-  }, [account?.requiresPasswordChange, authStatus, mode, setWorkItems, setWorkRules, workRules.length, workspaceScope])
+  }, [tenantDataEnabled, setWorkItems, setWorkRules, workRules.length, workspaceScope])
 
   useEffect(() => {
-    if (authStatus !== 'signed-in' || account?.requiresPasswordChange || mode !== 'tenant' || !account?.tenantId) {
+    if (!tenantDataEnabled || !account?.tenantId) {
       setDirectoryAssignees([])
       return
     }
@@ -1830,19 +1743,19 @@ export default function App() {
     fetch('/api/directory')
       .then(async (response) => {
         if (!response.ok) throw new Error('directory-load')
-        return response.json() as Promise<{ members?: Array<{ id: string; name: string }> }>
+        return response.json() as Promise<{ members?: Array<{ id: string; name: string; kind?: 'employee' | 'guest'; active?: boolean }> }>
       })
       .then(({ members }) => {
         if (!active || !Array.isArray(members)) return
         setDirectoryAssignees(members
           .filter((member) => member.id && member.name)
-          .map((member) => ({ id: member.id, name: member.name })))
+          .map((member) => ({ id: member.id, name: member.name, ...(member.kind === 'guest' ? { kind: 'guest' as const } : {}) })))
       })
       .catch(() => {
         if (active) setDirectoryAssignees([])
       })
     return () => { active = false }
-  }, [account?.requiresPasswordChange, account?.tenantId, authStatus, mode])
+  }, [tenantDataEnabled, account?.tenantId])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -2188,8 +2101,10 @@ export default function App() {
       setAuthStatus('signed-in')
       publishSessionChange(sessionIdentity(body.account))
       if (body.account.role === 'platform-operator') { setMode('platform'); setPage('platform') }
-      else { setMode('tenant'); setPage('ai') }
-      setToast(`${body.account.tenantName ?? BRAND.name} 워크스페이스에 로그인했습니다.`)
+      else { setMode('tenant'); setPage(body.account.role === 'tenant-guest' ? 'projects' : 'ai') }
+      setToast(body.account.role === 'tenant-guest'
+        ? `${body.account.tenantName ?? BRAND.name}의 초대된 프로젝트에 게스트로 들어왔습니다.`
+        : `${body.account.tenantName ?? BRAND.name} 워크스페이스에 로그인했습니다.`)
       return { ok: true, message: '로그인했습니다.' }
     } catch {
       return { ok: false, message: '인증 서버에 연결할 수 없습니다. 서버 실행 상태를 확인해 주세요.' }
@@ -2284,7 +2199,7 @@ export default function App() {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} onToast={setToast} onOpenOrigin={(page) => navigate(page as PageId)} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
-      case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
+      case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onNavigate={(target) => { if (target === 'people') setPeopleInitialTab('accounts'); navigate(target as PageId) }} />
       case 'finance': return <TaxAssetsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} industryType={account?.industryType ?? 'food_manufacturing'} onToast={setToast} />
       case 'ip': return <IpRightsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} onAskLens={setLensTarget} onToast={setToast} />
       case 'products': return <ProductManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
@@ -2296,16 +2211,40 @@ export default function App() {
       case 'approvals': return <ApprovalQueue workspaceScope={workspaceScope} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenEvidence={(page) => navigate(page as PageId)} onPendingChange={setPendingProposals} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} industryType={account?.industryType ?? 'food_manufacturing'} onAskLens={setLensTarget} onToast={setToast} />
       case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} companyName={tenantName} onAskLens={setLensTarget} onToast={setToast} />
-      case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} />
+      case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onNavigate={(target) => { if (target === 'people') setPeopleInitialTab('accounts'); navigate(target as PageId) }} />
       case 'it-deliverables':
       case 'it-contracts': return <ItServicesPage view={page as ItServicesView} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} onToast={setToast} />
       default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} itProjects={dashboardItProjects} itContracts={dashboardItContracts} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
   }
 
+  if (guestInviteToken) {
+    // 초대 수락 → 같은 자격으로 바로 로그인. 성공하면 주소창의 토큰을 지워 새로고침해도 수락 화면이 다시 뜨지 않게 한다.
+    return <GuestAcceptPage token={guestInviteToken} onAccepted={async ({ email, password }) => {
+      const result = await login({ workspace: 'tenant', email, password, remember: true })
+      if (result.ok) {
+        try { window.history.replaceState({}, '', window.location.pathname) } catch { /* 주소 정리는 편의 기능이다 */ }
+        setGuestInviteToken('')
+      }
+      return result
+    }} onCancel={() => { try { window.history.replaceState({}, '', window.location.pathname) } catch { /* 주소 정리는 편의 기능이다 */ } setGuestInviteToken('') }} />
+  }
   if (authStatus === 'checking') return <main className="auth-loading" aria-live="polite"><BrandMark size={48} /><strong>{BRAND.name}</strong><span>안전한 세션을 확인하고 있습니다…</span></main>
   if (authStatus === 'signed-out') return <LoginPage onLogin={login} initialError={toast} />
   if (account?.requiresPasswordChange) return <PasswordChangePage name={account.name} email={account.email} onChange={changeInitialPassword} onLogout={logout} />
+  if (account?.role === 'tenant-guest') {
+    /*
+     * 외부 게스트는 사이드바·탑바(전역 검색·알림·메신저 버튼)·휴대폰 탭 막대를 DOM에 아예 두지 않는다.
+     * 숨기는 것과 없는 것은 다르다 — 메뉴 이름·직원 목록·다른 화면의 존재 자체가 외부인에게 새지 않아야 한다.
+     * 개인 설정·프로필·토스트만 같은 부품을 공유한다.
+     */
+    return <>
+      <GuestWorkspace account={account} workspaceScope={workspaceScope} notificationFeed={notificationFeed} onReloadNotifications={loadNotifications} onLogout={logout} onToast={setToast} onOpenSettings={() => setSettingsOpen(true)} />
+      <SettingsDrawer open={settingsOpen} guestMode onClose={() => setSettingsOpen(false)} profileName={account.name} profileRole={`게스트 · ${account.guestScope?.orgName || account.team || '외부 거래처'}`} companyName={account.tenantName ?? BRAND.name} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
+      {profileOpen && <ProfileEditor account={account} onClose={() => setProfileOpen(false)} onToast={setToast} onSaved={(next) => { setAccount((current) => current ? { ...current, ...next } as AuthAccount : current) }} />}
+      {toastMessage && <Toast message={toastMessage} onClose={() => setToastMessage(null)} />}
+    </>
+  }
 
   return (
     <IndustryProvider industryType={account?.industryType}>

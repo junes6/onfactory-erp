@@ -5,7 +5,8 @@ import test from 'node:test'
 const appSource = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const stylesSource = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
 const workPageSource = appSource.slice(appSource.indexOf('function WorkPage('), appSource.indexOf('function InventoryPage('))
-const completionSource = appSource.slice(appSource.indexOf('function CompletionModal('), appSource.indexOf('function WorkReviewModal('))
+// 완료 보고 모달은 직원 업무 화면과 게스트 화면이 함께 쓰도록 별도 파일로 분리됐다.
+const completionSource = await readFile(new URL('../src/components/CompletionModal.tsx', import.meta.url), 'utf8')
 const taskModalSource = appSource.slice(appSource.indexOf('function TaskModal('), appSource.indexOf('function SupportSessionModal('))
 
 test('업무 내부 상태는 쉬운 표시 문구로 변환한다', () => {

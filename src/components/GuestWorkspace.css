@@ -1,0 +1,70 @@
+/* 외부 게스트 전용 셸 — 사이드바·탑바 없이 헤더 한 줄과 탭 패널 하나. 색·간격은 전부 토큰. */
+.guest-shell { min-height: 100vh; display: flex; flex-direction: column; background: var(--canvas); color: var(--ink); }
+
+.guest-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  padding: var(--space-12) var(--space-24);
+  border-bottom: var(--hairline) solid var(--line);
+  background: var(--surface);
+}
+.guest-header-brand { display: flex; align-items: center; gap: var(--space-12); min-width: 0; }
+.guest-header-brand small { display: block; color: var(--muted); font-size: var(--font-13); }
+.guest-header-brand strong { display: block; overflow: hidden; font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
+.guest-header-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); }
+.guest-project-select select { min-height: 36px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); font-size: var(--font-13); }
+.guest-access-until { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--muted); font-size: var(--font-13); }
+
+.guest-main { flex: 1; width: min(1080px, 100%); margin: var(--space-0) auto; padding: var(--space-24); }
+/* 2층 표면: 탭은 배경 위 단독 컨트롤이고, 카드 층은 업무 행·자료 행·메신저·게시글 하나뿐이다(카드 안에 카드 금지). */
+.guest-panel { display: flex; flex-direction: column; gap: var(--space-16); }
+.guest-tabs { flex-wrap: wrap; padding: var(--space-0); border-bottom: none; }
+.guest-tabs button { display: inline-flex; align-items: center; gap: var(--space-4); }
+.guest-tab-body { padding: var(--space-0); }
+.guest-board .content-page { padding: var(--space-0); animation: none; }
+.guest-notification-wrap .ui-icon-button { position: relative; }
+.guest-unread { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; display: inline-grid; place-items: center; padding: var(--space-0) var(--space-4); border-radius: var(--radius-8); color: var(--color-white); background: var(--color-danger); font-size: var(--font-11); font-style: normal; font-weight: var(--weight-medium); }
+
+/* 업무 목록 — 한 줄 원칙: 상태 점 · 제목 + 보조 1줄 · 마감 · 버튼 1개. 상세는 눌러서 편다. */
+.guest-task-list { display: flex; flex-direction: column; gap: var(--space-8); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.guest-task-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.guest-task-row.is-done { opacity: .72; }
+.guest-task-row.is-open { border-color: var(--color-primary); }
+.guest-task-summary { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-12); padding: var(--space-12) var(--space-16); border: none; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.guest-task-title { min-width: 0; }
+.guest-task-title strong { display: block; overflow: hidden; font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
+.guest-task-title small { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); }
+.guest-task-summary time { color: var(--muted); font-size: var(--font-13); white-space: nowrap; }
+.guest-task-action { padding-right: var(--space-12); }
+.guest-task-detail { grid-column: 1 / -1; padding: var(--space-0) var(--space-16) var(--space-16); border-top: var(--hairline) solid var(--line); }
+.guest-task-description { margin: var(--space-12) var(--space-0) var(--space-0); white-space: pre-wrap; font-size: var(--font-15); line-height: 1.6; }
+.guest-task-revision { display: flex; align-items: center; gap: var(--space-4); margin: var(--space-12) var(--space-0) var(--space-0); padding: var(--space-8) var(--space-12); border-radius: var(--radius-8); color: var(--color-danger-ink); background: var(--color-danger-soft); font-size: var(--font-13); }
+.guest-task-checklist { display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-12) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
+.guest-task-checklist label { display: flex; align-items: center; gap: var(--space-8); font-size: var(--font-15); }
+.guest-task-checklist .is-done { color: var(--muted); text-decoration: line-through; }
+.guest-task-history p { display: flex; align-items: flex-start; gap: var(--space-4); margin: var(--space-12) var(--space-0) var(--space-0); color: var(--color-blue); font-size: var(--font-13); }
+.guest-task-meta { display: flex; flex-wrap: wrap; gap: var(--space-16); margin: var(--space-12) var(--space-0) var(--space-0); }
+.guest-task-meta div { display: flex; gap: var(--space-4); font-size: var(--font-13); }
+.guest-task-meta dt { color: var(--muted); }
+.guest-task-meta dd { margin: var(--space-0); }
+
+/* 자료 목록 — 한 줄에 아이콘 · 이름 + 보조 1줄 · 내려받기 */
+.guest-file-list { display: flex; flex-direction: column; gap: var(--space-8); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.guest-file-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-12); padding: var(--space-12) var(--space-16); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.guest-file-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-primary); background: var(--color-primary-soft); }
+.guest-file-copy { min-width: 0; }
+.guest-file-copy strong { display: block; overflow: hidden; font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
+.guest-file-copy small { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); }
+
+@media (max-width: 720px) {
+  .guest-header { padding: var(--space-12) var(--space-16); }
+  .guest-main { padding: var(--space-12); }
+  .guest-task-row { grid-template-columns: minmax(0, 1fr); }
+  .guest-task-action { padding: var(--space-0) var(--space-16) var(--space-12); }
+  .guest-task-action .ui-button { width: 100%; }
+  .guest-task-summary { grid-template-columns: auto minmax(0, 1fr); }
+  .guest-task-summary time { grid-column: 2; }
+}

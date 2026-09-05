@@ -8,7 +8,9 @@ import { Button, ButtonLink, IconButton } from './ui/Button'
 import { useIndustrySurface } from '../modules/IndustryContext'
 
 type ProjectRole = 'owner' | 'editor' | 'viewer'
-type ProjectMember = { id: string; name: string; team?: string; role: ProjectRole }
+/** kind는 서버가 붙인다. 'guest'는 외부 거래처 계정 — 역할은 항상 viewer로 고정되고 화면은 배지를 단다. */
+type MemberKind = 'employee' | 'guest'
+type ProjectMember = { id: string; name: string; team?: string; role: ProjectRole; kind?: MemberKind }
 type Project = {
   id: string
   legacyId?: string
@@ -33,9 +35,15 @@ type Project = {
   fileCount: number
   lastActivityAt: string
 }
-type ProjectComment = { id: string; authorId: string; author: string; text: string; attachments: StoredDocumentAttachment[]; createdAt: string }
+type ProjectComment = { id: string; authorId: string; author: string; authorRole?: string; text: string; attachments: StoredDocumentAttachment[]; createdAt: string }
 type ProjectPost = { id: string; projectId: string; title: string; body: string; attachments: StoredDocumentAttachment[]; authorId: string; author: string; pinned: boolean; comments: ProjectComment[]; createdAt: string; updatedAt: string }
-type DirectoryEntry = { id: string; name: string; team: string; jobRole: string }
+/** projectIds는 게스트 항목에만 올 수 있다(초대 범위). 있으면 범위 밖 프로젝트의 후보 목록에서 그 게스트를 뺀다. */
+type DirectoryEntry = { id: string; name: string; team: string; jobRole: string; kind?: MemberKind; projectIds?: string[] }
+
+/** 외부 게스트 배지 — 로스터·댓글·멤버 아바타에 같은 모양으로 붙인다. */
+function GuestBadge() {
+  return <StatusBadge className="status-pill project-guest-badge" tone="warning">게스트</StatusBadge>
+}
 
 const roleLabel: Record<ProjectRole, string> = { owner: '소유자', editor: '편집', viewer: '열람' }
 const roleTone: Record<ProjectRole, StatusBadgeTone> = { owner: 'info', editor: 'success', viewer: 'neutral' }
@@ -52,12 +60,20 @@ async function readJson<T>(response: Response): Promise<T & { error?: { message?
   try { return JSON.parse(text) } catch { return { error: { message: text } } as T & { error?: { message?: string } } }
 }
 
-export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserName, canManage, onToast }: {
+export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserName, canManage, onToast, onNavigate, guestMode = false, focusProjectId }: {
   workspaceScope?: string
   currentUserId: string
   currentUserName: string
   canManage: boolean
   onToast: (message: string) => void
+  /** 다른 화면으로 보내는 통로. 멤버 편집기의 "외부 게스트 초대는 인사·조직에서" 링크가 쓴다. */
+  onNavigate?: (page: string) => void
+  /**
+   * 외부 게스트 화면. 새 프로젝트·설정·삭제·글쓰기·필터를 그리지 않고,
+   * focusProjectId가 가리키는 프로젝트 상세로 바로 들어간다(목록 화면 없음).
+   */
+  guestMode?: boolean
+  focusProjectId?: string
 }) {
   const industry = useIndustrySurface()
   const headers = useMemo(() => ({ 'content-type': 'application/json', ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}) }), [workspaceScope])
@@ -96,6 +112,8 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
 
   useEffect(() => { void loadProjects() }, [loadProjects])
   useEffect(() => { if (selectedId) { setDetailTab('feed'); void loadDetail(selectedId) } }, [selectedId, loadDetail])
+  // 게스트는 헤더의 프로젝트 셀렉트가 목록 역할을 한다. 고른 프로젝트 상세를 바로 연다.
+  useEffect(() => { if (guestMode) setSelectedId(focusProjectId || null) }, [guestMode, focusProjectId])
 
   const [categoryFilter, setCategoryFilter] = useState('전체')
   const categories = ['전체', ...new Set(projects.map((project) => project.category).filter((value): value is string => Boolean(value)))]
@@ -103,8 +121,9 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
     .filter((project) => filter === 'archived' ? project.status === 'archived' : project.status !== 'archived')
     .filter((project) => categoryFilter === '전체' || project.category === categoryFilter)
   const role = detail?.role ?? null
-  const canPost = role === 'owner' || role === 'editor'
-  const isOwner = role === 'owner'
+  // 게스트는 서버가 viewer로 고정하지만, 화면도 같은 규칙을 한 번 더 말한다 — 응답이 어긋나도 글쓰기·설정 버튼이 생기지 않게.
+  const canPost = !guestMode && (role === 'owner' || role === 'editor')
+  const isOwner = !guestMode && role === 'owner'
 
   const saveProject = async (input: Record<string, unknown>, projectId?: string) => {
     const response = await fetch(projectId ? `/api/projects/${encodeURIComponent(projectId)}` : '/api/projects', { method: projectId ? 'PATCH' : 'POST', headers, body: JSON.stringify(input) })
@@ -186,19 +205,20 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
       ...post.comments.flatMap((comment) => comment.attachments.map((attachment) => ({ attachment, source: `${post.title} 댓글`, author: comment.author, at: comment.createdAt }))),
     ])
     const period = [detail.startDate, detail.endDate].some(Boolean) ? `${detail.startDate ? formatDateLabel(detail.startDate) : '?'} ~ ${detail.endDate ? formatDateLabel(detail.endDate) : '?'}` : ''
+    const guestMemberCount = detail.members.filter((member) => member.kind === 'guest').length
     return <div className="content-page project-page">
       <header className="page-header project-detail-header">
         <div>
-          <button type="button" className="project-back" onClick={() => { setSelectedId(null); setDetail(null); void loadProjects(true) }}><ArrowLeft size={16} /> 프로젝트 목록</button>
+          {!guestMode && <button type="button" className="project-back" onClick={() => { setSelectedId(null); setDetail(null); void loadProjects(true) }}><ArrowLeft size={16} /> 프로젝트 목록</button>}
           <h1>{detail.name} {detail.category && <StatusBadge className="status-pill" tone="info">{detail.category}</StatusBadge>}{detail.stage && <StatusBadge className="status-pill" dot tone={stageTone(detail.stage)}>{detail.stage}</StatusBadge>}{detail.status === 'archived' && <StatusBadge className="status-pill" tone="neutral">보관됨</StatusBadge>}</h1>
           {detail.description && <p>{detail.description}</p>}
           <div className="project-meta">
-            <span className="project-members" title={detail.members.map((member) => `${member.name} (${roleLabel[member.role]})`).join(', ')}><Users size={15} /> {detail.members.slice(0, 6).map((member) => <i key={member.id} className={`project-avatar role-${member.role}`}>{member.name.slice(0, 1)}</i>)}{detail.members.length > 6 && <em>+{detail.members.length - 6}</em>} {detail.members.length}명</span>
+            <span className="project-members" title={detail.members.map((member) => `${member.name} (${member.kind === 'guest' ? '게스트' : roleLabel[member.role]})`).join(', ')}><Users size={15} /> {detail.members.slice(0, 6).map((member) => <i key={member.id} className={`project-avatar role-${member.role}${member.kind === 'guest' ? ' is-guest' : ''}`}>{member.name.slice(0, 1)}</i>)}{detail.members.length > 6 && <em>+{detail.members.length - 6}</em>} {detail.members.length}명{guestMemberCount > 0 && <> <StatusBadge className="status-pill project-guest-badge" tone="warning">게스트 {guestMemberCount}명</StatusBadge></>}</span>
             {detail.client && <span><Building2 size={14} /> {detail.client}</span>}
             {period && <span><CalendarDays size={14} /> {period}</span>}
             {money(detail.amount) && <span><Coins size={14} /> {money(detail.amount)}</span>}
             <span>{detail.visibility === 'company' ? <><Users size={14} /> 회사 전체 열람</> : <><Lock size={14} /> 멤버만</>}</span>
-            {role && <StatusBadge className="status-pill" tone={roleTone[role]}>내 권한 · {roleLabel[role]}</StatusBadge>}
+            {role && <StatusBadge className="status-pill" tone={guestMode ? 'warning' : roleTone[role]}>내 권한 · {guestMode ? '게스트 (보기와 댓글)' : roleLabel[role]}</StatusBadge>}
           </div>
         </div>
         <div className="page-header-actions">
@@ -232,7 +252,17 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
           </section>
         </>}
 
-      {editorOpen === 'settings' && <ProjectEditor project={detail} directory={directory} currentUserId={currentUserId} onClose={() => setEditorOpen(null)} onSave={(input) => saveProject(input, detail.id)} />}
+      {editorOpen === 'settings' && <ProjectEditor project={detail} directory={directory} currentUserId={currentUserId} onClose={() => setEditorOpen(null)} onSave={(input) => saveProject(input, detail.id)} onNavigate={onNavigate} />}
+    </div>
+  }
+
+  if (guestMode) {
+    // 게스트에게 목록 화면은 없다. 상세를 열지 못한 상태(불러오는 중·범위 밖)만 짧게 말한다.
+    // loadDetail이 실패하면 selectedId를 비우므로, selectedId가 남아 있는 동안만 "불러오는 중"이다.
+    return <div className="content-page project-page">
+      {loading || (selectedId && !detail)
+        ? <div className="empty-state compact"><FolderKanban size={26} /><h3>프로젝트를 불러오는 중</h3></div>
+        : <div className="empty-state compact"><FolderKanban size={26} /><h3>볼 수 있는 프로젝트가 없습니다</h3><p>초대한 회사가 프로젝트를 지정하면 여기에 게시판이 열립니다. 방금 열리지 않았다면 위에서 프로젝트를 다시 골라 주세요.</p></div>}
     </div>
   }
 
@@ -257,11 +287,11 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
             <small>{project.visibility === 'company' ? '회사 전체 열람' : '멤버만'} · 최근 {formatDateTime(project.lastActivityAt)}</small>
           </button>)}
         </div>}
-    {editorOpen === 'create' && <ProjectEditor directory={directory} currentUserId={currentUserId} currentUserName={currentUserName} onClose={() => setEditorOpen(null)} onSave={(input) => saveProject(input)} />}
+    {editorOpen === 'create' && <ProjectEditor directory={directory} currentUserId={currentUserId} currentUserName={currentUserName} onClose={() => setEditorOpen(null)} onSave={(input) => saveProject(input)} onNavigate={onNavigate} />}
   </div>
 }
 
-function ProjectEditor({ project, directory, currentUserId, currentUserName, onClose, onSave }: { project?: Project; directory: DirectoryEntry[]; currentUserId: string; currentUserName?: string; onClose: () => void; onSave: (input: Record<string, unknown>) => Promise<boolean> }) {
+function ProjectEditor({ project, directory, currentUserId, currentUserName, onClose, onSave, onNavigate }: { project?: Project; directory: DirectoryEntry[]; currentUserId: string; currentUserName?: string; onClose: () => void; onSave: (input: Record<string, unknown>) => Promise<boolean>; onNavigate?: (page: string) => void }) {
   const [name, setName] = useState(project?.name ?? '')
   const [description, setDescription] = useState(project?.description ?? '')
   const [visibility, setVisibility] = useState<'members' | 'company'>(project?.visibility ?? 'members')
@@ -281,13 +311,25 @@ function ProjectEditor({ project, directory, currentUserId, currentUserName, onC
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey) }, [onClose])
   const nameOf = (id: string) => directory.find((entry) => entry.id === id)?.name ?? project?.members.find((member) => member.id === id)?.name ?? id
   const memberRole = (id: string) => members.find((member) => member.id === id)?.role ?? null
+  const isGuestEntry = (id: string) => directory.find((entry) => entry.id === id)?.kind === 'guest' || project?.members.find((member) => member.id === id)?.kind === 'guest'
+  /**
+   * 게스트가 이 프로젝트의 후보가 되는가. 게스트는 인사·조직에서 초대할 때 정한 프로젝트 범위 안에서만 멤버가 된다.
+   * 새 프로젝트(아직 id 없음)에는 범위가 있을 수 없으니 전부 뺀다. 범위(projectIds)를 모르는 항목은 서버 400에 맡긴다.
+   */
+  const guestAllowedHere = (entry: DirectoryEntry) => {
+    if (entry.kind !== 'guest') return true
+    if (!project) return false
+    return !Array.isArray(entry.projectIds) || entry.projectIds.includes(project.id)
+  }
   // 회사 구성원 전체 목록 — 검색은 필터일 뿐, 항상 모두 보이고 눌러서 넣고 뺀다.
   const normalizedQuery = query.trim().toLowerCase()
   const roster = directory
     .filter((entry) => entry.id !== ownerId)
+    .filter(guestAllowedHere)
     .filter((entry) => !normalizedQuery || `${entry.name} ${entry.team} ${entry.jobRole}`.toLowerCase().includes(normalizedQuery))
     .sort((left, right) => Number(Boolean(memberRole(right.id))) - Number(Boolean(memberRole(left.id))) || (left.team || '').localeCompare(right.team || '', 'ko') || left.name.localeCompare(right.name, 'ko'))
-  const toggleMember = (id: string) => setMembers((current) => current.some((member) => member.id === id) ? current.filter((member) => member.id !== id) : [...current, { id, role: 'editor' }])
+  // 게스트는 viewer로만 들어간다. 편집 권한을 줘도 서버가 viewer로 되돌리므로 화면에서 처음부터 그렇게 넣는다.
+  const toggleMember = (id: string) => setMembers((current) => current.some((member) => member.id === id) ? current.filter((member) => member.id !== id) : [...current, { id, role: isGuestEntry(id) ? 'viewer' : 'editor' }])
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className="modal-card project-editor" role="dialog" aria-modal="true" aria-labelledby="project-editor-title">
       <header><div><span className="eyebrow">{project ? 'PROJECT SETTINGS' : 'NEW PROJECT'}</span><h2 id="project-editor-title">{project ? '멤버 · 설정' : '새 프로젝트'}</h2><p>{project ? '멤버 권한·관리 정보·공개 범위를 바꿉니다.' : '이름만 정하면 시작됩니다. 멤버·관리 정보는 나중에도 바꿀 수 있습니다.'}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
@@ -318,16 +360,18 @@ function ProjectEditor({ project, directory, currentUserId, currentUserName, onC
             <li className="is-owner-row"><i className="project-avatar role-owner">{(ownerName || nameOf(ownerId)).slice(0, 1)}</i><div><span>{ownerName || nameOf(ownerId)}</span><small>프로젝트 소유자</small></div><em>소유자</em></li>
             {roster.map((entry) => {
               const currentRole = memberRole(entry.id)
-              return <li key={entry.id} className={currentRole ? 'is-member' : ''}>
-                <i className={`project-avatar role-${currentRole ?? 'viewer'}`}>{entry.name.slice(0, 1)}</i>
-                <div><span>{entry.name}</span><small>{[entry.team, entry.jobRole].filter(Boolean).join(' · ') || '소속 미지정'}</small></div>
-                {currentRole && <select value={currentRole} aria-label={`${entry.name} 권한`} onClick={(event) => event.stopPropagation()} onChange={(event) => setMembers((current) => current.map((member) => member.id === entry.id ? { ...member, role: event.target.value as ProjectRole } : member))}><option value="editor">편집</option><option value="viewer">열람</option></select>}
+              const guest = entry.kind === 'guest'
+              return <li key={entry.id} className={`${currentRole ? 'is-member' : ''}${guest ? ' is-guest' : ''}`}>
+                <i className={`project-avatar role-${currentRole ?? 'viewer'}${guest ? ' is-guest' : ''}`}>{entry.name.slice(0, 1)}</i>
+                <div><span>{entry.name}{guest && <> <GuestBadge /></>}</span><small>{[entry.team, guest ? '외부 게스트' : entry.jobRole].filter(Boolean).join(' · ') || '소속 미지정'}</small></div>
+                {currentRole && <select value={guest ? 'viewer' : currentRole} disabled={guest} aria-label={`${entry.name} 권한${guest ? ' (게스트는 열람 고정)' : ''}`} onClick={(event) => event.stopPropagation()} onChange={(event) => setMembers((current) => current.map((member) => member.id === entry.id ? { ...member, role: event.target.value as ProjectRole } : member))}><option value="editor">편집</option><option value="viewer">열람</option></select>}
                 <button type="button" className={currentRole ? 'project-roster-remove' : 'project-roster-add'} onClick={() => toggleMember(entry.id)}>{currentRole ? <><X size={14} /> 제외</> : <><Plus size={14} /> 추가</>}</button>
               </li>
             })}
             {roster.length === 0 && <li className="project-roster-empty">일치하는 구성원이 없습니다.</li>}
           </ul>
-          <p className="project-member-hint">편집: 글·파일 올리기 가능 · 열람: 보기와 댓글만 · 회사 전체 공개여도 글쓰기는 멤버만 가능합니다.</p>
+          <p className="project-member-hint">편집: 글·파일 올리기 가능 · 열람: 보기와 댓글만 · 회사 전체 공개여도 글쓰기는 멤버만 가능합니다. 게스트는 열람으로 고정됩니다.</p>
+          {onNavigate && <div className="project-member-guest-link"><Button tone="quiet" size="sm" type="button" onClick={() => { onClose(); onNavigate('people') }}>외부 게스트 초대는 인사·조직 → 계정·권한에서</Button></div>}
         </div>
         <footer><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>취소</Button><Button tone="primary" type="submit" disabled={busy || name.trim().length < 2}>{busy ? '저장 중…' : project ? '설정 저장' : '프로젝트 만들기'}</Button></footer>
       </form>
@@ -423,8 +467,8 @@ function PostCard({ post, currentUserId, isOwner, canComment, workspaceScope, on
     {post.attachments.length > 0 && <div className="project-post-files">{post.attachments.map((attachment) => <button type="button" key={attachment.id} onClick={() => onDownload(attachment)}><Download size={14} /> {attachment.name} <small>{attachment.size}</small></button>)}</div>}
     <div className="project-comments">
       {post.comments.map((comment) => <div className="project-comment" key={comment.id}>
-        <i className="project-avatar role-viewer">{comment.author.slice(0, 1)}</i>
-        <div><span className="project-comment-head"><strong>{comment.author}</strong><time dateTime={comment.createdAt}>{formatDateTime(comment.createdAt)}</time>{(comment.authorId === currentUserId || isOwner) && <button type="button" aria-label="댓글 삭제" onClick={() => onDeleteComment(comment)}><X size={13} /></button>}</span>{comment.text && <p>{comment.text}</p>}{comment.attachments.length > 0 && <span className="project-comment-files">{comment.attachments.map((attachment) => <button type="button" key={attachment.id} onClick={() => onDownload(attachment)}><Download size={12} /> {attachment.name}</button>)}</span>}</div>
+        <i className={`project-avatar role-viewer${comment.authorRole === 'tenant-guest' ? ' is-guest' : ''}`}>{comment.author.slice(0, 1)}</i>
+        <div><span className="project-comment-head"><strong>{comment.author}</strong>{comment.authorRole === 'tenant-guest' && <GuestBadge />}<time dateTime={comment.createdAt}>{formatDateTime(comment.createdAt)}</time>{(comment.authorId === currentUserId || isOwner) && <button type="button" aria-label="댓글 삭제" onClick={() => onDeleteComment(comment)}><X size={13} /></button>}</span>{comment.text && <p>{comment.text}</p>}{comment.attachments.length > 0 && <span className="project-comment-files">{comment.attachments.map((attachment) => <button type="button" key={attachment.id} onClick={() => onDownload(attachment)}><Download size={12} /> {attachment.name}</button>)}</span>}</div>
       </div>)}
       {canComment && (showComposer
         ? <form className="project-comment-composer" onSubmit={async (event) => { event.preventDefault(); if (!text.trim() && attachments.length === 0) return; setBusy(true); const ok = await onComment({ text: text.trim(), attachments }); setBusy(false); if (ok) { setText(''); setAttachments([]); setShowComposer(false) } }}>
