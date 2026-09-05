@@ -424,6 +424,52 @@ test('#15 SSE: 게스트 스트림에는 남의 업무 제목이 실리지 않�
   })
 })
 
+test('#22 하위 업무: /parent는 게이트 403, 게스트 담당 자식은 상위와 같은 프로젝트에 귀속돼야 하고, 게스트 GET·SSE에 상위 제목이 없다', async () => {
+  const store = seedStore()
+  await withServer(buildApp(store), async (origin) => {
+    const guest = await login(origin, GUEST.email, GUEST.password)
+    const admin = await login(origin, ADMIN.email)
+    const g = api(origin, guest)
+    const a = api(origin, admin)
+    // 이동 라우트는 allowlist 밖 — 게이트가 고정 문구 하나로 막는다.
+    const gated = await g('POST', '/api/work-items/WK-W1/parent', { parentId: null })
+    assert.equal(gated.status, 403)
+    assert.deepEqual(gated.body, GUEST_FORBIDDEN_BODY)
+    // 관리자가 WK-W1(게스트 담당, PRJ-A) 아래 게스트 담당 자식을 둔다. 시드의 W3는 귀속이 없어 먼저 채운다.
+    const base = store.tenants[TENANT]['work-items'].data.map((row) => (row.id === 'WK-W3' ? { ...row, projectId: 'PRJ-A' } : row))
+    const child = workItem({ id: 'WK-W1-C', title: 'W1 하위 치수 확인', projectId: 'PRJ-A', parentId: 'WK-W1' })
+    const saved = await a('PUT', '/api/workspace/work-items', { data: [...base, child] })
+    assert.equal(saved.status, 200, JSON.stringify(saved.body))
+    // 상위에 projectId가 없으면 게스트 자식도 귀속을 잃는다 — 트리 검증보다 게스트 제약이 먼저 말한다.
+    const bare = workItem({ id: 'WK-NP', title: '귀속 없는 상위', owner: PARK.name, ownerId: PARK.id })
+    const noProject = await a('PUT', '/api/workspace/work-items', { data: [...base, child, bare, workItem({ id: 'WK-NP-C', title: '귀속 없는 게스트 자식', parentId: 'WK-NP' })] })
+    assert.equal(noProject.status, 400)
+    assert.equal(noProject.body.error.code, 'GUEST_PROJECT_REQUIRED')
+    // 게스트 GET: 자기 담당 행만이고, 직원에게 가는 상위 제목 envelope는 없다.
+    const items = await g('GET', '/api/workspace/work-items')
+    assert.equal(items.status, 200)
+    assert.deepEqual(items.body.data.map((row) => row.id).sort(), ['WK-W1', 'WK-W1-C', 'WK-W3'])
+    assert.equal('parents' in items.body, false)
+    assertNoLeak(items.body, 'GET work-items (게스트 하위 업무)')
+    // 관리자가 게스트 자식을 다른 상위로 옮기면 게스트 스트림에는 key·version만 온다.
+    const controller = new AbortController()
+    const stream = await fetch(`${origin}/api/events`, { headers: guest.headers, signal: controller.signal })
+    const chunks = []
+    const reader = stream.body.getReader()
+    const pump = (async () => { try { for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(Buffer.from(value).toString('utf8')) } } catch { /* abort */ } })()
+    const moved = await a('POST', '/api/work-items/WK-W1-C/parent', { parentId: 'WK-W2' })
+    assert.equal(moved.status, 200, JSON.stringify(moved.body))
+    assert.equal(moved.body.item.projectId, 'PRJ-A')
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    controller.abort()
+    await pump
+    const text = chunks.join('')
+    assert.ok(text.includes('data: {"key":"work-items","version":null}'), `work 이벤트는 종류·번호만 온다: ${text}`)
+    assert.ok(!text.includes('W1 하위 치수 확인') && !text.includes('W2 내부 검수'), `게스트 스트림에 업무 제목이 실렸다: ${text}`)
+    assertNoLeak(text, 'SSE (하위 업무 이동)')
+  })
+})
+
 test('프로필: 게스트는 소속·직책을 바꿀 수 없고(거래처명·외부 게스트 고정), 이름 변경은 grant·초대 기록에도 반영된다', async () => {
   const store = seedStore()
   await withServer(buildApp(store), async (origin) => {

@@ -84,12 +84,17 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
   const push = (type, item) => { const bucket = found.get(type); if (bucket.length < PER_TYPE_LIMIT) bucket.push(item) }
 
   // 업무 — 일반 직원은 자기가 맡았거나 자기가 지시한 것만 본다. 목록 화면과 같은 규칙이다.
-  for (const task of rows('work-items')) {
+  const workItems = rows('work-items')
+  const workItemById = new Map(workItems.map((task) => [task?.id, task]))
+  for (const task of workItems) {
     if (!isAdmin && task.ownerId !== auth.id && task.requesterId !== auth.id) continue
+    // 매치 텍스트에 상위 제목은 넣지 않는다 — 자식이 많으면 PER_TYPE_LIMIT에서 상위가 밀린다. meta에만, 볼 수 있는 상위일 때만.
     if (!matches(`${task.title} ${task.description} ${task.owner} ${task.category} ${task.status} ${task.id}`, words)) continue
+    const parent = task.parentId ? workItemById.get(task.parentId) : null
+    const parentVisible = parent && (isAdmin || parent.ownerId === auth.id || parent.requesterId === auth.id)
     push('task', hit({
       kind: 'task', id: task.id, title: task.title,
-      meta: `${task.status} · ${task.due ? String(task.due).slice(0, 10) : '기한 없음'}`,
+      meta: `${task.status} · ${task.due ? String(task.due).slice(0, 10) : '기한 없음'}${parentVisible ? ` · 상위: ${parent.title}` : ''}`,
       owner: task.owner, page: 'tasks', focusId: task.id,
       snippet: excerpt(task.description, first),
     }))

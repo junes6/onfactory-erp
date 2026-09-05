@@ -41,12 +41,13 @@ import {
   WORK_RULE_FREQUENCIES as SCHEDULE_FREQUENCIES,
   WORK_RULE_MONTHLY_MODES as SCHEDULE_MONTHLY_MODES,
 } from './work-rule-schedule.mjs'
+import { workItemTreeViolation, openSubtaskCount, parentRefsFor, prependWithinCap, registerWorkItemTreeRoutes } from './work-item-tree.mjs'
 import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
 import { registerPersonalCoreRoutes } from './personal-core-routes.mjs'
 import { backupSettings, BACKUP_STATUS_KEY, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
 import { createScheduler, SCHEDULER_RUNS_KEY, SCHEDULER_STATE_KEY } from './scheduler.mjs'
 import {
-  addNotifications, buildNotification, NOTIFICATIONS_KEY, NOTIFICATION_SETTINGS_KEY,
+  addNotifications, buildNotification, bundleAssignmentDrafts, NOTIFICATIONS_KEY, NOTIFICATION_SETTINGS_KEY,
   normalizeNotifications, pushPayload, PUSH_SUBSCRIPTIONS_KEY, removeSubscriptions,
   subscriptionsFor,
   // R15-I: 방해 금지 시간 · 아침 요약
@@ -184,7 +185,9 @@ const WORK_ITEM_BASE_FIELDS = [
 ]
 const WORK_ITEM_ID_FIELDS = ['ownerId', 'requesterId']
 // projectId: 프로젝트 귀속(선택). 외부 게스트에게 배정하는 업무는 반드시 초대된 프로젝트에 귀속돼야 한다.
-const WORK_ITEM_OPTIONAL_FIELDS = ['attachments', 'completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt', 'origin', 'checklist', 'projectId']
+// parentId: 상위 업무 id(선택). 깊이 2단 — parentId가 있는 행은 parentId가 없는 행만 가리킬 수 있다(배열 검증 workItemTreeViolation).
+// 진행률·차단 건수는 저장하지 않고 자식 status에서 파생한다.
+const WORK_ITEM_OPTIONAL_FIELDS = ['attachments', 'completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt', 'origin', 'checklist', 'projectId', 'parentId']
 const WORK_ITEM_FIELDS = [...WORK_ITEM_BASE_FIELDS, ...WORK_ITEM_ID_FIELDS, ...WORK_ITEM_OPTIONAL_FIELDS]
 const WORK_ITEM_STATUSES = new Set(['업무요청', '수행중', '결재대기', '결재완료'])
 const WORK_ITEM_PRIORITIES = new Set(['긴급', '높음', '보통'])
@@ -292,6 +295,8 @@ function hasWorkItemShape(value) {
   if (WORK_ITEM_BASE_FIELDS.some((key) => typeof value[key] !== 'string')) return false
   if (WORK_ITEM_ID_FIELDS.some((key) => value[key] !== undefined && (typeof value[key] !== 'string' || !value[key]))) return false
   if (['ruleId', 'ruleOccurrence', 'createdAt'].some((key) => value[key] !== undefined && typeof value[key] !== 'string')) return false
+  // 자기 참조는 어느 저장 경로에서도 만들 수 없다 — 가장 좁은 문에서 막는다. 나머지 트리 검사는 배열 단위(workItemTreeViolation).
+  if (value.parentId !== undefined && (typeof value.parentId !== 'string' || !value.parentId || value.parentId === value.id)) return false
   if (value.attachments !== undefined && (!Array.isArray(value.attachments) || value.attachments.length > 10 || !value.attachments.every(hasWorkEvidenceShape))) return false
   if (value.completion !== undefined && !hasWorkCompletionShape(value.completion)) return false
   if (value.completionHistory !== undefined && (!Array.isArray(value.completionHistory) || value.completionHistory.length > 100 || !value.completionHistory.every(hasWorkCompletionShape))) return false
@@ -3029,7 +3034,7 @@ export function createApp(options = {}) {
         }
         previousEffectRecord = tenantStore['work-items']
         const current = Array.isArray(tenantStore['work-items']?.data) ? tenantStore['work-items'].data : []
-        tenantStore['work-items'] = { data: [normalized[0], ...current].slice(0, 1_000), updatedAt: now, updatedBy: request.auth.id }
+        tenantStore['work-items'] = { data: prependWithinCap(current, normalized[0], 1_000), updatedAt: now, updatedBy: request.auth.id }
         resultRef = { type: 'work-item', id: normalized[0].id }
       }
     }
@@ -3492,18 +3497,11 @@ export function createApp(options = {}) {
   }
   app.locals.notify = notify
 
-  /** 이전 목록에 없던 업무 중 나 아닌 사람에게 배정된 것. 지시받은 사람만 알림을 받는다. */
+  /** 이전 목록에 없던 업무 중 나 아닌 사람에게 배정된 것. 한 번의 저장에서 같은 사람에게 여러 건이 가면 한 건으로 묶는다(상위 업무가 대표). */
   const notifyNewAssignments = (auth, previousData, nextData) => {
     const known = new Set((Array.isArray(previousData) ? previousData : []).map((item) => item?.id))
-    notify(auth.tenantId, (Array.isArray(nextData) ? nextData : [])
-      .filter((item) => item?.id && !known.has(item.id) && item.ownerId)
-      .map((item) => ({
-        type: 'task-assigned', recipientId: item.ownerId, actorId: auth.id,
-        title: `새 업무: ${item.title}`,
-        body: `${item.requestedBy || auth.name}님이 지시했습니다.${item.due ? ` 마감 ${String(item.due).slice(0, 10)}` : ''}`,
-        page: 'tasks', focusId: item.id,
-        source: { kind: 'work-item', id: item.id, label: '업무' },
-      })))
+    const fresh = (Array.isArray(nextData) ? nextData : []).filter((item) => item?.id && !known.has(item.id) && item.ownerId)
+    notify(auth.tenantId, bundleAssignmentDrafts(fresh, { actorId: auth.id, actorName: auth.name }))
   }
 
   /**
@@ -6640,6 +6638,13 @@ export function createApp(options = {}) {
         response.status(409).json({ error: { code: 'CHECKLIST_INCOMPLETE', message: `점검 항목 ${remaining.length}건이 남아 있습니다: ${remaining.slice(0, 3).join(', ')}${remaining.length > 3 ? ' 외' : ''}` } })
         return
       }
+      // 하위 업무가 전부 결재완료가 아니면 완료 보고를 받지 않는다. 상태머신은 그대로이고 조건 하나를 더 본다(CHECKLIST_INCOMPLETE와 같은 자리).
+      // 메시지에 자식 제목을 싣지 않는다 — 게스트가 상위 담당자면 범위 밖 자식 제목이 새기 때문이다. 건수만.
+      const openSubtasks = openSubtaskCount(previousData, previous.id)
+      if (openSubtasks > 0) {
+        response.status(409).json({ error: { code: 'SUBTASKS_INCOMPLETE', count: openSubtasks, message: `하위 업무 ${openSubtasks}건이 아직 끝나지 않았습니다. 하위 업무가 모두 결재완료되면 완료 보고할 수 있습니다.` } })
+        return
+      }
       const summary = String(request.body?.completion?.summary ?? '').trim()
       const evidence = normalizeEvidence(request.body?.completion?.evidence)
       if (summary.length < 3 || summary.length > 2_000 || !evidence) {
@@ -7013,8 +7018,13 @@ export function createApp(options = {}) {
       data = record.data.filter((conversation) => !isDeveloperSupportConversation(conversation)
         || conversation.supportRequesterId === request.auth.id)
     }
+    let parents = null
     if (request.auth.role === 'tenant-member' && Array.isArray(record?.data)) {
-      if (key === 'work-items') data = record.data.filter((item) => isMemberWorkItem(item, request.auth))
+      if (key === 'work-items') {
+        data = record.data.filter((item) => isMemberWorkItem(item, request.auth))
+        // 자식만 보이는 직원에게 상위 '제목'만 준다(담당·상태·마감은 주지 않는다). 관리자는 상위가 data에 있고, 게스트는 받지 않는다.
+        parents = parentRefsFor(record.data, data)
+      }
       if (key === 'leave-requests') data = data.filter((leave) => leave?.requesterId === request.auth.id)
       if (key === 'daily-journals') data = data.filter((journal) => journal?.authorId === request.auth.id)
       if (key === 'calendar-events') data = record.data.filter((event) => isCalendarEventVisibleToMember(event, request.auth, accounts))
@@ -7035,7 +7045,7 @@ export function createApp(options = {}) {
     }
     const version = workspaceRecordVersion(record)
     response.set('ETag', `"${version}"`)
-    response.json({ data, updatedAt: record?.updatedAt ?? null, version })
+    response.json({ data, updatedAt: record?.updatedAt ?? null, version, ...(parents && Object.keys(parents).length ? { parents } : {}) })
   })
 
   app.put('/api/workspace/:key', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
@@ -7120,6 +7130,9 @@ export function createApp(options = {}) {
       // 게스트 제약: 게스트는 결재자(요청자)가 될 수 없고, 담당자면 초대된 프로젝트에 귀속돼야 한다.
       const violation = guestWorkItemViolation(nextData, accounts, guestGrantOf)
       if (violation) { response.status(400).json({ error: violation }); return }
+      // 트리 무결성은 배열 전체를 봐야 판단된다. 정규화·게스트 제약 뒤, 저장 직전 한 번.
+      const treeViolation = workItemTreeViolation(nextData, rowsBeforeWrite)
+      if (treeViolation) { response.status(400).json({ error: treeViolation }); return }
     }
     if (request.auth.role === 'tenant-admin' && key === 'work-rules') {
       nextData = normalizeAdminWorkRules(nextData, request.auth.tenantId, operatorAwareAccounts(request.auth))
@@ -7356,7 +7369,7 @@ export function createApp(options = {}) {
     const tenantStore = workspaceStore.tenants[auth.tenantId] ??= {}
     const previous = tenantStore['work-items']
     const current = Array.isArray(previous?.data) ? previous.data : []
-    tenantStore['work-items'] = { data: [normalized[0], ...current].slice(0, 1_000), updatedAt: now, updatedBy: auth.id }
+    tenantStore['work-items'] = { data: prependWithinCap(current, normalized[0], 1_000), updatedAt: now, updatedBy: auth.id }
     try {
       await commitWorkspaceStore()
     } catch (error) {
@@ -7634,6 +7647,11 @@ export function createApp(options = {}) {
     accounts,
     commitWorkspaceStore,
     ...(typeof options.personalTodoClock === 'function' ? { clock: options.personalTodoClock } : {}),
+  })
+
+  registerWorkItemTreeRoutes({
+    app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, accounts, commitWorkspaceStore, events,
+    guestGrantOf, hasWorkItemShape, isMemberWorkItem, workspaceRecordVersion,
   })
 
   registerPersonalCoreRoutes({

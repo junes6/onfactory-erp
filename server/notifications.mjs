@@ -66,6 +66,31 @@ export function buildNotification({ type, recipientId, title, body = '', page = 
   }
 }
 
+/**
+ * 한 번의 저장에서 새로 배정된 업무를 받는 사람마다 한 건으로 묶는다. 상위 업무가 있으면 그것을 대표(focusId)로 삼는다.
+ * 1건이면 기존 문구 그대로 — 상위 하나에 자식 여럿을 한꺼번에 지시했을 때 같은 사람의 알림이 건수만큼 울리지 않게 한다.
+ * 관리자 PUT과 템플릿 실체화가 같은 함수를 지나므로 두 경로의 문구가 갈라지지 않는다.
+ */
+export function bundleAssignmentDrafts(items, { actorId, actorName }) {
+  const byOwner = new Map()
+  for (const item of items) {
+    if (!item?.id || !item.ownerId) continue
+    if (!byOwner.has(item.ownerId)) byOwner.set(item.ownerId, [])
+    byOwner.get(item.ownerId).push(item)
+  }
+  return [...byOwner.entries()].map(([recipientId, group]) => {
+    const lead = group.find((item) => !item.parentId) ?? group[0]
+    const firstDue = group.map((item) => item.due).filter(Boolean).sort()[0]
+    const single = group.length === 1
+    return {
+      type: 'task-assigned', recipientId, actorId,
+      title: single ? `새 업무: ${lead.title}` : `새 업무 ${group.length}건: ${lead.title} 외 ${group.length - 1}건`,
+      body: `${lead.requestedBy || actorName}님이 지시했습니다.${firstDue ? ` ${single ? '마감' : '첫 마감'} ${String(firstDue).slice(0, 10)}` : ''}`,
+      page: 'tasks', focusId: lead.id, source: { kind: 'work-item', id: lead.id, label: '업무' },
+    }
+  })
+}
+
 export function normalizeNotification(value) {
   if (!value || typeof value !== 'object') return null
   const id = text(value.id, 120)

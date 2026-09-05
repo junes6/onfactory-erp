@@ -76,6 +76,8 @@ export type WorkItem = {
   origin?: { kind: string; label?: string; detail?: string; page?: string; focusId?: string }
   /** 프로젝트 귀속. 외부 게스트를 담당자로 두는 업무는 반드시 초대 범위 안의 프로젝트에 묶인다. */
   projectId?: string
+  /** 상위 업무 id. 있으면 이 행은 하위 업무다(깊이 2). 상위와 같은 projectId를 가진다. 진행률은 저장하지 않는다. */
+  parentId?: string
 }
 
 export type WorkRule = {

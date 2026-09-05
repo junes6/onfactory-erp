@@ -47,7 +47,11 @@ function fixture() {
   snapshot.platform.auditEvents = [{ id: 'AUD-1', tenantId: 'TENANT-HSB', at: '2026-08-18 14:24', event: '진단' }]
   snapshot.tenants['TENANT-HSB'] = {
     'work-items': {
-      data: [{ id: 'WORK-1', title: '점검', due: '오늘 18:00', status: '업무요청' }],
+      // WORK-2는 하위 업무. parentId는 payload JSONB 안에 그대로 남아야 한다(DDL 무변경).
+      data: [
+        { id: 'WORK-1', title: '점검', due: '오늘 18:00', status: '업무요청' },
+        { id: 'WORK-2', title: '하위', parentId: 'WORK-1', status: '업무요청', due: '2026-08-22T09:00:00.000Z' },
+      ],
       updatedAt: '2026-08-20T01:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
     },
     'calendar-events': {
@@ -124,9 +128,10 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     await adapter.commitSnapshot(source, { referenceDate: '2026-08-20', rawDueByEntity: { 'TENANT-HSB:WORK-1': '오늘 18:00' } })
 
     const workRows = await pool.query('SELECT id, org_id, payload, raw_due, due_at, created_by FROM work_items ORDER BY org_id')
-    assert.equal(workRows.rows.length, 2)
+    assert.equal(workRows.rows.length, 3)
     assert.equal(workRows.rows[0].payload.due, undefined)
-    assert.equal(workRows.rows.find((row) => row.org_id === 'TENANT-HSB').raw_due, '오늘 18:00')
+    assert.equal(workRows.rows.find((row) => row.id === 'WORK-1').raw_due, '오늘 18:00')
+    assert.equal(workRows.rows.find((row) => row.id === 'WORK-2').payload.parentId, 'WORK-1', '하위 업무의 parentId는 payload로 왕복한다')
     assert.equal(workRows.rows.find((row) => row.org_id === 'TENANT-POHANG').due_at.toISOString(), '2026-08-22T09:00:00.000Z')
 
     const calendar = await pool.query('SELECT payload, starts_at, ends_at FROM calendar_events')
@@ -188,6 +193,7 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.equal(facade.tenants['TENANT-HSB']['calendar-events'].data[0].start, '09:00')
     assert.equal(facade.tenants['TENANT-HSB']['messenger-conversations'].data[0].messages[0].time, '14:42')
     assert.equal(facade.tenants['TENANT-HSB']['work-items'].data[0].due, '오늘 18:00')
+    assert.equal(facade.tenants['TENANT-HSB']['work-items'].data.find((row) => row.id === 'WORK-2').parentId, 'WORK-1')
     assert.equal(facade.tenants['TENANT-HSB']['company-documents'].data[0].name, '점검표.pdf')
     assert.equal(facade.tenants['TENANT-HSB']['performance-settings'].data.employeeVisible, false)
     assert.equal(facade.tenants['TENANT-HSB']['performance-reports'].data[0].id, 'PERFS-1')
