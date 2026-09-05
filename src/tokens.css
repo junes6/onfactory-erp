@@ -16,6 +16,8 @@
   --color-warning-ink: #9A5B00;
   --color-success-ink: #157A5B;
   --color-danger: #E24B4A;
+  /* 일곱 곳이 이미 쓰고 있었는데 정의가 없어 부모 글자색으로 떨어지고 있었다. 원색을 어둡게 눌러 옅은 배경 위에서 읽히게 한다. */
+  --color-danger-ink: color-mix(in srgb, var(--color-danger) 72%, var(--color-gray-800));
   /* Extended accent palette: One UI 컨셉의 다색 구분용. 화면 요소는 반드시
      이 토큰으로만 색을 얻는다 (verify-design-tokens allowedPalette와 동기화). */
   --color-primary: #2563EB;
@@ -141,6 +143,7 @@ html[data-theme='dark'] {
   --color-primary: #3B82F6;
   --color-warning-ink: #F2B35C;
   --color-success-ink: #3FC394;
+  --color-danger-ink: color-mix(in srgb, var(--color-danger) 70%, var(--color-gray-50));
   --color-blue-soft: color-mix(in srgb, var(--color-blue) 26%, var(--color-gray-50));
   --color-success-soft: color-mix(in srgb, var(--color-success) 24%, var(--color-gray-50));
   --color-warning-soft: color-mix(in srgb, var(--color-warning) 24%, var(--color-gray-50));

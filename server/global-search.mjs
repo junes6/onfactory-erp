@@ -49,8 +49,21 @@ export function excerpt(text, word, span = 120) {
   return `${start > 0 ? '…' : ''}${flat.slice(start, start + span)}${start + span < flat.length ? '…' : ''}`
 }
 
-function hit({ type, id, title, meta, owner, page, focusId, snippet }) {
-  return { type, id, title: String(title ?? '').slice(0, 160), meta: String(meta ?? '').slice(0, 120), owner: String(owner ?? '').slice(0, 60), page, focusId: focusId ?? id, snippet: String(snippet ?? '').slice(0, 160) }
+/** 결과 항목의 유형 이름. SEARCH_TYPES의 id와 같은 낱말을 쓴다. */
+export const SEARCH_KINDS = Object.freeze(SEARCH_TYPES.map((type) => type.id))
+
+/**
+ * 결과 항목 하나.
+ *
+ * 유형은 `kind`로 내려보낸다. 소비 측(화면·휴대폰·최근 연 항목 저장)이 `kind`를
+ * 기준으로 묶고 배지를 그리기 때문이다. `type`은 한 릴리스 동안 같은 값으로 함께
+ * 내려보낸다 — 이미 배포된 화면과 localStorage에 남은 "최근 연 항목"이 `type`을
+ * 읽고 있어, 한꺼번에 끊으면 옛 화면에서 유형이 비어 보인다. 다음 릴리스에 `type`을 뺀다.
+ */
+function hit({ kind, id, title, meta, owner, page, focusId, snippet }) {
+  // 유형이 비면 화면에서 '기타'로 떠서 눈에 띄긴 하지만, 서버에서 먼저 막는 게 맞다.
+  if (!SEARCH_KINDS.includes(kind)) throw new Error(`알 수 없는 검색 유형: ${kind}`)
+  return { kind, type: kind, id, title: String(title ?? '').slice(0, 160), meta: String(meta ?? '').slice(0, 120), owner: String(owner ?? '').slice(0, 60), page, focusId: focusId ?? id, snippet: String(snippet ?? '').slice(0, 160) }
 }
 
 /**
@@ -73,7 +86,7 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
     if (!isAdmin && task.ownerId !== auth.id && task.requesterId !== auth.id) continue
     if (!matches(`${task.title} ${task.description} ${task.owner} ${task.category} ${task.status} ${task.id}`, words)) continue
     push('task', hit({
-      type: 'task', id: task.id, title: task.title,
+      kind: 'task', id: task.id, title: task.title,
       meta: `${task.status} · ${task.due ? String(task.due).slice(0, 10) : '기한 없음'}`,
       owner: task.owner, page: 'tasks', focusId: task.id,
       snippet: excerpt(task.description, first),
@@ -85,7 +98,7 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
     if (!canReadDocument(document, auth)) continue
     if (!matches(`${document.name} ${document.category} ${(document.tags ?? []).join(' ')} ${document.summary}`, words)) continue
     push('document', hit({
-      type: 'document', id: document.id, title: document.name,
+      kind: 'document', id: document.id, title: document.name,
       meta: `${document.category}${document.uploadedAt ? ` · ${String(document.uploadedAt).slice(0, 10)}` : ''}`,
       owner: document.uploadedByName, page: 'documents', focusId: document.id,
       snippet: excerpt(document.summary, first),
@@ -98,7 +111,7 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
     const body = [journal.title, journal.completed, journal.issue, journal.nextPlan, journal.feedback].filter(Boolean).join(' ')
     if (!matches(`${journal.author} ${journal.department} ${journal.date} ${body}`, words)) continue
     push('journal', hit({
-      type: 'journal', id: journal.id, title: journal.title || `${journal.date} 업무일지`,
+      kind: 'journal', id: journal.id, title: journal.title || `${journal.date} 업무일지`,
       meta: `${journal.date} · ${journal.status ?? '작성됨'}`, owner: journal.author,
       page: 'journal', focusId: journal.id,
       snippet: excerpt(body, first),
@@ -113,7 +126,7 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
       if (message?.deletedAt) continue
       if (!matches(`${message?.text ?? ''} ${message?.senderName ?? ''} ${roomName}`, words)) continue
       push('message', hit({
-        type: 'message', id: `${conversation.id}:${message.id}`, title: roomName || '대화',
+        kind: 'message', id: `${conversation.id}:${message.id}`, title: roomName || '대화',
         meta: message.createdAt ? String(message.createdAt).slice(0, 10) : String(message.time ?? ''),
         owner: message.senderName, page: 'ai', focusId: conversation.id,
         snippet: excerpt(message.text, first),
@@ -128,7 +141,7 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
     const body = [conversation.title, conversation.summary, ...(conversation.messages ?? []).map((message) => message.content)].join('\n')
     if (!matches(body, words)) continue
     push('conversation', hit({
-      type: 'conversation', id: conversation.id, title: conversation.title,
+      kind: 'conversation', id: conversation.id, title: conversation.title,
       meta: `${conversation.messages?.length ?? 0}개 · ${String(conversation.updatedAt ?? '').slice(0, 10)}`,
       owner: auth.name, page: 'ai', focusId: conversation.id,
       snippet: excerpt(body, first),
@@ -139,7 +152,7 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
   for (const opportunity of rows('opportunities')) {
     if (!matches(`${opportunity.title} ${opportunity.agency} ${opportunity.source} ${opportunity.noticeNo} ${opportunity.rationale}`, words)) continue
     push('opportunity', hit({
-      type: 'opportunity', id: opportunity.id, title: opportunity.title,
+      kind: 'opportunity', id: opportunity.id, title: opportunity.title,
       meta: `${opportunity.agency ?? opportunity.source ?? ''}${opportunity.deadline ? ` · ~${String(opportunity.deadline).slice(0, 10)}` : ''}`,
       owner: opportunity.source ?? '외부', page: 'approvals', focusId: opportunity.id,
       snippet: excerpt(opportunity.rationale, first),
@@ -151,7 +164,7 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
     if (person.tenantId !== auth.tenantId) continue
     if (!matches(`${person.name} ${person.team} ${person.jobRole} ${person.email}`, words)) continue
     push('person', hit({
-      type: 'person', id: person.id, title: person.name,
+      kind: 'person', id: person.id, title: person.name,
       meta: [person.team, person.jobRole].filter(Boolean).join(' · ') || '소속 미지정',
       owner: person.approvalStatus === 'inactive' ? '비활성 계정' : '', page: 'people', focusId: person.id,
       snippet: person.email ?? '',
@@ -159,7 +172,8 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
   }
 
   const groups = SEARCH_TYPES
-    .map((type) => ({ type: type.id, label: type.label, items: found.get(type.id) }))
+    // 그룹도 항목과 같은 이유로 `kind`와 `type`을 함께 내려보낸다(hit() 주석 참고).
+    .map((type) => ({ kind: type.id, type: type.id, label: type.label, items: found.get(type.id) }))
     .filter((group) => group.items.length > 0)
   return { groups, total: groups.reduce((sum, group) => sum + group.items.length, 0) }
 }

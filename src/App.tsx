@@ -2352,8 +2352,8 @@ export default function App() {
                 workspaceScope={workspaceScope}
                 placeholder={tenantSurface.globalSearchPlaceholder}
                 onOpen={(hit) => {
-                  if (hit.type === 'task') setWorkFocusId(hit.focusId)
-                  else if (hit.type === 'message' || hit.type === 'conversation') { setMessengerOpen(hit.type === 'message'); if (hit.type === 'message') return }
+                  if (hit.kind === 'task') setWorkFocusId(hit.focusId)
+                  else if (hit.kind === 'message' || hit.kind === 'conversation') { setMessengerOpen(hit.kind === 'message'); if (hit.kind === 'message') return }
                   else setPlatformFocusId(hit.focusId)
                   navigate(hit.page as PageId)
                 }}

@@ -3038,10 +3038,13 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
 .search-group + .search-group { margin-top: var(--space-8); border-top: var(--hairline) solid var(--line); padding-top: var(--space-8); }
 .search-group-head { display: flex; align-items: center; gap: var(--space-8); margin: var(--space-0) var(--space-0) var(--space-4); padding: var(--space-0) var(--space-8); color: var(--muted); font-size: var(--font-11); }
 .search-badge { padding: var(--space-0) var(--space-8); border-radius: var(--radius-8); background: var(--color-gray-100); color: var(--color-gray-600); font-size: var(--font-11); }
-.search-badge.type-task { color: var(--forest-dark); background: var(--lime); }
-.search-badge.type-document { color: var(--color-blue-deep); background: var(--color-blue-soft); }
-.search-badge.type-message, .search-badge.type-conversation { color: var(--color-success-ink); background: var(--color-success-soft); }
-.search-badge.type-opportunity { color: var(--color-warning-ink); background: var(--color-warning-soft); }
+.search-badge.kind-task { color: var(--forest-dark); background: var(--lime); }
+.search-badge.kind-document { color: var(--color-blue-deep); background: var(--color-blue-soft); }
+.search-badge.kind-journal { color: var(--color-teal); background: var(--color-teal-soft); } /* 일지 — 문서(남색)·메신저(초록) 사이에서 구별되는 청록 */
+.search-badge.kind-person { color: var(--color-violet); background: var(--color-violet-soft); } /* 인물 — 다른 여섯 갈래와 겹치지 않는 보라 */
+.search-badge.kind-message, .search-badge.kind-conversation { color: var(--color-success-ink); background: var(--color-success-soft); }
+.search-badge.kind-opportunity { color: var(--color-warning-ink); background: var(--color-warning-soft); }
+.search-badge.kind-other { color: var(--color-danger-ink); background: var(--color-danger-soft); } /* 유형이 비어 온 항목 — 눈에 띄어야 고친다 */
 .search-group > button { width: 100%; min-height: 60px; display: flex; align-items: center; gap: var(--space-12); padding: var(--space-8); border: none; border-radius: var(--radius-8); background: transparent; text-align: left; cursor: pointer; }
 .search-group > button:hover, .search-group > button.is-cursor { background: var(--color-blue-soft); }
 .search-group > button > span { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--forest); background: var(--forest-soft); }

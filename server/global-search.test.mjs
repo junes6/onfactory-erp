@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-import { excerpt, matches, PER_TYPE_LIMIT, searchTenant, terms } from './global-search.mjs'
+import { excerpt, matches, PER_TYPE_LIMIT, SEARCH_KINDS, searchTenant, terms } from './global-search.mjs'
 
 const ADMIN = { id: 'U-ADMIN', name: '김서원', role: 'tenant-admin', tenantId: 'T1', team: '경영' }
 const MEMBER = { id: 'U-PARK', name: '박지현', role: 'tenant-member', tenantId: 'T1', team: '품질' }
@@ -114,4 +115,37 @@ test('걸린 자리를 잘라 보여 준다', () => {
   const piece = excerpt(text, '냉장창고')
   assert.match(piece, /냉장창고 온도 기록/)
   assert.ok(piece.startsWith('…'), '앞을 잘랐으면 잘랐다고 보여 준다')
+})
+
+test('모든 항목과 그룹에 kind가 채워져 있고 SEARCH_TYPES 안의 값이다', () => {
+  // 사람까지 일곱 갈래가 전부 걸리도록 두 검색어를 합친다.
+  // 관리자는 AI 대화를 못 보고, 사람은 이름으로만 걸린다. 셋을 합쳐야 일곱 갈래가 모두 나온다.
+  const results = [search('냉장창고', ADMIN), search('냉장창고', MEMBER), search('박지현', MEMBER)]
+  const seen = new Set()
+  for (const result of results) {
+    assert.ok(result.groups.length > 0)
+    for (const group of result.groups) {
+      assert.ok(SEARCH_KINDS.includes(group.kind), `그룹 kind가 비었거나 낯설다: ${String(group.kind)}`)
+      // 호환용 type은 한 릴리스 동안 kind와 같은 값이어야 한다.
+      assert.equal(group.type, group.kind)
+      for (const item of group.items) {
+        assert.ok(SEARCH_KINDS.includes(item.kind), `${group.kind} 그룹의 ${item.id} 항목 kind가 비었거나 낯설다: ${String(item.kind)}`)
+        assert.equal(item.kind, group.kind, '항목의 kind는 자기 그룹과 같아야 한다')
+        assert.equal(item.type, item.kind)
+        seen.add(item.kind)
+      }
+    }
+  }
+  // 어느 한 갈래가 kind를 빼먹으면 위 단언에서 걸리지만, 갈래 자체가 결과에 안 나와 검사를 피하는 일도 막는다.
+  assert.deepEqual([...seen].sort(), [...SEARCH_KINDS].sort(), '일곱 갈래가 모두 검사를 거쳐야 한다')
+})
+
+test('SEARCH_KINDS 와 클라이언트 KIND_LABEL 사전의 키가 같다', async () => {
+  // 서버에 갈래를 더하고 화면 사전을 잊으면, 어긋난 항목이 영문 id를 배지에 달고 나온다.
+  // 화면 모듈은 React를 끌어와서 여기서 import할 수 없으니 소스를 문자열로 읽어 키만 뽑는다.
+  const source = await readFile(new URL('../src/components/GlobalSearch.tsx', import.meta.url), 'utf8')
+  const block = source.match(/const KIND_LABEL: Record<SearchKind, string> = \{([\s\S]*?)\n\}/u)
+  assert.ok(block, 'GlobalSearch.tsx 에 KIND_LABEL 사전이 있어야 한다')
+  const keys = [...block[1].matchAll(/^\s*([a-zA-Z_]+):\s*'[^']+',?\s*$/gmu)].map((match) => match[1])
+  assert.deepEqual(keys.sort(), [...SEARCH_KINDS].sort(), '서버 갈래와 화면 사전의 키가 어긋났다')
 })
