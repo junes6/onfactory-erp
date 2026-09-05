@@ -17,3 +17,8 @@ supabase/.temp/
 
 # Claude Code local launch config (machine-specific paths)
 .claude/
+
+# 비밀은 커밋하지 않는다 — 예시 파일만 남긴다. (*.local 규칙은 .env 자체를 잡지 못한다.)
+.env
+.env.*
+!.env.example
