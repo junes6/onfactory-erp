@@ -7,6 +7,11 @@ type WorkspaceStateOptions<T> = {
   /** Stable authorization-scope identifier used only to isolate the browser cache. */
   scope?: string
   validate?: (value: unknown) => value is T
+  /**
+   * 응답 봉투(data 밖의 키)를 그대로 넘긴다.
+   * work-items GET의 `parents`처럼 배열이 아니라 응답에만 붙는 파생값을 화면이 받는 자리다.
+   */
+  onEnvelope?: (body: Record<string, unknown>) => void
 }
 
 type ScopedValue<T> = {
@@ -195,6 +200,8 @@ export function useWorkspaceState<T>(
             if (latest.ok) {
               const body = await latest.json() as { data?: unknown; version?: string }
               if (Object.prototype.hasOwnProperty.call(body, 'data') && body.data !== null && (!validate || validate(body.data))) {
+                // 재수화도 정상 GET과 같은 봉투를 받는다 — 충돌 뒤에 상위 제목이 사라지면 칩이 '상위 업무'로 되돌아간다.
+                options.onEnvelope?.(body as Record<string, unknown>)
                 const latestValue = body.data as T
                 serverVersionRef.current = body.version ?? latest.headers.get('etag')?.replace(/^W\//, '').replace(/^"|"$/g, '') ?? null
                 writeVersionRef.current += 1
@@ -310,10 +317,13 @@ export function useWorkspaceState<T>(
         if (!body || typeof body !== 'object' || !Object.prototype.hasOwnProperty.call(body, 'data')) {
           throw new Error('공유 데이터 응답 형식이 올바르지 않습니다.')
         }
-        return body as { data: unknown; version?: string }
+        // 봉투(상위 제목·하위 건수)는 다음 .then의 최신성 검사를 지난 뒤에 넘긴다 —
+        // 지나간 범위(지원 세션 전환·계정 전환)의 응답이 data는 버려지면서 제목만 남으면 안 된다.
+        return { ...(body as { data: unknown; version?: string }), envelope: body as Record<string, unknown> }
       })
-      .then(({ data, version }) => {
+      .then(({ data, version, envelope }) => {
         if (sequence !== requestSequence.current || activeIdentityRef.current !== hydrationIdentity) return
+        options.onEnvelope?.(envelope)
         if (data !== null && validate && !validate(data)) throw new Error('공유 데이터 형식이 올바르지 않아 안전하게 불러오지 않았습니다.')
         loadSucceeded = true
         serverVersionRef.current = version ?? null

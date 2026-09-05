@@ -40,6 +40,11 @@
 .guest-task-summary time { color: var(--muted); font-size: var(--font-13); white-space: nowrap; }
 .guest-task-action { padding-right: var(--space-12); }
 .guest-task-detail { grid-column: 1 / -1; padding: var(--space-0) var(--space-16) var(--space-16); border-top: var(--hairline) solid var(--line); }
+/* 하위 업무 — 상위 행 아래로 접어 편다. 자식 행 모양은 공용 SubtaskList.css가 정한다. */
+.guest-task-children { grid-column: 1 / -1; padding: var(--space-0) var(--space-16) var(--space-12); }
+.guest-task-children > summary { min-height: 36px; display: flex; align-items: center; color: var(--muted); font-size: var(--font-13); cursor: pointer; }
+/* 하위 행을 열면 상세가 그 자리에 붙는다. 바깥 여백은 이미 상위 블록이 주었으므로 좌우는 비운다. */
+.guest-task-children .guest-task-detail { padding-inline: var(--space-0); }
 .guest-task-description { margin: var(--space-12) var(--space-0) var(--space-0); white-space: pre-wrap; font-size: var(--font-15); line-height: 1.6; }
 .guest-task-revision { display: flex; align-items: center; gap: var(--space-4); margin: var(--space-12) var(--space-0) var(--space-0); padding: var(--space-8) var(--space-12); border-radius: var(--radius-8); color: var(--color-danger-ink); background: var(--color-danger-soft); font-size: var(--font-13); }
 .guest-task-checklist { display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-12) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
@@ -67,4 +72,5 @@
   .guest-task-action .ui-button { width: 100%; }
   .guest-task-summary { grid-template-columns: auto minmax(0, 1fr); }
   .guest-task-summary time { grid-column: 2; }
+  .guest-task-children { padding-left: var(--space-8); }
 }

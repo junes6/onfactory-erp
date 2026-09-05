@@ -93,6 +93,8 @@ test('GuestWorkspace는 업무·채널·자료·게시판 네 탭과 게스트 �
   // 채널은 메신저를 읽기 전용·프로젝트 로스터로 재사용하고, 게시판은 ProjectSpacesPage guestMode.
   assert.match(guestWorkspace, /<MessengerDrawer embedded readOnlyRooms open rosterOverride=\{roster\}/)
   assert.match(guestWorkspace, /<ProjectSpacesPage guestMode focusProjectId=\{selectedProject\?\.id\}/)
+  // 하위 업무는 상위 행 안에서만 펼친다 — 게스트 목록도 상위 한 줄이 원칙이다.
+  assert.match(guestWorkspace, /<details className="guest-task-children"/)
   assert.equal(guestWorkspace.includes('/api/documents?'), false, '게스트 자료 탭에는 업로드가 없다')
 })
 

@@ -60,7 +60,7 @@ async function readJson<T>(response: Response): Promise<T & { error?: { message?
   try { return JSON.parse(text) } catch { return { error: { message: text } } as T & { error?: { message?: string } } }
 }
 
-export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserName, canManage, onToast, onNavigate, guestMode = false, focusProjectId }: {
+export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserName, canManage, onToast, onNavigate, guestMode = false, focusProjectId, onFocusHandled }: {
   workspaceScope?: string
   currentUserId: string
   currentUserName: string
@@ -74,6 +74,11 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
    */
   guestMode?: boolean
   focusProjectId?: string
+  /**
+   * 지목된 프로젝트를 한 번 열었다고 알린다. 부모가 여기서 focusProjectId를 지운다 —
+   * 지우지 않으면 다음에 프로젝트 메뉴로 들어올 때마다 같은 상세가 다시 열려 목록에 닿을 수 없다.
+   */
+  onFocusHandled?: () => void
 }) {
   const industry = useIndustrySurface()
   const headers = useMemo(() => ({ 'content-type': 'application/json', ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}) }), [workspaceScope])
@@ -113,7 +118,12 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
   useEffect(() => { void loadProjects() }, [loadProjects])
   useEffect(() => { if (selectedId) { setDetailTab('feed'); void loadDetail(selectedId) } }, [selectedId, loadDetail])
   // 게스트는 헤더의 프로젝트 셀렉트가 목록 역할을 한다. 고른 프로젝트 상세를 바로 연다.
-  useEffect(() => { if (guestMode) setSelectedId(focusProjectId || null) }, [guestMode, focusProjectId])
+  // 직원·관리자는 업무 드로어의 출처 배지로 들어오므로, 지목된 프로젝트가 있으면 목록이 아니라 그 상세를 연다(막다른 길 금지).
+  // 지목은 한 번만 쓴다. 남겨 두면 이 화면에 올 때마다 같은 상세가 열려 '프로젝트 목록'이 사라진 것처럼 보인다.
+  useEffect(() => {
+    if (guestMode) { setSelectedId(focusProjectId || null); return }
+    if (focusProjectId) { setSelectedId(focusProjectId); onFocusHandled?.() }
+  }, [guestMode, focusProjectId, onFocusHandled])
 
   const [categoryFilter, setCategoryFilter] = useState('전체')
   const categories = ['전체', ...new Set(projects.map((project) => project.category).filter((value): value is string => Boolean(value)))]

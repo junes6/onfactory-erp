@@ -19,5 +19,6 @@ test('AI work action passes the answer and opens the optional completion criteri
   assert.doesNotMatch(chat, /onCreateTask\(message\.sourcePrompt/)
   assert.match(app, /initialDescription=\{taskDraft\.completionCriteria\}/)
   assert.match(app, /useState\(initialDescription\)/)
-  assert.match(app, /open=\{Boolean\(initialDescription\)\}/)
+  // 상위 업무를 들고 열 때도 같은 선택 항목이 펼쳐진다(R16-C2).
+  assert.match(app, /open=\{Boolean\(initialDescription\) \|\| Boolean\(initialParentId\)\}/)
 })

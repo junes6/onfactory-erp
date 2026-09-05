@@ -2445,6 +2445,7 @@ html[data-theme='dark'] .workflow-detail-stepper :is(i,li > span) { background: 
 .workflow-column.tone-done .workflow-column-icon, .workflow-column.tone-done .workflow-column-head em { color: var(--color-success-ink); background: var(--color-success-soft); }
 .workflow-column-body { display: flex; flex-direction: column; gap: var(--space-8); min-height: 120px; padding: var(--space-8); }
 .workflow-column-empty { display: flex; align-items: center; justify-content: center; gap: var(--space-8); padding: var(--space-16) var(--space-8); border: var(--hairline) dashed var(--line-strong); border-radius: var(--radius-8); color: var(--subtle); font-size: var(--font-13); }
+.workflow-column-note { margin: var(--space-0); color: var(--subtle); font-size: var(--font-13); line-height: 1.5; text-align: center; }
 .workflow-column-more { min-height: 40px; border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--muted); background: var(--surface); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
 .workflow-column-more:hover { color: var(--color-primary); border-color: var(--color-primary); }
 
@@ -2460,6 +2461,9 @@ html[data-theme='dark'] .workflow-detail-stepper :is(i,li > span) { background: 
 .workflow-card-flag.revision { color: var(--color-rose); background: var(--color-rose-soft); }
 .workflow-card-flag.overdue { color: var(--color-danger); background: var(--color-danger-soft); }
 .workflow-card h3 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; margin: var(--space-8) var(--space-0) var(--space-0); font-size: var(--font-15); line-height: 1.4; letter-spacing: -.01em; }
+/* 카드 상세로 가는 유일한 조작점. 모양은 제목 그대로 두고 역할만 버튼으로 바꾼다(카드 전체 role="button"은 안쪽 조작을 보조기술에서 지운다). */
+.workflow-card-title { width: 100%; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; padding: var(--space-0); border: 0; color: inherit; background: none; font: inherit; letter-spacing: inherit; text-align: left; cursor: pointer; }
+.workflow-card-title:hover { color: var(--color-primary); }
 .workflow-card-meta { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); margin-top: var(--space-8); }
 .workflow-card-person { min-width: 0; display: inline-flex; align-items: center; gap: var(--space-4); overflow: hidden; color: var(--muted); font-size: var(--font-13); white-space: nowrap; text-overflow: ellipsis; }
 .workflow-card-person i { width: 22px; height: 22px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-blue-deep); background: var(--color-blue-soft); font-size: var(--font-11); font-style: normal; font-weight: var(--weight-medium); }
@@ -2986,6 +2990,11 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
   min-height: 56px; padding: var(--space-8) var(--space-0); border-bottom: var(--hairline) solid var(--line);
 }
 .mobile-line-list > li:last-child { border-bottom: 0; }
+/* 하위 업무가 있는 줄은 아래로 한 칸 접어 편다 — 한 줄 원칙은 자식 행에도 그대로다. */
+.mobile-line-list > li.has-children { flex-wrap: wrap; }
+.mobile-line-children { flex: 1 0 100%; margin: var(--space-4) var(--space-0) var(--space-0) var(--space-16); }
+.mobile-line-children > summary { min-height: 40px; display: flex; align-items: center; color: var(--muted); font-size: var(--font-13); cursor: pointer; }
+.mobile-line-children .workflow-subtask-row { min-height: 48px; }
 .mobile-line-open {
   flex: 1; min-width: 0; display: block; padding: var(--space-0);
   border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer;

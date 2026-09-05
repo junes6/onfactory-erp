@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, Bell, CheckCircle2, ClipboardCheck, Clock3, Download, FileText, FolderKanban, ListChecks, LogIn, MessageCircle, Paperclip, Settings2, ShieldCheck } from 'lucide-react'
+import { ArrowRight, Bell, CheckCircle2, ChevronDown, ClipboardCheck, Clock3, Download, FileText, FolderKanban, ListChecks, LogIn, MessageCircle, Paperclip, Settings2, ShieldCheck } from 'lucide-react'
 import { BrandMark } from './AppIcons'
 import { Button, IconButton } from './ui/Button'
 import { StatusBadge } from './StatusBadge'
@@ -7,9 +7,12 @@ import { CompletionModal } from './CompletionModal'
 import { NotificationCenter, type NotificationFeed } from './NotificationCenter'
 import { MessengerDrawer, type MessengerRosterEntry } from './CollaborationSuite'
 import { ProjectSpacesPage } from './ProjectSpaces'
+import { ParentChip, SubtaskRows } from './SubtaskList'
 import { IndustryProvider } from '../modules/IndustryContext'
 import { useEventStream } from '../hooks/useEventStream'
 import { formatDateLabel, formatDateTime, formatWorkDue } from '../utils/dateTime'
+import { workStatusLabel, workStatusTone } from '../utils/workStatus'
+import { childrenOf, isSubtask, isTopLevelIn, subtaskBlockMessage, subtaskBlockReason, subtaskCountLabel } from '../utils/workTree'
 import type { WorkEvidence, WorkItem } from '../domainData'
 import { BRAND } from '../brand'
 import './GuestWorkspace.css'
@@ -61,14 +64,13 @@ const TABS: Array<{ id: GuestTab; label: string; icon: typeof ListChecks }> = [
   { id: 'board', label: '게시판', icon: FolderKanban },
 ]
 
-const statusLabel: Record<WorkItem['status'], string> = { 업무요청: '요청됨', 수행중: '진행 중', 결재대기: '확인 대기', 결재완료: '완료' }
-const statusTone = (status: WorkItem['status']) => status === '결재완료' ? 'success' : status === '결재대기' ? 'info' : status === '수행중' ? 'warning' : 'neutral'
+// 상태 문구·색은 src/utils/workStatus.ts 한 곳에서만 정한다 — 게스트가 보는 말이 직원 화면과 달라서는 안 된다.
 
 function humanSize(size: number) {
   return size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
-async function readJson<T>(response: Response): Promise<T & { error?: { code?: string; message?: string } }> {
+async function readJson<T>(response: Response): Promise<T & { error?: { code?: string; message?: string; count?: number } }> {
   const text = await response.text()
   try { return JSON.parse(text) } catch { return { error: { message: text } } as T & { error?: { code?: string; message?: string } } }
 }
@@ -95,6 +97,8 @@ export function GuestWorkspace({ account, workspaceScope, notificationFeed, onRe
   const [workItems, setWorkItems] = useState<WorkItem[]>([])
   const [workState, setWorkState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
+  /** 하위 목록을 펼쳐 둔 상위. 자식을 닫았다고 목록까지 접히면 형제 행을 훑던 자리를 잃는다. */
+  const [openChildLists, setOpenChildLists] = useState<Set<string>>(() => new Set())
   const [completionItem, setCompletionItem] = useState<WorkItem | null>(null)
   const [busyTaskId, setBusyTaskId] = useState('')
   const [documents, setDocuments] = useState<GuestDocument[]>([])
@@ -176,9 +180,22 @@ export function GuestWorkspace({ account, workspaceScope, notificationFeed, onRe
     if (event.kind === 'notification' || event.kind === 'resync') void onReloadNotifications()
   })
 
+  /**
+   * 하위 목록의 펼침은 이 집합 하나가 정한다.
+   * <details>의 open을 계산식(`집합 || 행이 열림 || 자식이 열림`)으로 두면, 값이 true에 머무는 동안
+   * React가 DOM에 다시 쓰지 않아 한 번 접힌 목록을 코드로는 두 번 다시 펼 수 없다. 그래서 '펼쳐야 하는 사건'마다 집합에 넣는다.
+   */
+  const openChildList = (parentId: string) => setOpenChildLists((current) => current.has(parentId) ? current : new Set(current).add(parentId))
+  /** 연 업무가 자식이면 그 상위의 목록을, 상위면 자기 목록을 펼친다. */
+  const openChildListOf = (taskId: string) => {
+    const parentId = workItems.find((entry) => entry.id === taskId)?.parentId
+    openChildList(parentId ?? taskId)
+  }
+
   // 알림에서 넘어오기: 업무 알림은 업무 탭에서 그 업무를 펼치고, 멘션은 채널 탭으로. 그 밖(승인 큐·AI)은 게스트 화면에 없다.
   const openFromNotification = (page: string, focusId: string) => {
-    if (page === 'tasks') { setTab('tasks'); if (focusId) setOpenTaskId(focusId); return }
+    // 하위 업무 알림이면 그 자식을 품은 상위의 목록도 함께 펼친다 — 접힌 <details> 안에서 상세를 열면 화면에는 아무 일도 일어나지 않는다.
+    if (page === 'tasks') { setTab('tasks'); if (focusId) { setOpenTaskId(focusId); openChildListOf(focusId) } return }
     if (page === 'messenger') { setTab('channels'); return }
     setTab('tasks')
   }
@@ -190,7 +207,12 @@ export function GuestWorkspace({ account, workspaceScope, notificationFeed, onRe
         method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ action, ...input }),
       })
       const body = await readJson<{ item?: WorkItem }>(response)
-      if (!response.ok || !body.item) { onToast(body.error?.message || '업무 상태를 변경하지 못했습니다.'); return false }
+      if (!response.ok || !body.item) {
+        // 버튼에 붙은 경고와 거절 토스트가 같은 말이어야 한다 — 서버 문장을 그대로 쓰면 같은 사실이 두 문장이 되고, 내부 상태어('결재완료')도 새어 나온다.
+        const blocked = body.error?.code === 'SUBTASKS_INCOMPLETE' && typeof body.error.count === 'number' ? subtaskBlockMessage(body.error.count) : ''
+        onToast(blocked || body.error?.message || '업무 상태를 변경하지 못했습니다.')
+        return false
+      }
       setWorkItems((current) => current.map((entry) => entry.id === item.id ? body.item! : entry))
       onToast(action === 'accept' ? '업무를 시작했습니다.' : '완료 보고를 제출했습니다. 요청한 담당자가 확인합니다.')
       return true
@@ -224,19 +246,28 @@ export function GuestWorkspace({ account, workspaceScope, notificationFeed, onRe
   }
 
   // 업무는 서버가 이미 "내 담당"으로 잘라 준다. 여기서는 고른 프로젝트로 한 번 더 좁힌다.
+  // 상위가 보이는 자식은 목록에서 빼고 상위 행 안에서만 그린다. 상위를 못 보면 그 자식이 최상위 행이 된다.
+  const visibleIds = new Set(workItems.map((item) => item.id))
   const scopedWork = workItems
     .filter((item) => !selectedProject || !item.projectId || item.projectId === selectedProject.id)
+    .filter((item) => isTopLevelIn(item, visibleIds))
     .sort((left, right) => Number(right.status !== '결재완료') - Number(left.status !== '결재완료') || String(left.due).localeCompare(String(right.due)))
-  const openWorkCount = scopedWork.filter((item) => item.status !== '결재완료').length
+  // 탭 배지는 '내가 처리할 건수'다. 목록에서 자식을 상위 아래로 접었다고 해서 건수를 줄이면 맡은 일이 적어 보인다.
+  const openWorkCount = workItems.filter((item) => (
+    (!selectedProject || !item.projectId || item.projectId === selectedProject.id) && item.status !== '결재완료'
+  )).length
   const projectNameOf = (id?: string) => projects.find((project) => project.id === id)?.name
 
   // 행 버튼은 하나. '완료 보고'가 핵심 행동(primary 후보)이지만, 실제 primary 톤은 펼친 행 한 곳에만 준다 —
   // 진행 중 업무가 여럿이면 화면에 primary가 여러 개 생기기 때문이다(한 화면 기본 버튼 하나).
-  const taskAction = (item: WorkItem): { label: string; primary: boolean; run: () => void } | null => {
+  const taskAction = (item: WorkItem): { label: string; primary: boolean; blocked?: string; run: () => void } | null => {
     if (item.status === '업무요청') return { label: '업무 시작', primary: false, run: () => void transition(item, 'accept') }
     if (item.status === '수행중') {
-      const blocked = (item.checklist ?? []).some((entry) => !entry.done)
-      return { label: item.review?.decision === 'changes-requested' ? '보완 후 재제출' : '완료 보고', primary: true, run: () => { if (blocked) { onToast('점검 항목을 모두 마쳐야 완료 보고를 할 수 있습니다.'); setOpenTaskId(item.id); return } setCompletionItem(item) } }
+      const subtaskReason = subtaskBlockReason(workItems, item.id)
+      // 막힌 이유는 눌러 보기 전에 버튼에 붙는다. 게스트 목록은 스트림으로 다시 읽으므로 이 판정은 오래되지 않는다.
+      const reason = subtaskReason || ((item.checklist ?? []).some((entry) => !entry.done) ? '점검 항목을 모두 마쳐야 완료 보고를 할 수 있습니다.' : '')
+      const blocked = Boolean(reason)
+      return { label: item.review?.decision === 'changes-requested' ? '보완 후 재제출' : '완료 보고', blocked: reason || undefined, primary: true, run: () => { if (blocked) { onToast(reason); setOpenTaskId(item.id); return } setCompletionItem(item) } }
     }
     return null
   }
@@ -244,6 +275,21 @@ export function GuestWorkspace({ account, workspaceScope, notificationFeed, onRe
   const submitCompletion = async (summary: string, evidence: WorkEvidence[]) => {
     if (!completionItem) return false
     return transition(completionItem, 'submit', { completion: { summary, evidence } })
+  }
+
+  /** 업무 상세 한 벌. 상위 행과 하위 행이 같은 것을 쓴다 — 자식이라고 설명·점검 항목·완료 이력을 못 보면 안 된다. */
+  const taskDetail = (item: WorkItem) => {
+    const checklist = item.checklist ?? []
+    const history = item.completionHistory?.length ? item.completionHistory : item.completion ? [item.completion] : []
+    return <div className="guest-task-detail">
+      {item.description && <p className="guest-task-description">{item.description}</p>}
+      {item.review?.decision === 'changes-requested' && item.status !== '결재완료' && <p className="guest-task-revision"><ClipboardCheck size={14} /> {item.review.requestedChanges || item.review.comment || '요청자가 보완 내용을 남기지 않았습니다.'}</p>}
+      {checklist.length > 0 && <ul className="guest-task-checklist" aria-label="점검 항목">
+        {checklist.map((entry) => <li key={entry.id}><label><input type="checkbox" checked={entry.done} disabled={item.status !== '수행중' && item.status !== '업무요청'} onChange={() => void toggleChecklist(item, entry.id, !entry.done)} /><span className={entry.done ? 'is-done' : ''}>{entry.label}</span></label></li>)}
+      </ul>}
+      {history.length > 0 && <div className="guest-task-history">{history.map((completion, index) => <p key={`${completion.submittedAt}-${index}`}><ClipboardCheck size={14} /> <span>{formatDateTime(completion.submittedAt)} 제출 · {completion.summary}</span></p>)}</div>}
+      <dl className="guest-task-meta"><div><dt>마감</dt><dd>{formatDateTime(item.due)}</dd></div><div><dt>요청</dt><dd>{item.requestedBy}</dd></div><div><dt>우선순위</dt><dd>{item.priority}</dd></div></dl>
+    </div>
   }
 
   const header = <header className="guest-header">
@@ -299,24 +345,26 @@ export function GuestWorkspace({ account, workspaceScope, notificationFeed, onRe
                   {scopedWork.map((item) => {
                     const action = taskAction(item)
                     const open = openTaskId === item.id
-                    const checklist = item.checklist ?? []
-                    const history = item.completionHistory?.length ? item.completionHistory : item.completion ? [item.completion] : []
+                    const children = childrenOf(workItems, item.id)
+                    // 자식을 열면 상위 목록도 함께 펼쳐진 채로 둔다 — 열자마자 접히면 어디에도 갈 수 없다.
+                    const openChild = children.find((child) => child.id === openTaskId)
                     return <li key={item.id} className={`guest-task-row${open ? ' is-open' : ''}${item.status === '결재완료' ? ' is-done' : ''}`}>
-                      <button type="button" className="guest-task-summary" aria-expanded={open} onClick={() => setOpenTaskId(open ? null : item.id)}>
-                        <StatusBadge className="status-pill" dot tone={statusTone(item.status)}>{statusLabel[item.status]}</StatusBadge>
-                        <span className="guest-task-title"><strong>{item.title}</strong><small>{item.requestedBy} 요청{item.projectId && projectNameOf(item.projectId) ? ` · ${projectNameOf(item.projectId)}` : ''}{item.review?.decision === 'changes-requested' && item.status !== '결재완료' ? ' · 보완 요청' : ''}</small></span>
+                      <button type="button" className="guest-task-summary" aria-expanded={open} onClick={() => { setOpenTaskId(open ? null : item.id); if (!open) openChildList(item.id) }}>
+                        <StatusBadge className="status-pill" dot tone={workStatusTone(item.status)}>{workStatusLabel(item.status)}</StatusBadge>
+                        {/* 상위 업무의 제목은 게스트에게 주지 않는다 — 범위 밖 업무의 이름이 새면 안 된다. 있다는 사실만 밝힌다. */}
+                        {/* 진행률(퍼센트)도 적지 않는다. 서버가 내 담당 행만 주므로 분모를 모른다 — 남의 자식이 섞이면 '100%' 옆에서 서버가 거절한다. 보이는 건수만 말한다. */}
+                        <span className="guest-task-title"><strong>{item.title}</strong><small>{item.requestedBy} 요청{item.projectId && projectNameOf(item.projectId) ? ` · ${projectNameOf(item.projectId)}` : ''}{item.review?.decision === 'changes-requested' && item.status !== '결재완료' ? ' · 보완 요청' : ''}{children.length > 0 ? ` · ${subtaskCountLabel(children.length)}` : ''}</small>{isSubtask(item) && <ParentChip />}</span>
                         <time dateTime={item.due}>{item.status === '결재완료' ? '완료됨' : formatWorkDue(item.due)}</time>
                       </button>
-                      <div className="guest-task-action">{action && <Button tone={open && action.primary ? 'primary' : 'secondary'} size="sm" type="button" disabled={busyTaskId === item.id} onClick={action.run}>{action.label} <ArrowRight size={15} /></Button>}</div>
-                      {open && <div className="guest-task-detail">
-                        {item.description && <p className="guest-task-description">{item.description}</p>}
-                        {item.review?.decision === 'changes-requested' && item.status !== '결재완료' && <p className="guest-task-revision"><ClipboardCheck size={14} /> {item.review.requestedChanges || item.review.comment || '요청자가 보완 내용을 남기지 않았습니다.'}</p>}
-                        {checklist.length > 0 && <ul className="guest-task-checklist" aria-label="점검 항목">
-                          {checklist.map((entry) => <li key={entry.id}><label><input type="checkbox" checked={entry.done} disabled={item.status !== '수행중' && item.status !== '업무요청'} onChange={() => void toggleChecklist(item, entry.id, !entry.done)} /><span className={entry.done ? 'is-done' : ''}>{entry.label}</span></label></li>)}
-                        </ul>}
-                        {history.length > 0 && <div className="guest-task-history">{history.map((completion, index) => <p key={`${completion.submittedAt}-${index}`}><ClipboardCheck size={14} /> <span>{formatDateTime(completion.submittedAt)} 제출 · {completion.summary}</span></p>)}</div>}
-                        <dl className="guest-task-meta"><div><dt>마감</dt><dd>{formatDateTime(item.due)}</dd></div><div><dt>요청</dt><dd>{item.requestedBy}</dd></div><div><dt>우선순위</dt><dd>{item.priority}</dd></div></dl>
-                      </div>}
+                      <div className="guest-task-action">{action && <Button tone={open && action.primary ? 'primary' : 'secondary'} size="sm" type="button" disabled={busyTaskId === item.id} aria-disabled={action.blocked ? true : undefined} title={action.blocked} onClick={action.run}>{action.label} <ArrowRight size={15} /></Button>}</div>
+                      {/* 펼침은 집합 하나가 정한다(위 openChildList). 자식을 닫는 것과 목록을 접는 것은 다른 일이라 summary는 언제나 접을 수 있다. */}
+                      {children.length > 0 && <details className="guest-task-children" open={openChildLists.has(item.id)} onToggle={(event) => setOpenChildLists((current) => { const next = new Set(current); if (event.currentTarget.open) next.add(item.id); else next.delete(item.id); return next })}>
+                        <summary><ChevronDown size={14} /> {subtaskCountLabel(children.length)}</summary>
+                        <SubtaskRows items={children} onOpen={(child) => { setOpenTaskId(openTaskId === child.id ? null : child.id); openChildList(item.id) }} actionFor={(child) => { const childAction = taskAction(child); return childAction ? { label: childAction.label, blocked: childAction.blocked, stops: Boolean(childAction.blocked), run: childAction.run } : null }} busyId={busyTaskId} />
+                        {/* 자식에게도 점검 항목·보완 사유·완료 이력이 있다. 상위와 같은 상세를 그 자리에서 연다. */}
+                        {openChild && taskDetail(openChild)}
+                      </details>}
+                      {open && taskDetail(item)}
                     </li>
                   })}
                 </ul>}

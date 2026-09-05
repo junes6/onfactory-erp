@@ -1,6 +1,9 @@
-import { Bell, CalendarDays, ChevronRight, ClipboardList, FileText, Home, ListChecks, MessageCircle, MoreHorizontal, Settings2, Timer, X } from 'lucide-react'
+import { Bell, CalendarDays, ChevronDown, ChevronRight, ClipboardList, FileText, Home, ListChecks, MessageCircle, MoreHorizontal, Settings2, Timer, X } from 'lucide-react'
 import type { WorkItem } from '../domainData'
 import { Button } from './ui/Button'
+import { ParentChip, SubtaskRows } from './SubtaskList'
+import { workStatusLabel } from '../utils/workStatus'
+import { childrenOf, isSubtask, isTopLevelIn, parentTitleOf, progressLabel, subtaskProgress, type ParentRef } from '../utils/workTree'
 
 /**
  * 휴대폰 화면.
@@ -67,8 +70,10 @@ export function nextActionLabel(status: WorkItem['status']) {
   return '보기'
 }
 
-export function MobileToday({ tasks, events, alerts, userName, onOpenTask, onGoTasks, onOpenAlerts }: {
+export function MobileToday({ tasks, allTasks, events, alerts, userName, onOpenTask, onGoTasks, onOpenAlerts }: {
   tasks: WorkItem[]
+  /** 진행률·건수를 셀 때 쓰는 전체 목록. tasks는 이미 최상위만 남겨 자식이 빠져 있다. */
+  allTasks?: WorkItem[]
   events: { id: string; title: string; date: string; owner?: string }[]
   alerts: { id: string; title: string; createdAt?: string }[]
   userName: string
@@ -77,24 +82,28 @@ export function MobileToday({ tasks, events, alerts, userName, onOpenTask, onGoT
   onOpenAlerts: () => void
 }) {
   const shown = tasks.slice(0, TODAY_TASK_LIMIT)
+  // 제목의 건수는 자식까지 센다 — 목록에서 접었다고 맡은 일이 줄지는 않는다.
+  const openCount = (allTasks ?? tasks).filter((task) => task.status !== '결재완료').length
+  // 버튼이 말하는 '나머지'는 5줄 제한이 자른 줄이다. 접힌 자식까지 세면 다 보이는 화면에서도 '나머지 1건 보기'가 뜬다.
   const hidden = Math.max(0, tasks.length - shown.length)
   return (
     <div className="mobile-today">
       <h1 className="mobile-today-greeting">{userName}님, 오늘 할 일입니다</h1>
 
       <section className="mobile-card" aria-label="오늘 업무">
-        <h2><ListChecks size={17} /> 내 업무 {tasks.length}건</h2>
+        <h2><ListChecks size={17} /> 내 업무 {openCount}건</h2>
         {shown.length === 0 && <p className="mobile-empty">지금 맡은 업무가 없습니다.</p>}
         <ul className="mobile-line-list">
-          {shown.map((task) => (
-            <li key={task.id}>
+          {shown.map((task) => {
+            const progress = subtaskProgress(allTasks ?? tasks, task.id)
+            return <li key={task.id}>
               <button type="button" className="mobile-line-open" onClick={() => onOpenTask(task)}>
                 <strong>{task.title}</strong>
-                <small>{task.status} · {task.due ? task.due.slice(5, 10).replace('-', '.') : '기한 없음'}</small>
+                <small>{workStatusLabel(task.status)} · {task.due ? task.due.slice(5, 10).replace('-', '.') : '기한 없음'}{progress ? ` · ${progressLabel(progress)}` : ''}</small>
               </button>
               <ChevronRight size={18} aria-hidden="true" />
             </li>
-          ))}
+          })}
         </ul>
         {hidden > 0 && <Button tone="quiet" size="sm" full onClick={onGoTasks}>나머지 {hidden}건 보기</Button>}
       </section>
@@ -134,36 +143,60 @@ export function MobileToday({ tasks, events, alerts, userName, onOpenTask, onGoT
  * 한 행에 제목·상태·기한만 두고 버튼은 하나다. 손가락으로 누르는 화면에서
  * 행마다 버튼이 서넛이면 어느 것을 눌렀는지 모른 채 눌리게 된다.
  */
-export function MobileTaskList({ tasks, onAdvance, onOpenTask, busyId }: {
+export function MobileTaskList({ tasks, parentRefs, onAdvance, onOpenTask, busyId }: {
   tasks: WorkItem[]
+  /** 상위가 목록 밖에 있는 자식에게 붙일 제목(서버 응답 봉투). */
+  parentRefs?: Record<string, ParentRef>
   onAdvance: (task: WorkItem) => void
   onOpenTask: (task: WorkItem) => void
   busyId?: string
 }) {
-  const open = tasks.filter((task) => task.status !== '결재완료')
-  const done = tasks.filter((task) => task.status === '결재완료')
-  const row = (task: WorkItem) => (
-    <li key={task.id}>
+  // 목록에는 상위만 한 줄로 세우고, 자식은 그 아래 접힌 채로 둔다.
+  const ids = new Set(tasks.map((task) => task.id))
+  const openTotal = tasks.filter((task) => task.status !== '결재완료').length
+  // 진행 중 목록에서 접는 기준은 '진행 중인 상위'다. 끝난 상위 아래 남은 자식까지 접으면
+  // 그 자식은 '끝난 업무' 안에서만 닿을 수 있게 되어, 제목은 '업무 1건'인데 목록은 비어 보인다.
+  const openIds = new Set(tasks.filter((task) => task.status !== '결재완료').map((task) => task.id))
+  const open = tasks.filter((task) => task.status !== '결재완료' && isTopLevelIn(task, openIds))
+  const done = tasks.filter((task) => task.status === '결재완료' && isTopLevelIn(task, ids))
+  // 끌어올린 자식은 상위 행 안에서 또 그리지 않는다 — 한 업무가 한 화면에 두 줄이 되면 어느 쪽을 눌러야 하는지 모른다.
+  const promoted = new Set(open.map((task) => task.id))
+  /**
+   * 한 줄. 최상위로 올릴지 정한 집합(foldIds)을 그대로 받아서 상위 칩도 같은 집합으로 판정한다 —
+   * 두 집합이 다르면 상위가 끝나서 최상위로 올라온 자식이 칩 없이 독립 업무처럼 보인다.
+   */
+  const row = (task: WorkItem, foldIds: Set<string>) => {
+    const children = childrenOf(tasks, task.id).filter((child) => !promoted.has(child.id))
+    const progress = subtaskProgress(tasks, task.id)
+    return <li key={task.id} className={progress ? 'has-children' : undefined}>
       <button type="button" className="mobile-line-open" onClick={() => onOpenTask(task)}>
         <strong>{task.title}</strong>
-        <small>{task.status} · {task.owner} · {task.due ? task.due.slice(5, 10).replace('-', '.') : '기한 없음'}</small>
+        <small>{workStatusLabel(task.status)} · {task.owner} · {task.due ? task.due.slice(5, 10).replace('-', '.') : '기한 없음'}{progress ? ` · ${progressLabel(progress)}` : ''}</small>
+        {isSubtask(task) && !foldIds.has(task.parentId) && <ParentChip title={parentTitleOf(task, tasks, parentRefs)} />}
       </button>
       {task.status !== '결재완료' && (
         <Button tone="secondary" size="sm" disabled={busyId === task.id} onClick={() => onAdvance(task)}>
           {nextActionLabel(task.status)}
         </Button>
       )}
+      {progress && <details className="mobile-line-children">
+        <summary><ChevronDown size={14} /> {progressLabel(progress)}</summary>
+        {children.length > 0 && <SubtaskRows items={children} onOpen={onOpenTask} actionFor={(child) => child.status === '결재완료' ? null : { label: nextActionLabel(child.status), run: () => onAdvance(child) }} busyId={busyId} />}
+        {/* 센 것과 그린 것이 다르면 그 차이를 말한다 — 끝난 상위 아래 남은 자식은 위쪽에 한 줄로 올라가 있다. */}
+        {progress.total > children.length && <p className="workflow-subtask-note">하위 업무 {progress.total - children.length}건은 이 목록 위쪽에 한 줄로 나와 있습니다.</p>}
+      </details>}
     </li>
-  )
+  }
   return (
     <div className="mobile-task-page">
-      <h1 className="mobile-page-title">업무 {open.length}건</h1>
+      {/* 줄은 상위만 세우지만 건수는 자식까지 센다 — '업무 1건'이라고 말해 놓고 안에 세 건이 있으면 안 된다. */}
+      <h1 className="mobile-page-title">업무 {openTotal}건</h1>
       {open.length === 0 && <p className="mobile-empty">진행 중인 업무가 없습니다.</p>}
-      <ul className="mobile-line-list">{open.map(row)}</ul>
+      <ul className="mobile-line-list">{open.map((task) => row(task, openIds))}</ul>
       {done.length > 0 && (
         <details className="mobile-done">
           <summary>끝난 업무 {done.length}건</summary>
-          <ul className="mobile-line-list">{done.slice(0, 20).map(row)}</ul>
+          <ul className="mobile-line-list">{done.slice(0, 20).map((task) => row(task, ids))}</ul>
         </details>
       )}
     </div>

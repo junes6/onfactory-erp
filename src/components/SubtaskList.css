@@ -1,0 +1,49 @@
+/* 하위 업무 — 카드 안에 카드를 두지 않는다. details 한 줄 + 들여쓴 ul, 자식 행도 상태 점·제목·마감·버튼 1개. */
+.workflow-card-subtasks { margin-top: var(--space-8); }
+.workflow-card-subtasks > summary { display: flex; align-items: center; gap: var(--space-4); min-height: 28px; color: var(--muted); font-size: var(--font-13); cursor: pointer; }
+.workflow-card-subtasks[open] > summary, .workflow-card-subtasks > summary:hover { color: var(--color-primary); }
+.workflow-card-subtasks > summary.is-complete { color: var(--color-success-ink); }
+
+/* 세 표면의 '펼치기'는 같은 어휘여야 한다 — 브라우저 삼각형을 지우고 같은 아이콘 하나를 쓰며, 열리면 돌려서 방향을 말한다.
+   한 곳은 삼각형, 한 곳은 돌지 않는 아이콘이면 같은 동작이 화면마다 다른 것으로 보인다. */
+.workflow-card-subtasks > summary, .mobile-line-children > summary, .guest-task-children > summary { list-style: none; }
+.workflow-card-subtasks > summary::-webkit-details-marker,
+.mobile-line-children > summary::-webkit-details-marker,
+.guest-task-children > summary::-webkit-details-marker { display: none; }
+.workflow-card-subtasks > summary > svg, .mobile-line-children > summary > svg, .guest-task-children > summary > svg { flex: 0 0 auto; margin-right: var(--space-4); transition: transform .15s ease; }
+.workflow-card-subtasks[open] > summary > svg, .mobile-line-children[open] > summary > svg, .guest-task-children[open] > summary > svg { transform: rotate(180deg); }
+
+/* 진행률 막대. 카드 왼쪽 우선순위 바(4px)와 같은 예외 두께다. */
+.workflow-progress { flex: 1; min-width: 40px; height: 4px; display: block; overflow: hidden; margin-left: var(--space-4); border-radius: var(--radius-8); background: var(--color-gray-200); }
+.workflow-progress > b { display: block; height: 100%; background: var(--color-success); }
+
+.workflow-subtask-list { display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-0) var(--space-0) var(--space-0) var(--space-12); border-left: var(--hairline) solid var(--line); list-style: none; }
+.workflow-subtask-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); min-height: 40px; }
+.workflow-subtask-open { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); padding: var(--space-4) var(--space-0); border: none; color: inherit; background: transparent; text-align: left; }
+button.workflow-subtask-open { cursor: pointer; }
+.workflow-subtask-open strong { overflow: hidden; font-size: var(--font-13); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.workflow-subtask-open time { color: var(--muted); font-size: var(--font-11); white-space: nowrap; }
+.workflow-subtask-row.is-done strong { color: var(--muted); text-decoration: line-through; }
+
+/* 자식이 내 목록에 없을 때(다른 담당자) 대신 놓는 한 줄. 제목이 아니라 건수만 적는다. */
+.workflow-subtask-note { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); }
+
+/* 상위 칩 — 상위를 볼 수 있으면 누를 수 있고, 아니면 그냥 밝히기만 한다. */
+.workflow-parent-chip { max-width: 100%; display: inline-flex; align-items: center; gap: var(--space-4); overflow: hidden; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--muted); background: transparent; font-size: var(--font-11); line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
+button.workflow-parent-chip { cursor: pointer; }
+button.workflow-parent-chip:hover { color: var(--color-primary); border-color: var(--color-primary); }
+
+/* 사유가 있는 행동은 경고 색으로 바뀌되 눌리는 채로 둔다.
+   막혔다고 칠하고 잠그면(cursor: not-allowed·aria-disabled) 화면이 든 낡은 건수 하나로 길이 끊긴다 —
+   남았는지 아닌지는 제출 시점에 서버가 정하므로, 화면은 경고만 하고 문은 열어 둔다. */
+.workflow-card-action.is-warned { color: var(--color-warning-ink); border: var(--hairline) solid var(--color-warning); background: var(--color-warning-soft); }
+/* 마우스를 올리면 styles.css의 일반 :hover가 같은 순위로 덮어써 경고 톤이 사라진다 — 한 단계 더 좁혀 순서와 무관하게 지킨다. */
+.workflow-card-action.is-warned:hover { color: var(--color-warning-ink); background: color-mix(in srgb, var(--color-warning-soft) 80%, var(--color-warning)); }
+/* 사유는 title이 아니라 버튼 위에 그대로 적는다 — 마우스를 올려야 보이는 문장은 손가락과 키보드에게는 없는 문장이다. */
+.workflow-card-blocked, .workflow-drawer-blocked { display: flex; align-items: flex-start; gap: var(--space-4); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-8) var(--space-12); border-radius: var(--radius-8); color: var(--color-warning-ink); background: var(--color-warning-soft); font-size: var(--font-13); line-height: 1.5; }
+.workflow-card-blocked { font-size: var(--font-11); }
+
+/* 상위 바꾸기 — 고르는 것과 적용하는 것을 나눈다. select만 바꿔서는 아무 일도 일어나지 않는다. */
+.workflow-drawer-parent { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); margin-top: var(--space-8); }
+.workflow-drawer-parent .form-field { flex: 1 1 auto; min-width: 200px; margin: var(--space-0); }
+.workflow-parent-select { min-height: 36px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); font-size: var(--font-13); }
