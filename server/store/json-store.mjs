@@ -28,6 +28,8 @@ function parseStore(file) {
   parsed.accountCredentials ??= {}
   parsed.invitedAccounts ??= []
   parsed.passwordResetRequests ??= []
+  // 게스트 grant가 없는 옛 파일도 그대로 열린다(빈 배열로 채운다).
+  parsed.guestGrants ??= []
   assertKnownWorkspaceKeys(parsed)
   return parsed
 }
@@ -102,6 +104,13 @@ export class JsonStoreAdapter {
 
   async createSessionMap() {
     return new Map()
+  }
+
+  // 게스트 GET 라우트가 메모리 필터 결과 id를 넘겨 DB(RLS)와 교집합을 구하는 계약이다.
+  // JSON 저장소에는 RLS가 없으므로 앱 필터 결과를 그대로 돌려준다 — 여기서 더 자르면
+  // JSON 모드와 PG 모드의 응답이 달라진다.
+  async guestVisibleIds({ candidateIds } = {}) {
+    return Array.isArray(candidateIds) ? candidateIds.filter((id) => typeof id === 'string') : []
   }
 
   async close() {}

@@ -15,7 +15,7 @@ async function login(origin, email, workspace = 'tenant') {
 
 const freshStore = () => ({
   version: 2, tenants: { 'TENANT-SUNSEA': {}, 'TENANT-POHANG': {} }, platform: {},
-  accountApprovals: {}, accountCredentials: {}, invitedAccounts: [], passwordResetRequests: [],
+  accountApprovals: {}, accountCredentials: {}, invitedAccounts: [], passwordResetRequests: [], guestGrants: [],
 })
 
 test('demo tenant fixtures carry no fixed metric values', () => {
@@ -67,5 +67,29 @@ test('platform tenant metrics are live aggregates that move when a tenant create
     const sunseaTicket = withTicket.tenants.find((tenant) => tenant.id === 'TENANT-SUNSEA')
     assert.equal(sunseaTicket.metrics.openTickets, sunseaAfter.metrics.openTickets + 1, '새 티켓이 미처리 집계에 반영된다')
     assert.equal(sunseaTicket.service, '주의')
+  })
+})
+
+test('platform member counts exclude external guests and expose them as guestCount', async () => {
+  const store = freshStore()
+  const guestId = 'USR-TENANT-SUNSEA-GUESTMETRIC'
+  store.invitedAccounts.push({ id: guestId, email: 'metric.guest@partner.example', name: '홍거래', tenantId: 'TENANT-SUNSEA', tenantName: '햇살바다', team: '파트너상사', jobRole: '외부 게스트', requested: '게스트 초대', role: 'tenant-guest', guestGrantId: 'GST-METRIC' })
+  store.accountApprovals[guestId] = 'approved'
+  store.guestGrants.push({ id: 'GST-METRIC', tenantId: 'TENANT-SUNSEA', accountId: guestId, email: 'metric.guest@partner.example', name: '홍거래', orgName: '파트너상사', projectIds: [], invitedById: 'USR-SUNSEA-ADMIN', invitedByName: '김서원', status: 'active', tokenHash: null, createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' })
+  let membersWithoutGuest = null
+  await withServer(createApp({ apiKey: '', initialWorkspaceStore: freshStore(), onWorkspaceStoreChange: () => {} }), async (origin) => {
+    const operator = await login(origin, 'operator@onfactory.co.kr', 'platform')
+    const state = await (await fetch(`${origin}/api/platform/state`, { headers: { cookie: operator } })).json()
+    const sunsea = state.tenants.find((tenant) => tenant.id === 'TENANT-SUNSEA')
+    membersWithoutGuest = sunsea.metrics.members
+    assert.equal(sunsea.metrics.guestCount, 0)
+  })
+  await withServer(createApp({ apiKey: '', initialWorkspaceStore: store, onWorkspaceStoreChange: () => {} }), async (origin) => {
+    const operator = await login(origin, 'operator@onfactory.co.kr', 'platform')
+    const state = await (await fetch(`${origin}/api/platform/state`, { headers: { cookie: operator } })).json()
+    const sunsea = state.tenants.find((tenant) => tenant.id === 'TENANT-SUNSEA')
+    assert.equal(sunsea.metrics.members, membersWithoutGuest, '게스트는 인원 수에 들어가지 않는다')
+    assert.equal(sunsea.metrics.guestCount, 1)
+    assert.equal(sunsea.metrics.pendingAccounts, 1, '승인 대기 수에도 게스트는 없다(데모 신규 직원 1명만)')
   })
 })

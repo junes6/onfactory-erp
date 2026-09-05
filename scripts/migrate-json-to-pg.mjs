@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 
 import { COMPANY_DOCUMENTS_KEY } from '../server/store/constants.mjs'
 import { StoreVerificationError } from '../server/store/errors.mjs'
-import { PostgresStoreAdapter } from '../server/store/postgres-store.mjs'
+import { PostgresStoreAdapter, applyPostgresServiceContext } from '../server/store/postgres-store.mjs'
 import { assertKnownWorkspaceKeys, encodeWorkspaceRecord, workspaceTableForKey } from '../server/store/workspace-codec.mjs'
 
 const KOREA_OFFSET = '+09:00'
@@ -58,6 +58,8 @@ export function prepareMigrationSnapshot(source, referenceDate) {
   snapshot.accountCredentials ??= {}
   snapshot.invitedAccounts ??= []
   snapshot.passwordResetRequests ??= []
+  // 게스트 grant도 최상위 컬렉션이다 — 빠뜨리면 이관 후 게스트가 범위 없는 계정으로 남는다.
+  snapshot.guestGrants ??= []
   assertKnownWorkspaceKeys(snapshot)
   const rawDueByEntity = {}
   for (const [tenantId, tenantStore] of Object.entries(snapshot.tenants)) {
@@ -100,12 +102,35 @@ export async function verifyNormalizedCounts(client, snapshot) {
     counts.push(row)
     if (row.status !== 'OK') mismatches.push(`${expected.orgId}/${expected.key}: expected=${expected.count}, actual=${actual}`)
   }
+  // 게스트 grant는 테넌트 키가 아니라 최상위 컬렉션이라 위 루프에 안 잡힌다. 따로 센다.
+  const expectedGrants = (snapshot.guestGrants ?? []).filter((grant) => grant?.id && grant?.tenantId && grant?.accountId).length
+  const grantResult = await client.query('SELECT COUNT(*)::int AS count FROM guest_grants WHERE deleted_at IS NULL')
+  const loadedGrants = Number(grantResult.rows[0]?.count ?? 0)
+  counts.push({ org: '*', key: 'guestGrants', source: expectedGrants, loaded: loadedGrants, status: loadedGrants === expectedGrants ? 'OK' : 'MISMATCH' })
+  if (loadedGrants !== expectedGrants) mismatches.push(`guestGrants: expected=${expectedGrants}, actual=${loadedGrants}`)
   if (mismatches.length) {
     const error = new StoreVerificationError(`Postgres 이관 건수 검증 실패: ${mismatches.join('; ')}`)
     error.counts = counts
     throw error
   }
   return counts
+}
+
+/** 풀에서 커넥션 하나를 빌려 트랜잭션 + service 컨텍스트 안에서 fn을 실행한다(읽기 전용 검증용). */
+async function withServiceContext(pool, fn) {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await applyPostgresServiceContext(client)
+    const result = await fn(client)
+    await client.query('COMMIT')
+    return result
+  } catch (error) {
+    try { await client.query('ROLLBACK') } catch { /* 이미 끊긴 트랜잭션 */ }
+    throw error
+  } finally {
+    client.release()
+  }
 }
 
 export function migrationBackupPath(sourcePath, now = new Date()) {
@@ -148,7 +173,9 @@ export async function migrateJsonToPostgres({
       rawDueByEntity: prepared.rawDueByEntity,
       verify: verifyNormalizedCounts,
     })
-    const counts = await verifyNormalizedCounts(adapter.pool, prepared.snapshot)
+    // 커밋 뒤 재검증은 service 컨텍스트 안에서 한다. items·work_items·project_*·guest_grants 등은 FORCE RLS가 걸려 있어
+    // app.role이 없는 커넥션(비특권 롤)에서는 COUNT가 전부 0으로 보이고, 정상 이관이 MISMATCH로 실패한다.
+    const counts = await withServiceContext(adapter.pool, (client) => verifyNormalizedCounts(client, prepared.snapshot))
     const restored = await adapter.loadSnapshot()
     const after = await readFile(resolvedSource, 'utf8')
     const afterStat = await stat(resolvedSource)

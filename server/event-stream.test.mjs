@@ -124,3 +124,35 @@ test('closing a connection stops delivery and frees the tenant entry', () => {
   stream.publish('T1', 'work', { seq: 9 })
   assert.equal(client.frames().length, before, '끊긴 클라이언트에는 더 쓰지 않는다')
 })
+
+test('a restricted (guest) client gets only message/work kinds, stripped to key/version, unless the event is addressed to it', () => {
+  const stream = createEventStream()
+  const fake = fakeClient()
+  const guest = { ...fake, handle: stream.connect({ request: fake.request, response: fake.response, tenantId: 'T1', accountId: 'G1', restricted: true }) }
+  const employee = connectClient(stream, { accountId: 'U1' })
+
+  stream.publish('T1', 'work', { id: 'WK-1', status: '수행중', title: '비밀 업무 제목' })
+  stream.publish('T1', 'message', { key: 'messenger-conversations', version: 'v7', conversationId: 'grp-1' })
+  stream.publish('T1', 'proposal', { pending: 3 })
+  stream.publish('T1', 'activity', { title: '누군가 무엇을 했다' })
+  stream.publish('T1', 'notification', { title: '게스트 본인 알림' }, { accountId: 'G1' })
+
+  const kinds = guest.frames().map((frame) => frame.kind)
+  assert.deepEqual(kinds.filter((kind) => kind !== 'ready'), ['work', 'message', 'notification'], '제안·활동은 게스트에게 가지 않는다')
+  assert.deepEqual(guest.frames().find((frame) => frame.kind === 'work').data, { key: null, version: null }, '업무 제목이 벗겨진다')
+  assert.deepEqual(guest.frames().find((frame) => frame.kind === 'message').data, { key: 'messenger-conversations', version: 'v7' }, '대화 id도 내려가지 않는다')
+  assert.deepEqual(guest.frames().find((frame) => frame.kind === 'notification').data, { title: '게스트 본인 알림' }, '본인 앞으로 온 것은 그대로')
+  assert.ok(!guest.chunks.join('').includes('비밀 업무 제목'))
+  // 직원은 예전과 똑같이 전부 받는다.
+  assert.equal(employee.frames().find((frame) => frame.kind === 'work').data.title, '비밀 업무 제목')
+  assert.equal(employee.frames().filter((frame) => frame.kind === 'proposal').length, 1)
+
+  // 보관분을 넘어 끊겼던 게스트에게는 resync가 그대로 간다 — 재조회 신호에는 테넌트 데이터가 없다.
+  for (let index = 0; index < EVENT_BUFFER_PER_TENANT + 5; index += 1) stream.publish('T1', 'work', { key: 'work-items', version: `v${index}` })
+  const late = fakeClient()
+  late.request.headers['last-event-id'] = '1'
+  stream.connect({ request: late.request, response: late.response, tenantId: 'T1', accountId: 'G2', restricted: true })
+  const resync = late.frames().find((frame) => frame.kind === 'resync')
+  assert.ok(resync, '제한 클라이언트도 resync를 받는다')
+  assert.deepEqual(Object.keys(resync.data), ['reason'])
+})

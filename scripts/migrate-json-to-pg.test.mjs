@@ -29,9 +29,27 @@ function sourceFixture() {
       },
     },
     platform: { tenants: [{ id: 'TENANT-MIGRATION', name: 'Migration tenant', isDemo: false }], supportTickets: [], integrations: [], actions: [], auditEvents: [] },
-    accountApprovals: {}, accountCredentials: {}, invitedAccounts: [], passwordResetRequests: [],
+    accountApprovals: {}, accountCredentials: {},
+    invitedAccounts: [{
+      id: 'USR-TENANT-MIGRATION-GUEST01', tenantId: 'TENANT-MIGRATION', email: 'guest@partner.test', name: '거래처 게스트',
+      role: 'tenant-guest', guestGrantId: 'GST-TENANT-MIGRATION-000001', approved: false, approvalStatus: 'pending',
+    }],
+    passwordResetRequests: [],
+    guestGrants: [{
+      id: 'GST-TENANT-MIGRATION-000001', tenantId: 'TENANT-MIGRATION', accountId: 'USR-TENANT-MIGRATION-GUEST01',
+      email: 'guest@partner.test', name: '거래처 게스트', orgName: '파트너사', projectIds: ['PRJ-M'],
+      status: 'invited', tokenHash: 'd'.repeat(64), tokenIssuedAt: '2026-08-20T06:00:00.000Z', tokenExpiresAt: '2026-08-27T06:00:00.000Z',
+      createdAt: '2026-08-20T06:00:00.000Z', updatedAt: '2026-08-20T06:00:00.000Z',
+    }],
   }
 }
+
+test('migration snapshot fills guestGrants for legacy files that predate the collection', () => {
+  const legacy = sourceFixture()
+  delete legacy.guestGrants
+  const prepared = prepareMigrationSnapshot(legacy, '2026-08-20')
+  assert.deepEqual(prepared.snapshot.guestGrants, [])
+})
 
 test('relative due conversion uses an explicit Korea base date and preserves raw text', () => {
   assert.deepEqual(normalizeLegacyDue('오늘 18:00', '2026-08-20'), {
@@ -63,6 +81,16 @@ test('migration keeps the JSON source immutable, creates a timestamp backup, and
     assert.equal(rows.rows[0].payload.due, undefined)
     assert.equal(rows.rows.find((row) => row.id === 'WORK-TODAY').due_at.toISOString(), '2026-08-20T09:00:00.000Z')
     assert.equal(rows.rows.find((row) => row.id === 'WORK-TODAY').raw_due, '오늘 18:00')
+
+    // 게스트 grant도 함께 이관되고 건수 검증에 포함된다. 토큰 해시는 payload가 아니라 컬럼에만 있다.
+    const grants = await pool.query('SELECT id, token_hash, payload FROM guest_grants WHERE deleted_at IS NULL')
+    assert.deepEqual(grants.rows.map((row) => row.id), ['GST-TENANT-MIGRATION-000001'])
+    assert.equal(grants.rows[0].token_hash, 'd'.repeat(64))
+    assert.equal(grants.rows[0].payload.tokenHash, undefined)
+    assert.ok(result.counts.some((row) => row.key === 'guestGrants' && row.source === 1 && row.loaded === 1 && row.status === 'OK'))
+    assert.equal(result.snapshot.guestGrants[0].tokenHash, 'd'.repeat(64))
+    const guestRole = await pool.query('SELECT role FROM core_accounts WHERE id = $1', ['USR-TENANT-MIGRATION-GUEST01'])
+    assert.equal(guestRole.rows[0].role, 'tenant-guest')
 
     const wrong = sourceFixture()
     wrong.tenants['TENANT-MIGRATION']['work-items'].data.push({ id: 'WORK-MISSING', due: '오늘', title: '누락', status: '업무요청' })

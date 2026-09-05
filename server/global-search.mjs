@@ -75,6 +75,8 @@ function hit({ kind, id, title, meta, owner, page, focusId, snippet }) {
 export function searchTenant({ query, auth, tenantStore, accounts, canReadDocument, isConversationVisibleToMember }) {
   const words = terms(query)
   if (words.length === 0 || query.trim().length < MIN_QUERY_LENGTH) return { groups: [], total: 0 }
+  // 외부 게스트는 전역 검색이 없다. 사람 검색 한 갈래만으로도 직원 명단이 열거되기 때문이다. 게이트가 먼저 막지만 여기서도 끊는다.
+  if (auth?.role === 'tenant-guest') return { groups: [], total: 0 }
   const first = words[0]
   const rows = (key) => (Array.isArray(tenantStore?.[key]?.data) ? tenantStore[key].data : [])
   const isAdmin = auth.role === 'tenant-admin'

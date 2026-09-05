@@ -15,7 +15,7 @@ async function login(origin, email, workspace = 'tenant') {
 
 const freshStore = () => ({
   version: 2, tenants: { 'TENANT-SUNSEA': {}, 'TENANT-3DMUSE': {} }, platform: {},
-  accountApprovals: {}, accountCredentials: {}, invitedAccounts: [], passwordResetRequests: [],
+  accountApprovals: {}, accountCredentials: {}, invitedAccounts: [], passwordResetRequests: [], guestGrants: [],
 })
 
 test('demo seed includes the it_services tenant 3D뮤즈 with one admin', () => {

@@ -38,6 +38,13 @@ export function createEventStream({ clock = () => new Date(), logger = console }
   const write = (client, event) => {
     // 받는 사람이 지정된 이벤트는 그 사람에게만 간다.
     if (event.accountId && event.accountId !== client.accountId) return
+    // 제한 클라이언트(외부 게스트): 본인 앞으로 온 것이 아니면 message·work 두 종류만, 내용은 key·version만 받는다.
+    // 테넌트 전체에 뿌리는 work 이벤트에는 업무 제목이 실리는데, 그 제목은 게스트가 볼 수 없는 업무의 것일 수 있다.
+    // resync는 "전부 다시 읽어라"라는 신호일 뿐 테넌트 데이터가 없으므로 그대로 보낸다 — 막으면 오래 끊긴 게스트 화면이 재조회 신호를 못 받는다.
+    if (client.restricted && !event.accountId && event.kind !== 'resync') {
+      if (!['message', 'work'].includes(event.kind)) return
+      event = { ...event, data: { key: event.data?.key ?? null, version: event.data?.version ?? null } }
+    }
     try {
       client.response.write(`id: ${event.id}\nevent: ${event.kind}\ndata: ${JSON.stringify(event.data)}\n\n`)
       client.lastSentId = event.id
@@ -73,7 +80,7 @@ export function createEventStream({ clock = () => new Date(), logger = console }
     return { events: buffer.events.filter((event) => event.id > lastEventId), resync: false }
   }
 
-  const connect = ({ request, response, tenantId, accountId }) => {
+  const connect = ({ request, response, tenantId, accountId, restricted = false }) => {
     response.writeHead(200, {
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache, no-transform',
@@ -81,7 +88,7 @@ export function createEventStream({ clock = () => new Date(), logger = console }
       // 프록시가 버퍼링하면 스트림이 아니라 한 덩어리가 된다.
       'x-accel-buffering': 'no',
     })
-    const client = { accountId, response, lastSentId: 0 }
+    const client = { accountId, response, lastSentId: 0, restricted: restricted === true }
     const clients = clientsByTenant.get(tenantId) ?? new Set()
     clients.add(client)
     clientsByTenant.set(tenantId, clients)

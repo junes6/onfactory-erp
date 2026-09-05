@@ -11,7 +11,7 @@ async function login(origin, email, workspace = 'tenant', password = 'demo1234')
   const response = await fetch(`${origin}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspace, email, password }) })
   return { response, cookie: response.headers.get('set-cookie') ?? '' }
 }
-const freshStore = () => ({ version: 2, tenants: { 'TENANT-SUNSEA': {}, 'TENANT-POHANG': {} }, platform: {}, accountApprovals: {}, accountCredentials: {}, invitedAccounts: [], passwordResetRequests: [] })
+const freshStore = () => ({ version: 2, tenants: { 'TENANT-SUNSEA': {}, 'TENANT-POHANG': {} }, platform: {}, accountApprovals: {}, accountCredentials: {}, invitedAccounts: [], passwordResetRequests: [], guestGrants: [] })
 const json = (cookie, identity) => ({ 'content-type': 'application/json', cookie, ...(identity ? { 'x-workspace-identity': identity } : {}) })
 const readJson = async (response) => { const text = await response.text(); try { return JSON.parse(text) } catch { return { raw: text } } }
 const uploadDir = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'onfactory-r7-')), 'documents')

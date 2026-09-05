@@ -21,6 +21,7 @@ const freshStore = () => ({
   accountCredentials: {},
   invitedAccounts: [],
   passwordResetRequests: [],
+  guestGrants: [],
 })
 
 test('platform operator logs in from either workspace selector and lands on the platform console', async () => {

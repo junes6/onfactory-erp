@@ -1,6 +1,8 @@
 import { cpSync, existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 
+// 백업 디렉터리를 통째로 되돌린다. workspace-state.json 안의 최상위 컬렉션(guestGrants 포함)은
+// 파일 단위로 함께 돌아오고, 없는 컬렉션은 JSON 저장소가 열 때 빈 배열로 채운다(json-store.mjs).
 const argument = process.argv.find((value) => value.startsWith('--from='))?.slice('--from='.length)
 const backupsRoot = path.resolve('server/backups')
 const source = argument ? path.resolve(argument) : ''

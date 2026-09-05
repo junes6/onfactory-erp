@@ -96,6 +96,10 @@ export function registerMessengerRoomRoutes({
   notify,
   events,
   clock = () => new Date(),
+  // 외부 게스트·프로젝트 채널. 주입되지 않으면(옛 호출자) 게스트가 없는 것으로 동작한다.
+  guestGrantOf = () => null,
+  projectSpacesOf = () => [],
+  projectRoleOf = () => null,
 }) {
   const conversationsOf = (tenantId) => {
     const record = workspaceStore.tenants[tenantId]?.[CONVERSATIONS_KEY]
@@ -106,6 +110,18 @@ export function registerMessengerRoomRoutes({
   // 이미 있는 방의 기록은 그대로 두되 새 방에 넣지는 않는다.
   const tenantAccounts = (tenantId) => accounts.filter((account) => account.tenantId === tenantId
     && account.approved && account.approvalStatus !== 'inactive')
+
+  /**
+   * 게스트가 이 방에 들어올 수 있는가 — 방이 프로젝트 채널(projectId)이고 그 프로젝트가 게스트의 초대 범위 안일 때만.
+   * projectId 없는 일반 그룹방·팀방에 게스트를 넣으면 회사 내부 대화가 외부로 열린다.
+   */
+  const guestOutsideProject = (roster, invitedIds, projectId) => invitedIds.some((id) => {
+    const account = roster.find((candidate) => candidate.id === id)
+    if (account?.role !== 'tenant-guest') return false
+    const grant = guestGrantOf(id)
+    return !projectId || !grant || grant.status !== 'active' && grant.status !== 'invited' || !(grant.projectIds ?? []).includes(projectId)
+  })
+  const GUEST_OUTSIDE_PROJECT = { code: 'GUEST_OUTSIDE_PROJECT', message: '외부 게스트는 초대된 프로젝트의 채널(projectId가 있는 방)에만 참여할 수 있습니다.' }
 
   /** 방을 찾고 볼 수 있는지까지 확인한다. 못 찾은 것과 못 보는 것을 응답에서 구분하지 않는다. */
   const locate = (request, response) => {
@@ -148,6 +164,30 @@ export function registerMessengerRoomRoutes({
       response.status(400).json({ error: { code: 'INVALID_PARTICIPANT', message: '같은 회사 구성원만 초대할 수 있습니다.' } })
       return
     }
+    // 프로젝트 채널: projectId를 주면 그 프로젝트의 owner/editor만 만들 수 있고, 참여자는 프로젝트 멤버 안에서만 고른다.
+    // 게스트는 이런 방에만 들어올 수 있다.
+    const projectId = text(request.body?.projectId, 80)
+    let project = null
+    if (projectId) {
+      project = projectSpacesOf(request.auth.tenantId).find((item) => item?.id === projectId) ?? null
+      if (!project) {
+        response.status(400).json({ error: { code: 'INVALID_PROJECT', message: '프로젝트를 찾을 수 없습니다.' } })
+        return
+      }
+      if (!['owner', 'editor'].includes(projectRoleOf(project, request.auth))) {
+        response.status(403).json({ error: { code: 'PROJECT_EDITOR_REQUIRED', message: '프로젝트 채널은 그 프로젝트의 소유자 또는 편집자만 만들 수 있습니다.' } })
+        return
+      }
+      const memberIds = new Set([project.ownerId, ...(project.members ?? []).map((member) => member?.id)].filter(Boolean))
+      if (invited.some((id) => !memberIds.has(id))) {
+        response.status(400).json({ error: { code: 'INVALID_PARTICIPANT', message: '프로젝트 채널에는 그 프로젝트 멤버만 초대할 수 있습니다.' } })
+        return
+      }
+    }
+    if (guestOutsideProject(roster, invited, projectId)) {
+      response.status(400).json({ error: GUEST_OUTSIDE_PROJECT })
+      return
+    }
     const participantIds = Array.from(new Set([request.auth.id, ...invited]))
     const createdAt = nowIso()
     const conversation = {
@@ -164,6 +204,7 @@ export function registerMessengerRoomRoutes({
       ownerId: request.auth.id,
       createdBy: request.auth.id,
       createdAt,
+      ...(projectId ? { projectId } : {}),
       ...(text(request.body?.icon, MAX_ICON) ? { icon: text(request.body.icon, MAX_ICON) } : {}),
     }
     const conversations = conversationsOf(request.auth.tenantId)
@@ -225,6 +266,10 @@ export function registerMessengerRoomRoutes({
     const invited = requested.filter((id) => roster.some((account) => account.id === id))
     if (!invited.length || invited.length !== requested.length) {
       response.status(400).json({ error: { code: 'INVALID_PARTICIPANT', message: '같은 회사 구성원만 초대할 수 있습니다.' } })
+      return
+    }
+    if (guestOutsideProject(roster, invited, conversation.projectId)) {
+      response.status(400).json({ error: GUEST_OUTSIDE_PROJECT })
       return
     }
     const participantIds = Array.from(new Set([...(conversation.participantIds ?? []), ...invited]))

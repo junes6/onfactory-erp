@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import { newDb } from 'pg-mem'
 
 import { emptyWorkspaceStore } from './constants.mjs'
-import { applyPostgresServiceContext, PostgresStoreAdapter } from './postgres-store.mjs'
-import { UnknownWorkspaceKeyError } from './errors.mjs'
+import { JsonStoreAdapter } from './json-store.mjs'
+import { applyPostgresGuestContext, applyPostgresServiceContext, PostgresStoreAdapter, withoutPgMemUnsupportedRls } from './postgres-store.mjs'
+import { StoreVerificationError, UnknownWorkspaceKeyError } from './errors.mjs'
 import { assertKnownWorkspaceKeys } from './workspace-codec.mjs'
+
+const GUEST_TOKEN_HASH = 'c'.repeat(64)
 
 async function testAdapter() {
   const memory = newDb({ autoCreateForeignKeyIndices: true })
@@ -83,6 +86,28 @@ function fixture() {
     tokenHash: 'b'.repeat(64), token: 'raw-reset-token', deliverySecret: 'raw-delivery-secret',
     status: 'development-ready', createdAt: '2026-08-20T06:00:00.000Z', expiresAt: '2026-08-20T07:00:00.000Z',
   }]
+  // A절: 외부 게스트. 계정은 invitedAccounts(role 'tenant-guest')에, 범위는 guestGrants에.
+  snapshot.invitedAccounts = [{
+    id: 'USR-TENANT-HSB-GUEST01', tenantId: 'TENANT-HSB', email: 'guest@partner.test', name: '거래처 게스트',
+    role: 'tenant-guest', guestGrantId: 'GST-TENANT-HSB-000001', team: '파트너사', jobRole: '외부 게스트',
+    approved: false, approvalStatus: 'pending',
+  }]
+  snapshot.guestGrants = [{
+    id: 'GST-TENANT-HSB-000001', tenantId: 'TENANT-HSB', accountId: 'USR-TENANT-HSB-GUEST01',
+    email: 'guest@partner.test', name: '거래처 게스트', orgName: '파트너사',
+    projectIds: ['PRJ-A'], invitedById: 'USR-HSB-ADMIN', invitedByName: 'HSB 관리자', status: 'invited',
+    tokenHash: GUEST_TOKEN_HASH, tokenIssuedAt: '2026-08-20T06:00:00.000Z', tokenExpiresAt: '2026-08-27T06:00:00.000Z',
+    resendCount: 0, lastResentAt: null, accessExpiresAt: null,
+    acceptedAt: null, revokedAt: null, revokedById: null, deactivatedAt: null,
+    createdAt: '2026-08-20T06:00:00.000Z', updatedAt: '2026-08-20T06:00:00.000Z',
+  }]
+  snapshot.tenants['TENANT-HSB']['project-spaces'] = {
+    data: [
+      { id: 'PRJ-A', name: '공동 프로젝트', visibility: 'members', members: [{ id: 'USR-HSB-ADMIN', role: 'owner' }, { id: 'USR-TENANT-HSB-GUEST01', role: 'viewer' }] },
+      { id: 'PRJ-B', name: '사내 프로젝트', visibility: 'company', members: [{ id: 'USR-HSB-ADMIN', role: 'owner' }] },
+    ],
+    updatedAt: '2026-08-20T06:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
+  }
   return snapshot
 }
 
@@ -168,6 +193,29 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.equal(facade.tenants['TENANT-HSB']['performance-reports'].data[0].id, 'PERFS-1')
     assert.equal(facade.passwordResetRequests[0].tokenHash, 'b'.repeat(64))
     assert.equal(facade.passwordResetRequests[0].token, undefined)
+
+    // 게스트 grant 라운드트립: payload에서는 token* 이 지워지고, 컬럼에서 되돌아온다.
+    const persistedGrant = await pool.query('SELECT payload, token_hash, token_issued_at, token_expires_at, project_ids, status, account_id FROM guest_grants WHERE id = $1', ['GST-TENANT-HSB-000001'])
+    assert.equal(persistedGrant.rows.length, 1)
+    assert.equal(persistedGrant.rows[0].payload.tokenHash, undefined)
+    assert.equal(persistedGrant.rows[0].payload.tokenIssuedAt, undefined)
+    assert.equal(persistedGrant.rows[0].payload.tokenExpiresAt, undefined)
+    assert.equal(persistedGrant.rows[0].token_hash, GUEST_TOKEN_HASH)
+    assert.equal(persistedGrant.rows[0].token_expires_at.toISOString(), '2026-08-27T06:00:00.000Z')
+    assert.deepEqual(persistedGrant.rows[0].project_ids, ['PRJ-A'])
+    assert.equal(persistedGrant.rows[0].status, 'invited')
+    assert.equal(persistedGrant.rows[0].account_id, 'USR-TENANT-HSB-GUEST01')
+    assert.equal(facade.guestGrants.length, 1)
+    assert.equal(facade.guestGrants[0].tokenHash, GUEST_TOKEN_HASH)
+    assert.equal(facade.guestGrants[0].tokenIssuedAt, '2026-08-20T06:00:00.000Z')
+    assert.equal(facade.guestGrants[0].tokenExpiresAt, '2026-08-27T06:00:00.000Z')
+    assert.deepEqual(facade.guestGrants[0].projectIds, ['PRJ-A'])
+    assert.equal(facade.guestGrants[0].orgName, '파트너사')
+    // 초대 계정의 role 'tenant-guest'는 core_accounts 컬럼과 facade 양쪽에 보존된다(재기동 승격 회귀 방지).
+    const guestAccount = await pool.query('SELECT role, tenant_id FROM core_accounts WHERE id = $1', ['USR-TENANT-HSB-GUEST01'])
+    assert.equal(guestAccount.rows[0].role, 'tenant-guest')
+    assert.equal(guestAccount.rows[0].tenant_id, 'TENANT-HSB')
+    assert.equal(facade.invitedAccounts.find((invited) => invited.id === 'USR-TENANT-HSB-GUEST01').role, 'tenant-guest')
     assert.equal(facade.platform.integrations[0].lastSync, '14:41')
     assert.equal(facade.platform.auditEvents[0].at, '2026-08-18 14:24')
     assert.ok(contextCalls.length >= 2, JSON.stringify(contextCalls))
@@ -207,6 +255,108 @@ test('performance tables force RLS for service DAL and tenant admins without dir
   assert.match(schema, /CREATE POLICY performance_settings_tenant_admin[\s\S]*app\.org_id/)
   assert.match(schema, /CREATE POLICY performance_reports_tenant_admin[\s\S]*app\.org_id/)
   assert.doesNotMatch(schema, /CREATE POLICY performance_[\w]+_tenant_member/)
+})
+
+test('guest grants soft-delete when they leave the snapshot and reload without them', async () => {
+  const { adapter, pool, serviceContextApplier } = await testAdapter()
+  try {
+    const source = fixture()
+    await adapter.commitSnapshot(source, { referenceDate: '2026-08-20' })
+    const next = structuredClone(source)
+    next.guestGrants = []
+    next.invitedAccounts = []
+    await adapter.commitSnapshot(next, { referenceDate: '2026-08-20' })
+    const rows = await pool.query('SELECT id, deleted_at FROM guest_grants')
+    assert.equal(rows.rows.length, 1)
+    assert.ok(rows.rows[0].deleted_at)
+    const reloaded = new PostgresStoreAdapter({ pool, serviceContextApplier })
+    await reloaded.connect()
+    const facade = await reloaded.loadSnapshot()
+    assert.deepEqual(facade.guestGrants, [])
+  } finally {
+    await adapter.close()
+  }
+})
+
+test('guest scope RLS policies exist in the schema for the six tables plus core_accounts self-row', async () => {
+  const schema = await readFile(new URL('../../db/postgres-schema.sql', import.meta.url), 'utf8')
+  const migration = await readFile(new URL('../../supabase/migrations/20260906010000_guest_scope_rls.sql', import.meta.url), 'utf8')
+  const table = await readFile(new URL('../../supabase/migrations/20260906000000_guest_grants.sql', import.meta.url), 'utf8')
+  for (const sql of [schema, migration]) {
+    assert.match(sql, /CREATE OR REPLACE FUNCTION app_guest_project_ids\(\)/)
+    assert.match(sql, /ARRAY\['project_spaces', 'project_posts', 'work_items', 'messenger_conversations', 'items', 'guest_grants'\]/)
+    assert.match(sql, /FORCE ROW LEVEL SECURITY/)
+    for (const policy of ['project_spaces_guest_read', 'project_posts_guest_read', 'work_items_guest_read', 'messenger_conversations_guest_read', 'items_guest_read', 'core_accounts_guest_self']) {
+      assert.match(sql, new RegExp(`CREATE POLICY ${policy} ON \\w+ FOR SELECT USING \\([\\s\\S]*?'tenant-guest'`))
+    }
+    assert.match(sql, /CREATE POLICY core_accounts_service ON core_accounts/)
+    assert.match(sql, /items_guest_read ON items FOR SELECT USING \([\s\S]*?item_type = 'company-document'/)
+    // guest_grants에는 게스트 SELECT 정책이 없어야 한다(service 전용).
+    assert.doesNotMatch(sql, /CREATE POLICY guest_grants_guest/)
+  }
+  for (const sql of [schema, table]) {
+    assert.match(sql, /CREATE TABLE IF NOT EXISTS guest_grants \([\s\S]*?token_hash TEXT,[\s\S]*?token_issued_at TIMESTAMPTZ,[\s\S]*?token_expires_at TIMESTAMPTZ/)
+    assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS idx_guest_grants_account ON guest_grants \(account_id\) WHERE deleted_at IS NULL/)
+  }
+  // 정책 대상 테이블은 supabase 마이그레이션 체인 안에 CREATE TABLE로 존재해야 한다. 한 테이블이라도 빠지면
+  // DO 루프 첫 반복에서 'relation does not exist'로 RLS 마이그레이션 전체가 실패하고, 환경별 격리 수준이 갈라진다.
+  const migrationsDir = new URL('../../supabase/migrations/', import.meta.url)
+  const chain = (await Promise.all((await readdir(migrationsDir)).filter((name) => name.endsWith('.sql')).sort().map((name) => readFile(new URL(name, migrationsDir), 'utf8')))).join('\n')
+  for (const tableName of ['project_spaces', 'project_posts', 'work_items', 'messenger_conversations', 'items', 'guest_grants', 'core_accounts']) {
+    assert.match(chain, new RegExp(`CREATE TABLE IF NOT EXISTS ${tableName}\\b`), `${tableName}가 supabase/migrations 안에서 만들어져야 한다`)
+  }
+  // 그리고 RLS 마이그레이션 파일 이름은 테이블 마이그레이션보다 뒤여야 한다(사전순 적용).
+  assert.ok('20260906000000_guest_grants.sql' < '20260906010000_guest_scope_rls.sql')
+  // pg-mem용 스키마에는 RLS·함수·DO 블록이 하나도 남지 않아야 한다(남으면 메모리 엔진이 파싱 실패).
+  const stripped = withoutPgMemUnsupportedRls(schema)
+  assert.doesNotMatch(stripped, /ROW LEVEL SECURITY|CREATE POLICY|DROP POLICY|CREATE OR REPLACE FUNCTION|DO \$\$/)
+  assert.match(stripped, /CREATE TABLE IF NOT EXISTS guest_grants/)
+  assert.match(stripped, /CREATE TABLE IF NOT EXISTS platform_tenants/)
+})
+
+test('postgres guest context sets the four session variables transaction-locally and rejects unsafe input', async () => {
+  const calls = []
+  const client = { query: async (...args) => { calls.push(args) } }
+  await applyPostgresGuestContext(client, { tenantId: 'TENANT-HSB', accountId: 'USR-TENANT-HSB-GUEST01', projectIds: ['PRJ-A', 'PRJ-B', 'PRJ-A', ''] })
+  assert.deepEqual(calls, [[
+    "SELECT set_config('app.role', $1, TRUE), set_config('app.org_id', $2, TRUE), set_config('app.current_account_id', $3, TRUE), set_config('app.guest_project_ids', $4, TRUE)",
+    ['tenant-guest', 'TENANT-HSB', 'USR-TENANT-HSB-GUEST01', 'PRJ-A,PRJ-B'],
+  ]])
+  await assert.rejects(applyPostgresGuestContext(client, { tenantId: '', accountId: 'X', projectIds: [] }), StoreVerificationError)
+  await assert.rejects(applyPostgresGuestContext(client, { tenantId: 'T', accountId: null, projectIds: [] }), StoreVerificationError)
+  // 콤마가 든 id는 app.guest_project_ids 문자열을 조작할 수 있으므로 거절한다.
+  await assert.rejects(applyPostgresGuestContext(client, { tenantId: 'T', accountId: 'U', projectIds: ['PRJ-A,PRJ-B'] }), StoreVerificationError)
+})
+
+test('guestVisibleIds intersects candidates with rows selected under the guest context (pg-mem: existence only)', async () => {
+  const { adapter } = await testAdapter()
+  try {
+    await adapter.commitSnapshot(fixture(), { referenceDate: '2026-08-20', rawDueByEntity: { 'TENANT-HSB:WORK-1': '오늘 18:00' } })
+    const scope = { tenantId: 'TENANT-HSB', accountId: 'USR-TENANT-HSB-GUEST01', projectIds: ['PRJ-A'] }
+    // 워크스페이스 키와 테이블 이름 둘 다 받는다.
+    assert.deepEqual(await adapter.guestVisibleIds({ ...scope, table: 'project-spaces', candidateIds: ['PRJ-A', 'PRJ-NOPE'] }), ['PRJ-A'])
+    assert.deepEqual(await adapter.guestVisibleIds({ ...scope, table: 'project_spaces', candidateIds: ['PRJ-B', 'PRJ-A'] }), ['PRJ-B', 'PRJ-A'])
+    assert.deepEqual(await adapter.guestVisibleIds({ ...scope, table: 'work-items', candidateIds: ['WORK-1', 'WORK-404'] }), ['WORK-1'])
+    assert.deepEqual(await adapter.guestVisibleIds({ ...scope, table: 'company-documents', candidateIds: ['DOC-1'] }), ['DOC-1'])
+    assert.deepEqual(await adapter.guestVisibleIds({ ...scope, table: 'messenger-conversations', candidateIds: ['ROOM-1', 'ROOM-1'] }), ['ROOM-1'])
+    // 다른 테넌트의 행은 org_id 조건에서 걸러진다.
+    assert.deepEqual(await adapter.guestVisibleIds({ ...scope, tenantId: 'TENANT-POHANG', table: 'work_items', candidateIds: ['CAL-1', 'WORK-1'] }), ['WORK-1'])
+    assert.deepEqual(await adapter.guestVisibleIds({ ...scope, table: 'work-items', candidateIds: [] }), [])
+    // 정책이 없는 테이블은 거절한다 — 정책 없는 테이블은 게스트 컨텍스트에서 전량이 보이기 때문이다.
+    await assert.rejects(adapter.guestVisibleIds({ ...scope, table: 'calendar-events', candidateIds: ['CAL-1'] }), StoreVerificationError)
+    await assert.rejects(adapter.guestVisibleIds({ ...scope, table: 'core_accounts', candidateIds: ['USR-HSB-ADMIN'] }), StoreVerificationError)
+    await assert.rejects(adapter.guestVisibleIds({ ...scope, tenantId: '', table: 'work-items', candidateIds: ['WORK-1'] }), StoreVerificationError)
+  } finally {
+    await adapter.close()
+  }
+})
+
+test('json adapter returns guest candidates unchanged (no RLS to intersect with)', async () => {
+  const adapter = new JsonStoreAdapter({ file: null, readOnly: true })
+  assert.deepEqual(await adapter.guestVisibleIds({ table: 'work-items', tenantId: 'T', accountId: 'U', projectIds: ['PRJ-A'], candidateIds: ['W1', 'W2'] }), ['W1', 'W2'])
+  assert.deepEqual(await adapter.guestVisibleIds({ candidateIds: undefined }), [])
+  const snapshot = await adapter.loadSnapshot()
+  assert.deepEqual(snapshot.guestGrants, [])
 })
 
 test('postgres service context is transaction-local and never derived from request input', async () => {

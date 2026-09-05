@@ -29,6 +29,18 @@ function jsonAdapter(options, fallbackReason = null) {
   return new JsonStoreAdapter({ file: options.workspaceStoreFile, readOnly, fallbackReason })
 }
 
+// app.mjs는 `options.storeAdapter.guestVisibleIds(...)`만 믿고 부른다. 두 어댑터 모두 메서드를
+// 갖지만, 테스트 더블이나 외부 주입 어댑터가 빠뜨렸을 때 게스트 GET이 500으로 죽지 않도록
+// 후보 id를 그대로 돌려주는 기본 동작을 붙인다(JSON 모드와 같은 의미).
+function withGuestVisibility(adapter) {
+  if (adapter && typeof adapter.guestVisibleIds !== 'function') {
+    adapter.guestVisibleIds = async ({ candidateIds } = {}) => (
+      Array.isArray(candidateIds) ? candidateIds.filter((id) => typeof id === 'string') : []
+    )
+  }
+  return adapter
+}
+
 export async function createStoreAdapter(options = {}) {
   const env = options.env ?? process.env
   const requestedBackend = String(options.backend ?? env.STORE_BACKEND ?? 'postgres').trim().toLowerCase()
@@ -43,11 +55,11 @@ export async function createStoreAdapter(options = {}) {
       : path.resolve(env.WORKSPACE_STORE_FILE?.trim() || 'server/data/workspace-state.json'),
   }
 
-  if (requestedBackend === 'json') return jsonAdapter(normalizedOptions)
+  if (requestedBackend === 'json') return withGuestVisibility(jsonAdapter(normalizedOptions))
 
   const databaseUrl = options.databaseUrl ?? env.DATABASE_URL?.trim()
   if (!databaseUrl && !options.pool) {
-    return jsonAdapter(normalizedOptions, 'DATABASE_URL이 없어 로컬 JSON 저장소(읽기·쓰기)를 사용합니다.')
+    return withGuestVisibility(jsonAdapter(normalizedOptions, 'DATABASE_URL이 없어 로컬 JSON 저장소(읽기·쓰기)를 사용합니다.'))
   }
 
   const postgres = new PostgresStoreAdapter({
@@ -59,11 +71,11 @@ export async function createStoreAdapter(options = {}) {
   })
   try {
     await postgres.connect()
-    return postgres
+    return withGuestVisibility(postgres)
   } catch (error) {
     try { await postgres.close() } catch { /* original connection failure wins */ }
     if (parseBoolean(options.allowJsonFallback ?? env.STORE_ALLOW_JSON_FALLBACK, true) === false) throw error
-    return jsonAdapter(normalizedOptions, `Postgres 연결 실패로 로컬 JSON 저장소(읽기·쓰기)를 사용합니다: ${error.message}`)
+    return withGuestVisibility(jsonAdapter(normalizedOptions, `Postgres 연결 실패로 로컬 JSON 저장소(읽기·쓰기)를 사용합니다: ${error.message}`))
   }
 }
 
@@ -75,7 +87,7 @@ export async function initializeRuntimeStore(options = {}) {
 }
 
 export { JsonStoreAdapter } from './json-store.mjs'
-export { PostgresStoreAdapter } from './postgres-store.mjs'
+export { applyPostgresGuestContext, PostgresStoreAdapter } from './postgres-store.mjs'
 export { ReadOnlyStoreError, StoreConfigurationError, StoreVerificationError, UnknownWorkspaceKeyError } from './errors.mjs'
-export { WORKSPACE_KEYS, WORKSPACE_TABLES } from './constants.mjs'
+export { GUEST_SCOPE_TABLES, WORKSPACE_KEYS, WORKSPACE_TABLES } from './constants.mjs'
 

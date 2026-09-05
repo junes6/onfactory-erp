@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url'
 
 import pg from 'pg'
 
-import { COMPANY_DOCUMENTS_KEY, emptyWorkspaceStore, WORKSPACE_KEYS } from './constants.mjs'
+import { COMPANY_DOCUMENTS_KEY, emptyWorkspaceStore, GUEST_SCOPE_TABLES, WORKSPACE_KEY_SET, WORKSPACE_KEYS } from './constants.mjs'
+import { StoreVerificationError } from './errors.mjs'
 import { PersistentSessionMap } from './persistent-session-map.mjs'
 import { canonicalIso, prepareTemporalRow } from './temporal-codec.mjs'
 import {
@@ -29,11 +30,17 @@ const clone = (value) => structuredClone(value)
 const json = (value) => JSON.stringify(value ?? {})
 const schemaFile = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../db/postgres-schema.sql')
 
-function withoutPgMemUnsupportedRls(sql) {
+// pg-mem은 RLS DDL·SQL 함수·DO 블록을 파싱하지 못한다. 실 Postgres에는 그대로 적용되고,
+// 테스트용 메모리 엔진에만 이 구간을 걷어낸 스키마를 준다. 테이블·정책 이름을 박아 두면
+// 정책을 추가할 때마다 정규식을 늘려야 하므로 구문 단위로 잡는다(정책 본문에는 ';'가 없다).
+export function withoutPgMemUnsupportedRls(sql) {
   return sql
-    .replace(/ALTER TABLE performance_(?:settings|report_snapshots) (?:ENABLE|FORCE) ROW LEVEL SECURITY;\s*/g, '')
-    .replace(/DROP POLICY IF EXISTS performance_[\w]+ ON performance_(?:settings|report_snapshots);\s*/g, '')
-    .replace(/CREATE POLICY performance_[\s\S]*?WITH CHECK \([^;]+\);\s*/g, '')
+    // 함수·DO 블록을 먼저 지운다 — DO 블록 안에도 CREATE POLICY 문구가 들어 있기 때문이다.
+    .replace(/CREATE OR REPLACE FUNCTION [\s\S]*?\$\$;\s*/g, '')
+    .replace(/DO \$\$[\s\S]*?END \$\$;\s*/g, '')
+    .replace(/ALTER TABLE \w+ (?:ENABLE|FORCE) ROW LEVEL SECURITY;\s*/g, '')
+    .replace(/DROP POLICY IF EXISTS [^;]+;\s*/g, '')
+    .replace(/CREATE POLICY [^;]+;\s*/g, '')
 }
 
 async function applyStoreSchema(pool, sql) {
@@ -54,6 +61,53 @@ export async function applyPostgresServiceContext(client) {
     "SELECT set_config('app.role', $1, TRUE), set_config('app.org_id', $2, TRUE)",
     ['service', '__service__'],
   )
+}
+
+function requireIdentifier(value, label) {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!text) throw new StoreVerificationError(`게스트 컨텍스트에 ${label}가 없습니다.`)
+  return text
+}
+
+// app.guest_project_ids는 콤마로 이어 붙인 한 문자열이라, 콤마가 든 id는 범위를 조작할 수 있다.
+// 그런 id는 우리 규칙('PRJ-…')에 없으므로 조용히 버리지 않고 실패시킨다.
+function normalizeGuestProjectIds(projectIds) {
+  const list = Array.isArray(projectIds) ? projectIds : []
+  const result = []
+  for (const value of list) {
+    if (typeof value !== 'string' || !value.trim()) continue
+    if (value.includes(',')) throw new StoreVerificationError(`프로젝트 id에 콤마를 쓸 수 없습니다: ${value}`)
+    if (!result.includes(value.trim())) result.push(value.trim())
+  }
+  return result
+}
+
+// 게스트 세션 변수. 트랜잭션 로컬(TRUE)이라 COMMIT/ROLLBACK 뒤에는 풀의 다른 요청에 새지 않는다.
+// 이 컨텍스트에는 쓰기 정책이 없으므로 SELECT 전용 트랜잭션 안에서만 부른다.
+export async function applyPostgresGuestContext(client, { tenantId, accountId, projectIds } = {}) {
+  const orgId = requireIdentifier(tenantId, 'tenantId')
+  const currentAccountId = requireIdentifier(accountId, 'accountId')
+  const scopedProjectIds = normalizeGuestProjectIds(projectIds)
+  await client.query(
+    "SELECT set_config('app.role', $1, TRUE), set_config('app.org_id', $2, TRUE), set_config('app.current_account_id', $3, TRUE), set_config('app.guest_project_ids', $4, TRUE)",
+    ['tenant-guest', orgId, currentAccountId, scopedProjectIds.join(',')],
+  )
+}
+
+// 게스트 범위 조회 대상은 워크스페이스 키('project-spaces', 'company-documents')로도, 테이블 이름으로도 받는다.
+// 정책이 없는 테이블은 거절한다 — 정책 없는 테이블에 게스트 컨텍스트로 SELECT하면 전량이 보이기 때문이다.
+function resolveGuestScopeTable(table) {
+  const name = typeof table === 'string' ? table.trim() : ''
+  const sqlTable = (WORKSPACE_KEY_SET.has(name) || name === COMPANY_DOCUMENTS_KEY) ? workspaceTableForKey(name) : name
+  const scope = GUEST_SCOPE_TABLES[sqlTable]
+  if (!scope) throw new StoreVerificationError(`게스트 범위 조회를 지원하지 않는 테이블입니다: ${table}`)
+  return { table: sqlTable, itemType: scope.itemType ?? null }
+}
+
+function chunked(list, size) {
+  const result = []
+  for (let index = 0; index < list.length; index += size) result.push(list.slice(index, index + size))
+  return result
 }
 
 function isoOrNull(value) {
@@ -538,6 +592,53 @@ async function syncAccounts(client, snapshot) {
   }
   const existingResets = await client.query('SELECT id FROM password_reset_requests')
   for (const row of existingResets.rows) if (!resetIds.has(row.id)) await client.query('DELETE FROM password_reset_requests WHERE id = $1', [row.id])
+
+  await syncGuestGrants(client, snapshot)
+}
+
+function guestGrantRows(snapshot) {
+  return (snapshot.guestGrants ?? []).filter((grant) => grant?.id && grant?.tenantId && grant?.accountId)
+}
+
+// 게스트 grant: payload가 진실이고 컬럼은 인덱스·RLS용 사본이다. 단 stripSensitivePayload가
+// /token/에 걸리는 tokenHash·tokenIssuedAt·tokenExpiresAt을 지우므로 셋은 컬럼에만 두고
+// load 때 되돌린다(password_reset_requests와 같은 방식).
+async function syncGuestGrants(client, snapshot) {
+  const grants = guestGrantRows(snapshot)
+  const currentIds = new Set(grants.map((grant) => grant.id))
+  // account_id 부분 유니크 인덱스(살아 있는 grant는 계정당 하나) 때문에, 사라진 grant를 먼저
+  // 정리해야 같은 계정의 새 grant를 넣을 때 충돌하지 않는다.
+  await softDeleteMissing(client, 'guest_grants', currentIds, { idColumn: 'id' })
+  for (const grant of grants) {
+    await ensureTenant(client, snapshot, grant.tenantId)
+    await ensureAccount(client, snapshot, grant.accountId)
+    const projectIds = (Array.isArray(grant.projectIds) ? grant.projectIds : []).filter((id) => typeof id === 'string' && id.trim())
+    await client.query(`
+      INSERT INTO guest_grants (id, tenant_id, account_id, email, status, project_ids, token_hash, token_issued_at, token_expires_at,
+        access_expires_at, invited_by, payload, created_at, updated_at, deleted_at)
+      VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10, $11, $12::jsonb, COALESCE($13::timestamptz, NOW()), NOW(), NULL)
+      ON CONFLICT (id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, account_id = EXCLUDED.account_id, email = EXCLUDED.email,
+        status = EXCLUDED.status, project_ids = EXCLUDED.project_ids, token_hash = EXCLUDED.token_hash,
+        token_issued_at = EXCLUDED.token_issued_at, token_expires_at = EXCLUDED.token_expires_at,
+        access_expires_at = EXCLUDED.access_expires_at, invited_by = EXCLUDED.invited_by, payload = EXCLUDED.payload,
+        updated_at = NOW(), deleted_at = NULL
+    `, [grant.id, grant.tenantId, grant.accountId, grant.email ?? '', String(grant.status ?? 'invited'), projectIds,
+      grant.tokenHash ?? null, isoOrNull(grant.tokenIssuedAt), isoOrNull(grant.tokenExpiresAt), isoOrNull(grant.accessExpiresAt),
+      grant.invitedById ?? null, json(stripSensitivePayload(grant)), isoOrNull(grant.createdAt)])
+  }
+}
+
+async function loadGuestGrants(client, snapshot) {
+  const grants = await client.query(`
+    SELECT payload, token_hash, token_issued_at, token_expires_at
+    FROM guest_grants WHERE deleted_at IS NULL ORDER BY created_at, id
+  `)
+  snapshot.guestGrants = grants.rows.map((row) => ({
+    ...row.payload,
+    tokenHash: row.token_hash ?? null,
+    tokenIssuedAt: row.token_issued_at ? new Date(row.token_issued_at).toISOString() : null,
+    tokenExpiresAt: row.token_expires_at ? new Date(row.token_expires_at).toISOString() : null,
+  }))
 }
 
 async function loadPlatform(client, snapshot) {
@@ -577,6 +678,8 @@ async function loadAccounts(client, snapshot) {
     revokedAt: row.revoked_at ? new Date(row.revoked_at).toISOString() : undefined,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : row.payload?.createdAt,
   }))
+
+  await loadGuestGrants(client, snapshot)
 }
 
 async function loadWorkspace(client, snapshot) {
@@ -734,6 +837,39 @@ export class PostgresStoreAdapter {
 
   async #revokeSession(tokenHash) {
     await this.pool.query('UPDATE auth_sessions SET revoked_at = NOW(), updated_at = NOW() WHERE token_hash = $1', [tokenHash])
+  }
+
+  // 게스트 GET 라우트의 2차 방어. 앱이 메모리 필터로 고른 id(candidateIds)를 게스트 컨텍스트로
+  // 한 번 더 SELECT해 RLS가 허락한 것만 돌려준다 — 앱 필터가 실수해도 DB가 한 번 더 자른다.
+  // 반환은 candidateIds 순서를 유지한 부분집합이다. DB 오류는 그대로 던진다(조용히 전부 보여주지 않는다).
+  async guestVisibleIds({ table, tenantId, accountId, projectIds, candidateIds } = {}) {
+    const target = resolveGuestScopeTable(table)
+    const candidates = [...new Set((Array.isArray(candidateIds) ? candidateIds : []).filter((id) => typeof id === 'string' && id))]
+    if (candidates.length === 0) return []
+    const orgId = requireIdentifier(tenantId, 'tenantId')
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      await applyPostgresGuestContext(client, { tenantId: orgId, accountId, projectIds })
+      const visible = new Set()
+      // pg-mem이 `id = ANY($n::text[])`를 잘못 평가하므로 IN (…) 자리표시자로 쓴다. 실 Postgres에서도 같은 뜻이다.
+      for (const chunk of chunked(candidates, 500)) {
+        const fixed = target.itemType ? [orgId, target.itemType] : [orgId]
+        const placeholders = chunk.map((_, index) => `$${fixed.length + index + 1}`).join(', ')
+        const result = await client.query(
+          `SELECT id FROM ${target.table} WHERE org_id = $1 AND deleted_at IS NULL${target.itemType ? ' AND item_type = $2' : ''} AND id IN (${placeholders})`,
+          [...fixed, ...chunk],
+        )
+        for (const row of result.rows) visible.add(row.id)
+      }
+      await client.query('COMMIT')
+      return candidates.filter((id) => visible.has(id))
+    } catch (error) {
+      try { await client.query('ROLLBACK') } catch { /* retain original failure */ }
+      throw error
+    } finally {
+      client.release()
+    }
   }
 
   async flush() { await this.commitTail }

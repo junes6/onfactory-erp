@@ -91,4 +91,18 @@ export const emptyWorkspaceStore = () => ({
   accountCredentials: {},
   invitedAccounts: [],
   passwordResetRequests: [],
+  // A절: 외부 게스트 권한(grant). 테넌트 키가 아니라 invitedAccounts와 같은 최상위 컬렉션이다 —
+  // 계정은 invitedAccounts(role 'tenant-guest')에, "어느 프로젝트까지"는 여기에 둔다.
+  guestGrants: [],
+})
+
+// 게스트 RLS 정책이 걸린 테이블. PostgresStoreAdapter.guestVisibleIds가 이 밖의 테이블을 거절한다 —
+// 정책 없는 테이블에 게스트 컨텍스트로 SELECT하면 FORCE RLS가 아닌 경우 전량이 보이기 때문이다.
+export const GUEST_SCOPE_TABLES = Object.freeze({
+  project_spaces: Object.freeze({}),
+  project_posts: Object.freeze({}),
+  work_items: Object.freeze({}),
+  messenger_conversations: Object.freeze({}),
+  // items는 여러 종류를 담는 공용 테이블이라 회사 자료만 걸러 본다.
+  items: Object.freeze({ itemType: 'company-document' }),
 })

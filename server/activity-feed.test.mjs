@@ -97,3 +97,13 @@ test('the route serves the feed and enforces the same permission split', async (
     })
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
+
+test('an external guest gets an empty feed, and an unknown role is not treated as an administrator', () => {
+  const guest = { id: 'U-GUEST', role: 'tenant-guest', tenantId: 'T1', guestScope: { projectIds: ['PRJ-A'] } }
+  assert.deepEqual(buildActivityFeed(store, guest, { now: NOW, limit: 40 }), [], '게스트에게 활동 피드는 없다')
+  // 모르는 역할 문자열은 관리자가 아니다 — 예전 !== 'tenant-member' 판정이 열어 두던 구멍.
+  const unknown = { id: 'U-X', role: 'something-new', tenantId: 'T1' }
+  const feed = buildActivityFeed(store, unknown, { now: NOW, limit: 40 })
+  assert.equal(feed.some((row) => row.focusId === 'WK-2'), false)
+  assert.equal(feed.some((row) => ['proposal-created', 'proposal-decided', 'sentinel-warning', 'opportunity-new'].includes(row.kind)), false)
+})

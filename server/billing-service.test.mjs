@@ -279,3 +279,36 @@ test('provider-success ledger failures persist a reconciliation reservation and 
   assert.equal(retry.duplicate, true)
   assert.equal(base.inspect().usageEvents.length, 1)
 })
+
+test('usage events tagged with metadata.actorRole roll up into actorRoles and guests axes without changing duplicate detection', async () => {
+  const { repository, service } = createFixture()
+  await configureTenant(service, 'tenant-a')
+  const guestEvent = {
+    id: 'guest-usage-1', tenantId: 'tenant-a', userId: 'USR-GUEST-1', feature: 'ai-chat', model: 'model-a',
+    inputTokens: 100_000, outputTokens: 0, occurredAt: '2026-08-21T03:00:00.000Z',
+    metadata: { providerResponseModel: 'model-a', actorRole: 'tenant-guest', guestGrantId: 'GST-1' },
+  }
+  await service.recordUsageEvent(systemFor('tenant-a'), guestEvent)
+  await service.recordUsageEvent(systemFor('tenant-a'), {
+    id: 'member-usage-1', tenantId: 'tenant-a', userId: 'user-a', feature: 'ai-chat', model: 'model-a',
+    inputTokens: 200_000, outputTokens: 0, occurredAt: '2026-08-21T04:00:00.000Z', metadata: { actorRole: 'tenant-member' },
+  })
+  await service.recordUsageEvent(systemFor('tenant-a'), {
+    id: 'legacy-usage-1', tenantId: 'tenant-a', userId: 'user-b', feature: 'ai-chat', model: 'model-a',
+    inputTokens: 50_000, outputTokens: 0, occurredAt: '2026-08-21T05:00:00.000Z',
+  })
+  // 같은 id를 다시 넣으면 metadata와 무관하게 중복이다 — usageIdentity는 바뀌지 않았다.
+  const retry = await service.recordUsageEvent(systemFor('tenant-a'), { ...guestEvent, metadata: { actorRole: 'tenant-member' } })
+  assert.equal(retry.duplicate, true)
+  assert.equal(repository.inspect().usageEvents.length, 3)
+
+  const dashboard = await service.getDashboard(platform, { tenantId: 'tenant-a', month: '2026-08' })
+  const roles = Object.fromEntries(dashboard.details.actorRoles.map((row) => [row.key, row]))
+  assert.deepEqual(Object.keys(roles).sort(), ['tenant-guest', 'tenant-member', 'unknown'], '태그 없는 옛 이벤트는 unknown')
+  assert.equal(roles['tenant-guest'].inputTokens, 100_000)
+  assert.equal(roles['tenant-member'].inputTokens, 200_000)
+  assert.equal(roles.unknown.inputTokens, 50_000)
+  assert.deepEqual(dashboard.details.guests.map((row) => row.key), ['USR-GUEST-1'])
+  assert.equal(dashboard.details.guests[0].eventCount, 1)
+  assert.equal(dashboard.details.users.length, 3, '기존 users 축은 그대로')
+})

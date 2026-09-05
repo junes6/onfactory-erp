@@ -983,6 +983,10 @@ export function createBillingService({ repository, clock = () => new Date(), idF
           models: groupRows(events, (event) => event.model),
           features: groupRows(events, (event) => event.feature),
           users: groupRows(events, (event) => event.userId),
+          // 역할별 축. 이벤트 metadata.actorRole 태그로 만들며 스키마 변경이 없다. 태그 없는 옛 이벤트는 'unknown'.
+          actorRoles: groupRows(events, (event) => event.metadata?.actorRole ?? 'unknown'),
+          // 외부 게스트만 따로 — 게스트 사용량은 초대 테넌트 한도에서 소진되므로 누가 얼마나 썼는지 관리자가 알아야 한다.
+          guests: groupRows(events.filter((event) => event.metadata?.actorRole === 'tenant-guest'), (event) => event.userId),
         },
         monthlySnapshots: snapshots.sort((left, right) => right.billingMonth.localeCompare(left.billingMonth)),
       }

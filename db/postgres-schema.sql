@@ -160,6 +160,29 @@ CREATE TABLE IF NOT EXISTS password_reset_requests (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- A절 외부 게스트 초대: 게스트 권한(grant). supabase/migrations/20260906000000_guest_grants.sql과 동일 내용.
+-- payload(JSONB)가 진실, 나머지 컬럼은 인덱스·RLS 판정용 사본. 초대 토큰 해시·발급·만료 시각은
+-- 서버가 payload 저장 시 민감 필드(token*)를 지우므로 컬럼에 따로 둔다.
+CREATE TABLE IF NOT EXISTS guest_grants (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES core_tenants(id),
+  account_id TEXT NOT NULL REFERENCES core_accounts(id),
+  email TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'invited',
+  project_ids TEXT[] NOT NULL DEFAULT '{}',
+  token_hash TEXT,
+  token_issued_at TIMESTAMPTZ,
+  token_expires_at TIMESTAMPTZ,
+  access_expires_at TIMESTAMPTZ,
+  invited_by TEXT,
+  payload JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_guest_grants_tenant ON guest_grants (tenant_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_guest_grants_account ON guest_grants (account_id) WHERE deleted_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS workspace_store_meta (
   tenant_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
   workspace_key TEXT NOT NULL,
@@ -499,6 +522,82 @@ DROP POLICY IF EXISTS performance_reports_tenant_admin ON performance_report_sna
 CREATE POLICY performance_reports_tenant_admin ON performance_report_snapshots
   USING (org_id = current_setting('app.org_id', TRUE) AND current_setting('app.role', TRUE) = 'tenant-admin')
   WITH CHECK (org_id = current_setting('app.org_id', TRUE) AND current_setting('app.role', TRUE) = 'tenant-admin');
+
+-- A절 외부 게스트 초대: 게스트 범위 RLS. supabase/migrations/20260906010000_guest_scope_rls.sql과 동일 내용.
+-- 앱 필터가 실수해도 DB가 한 번 더 자르기 위한 2차 방어. 서버는 평소 app.role='service'로 전량 통과하고,
+-- 게스트 GET 라우트만 트랜잭션 안에서 app.role='tenant-guest' + app.org_id + app.current_account_id +
+-- app.guest_project_ids(콤마 구분)를 세팅해 SELECT한다. 게스트 컨텍스트에는 쓰기 정책이 없다.
+-- 주의: 접속 롤이 rolsuper 또는 rolbypassrls면 FORCE RLS를 포함해 이 정책들이 앱 커넥션에 적용되지 않는다 —
+-- 운영 DATABASE_URL은 NOBYPASSRLS 비특권 롤이어야 하며, run-postgres-e2e의 checkRolePrivileges가 이를 검사한다.
+-- pg-mem은 함수·DO 블록·RLS DDL을 못 읽으므로 postgres-store.mjs가 이 구간을 걷어내고 적용한다.
+CREATE OR REPLACE FUNCTION app_guest_project_ids() RETURNS TEXT[] LANGUAGE sql STABLE AS $$
+  SELECT COALESCE(string_to_array(NULLIF(current_setting('app.guest_project_ids', TRUE), ''), ','), '{}')
+$$;
+
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['project_spaces', 'project_posts', 'work_items', 'messenger_conversations', 'items', 'guest_grants'] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I_service ON %I', t, t);
+    EXECUTE format($p$
+      CREATE POLICY %I_service ON %I
+      USING (current_setting('app.role', TRUE) = 'service')
+      WITH CHECK (current_setting('app.role', TRUE) = 'service')
+    $p$, t, t);
+  END LOOP;
+END $$;
+
+DROP POLICY IF EXISTS project_spaces_guest_read ON project_spaces;
+CREATE POLICY project_spaces_guest_read ON project_spaces FOR SELECT USING (
+  current_setting('app.role', TRUE) = 'tenant-guest'
+  AND org_id = current_setting('app.org_id', TRUE)
+  AND id = ANY (app_guest_project_ids())
+  AND payload->'members' @> jsonb_build_array(jsonb_build_object('id', current_setting('app.current_account_id', TRUE)))
+);
+DROP POLICY IF EXISTS project_posts_guest_read ON project_posts;
+CREATE POLICY project_posts_guest_read ON project_posts FOR SELECT USING (
+  current_setting('app.role', TRUE) = 'tenant-guest'
+  AND org_id = current_setting('app.org_id', TRUE)
+  AND payload->>'projectId' = ANY (app_guest_project_ids())
+);
+DROP POLICY IF EXISTS work_items_guest_read ON work_items;
+CREATE POLICY work_items_guest_read ON work_items FOR SELECT USING (
+  current_setting('app.role', TRUE) = 'tenant-guest'
+  AND org_id = current_setting('app.org_id', TRUE)
+  AND payload->>'projectId' = ANY (app_guest_project_ids())
+  AND payload->>'ownerId' = current_setting('app.current_account_id', TRUE)
+);
+DROP POLICY IF EXISTS messenger_conversations_guest_read ON messenger_conversations;
+CREATE POLICY messenger_conversations_guest_read ON messenger_conversations FOR SELECT USING (
+  current_setting('app.role', TRUE) = 'tenant-guest'
+  AND org_id = current_setting('app.org_id', TRUE)
+  AND payload->'participantIds' ? current_setting('app.current_account_id', TRUE)
+  AND (payload->>'type' = 'direct' OR payload->>'projectId' = ANY (app_guest_project_ids()))
+);
+DROP POLICY IF EXISTS items_guest_read ON items;
+CREATE POLICY items_guest_read ON items FOR SELECT USING (
+  current_setting('app.role', TRUE) = 'tenant-guest'
+  AND org_id = current_setting('app.org_id', TRUE)
+  AND item_type = 'company-document'
+  AND (
+    payload->>'uploadedById' = current_setting('app.current_account_id', TRUE)
+    OR (payload->>'visibility' = 'restricted' AND payload->'allowedUserIds' ? current_setting('app.current_account_id', TRUE))
+  )
+);
+ALTER TABLE core_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE core_accounts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS core_accounts_service ON core_accounts;
+CREATE POLICY core_accounts_service ON core_accounts
+  USING (current_setting('app.role', TRUE) = 'service')
+  WITH CHECK (current_setting('app.role', TRUE) = 'service');
+DROP POLICY IF EXISTS core_accounts_guest_self ON core_accounts;
+CREATE POLICY core_accounts_guest_self ON core_accounts FOR SELECT USING (
+  current_setting('app.role', TRUE) = 'tenant-guest'
+  AND id = current_setting('app.current_account_id', TRUE)
+);
 
 CREATE TABLE IF NOT EXISTS platform_tenants (
   id TEXT PRIMARY KEY,

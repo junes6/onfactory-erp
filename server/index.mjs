@@ -8,6 +8,7 @@ import { createBillingService, createMemoryBillingRepository } from './billing-s
 import { performanceMaintenanceErrors, runPerformanceMonthlyMaintenance } from './performance-maintenance.mjs'
 import { initializeRuntimeStore } from './store/index.mjs'
 import { backupSettings } from './backup-mirror.mjs'
+import { createMailDelivery } from './mail-delivery.mjs'
 
 // .env.local is already covered by the project's *.local gitignore rule.
 config({ path: '.env.local', quiet: true })
@@ -27,12 +28,18 @@ const performanceModel = process.env.CLAUDE_MODEL?.trim() || 'claude-sonnet-5'
 const performanceClient = process.env.ANTHROPIC_API_KEY?.trim()
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY.trim(), maxRetries: 1, timeout: 60_000 })
   : null
+// 메일 어댑터. MAIL_TRANSPORT가 없으면 null이고, 초대·재설정 링크는 화면에서 복사해 전달한다.
+const mailDelivery = createMailDelivery({ env: process.env })
 const app = createApp({
   initialWorkspaceStore: runtimeStore.workspaceStore,
   sessions: runtimeStore.sessions,
   workspaceStoreFile,
   dataDirectory,
   onWorkspaceStoreChange: (workspaceStore) => runtimeStore.adapter.commitSnapshot(workspaceStore),
+  // Postgres 모드에서 게스트 GET을 RLS와 교집합할 어댑터(guestVisibleIds가 있을 때만 쓰인다).
+  storeAdapter: runtimeStore.adapter,
+  guestInviteDelivery: mailDelivery?.sendGuestInvitation ?? null,
+  passwordResetDelivery: mailDelivery?.sendPasswordReset ?? null,
   seedPlatformFixtures: runtimeStore.adapter.kind === 'json' && !runtimeStore.adapter.readOnly,
   seedDemoAccounts: runtimeStore.adapter.kind === 'json',
   skipStartupMigrations: runtimeStore.adapter.kind === 'postgres',

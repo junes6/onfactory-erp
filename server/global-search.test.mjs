@@ -149,3 +149,10 @@ test('SEARCH_KINDS 와 클라이언트 KIND_LABEL 사전의 키가 같다', asyn
   const keys = [...block[1].matchAll(/^\s*([a-zA-Z_]+):\s*'[^']+',?\s*$/gmu)].map((match) => match[1])
   assert.deepEqual(keys.sort(), [...SEARCH_KINDS].sort(), '서버 갈래와 화면 사전의 키가 어긋났다')
 })
+
+test('외부 게스트는 전역 검색으로 아무것도 찾지 못한다 — 사람 검색 한 갈래로도 직원 명단이 열거되기 때문', () => {
+  const GUEST = { id: 'U-GUEST', name: '홍거래', role: 'tenant-guest', tenantId: 'T1', team: '파트너상사', guestScope: { projectIds: ['PRJ-A'] } }
+  assert.deepEqual(search('냉장창고', GUEST), { groups: [], total: 0 })
+  assert.deepEqual(search('박지현', GUEST), { groups: [], total: 0 })
+  assert.equal(typeItems(search('박지현', MEMBER), 'person').length, 1, '직원은 여전히 찾는다')
+})

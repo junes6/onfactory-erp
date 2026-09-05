@@ -393,3 +393,69 @@ test('비활성 처리는 감사 기록에 남는다', async () => {
     assert.match(entry.scope, new RegExp(park.account.name))
   })
 })
+
+// ─────────────────────────── 외부 게스트 ───────────────────────────
+
+/** 게스트 계정·grant를 직접 심은 저장소. 초대 라우트는 guest-access.test가 다룬다. */
+function guestSeededStore() {
+  const guestId = 'USR-TENANT-SUNSEA-GUESTROOM'
+  return {
+    guestId,
+    store: {
+      version: 2,
+      tenants: {
+        'TENANT-SUNSEA': {
+          'project-spaces': { data: [
+            { id: 'PRJ-A', name: '파트너 협업 A', visibility: 'members', status: 'active', ownerId: 'USR-SUNSEA-ADMIN', ownerName: '김서원',
+              members: [{ id: 'USR-SUNSEA-ADMIN', name: '김서원', role: 'owner' }, { id: 'USR-SUNSEA-PARK', name: '박지현', role: 'editor' }, { id: guestId, name: '홍거래', role: 'viewer', kind: 'guest' }], createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' },
+            { id: 'PRJ-C', name: '비공개 C', visibility: 'members', status: 'active', ownerId: 'USR-SUNSEA-ADMIN', ownerName: '김서원',
+              members: [{ id: 'USR-SUNSEA-ADMIN', name: '김서원', role: 'owner' }], createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' },
+          ], updatedAt: '2026-09-01T00:00:00.000Z' },
+        },
+        'TENANT-POHANG': {},
+      },
+      platform: {},
+      accountApprovals: { [guestId]: 'approved' },
+      accountCredentials: {},
+      invitedAccounts: [{ id: guestId, email: 'room.guest@partner.example', name: '홍거래', tenantId: 'TENANT-SUNSEA', tenantName: '햇살바다', team: '파트너상사', jobRole: '외부 게스트', requested: '게스트 초대', role: 'tenant-guest', guestGrantId: 'GST-ROOM' }],
+      passwordResetRequests: [],
+      guestGrants: [{ id: 'GST-ROOM', tenantId: 'TENANT-SUNSEA', accountId: guestId, email: 'room.guest@partner.example', name: '홍거래', orgName: '파트너상사', projectIds: ['PRJ-A'], invitedById: 'USR-SUNSEA-ADMIN', invitedByName: '김서원', status: 'active', tokenHash: null, createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' }],
+    },
+  }
+}
+
+test('게스트는 초대된 프로젝트의 채널(projectId 있는 방)에만 들어갈 수 있다', async () => {
+  const { store, guestId } = guestSeededStore()
+  await withServer(createApp({ apiKey: '', initialWorkspaceStore: store, onWorkspaceStoreChange: () => {} }), async (origin) => {
+    const admin = await signIn(origin, ADMIN)
+    const park = await signIn(origin, PARK)
+    // projectId 없는 일반 그룹방에 게스트 → 400
+    const plain = await fetch(`${origin}/api/messenger/conversations/group`, { method: 'POST', headers: admin.headers, body: JSON.stringify({ name: '내부 회의', participantIds: [park.account.id, guestId] }) })
+    assert.equal(plain.status, 400)
+    assert.equal((await plain.json()).error.code, 'GUEST_OUTSIDE_PROJECT')
+    // 범위 밖 프로젝트(C) 채널에 게스트 → 400 (게스트는 C 멤버도 아니다)
+    const outside = await fetch(`${origin}/api/messenger/conversations/group`, { method: 'POST', headers: admin.headers, body: JSON.stringify({ name: 'C 채널', projectId: 'PRJ-C', participantIds: [guestId] }) })
+    assert.equal(outside.status, 400)
+    // 범위 안 프로젝트(A) 채널 → 201, 방에 projectId가 남는다
+    const channel = await makeRoom(origin, admin.headers, { name: 'A 채널', projectId: 'PRJ-A', participantIds: [park.account.id, guestId] })
+    assert.equal(channel.projectId, 'PRJ-A')
+    assert.ok(channel.participantIds.includes(guestId))
+    // 기존 일반 방에 나중에 게스트를 초대해도 막힌다
+    const room = await makeRoom(origin, admin.headers, { name: '일반방', participantIds: [park.account.id] })
+    const invite = await fetch(`${origin}/api/messenger/conversations/${room.id}/participants`, { method: 'POST', headers: admin.headers, body: JSON.stringify({ participantIds: [guestId] }) })
+    assert.equal(invite.status, 400)
+    assert.equal((await invite.json()).error.code, 'GUEST_OUTSIDE_PROJECT')
+    // A 채널에서는 나중 초대도 된다 — 먼저 내보낸 뒤 다시 부른다
+    const kick = await fetch(`${origin}/api/messenger/conversations/${channel.id}/participants/${guestId}`, { method: 'DELETE', headers: admin.headers })
+    assert.equal(kick.status, 200)
+    const reinvite = await fetch(`${origin}/api/messenger/conversations/${channel.id}/participants`, { method: 'POST', headers: admin.headers, body: JSON.stringify({ participantIds: [guestId] }) })
+    assert.equal(reinvite.status, 200, await reinvite.text())
+    // 프로젝트 채널은 프로젝트 멤버만 초대할 수 있고, 프로젝트에 권한 없는 사람은 만들 수 없다
+    const oh = await signIn(origin, OH)
+    const nonMember = await fetch(`${origin}/api/messenger/conversations/group`, { method: 'POST', headers: admin.headers, body: JSON.stringify({ name: 'A 채널 2', projectId: 'PRJ-A', participantIds: [oh.account.id] }) })
+    assert.equal(nonMember.status, 400)
+    const forbidden = await fetch(`${origin}/api/messenger/conversations/group`, { method: 'POST', headers: oh.headers, body: JSON.stringify({ name: '남의 프로젝트 채널', projectId: 'PRJ-A', participantIds: [] }) })
+    assert.equal(forbidden.status, 403)
+    assert.equal((await forbidden.json()).error.code, 'PROJECT_EDITOR_REQUIRED')
+  })
+})

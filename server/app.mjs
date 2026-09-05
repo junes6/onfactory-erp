@@ -22,6 +22,10 @@ import { registerAttendanceRoutes } from './attendance-routes.mjs'
 import { registerMessengerRoomRoutes } from './messenger-rooms.mjs'
 import { registerOversightRoutes } from './oversight-routes.mjs'
 import { registerGlobalSearchRoute } from './global-search.mjs'
+import {
+  GUEST_ROLE, GUEST_READ_KEYS, createGuestActivityRecorder, createGuestRouteGate, guestScopeOf, guestWorkItemViolation,
+  isGuestWorkItem, registerGuestRoutes, usageMetadataFor,
+} from './guest-access.mjs'
 import { registerAiConversationRoutes, CONVERSATIONS_KEY as AI_CONVERSATIONS_KEY, autoTitle, buildContext, messagesToFold, extractiveSummary, MAX_MESSAGE_LENGTH as AI_MAX_MESSAGE_LENGTH } from './ai-conversations.mjs'
 import {
   advanceRuleDate as advanceSchedule,
@@ -179,7 +183,8 @@ const WORK_ITEM_BASE_FIELDS = [
   'id', 'title', 'description', 'owner', 'requestedBy', 'due', 'priority', 'status', 'category',
 ]
 const WORK_ITEM_ID_FIELDS = ['ownerId', 'requesterId']
-const WORK_ITEM_OPTIONAL_FIELDS = ['attachments', 'completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt', 'origin', 'checklist']
+// projectId: 프로젝트 귀속(선택). 외부 게스트에게 배정하는 업무는 반드시 초대된 프로젝트에 귀속돼야 한다.
+const WORK_ITEM_OPTIONAL_FIELDS = ['attachments', 'completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt', 'origin', 'checklist', 'projectId']
 const WORK_ITEM_FIELDS = [...WORK_ITEM_BASE_FIELDS, ...WORK_ITEM_ID_FIELDS, ...WORK_ITEM_OPTIONAL_FIELDS]
 const WORK_ITEM_STATUSES = new Set(['업무요청', '수행중', '결재대기', '결재완료'])
 const WORK_ITEM_PRIORITIES = new Set(['긴급', '높음', '보통'])
@@ -210,12 +215,15 @@ const DEVELOPER_SUPPORT_CHANNEL = 'developer-support'
 const CONVERSATION_FIELDS = ['id', 'type', 'name', 'subtitle', 'unread', 'lastMessage', 'lastTime', 'messages']
 const MESSAGE_FIELDS = ['id', 'senderId', 'senderName', 'text', 'time']
 // 답장·반응·수정흔적·삭제흔적. 전부 선택 필드라 옛 메시지는 그대로 통과한다.
-const MESSAGE_OPTIONAL_FIELDS = ['readBy', 'createdAt', 'attachments', 'replyTo', 'reactions', 'editedAt', 'deletedAt', 'deletedBy']
+// senderRole: 보낸 사람의 신원 종류(직원/외부 게스트). 없으면 옛 메시지다.
+const MESSAGE_OPTIONAL_FIELDS = ['readBy', 'createdAt', 'attachments', 'replyTo', 'reactions', 'editedAt', 'deletedAt', 'deletedBy', 'senderRole']
 const CONVERSATION_OPTIONAL_FIELDS = [
   'memberId', 'participantIds', 'hiddenFor', 'lineageId', 'generation', 'lifecycle', 'closedAt', 'deletedAt',
   'systemChannel', 'supportRequesterId', 'supportTicketId',
   // 자유 생성 그룹방. kind가 'group'인 방만 이름 변경·초대·방장 위임을 허용한다.
   'kind', 'icon', 'ownerId', 'createdBy', 'createdAt', 'pinnedMessageIds', 'mutedFor',
+  // 프로젝트 채널. 외부 게스트는 projectId가 있는 방에만 참여할 수 있다.
+  'projectId',
 ]
 const CONVERSATION_LIFECYCLES = new Set(['active', 'closed', 'deleted'])
 const PLATFORM_TICKET_PRIORITIES = new Set(['P1', 'P2', 'P3'])
@@ -236,7 +244,10 @@ function hasWorkEvidenceShape(value) {
 
 function hasWorkCompletionShape(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  if (!hasExactFields(value, ['summary', 'evidence', 'submittedAt', 'submittedById', 'submittedByName'])) return false
+  // submittedByRole은 선택 — 옛 완료 기록에는 없고, 새 기록은 보고자의 신원 종류(직원/게스트)를 남긴다.
+  const { submittedByRole, ...required } = value
+  if (submittedByRole !== undefined && (typeof submittedByRole !== 'string' || !submittedByRole)) return false
+  if (!hasExactFields(required, ['summary', 'evidence', 'submittedAt', 'submittedById', 'submittedByName'])) return false
   return typeof value.summary === 'string' && value.summary.trim().length >= 3 && value.summary.length <= 2_000
     && Array.isArray(value.evidence) && value.evidence.length <= 10 && value.evidence.every(hasWorkEvidenceShape)
     && ['submittedAt', 'submittedById', 'submittedByName'].every((key) => typeof value[key] === 'string' && value[key])
@@ -1151,6 +1162,14 @@ function developerSupportLineageId(tenantId, requesterId) {
 
 function isConversationVisibleToMember(conversation, account, accounts) {
   if (conversationLifecycle(conversation) !== 'active') return false
+  // 외부 게스트: 참여자로 명시된 방만. 1:1은 그대로, 그룹·팀 방은 초대된 프로젝트의 채널(projectId)일 때만.
+  // 팀명 매칭·team-ops 전사방 분기에는 절대 들어가지 않는다 — 그 분기는 직원 전제다.
+  if (account?.role === GUEST_ROLE) {
+    if (!Array.isArray(conversation?.participantIds) || !conversation.participantIds.includes(account.id)) return false
+    if (conversation?.hiddenFor?.includes(account.id)) return false
+    if (conversation.type === 'direct') return true
+    return Boolean(conversation.projectId) && (account.guestScope?.projectIds ?? []).includes(conversation.projectId)
+  }
   if (isDeveloperSupportConversation(conversation)) return conversation.supportRequesterId === account?.id
   const identityIds = accountIdentityIds(account, accounts)
   if (conversation?.hiddenFor?.some((id) => identityIds.includes(id))) return false
@@ -1634,7 +1653,8 @@ function appendPlatformAudit(platform, { tenantId, event, scope, actor, result =
 }
 
 function emptyWorkspaceStore() {
-  return { version: 2, tenants: {}, platform: {}, accountApprovals: {}, accountCredentials: {}, invitedAccounts: [], passwordResetRequests: [] }
+  // guestGrants: 외부 게스트 초대 범위. invitedAccounts와 같은 최상위 컬렉션이라 WORKSPACE_STORE_KEYS(tenant 키)에는 넣지 않는다.
+  return { version: 2, tenants: {}, platform: {}, accountApprovals: {}, accountCredentials: {}, invitedAccounts: [], passwordResetRequests: [], guestGrants: [] }
 }
 
 function parseWorkspaceStoreFile(file) {
@@ -1650,6 +1670,7 @@ function parseWorkspaceStoreFile(file) {
   parsed.accountCredentials ??= {}
   parsed.invitedAccounts ??= []
   parsed.passwordResetRequests ??= []
+  parsed.guestGrants ??= []
   return parsed
 }
 
@@ -1752,6 +1773,10 @@ export function createApp(options = {}) {
   const authDisabled = options.authDisabled === true
   const exposePasswordResetTokens = options.exposePasswordResetTokens ?? process.env.NODE_ENV !== 'production'
   const passwordResetDelivery = typeof options.passwordResetDelivery === 'function' ? options.passwordResetDelivery : null
+  // 게스트 초대 메일 훅. 없으면 응답에 링크를 실어 화면에서 복사한다 (server/mail-delivery.mjs 참고).
+  const guestInviteDelivery = typeof options.guestInviteDelivery === 'function' ? options.guestInviteDelivery : null
+  // Postgres 모드에서 게스트 GET 응답을 RLS 결과와 교집합하는 어댑터. 없으면(JSON) 앱 필터 결과를 그대로 쓴다.
+  const storeAdapter = options.storeAdapter && typeof options.storeAdapter === 'object' ? options.storeAdapter : null
   const salesChannelHealthCheck = typeof options.salesChannelHealthCheck === 'function' ? options.salesChannelHealthCheck : null
   const requestedSalesHealthTimeout = Number(options.salesChannelHealthTimeoutMs)
   const salesChannelHealthTimeoutMs = Number.isSafeInteger(requestedSalesHealthTimeout)
@@ -1789,6 +1814,9 @@ export function createApp(options = {}) {
   workspaceStore.accountCredentials ??= {}
   workspaceStore.invitedAccounts ??= []
   workspaceStore.passwordResetRequests ??= []
+  workspaceStore.guestGrants ??= []
+  // 계정 하나에 grant 하나. 해지된 grant도 남겨 두므로(감사 추적) 상태는 호출한 쪽이 본다.
+  const guestGrantOf = (accountId) => workspaceStore.guestGrants.find((grant) => grant?.accountId === accountId) ?? null
   const platformSeedChanged = ensurePlatformStore(workspaceStore, { seedFixtures: options.seedPlatformFixtures !== false })
   if (platformSeedChanged) {
     const startupCommit = commitWorkspaceStore()
@@ -1842,7 +1870,10 @@ export function createApp(options = {}) {
       id: invited.id,
       name: invited.name || '초대 직원',
       email: String(invited.email),
-      role: 'tenant-member',
+      // 초대 행이 게스트(tenant-guest)로 저장돼 있으면 그대로 되살린다. 여기서 'tenant-member'로 고정하면
+      // 재기동 후 게스트가 일반 직원으로 승격되어 회사 데이터가 열린다 (guest-access.test #18).
+      role: invited.role === GUEST_ROLE ? GUEST_ROLE : 'tenant-member',
+      ...(invited.guestGrantId ? { guestGrantId: invited.guestGrantId } : {}),
       tenantId: invited.tenantId,
       tenantName: invited.tenantName,
       team: invited.team || '미지정',
@@ -1892,6 +1923,22 @@ export function createApp(options = {}) {
   // workspace request still needs room for several products in one catalog.
   app.use(express.json({ limit: '4mb' }))
 
+  /**
+   * API 응답은 브라우저가 저장하지 않는다.
+   *
+   * 지금까지 /api 응답에는 ETag만 있고 Cache-Control이 없었다. 같은 브라우저에서
+   * 운영자로 목록을 연 뒤 다른 계정(게스트)으로 로그인하자, 브라우저가 이전 사람의
+   * 업무 목록 응답을 그대로 재사용해 보여 줬다 — 서버는 빈 목록을 보냈는데도.
+   * 한 컴퓨터를 여러 사람이 쓰는 현장에서는 이것이 곧 다른 사람의 데이터 노출이다.
+   * 세션에 따라 달라지는 응답은 어느 것도 저장·재사용되면 안 되므로 전부 no-store로 둔다.
+   */
+  app.use('/api', (_request, response, next) => {
+    response.setHeader('cache-control', 'private, no-store, max-age=0')
+    response.setHeader('pragma', 'no-cache')
+    response.setHeader('vary', 'Cookie')
+    next()
+  })
+
   app.get('/api/health', (_request, response) => {
     response.json({
       claude: Boolean(client),
@@ -1920,6 +1967,9 @@ export function createApp(options = {}) {
   const tenantIndustryType = (tenantId) => workspaceStore.platform.tenants.find((item) => item?.id === tenantId)?.industryType ?? 'food_manufacturing'
   const effectiveAuth = (account, session) => {
     const base = { ...safeAccount(account), industryType: account.tenantId ? tenantIndustryType(account.tenantId) : null }
+    // 외부 게스트: 초대 범위를 auth에 싣는다. 헬퍼(projectRoleOf·isConversationVisibleToMember·canReadDocument)가
+    // auth 하나만 받으므로 시그니처를 바꾸지 않고 범위를 전달하는 유일한 길이다 (safeAccount의 oversight와 같은 성격).
+    if (account.role === GUEST_ROLE) return { ...base, guestScope: guestScopeOf(guestGrantOf(account.id)) }
     const enteredTenantId = session?.enteredTenantId
     if (account.role !== 'platform-operator' || !enteredTenantId) return base
     const tenant = workspaceStore.platform.tenants.find((item) => item?.id === enteredTenantId)
@@ -2054,11 +2104,39 @@ export function createApp(options = {}) {
     next()
   }
 
+  // 외부 게스트 게이트. 게스트 세션이면 allowlist 밖의 /api/* 전부를 403 한 가지 코드로 끊는다.
+  // 기존 네 가드 앞에 "추가"로만 서며, 게스트가 아닌 세션은 그대로 통과한다. /api/health(위)만 게이트 앞에 있다.
+  const recordGuestActivity = createGuestActivityRecorder({
+    platformOf: () => workspaceStore.platform,
+    appendPlatformAudit,
+    scheduleAuditCommit,
+  })
+  app.use('/api', createGuestRouteGate({ authenticatedContext, guestGrantOf, recordGuestActivity }))
+
+  /**
+   * Postgres 모드에서는 앱 필터 결과 id를 RLS(게스트 세션 변수) SELECT와 교집합한다.
+   * 앱 필터가 실수해도 DB가 한 번 더 자른다. JSON 모드(어댑터 없음)는 그대로 반환한다.
+   */
+  const guestVisibleRows = async (auth, table, rows) => {
+    if (auth?.role !== GUEST_ROLE || typeof storeAdapter?.guestVisibleIds !== 'function' || !rows.length) return rows
+    const ids = await storeAdapter.guestVisibleIds({
+      table, tenantId: auth.tenantId, accountId: auth.id,
+      projectIds: auth.guestScope?.projectIds ?? [], candidateIds: rows.map((row) => row?.id),
+    })
+    const allowed = new Set(Array.isArray(ids) ? ids : [])
+    return rows.filter((row) => allowed.has(row?.id))
+  }
+
   const documentRecord = (tenantId) => workspaceStore.tenants[tenantId]?.['company-documents']
   const isDeveloperSupportDocument = (document) => document?.category === '개발운영지원'
     || (Array.isArray(document?.tags) && document.tags.includes(DEVELOPER_SUPPORT_CHANNEL))
   const canReadDocument = (document, account) => {
     if (!document || !account || document.tenantId && document.tenantId !== account.tenantId) return false
+    // 외부 게스트: 본인이 올린 것과, restricted로 본인에게 열린 것만. visibility 'all'·부서 문서는 회사 내부다.
+    if (account.role === GUEST_ROLE) {
+      return document.uploadedById === account.id
+        || (document.visibility === 'restricted' && Array.isArray(document.allowedUserIds) && document.allowedUserIds.includes(account.id))
+    }
     if (isDeveloperSupportDocument(document)) return document.uploadedById === account.id
       || (document.visibility === 'restricted' && Array.isArray(document.allowedUserIds) && document.allowedUserIds.includes(account.id))
     if (account.role === 'tenant-admin' || document.uploadedById === account.id) return true
@@ -2142,8 +2220,11 @@ export function createApp(options = {}) {
         .some((key) => linkedDocumentIds(tenantStore[key]?.data).includes(id))
   }
   const safeDownloadName = (value) => String(value || 'document').replace(/[\r\n"]/g, '_').slice(0, 180)
-  /** 지정 문서들을 userIds가 읽을 수 있도록 allowedUserIds에 추가한다(restricted 문서). 변경이 있으면 true. */
-  const grantDocumentAccess = (tenantId, documentIds, userIds) => {
+  /**
+   * 지정 문서들을 userIds가 읽을 수 있도록 allowedUserIds에 추가한다(restricted 문서). 변경이 있으면 true.
+   * projectId를 주면 문서에 프로젝트 귀속을 스탬프한다 — 게스트 자료 탭이 "어느 프로젝트의 첨부"인지 알 수 있게.
+   */
+  const grantDocumentAccess = (tenantId, documentIds, userIds, { projectId = null } = {}) => {
     const ids = new Set((documentIds ?? []).map(String).filter((id) => id.startsWith('DOC-')))
     const users = [...new Set((userIds ?? []).map(String).filter(Boolean))]
     if (!ids.size || !users.length) return false
@@ -2156,9 +2237,10 @@ export function createApp(options = {}) {
       const allowed = new Set(Array.isArray(document.allowedUserIds) ? document.allowedUserIds : [])
       const before = allowed.size
       for (const user of users) allowed.add(user)
-      if (allowed.size === before && document.visibility === 'restricted') return document
+      const stampProject = projectId && !document.projectId
+      if (allowed.size === before && document.visibility === 'restricted' && !stampProject) return document
       changed = true
-      return { ...document, visibility: 'restricted', allowedUserIds: [...allowed] }
+      return { ...document, visibility: 'restricted', allowedUserIds: [...allowed], ...(stampProject ? { projectId } : {}) }
     })
     if (changed) {
       const tenantStore = workspaceStore.tenants[tenantId] ??= {}
@@ -2168,10 +2250,11 @@ export function createApp(options = {}) {
   }
   const isFactoryDrawingDocument = (document) => document?.category === '공장도면' || document?.tags?.includes('factory-drawing')
 
-  app.get('/api/documents', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+  app.get('/api/documents', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     if (!request.auth.tenantId) { response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } }); return }
     const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : []
-    response.json({ documents: documents.filter((document) => canReadDocument(document, request.auth)).map(({ tenantId: _tenantId, ...document }) => document) })
+    const visible = await guestVisibleRows(request.auth, 'items', documents.filter((document) => canReadDocument(document, request.auth)))
+    response.json({ documents: visible.map(({ tenantId: _tenantId, ...document }) => document) })
   })
 
   app.post('/api/documents', requireAuth, requireMatchingWorkspaceIdentity, express.raw({ type: '*/*', limit: '10mb' }), async (request, response) => {
@@ -2205,6 +2288,17 @@ export function createApp(options = {}) {
       if (visibility === 'department') departments = [request.auth.team]
       if (visibility === 'restricted') allowedUserIds = [request.auth.id]
     }
+    // 외부 게스트의 업로드는 항상 restricted다. 열람자는 본인 ∪ (초대된 프로젝트 멤버 ∩ 요청값)으로 잘라
+    // 회사 전체 공개('all')나 범위 밖 직원 지정이 요청값으로 들어와도 무시된다.
+    if (request.auth.role === GUEST_ROLE) {
+      const scopeIds = new Set(request.auth.guestScope?.projectIds ?? [])
+      const scopeMemberIds = new Set(projectSpacesOf(request.auth.tenantId)
+        .filter((project) => scopeIds.has(project?.id) && (project.members ?? []).some((member) => member?.id === request.auth.id))
+        .flatMap((project) => projectMemberIds(project)))
+      visibility = 'restricted'
+      departments = []
+      allowedUserIds = [...new Set([request.auth.id, ...allowedUserIds.filter((id) => scopeMemberIds.has(id))])]
+    }
     const id = `DOC-${Date.now()}-${randomBytes(4).toString('hex')}`
     let storedFile = null
     const document = {
@@ -2214,7 +2308,7 @@ export function createApp(options = {}) {
       originalName,
       mime: String(request.get('x-file-type') || 'application/octet-stream').slice(0, 120),
       size: request.body.length,
-      category,
+      category: request.auth.role === GUEST_ROLE ? '프로젝트' : category,
       visibility,
       departments,
       allowedUserIds,
@@ -2223,6 +2317,8 @@ export function createApp(options = {}) {
       uploadedAt: new Date().toISOString(),
       uploadedById: request.auth.id,
       uploadedByName: request.auth.name,
+      // 누가 올렸는지의 신원 종류. 화면이 게스트 첨부에 배지를 붙일 근거다.
+      uploadedByRole: request.auth.role,
       storage: documentStorage.backend,
     }
     try {
@@ -2235,6 +2331,9 @@ export function createApp(options = {}) {
       Object.assign(document, storedFile)
       const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? [...documentRecord(request.auth.tenantId).data] : []
       documents.unshift(document)
+      if (request.auth.role === GUEST_ROLE) {
+        appendPlatformAudit(workspaceStore.platform, { tenantId: request.auth.tenantId, event: '게스트 첨부 업로드', scope: `${document.name} · ${displayDocumentSize(document.size)}`, actor: `게스트 ${request.auth.name}`, reference: request.auth.guestScope?.grantId ?? request.auth.id })
+      }
       await persistDocumentList(request.auth.tenantId, documents, request.auth.id)
       try { enqueueProposal(request.auth.tenantId, proposeDocumentClassification(document, { industryType: tenantIndustryType(request.auth.tenantId) })) } catch { /* 제안 실패가 업로드를 막지 않는다 */ }
       const { tenantId: _tenantId, ...safeDocument } = document
@@ -2387,7 +2486,7 @@ export function createApp(options = {}) {
         outputTokens: Number(result.usage?.output_tokens || 0),
         occurredAt: usageStartedAt.toISOString(),
         durationMs: Date.now() - usageStartedAt.getTime(),
-        metadata: { extractionTarget: target, documentId: document.id, sourceMime, providerResponseModel: result.model || model },
+        metadata: { extractionTarget: target, documentId: document.id, sourceMime, providerResponseModel: result.model || model, ...usageMetadataFor(request.auth) },
       }
       try {
         await billingService.recordUsageEvent(usageActor, usageEvent)
@@ -2589,11 +2688,13 @@ export function createApp(options = {}) {
   const publicPlatformTenant = (tenant, pointsByTenant = new Map()) => {
     const { adminAccount: _adminAccount, ...rest } = tenant
     const safeTenant = Object.fromEntries(Object.entries(rest).filter(([key]) => !LEGACY_TENANT_METRIC_FIELDS.includes(key)))
-    const members = accounts.filter((account) => account.tenantId === tenant.id && account.approved && account.role !== 'platform-operator').length
+    // 인원 수는 직원만 센다. 외부 게스트는 좌석이 아니라 별도 축(guestCount)이다.
+    const members = accounts.filter((account) => account.tenantId === tenant.id && account.approved && account.role !== 'platform-operator' && account.role !== GUEST_ROLE).length
+    const guestCount = accounts.filter((account) => account.tenantId === tenant.id && account.approved && account.role === GUEST_ROLE).length
     const openTickets = workspaceStore.platform.supportTickets.filter((ticket) => ticket.tenantId === tenant.id && !['해결', '종료'].includes(ticket.status)).length
     const activity = tenantActivityMetrics(tenant.id)
     const staleDay = activity.lastActivityAt ? Date.now() - Date.parse(activity.lastActivityAt) > 24 * 60 * 60 * 1_000 : false
-    const tenantAccounts = accounts.filter((account) => account.tenantId === tenant.id && account.role !== 'platform-operator')
+    const tenantAccounts = accounts.filter((account) => account.tenantId === tenant.id && account.role !== 'platform-operator' && account.role !== GUEST_ROLE)
     const admins = tenantAccounts.filter((account) => account.role === 'tenant-admin').map((account) => ({ id: account.id, name: account.name, email: account.email, mustChangePassword: Boolean(account.mustChangePassword), temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt ?? null }))
     const pendingAccounts = tenantAccounts.filter((account) => !account.approved && !['rejected', 'inactive'].includes(account.approvalStatus)).length
     const proposals = proposalsOf(tenant.id)
@@ -2609,6 +2710,7 @@ export function createApp(options = {}) {
       admins,
       metrics: {
         members,
+        guestCount,
         pendingAccounts,
         todayActivity: activity.todayActivity,
         openTickets,
@@ -3094,7 +3196,7 @@ export function createApp(options = {}) {
         outputTokens: Number(result.usage?.output_tokens || 0),
         occurredAt: startedAt.toISOString(),
         durationMs: Date.now() - startedAt.getTime(),
-        metadata: { lensId: lens.id, lensName: lens.name, outputFormat: lens.outputFormat, documentId: document.id, sourceMime },
+        metadata: { lensId: lens.id, lensName: lens.name, outputFormat: lens.outputFormat, documentId: document.id, sourceMime, ...usageMetadataFor(request.auth) },
       }
       try { await billingService.recordUsageEvent(usageActor, usageEvent) }
       catch (ledgerError) {
@@ -3294,7 +3396,8 @@ export function createApp(options = {}) {
     request.socket?.setTimeout?.(0)
     request.socket?.setNoDelay?.(true)
     request.socket?.setKeepAlive?.(true)
-    events.connect({ request, response, tenantId: request.auth.tenantId, accountId: request.auth.id })
+    // 게스트 스트림은 제한 모드: 본인 앞으로 온 이벤트가 아니면 종류·번호만 받고 제목 같은 내용은 받지 않는다.
+    events.connect({ request, response, tenantId: request.auth.tenantId, accountId: request.auth.id, restricted: request.auth.role === GUEST_ROLE })
   })
 
   const notificationSettingsRecord = (tenantId) => {
@@ -3416,11 +3519,16 @@ export function createApp(options = {}) {
     const drafts = []
     for (const conversation of Array.isArray(nextData) ? nextData : []) {
       const known = seen.get(conversation?.id) ?? new Set()
+      // 참여자가 명시된 방이면 그 안에서만 찾는다. 예전에는 테넌트 전 직원을 대상으로 해서
+      // 방에 없는 사람도 @이름 한 줄로 불려 나왔다 — 게스트가 보낸 메시지라면 직원 이름 열거 통로가 된다.
+      const targets = Array.isArray(conversation?.participantIds)
+        ? roster.filter((account) => conversation.participantIds.includes(account.id))
+        : roster
       for (const message of conversation?.messages ?? []) {
         if (!message?.id || known.has(message.id)) continue
         const body = String(message.text ?? '')
         if (!body.includes('@')) continue
-        for (const account of roster) {
+        for (const account of targets) {
           if (account.id === auth.id || !body.includes(`@${account.name}`)) continue
           drafts.push({
             type: 'mention', recipientId: account.id, actorId: auth.id,
@@ -4632,6 +4740,7 @@ export function createApp(options = {}) {
         name: account.name,
         team: account.team || '미지정',
         role: account.jobRole || (account.role === 'tenant-admin' ? '운영 관리자' : '일반 사용자'),
+        kind: account.role === GUEST_ROLE ? 'guest' : 'employee',
         status: account.id === request.auth.id ? 'online' : 'offline',
         active: account.approvalStatus !== 'inactive',
       }))
@@ -4925,6 +5034,8 @@ export function createApp(options = {}) {
       id: `m-${Date.now()}-${randomBytes(3).toString('hex')}`,
       senderId: request.auth.id,
       senderName: request.auth.name,
+      // 보낸 사람의 신원 종류. 게스트 말풍선에 배지를 붙일 근거다.
+      senderRole: request.auth.role,
       text,
       time: sentAt,
       createdAt,
@@ -5253,6 +5364,12 @@ export function createApp(options = {}) {
     const account = accounts.find((candidate) => candidate.id === request.params.id && candidate.tenantId === request.auth.tenantId)
     if (!account) {
       response.status(404).json({ error: { code: 'ACCOUNT_NOT_FOUND', message: '대상 계정을 찾을 수 없습니다.' } })
+      return
+    }
+    // 외부 게스트의 활성·비활성은 게스트 관리 라우트가 grant 상태와 함께 바꾼다. 여기서 바꾸면
+    // "게스트 목록은 해지인데 계정은 활성"인 모순이 생기고 초대 수명주기를 우회한다.
+    if (account.role === GUEST_ROLE) {
+      response.status(409).json({ error: { code: 'GUEST_MANAGED_ELSEWHERE', message: '외부 게스트는 게스트 관리에서 처리합니다.' } })
       return
     }
     if (account.id === request.auth.id) {
@@ -5786,20 +5903,35 @@ export function createApp(options = {}) {
   }
   app.patch('/api/me/profile', requireSession, async (request, response) => {
     const account = request.sessionAccount
+    // 외부 게스트의 소속·직책은 초대한 관리자가 정한 값(거래처명 · '외부 게스트')으로 고정한다.
+    // 열어 두면 외부인이 직원 명단(directory)에서 관리자 직책·부서를 그대로 달 수 있다 — 신원 위장 통로.
+    const guestGrant = account.role === GUEST_ROLE ? guestGrantOf(account.id) : null
     const name = String(request.body?.name ?? account.name).trim().slice(0, 40)
-    const team = String(request.body?.team ?? account.team ?? '').trim().slice(0, 40)
-    const jobRole = String(request.body?.jobRole ?? account.jobRole ?? '').trim().slice(0, 40)
+    const team = guestGrant ? String(guestGrant.orgName ?? account.team ?? '').slice(0, 40) : String(request.body?.team ?? account.team ?? '').trim().slice(0, 40)
+    const jobRole = guestGrant ? '외부 게스트' : String(request.body?.jobRole ?? account.jobRole ?? '').trim().slice(0, 40)
     const phone = String(request.body?.phone ?? account.phone ?? '').trim().slice(0, 30)
     const bio = String(request.body?.bio ?? account.bio ?? '').trim().slice(0, 200)
     if (name.length < 2) { response.status(400).json({ error: { code: 'INVALID_PROFILE', message: '이름은 2자 이상 입력해 주세요.' } }); return }
     if (phone && !/^[0-9+\-\s()]{7,30}$/.test(phone)) { response.status(400).json({ error: { code: 'INVALID_PROFILE', message: '연락처 형식을 확인해 주세요.' } }); return }
     const previous = { name: account.name, team: account.team, jobRole: account.jobRole, phone: account.phone, bio: account.bio }
     const previousAccounts = Array.isArray(workspaceStore.accounts) ? [...workspaceStore.accounts] : undefined
+    // 게스트 이름은 grant·invitedAccounts에도 사본이 있다. 함께 바꾸지 않으면 재기동 때 옛 이름으로 되돌아간다.
+    const previousGuestNames = guestGrant ? { grant: guestGrant.name, invited: workspaceStore.invitedAccounts.find((item) => item?.id === account.id)?.name } : null
     Object.assign(account, { name, team: team || '미지정', jobRole: jobRole || '일반 사용자', phone, bio })
+    if (guestGrant) {
+      guestGrant.name = name
+      const invited = workspaceStore.invitedAccounts.find((item) => item?.id === account.id)
+      if (invited) invited.name = name
+    }
     persistAccountProfile(account)
     try { await commitWorkspaceStore() } catch {
       Object.assign(account, previous)
       if (previousAccounts) workspaceStore.accounts = previousAccounts
+      if (guestGrant && previousGuestNames) {
+        guestGrant.name = previousGuestNames.grant
+        const invited = workspaceStore.invitedAccounts.find((item) => item?.id === account.id)
+        if (invited && previousGuestNames.invited !== undefined) invited.name = previousGuestNames.invited
+      }
       response.status(500).json({ error: { code: 'PROFILE_WRITE_FAILED', message: '프로필을 저장하지 못했습니다.' } })
       return
     }
@@ -5844,22 +5976,39 @@ export function createApp(options = {}) {
   const projectRoleOf = (project, auth) => {
     if (!project) return null
     if (auth.role === 'tenant-admin') return 'owner'
+    // 외부 게스트: 초대 범위(guestScope) 안이고 members에 실제로 들어 있는 프로젝트만 viewer.
+    // visibility 'company' 분기에는 도달하지 않는다 — 회사 전체 공개는 외부인에게 공개가 아니다.
+    if (auth.role === GUEST_ROLE) {
+      const inScope = (auth.guestScope?.projectIds ?? []).includes(project.id)
+      const member = (project.members ?? []).some((item) => item?.id === auth.id)
+      return inScope && member ? 'viewer' : null
+    }
     const member = (project.members ?? []).find((item) => item?.id === auth.id)
     if (member) return PROJECT_ROLES.has(member.role) ? member.role : 'viewer'
     return project.visibility === 'company' ? 'viewer' : null
   }
   const projectMemberIds = (project) => [...new Set([project.ownerId, ...(project.members ?? []).map((item) => item?.id)].filter(Boolean))]
   const tenantAccountRef = (tenantId, id) => {
-    const account = accounts.find((item) => item.id === id && item.tenantId === tenantId && item.approved && item.role !== 'platform-operator')
-    return account ? { id: account.id, name: account.name, team: account.team ?? '' } : null
+    // 게스트는 초대 대기(approved:false) 중에도 멤버로 들어간다 — 수락 순간 바로 보이게 하기 위해서다.
+    const account = accounts.find((item) => item.id === id && item.tenantId === tenantId && item.role !== 'platform-operator'
+      && (item.approved || (item.role === GUEST_ROLE && item.approvalStatus === 'pending')))
+    if (!account) return null
+    return { id: account.id, name: account.name, team: account.team ?? '', kind: account.role === GUEST_ROLE ? 'guest' : 'employee' }
   }
-  const normalizeProjectMembers = (tenantId, ownerId, ownerName, raw) => {
+  const normalizeProjectMembers = (tenantId, ownerId, ownerName, raw, projectId = null) => {
     const members = [{ id: ownerId, name: ownerName, role: 'owner' }]
     for (const item of Array.isArray(raw) ? raw.slice(0, 100) : []) {
       const id = String(item?.id ?? '').trim()
       if (!id || id === ownerId || members.some((member) => member.id === id)) continue
       const ref = tenantAccountRef(tenantId, id)
       if (!ref) continue
+      if (ref.kind === 'guest') {
+        // 게스트는 grant 범위에 있는 프로젝트에만, 역할은 viewer 고정. 편집 권한을 주는 요청은 조용히 viewer로 내린다.
+        const grant = guestGrantOf(id)
+        if (!projectId || !grant || ['revoked', 'expired'].includes(grant.status) || !(grant.projectIds ?? []).includes(projectId)) continue
+        members.push({ id: ref.id, name: ref.name, team: ref.team, role: 'viewer', kind: 'guest' })
+        continue
+      }
       members.push({ id: ref.id, name: ref.name, team: ref.team, role: PROJECT_ROLES.has(item?.role) && item.role !== 'owner' ? item.role : 'viewer' })
     }
     return members
@@ -5918,18 +6067,30 @@ export function createApp(options = {}) {
   const publicProject = (project, posts, auth) => {
     const projectPosts = posts.filter((post) => post.projectId === project.id)
     const lastPost = projectPosts.reduce((latest, post) => !latest || String(post.updatedAt ?? post.createdAt).localeCompare(String(latest.updatedAt ?? latest.createdAt)) > 0 ? post : latest, null)
-    return { ...project, role: projectRoleOf(project, auth), postCount: projectPosts.length, fileCount: projectPosts.reduce((sum, post) => sum + (post.attachments?.length ?? 0), 0), lastActivityAt: lastPost ? (lastPost.updatedAt ?? lastPost.createdAt) : project.updatedAt }
+    const view = { ...project, role: projectRoleOf(project, auth), postCount: projectPosts.length, fileCount: projectPosts.reduce((sum, post) => sum + (post.attachments?.length ?? 0), 0), lastActivityAt: lastPost ? (lastPost.updatedAt ?? lastPost.createdAt) : project.updatedAt }
+    // 외부인에게 계약 금액·거래처명은 보이지 않는다. 게스트 자신이 그 거래처일 수 있어도 금액은 회사 내부 정보다.
+    if (auth.role === GUEST_ROLE) { delete view.amount; delete view.client }
+    return view
   }
   const projectGuards = [requireAuth, requireMatchingWorkspaceIdentity]
   const requireTenant = (request, response) => { if (!request.auth.tenantId) { response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } }); return false } return true }
 
-  app.get('/api/projects', ...projectGuards, (request, response) => {
+  app.get('/api/projects', ...projectGuards, async (request, response) => {
     if (!requireTenant(request, response)) return
     importLegacyItProjects(request.auth.tenantId)
     const posts = projectPostsOf(request.auth.tenantId)
-    const projects = projectSpacesOf(request.auth.tenantId).filter((project) => projectRoleOf(project, request.auth)).map((project) => publicProject(project, posts, request.auth))
+    const visibleSpaces = await guestVisibleRows(request.auth, 'project_spaces', projectSpacesOf(request.auth.tenantId).filter((project) => projectRoleOf(project, request.auth)))
+    const projects = visibleSpaces.map((project) => publicProject(project, posts, request.auth))
     projects.sort((left, right) => Number(right.status !== 'archived') - Number(left.status !== 'archived') || String(right.lastActivityAt).localeCompare(String(left.lastActivityAt)))
-    const directory = accounts.filter((account) => account.tenantId === request.auth.tenantId && account.approved && account.role !== 'platform-operator').map((account) => ({ id: account.id, name: account.name, team: account.team ?? '', jobRole: account.jobRole ?? '' }))
+    // 게스트에게 내려가는 directory는 "보이는 프로젝트의 멤버"뿐이다. 회사 전 직원 명단은 외부인에게 존재조차 알리지 않는다.
+    const guestMemberIds = request.auth.role === GUEST_ROLE ? new Set(visibleSpaces.flatMap((project) => projectMemberIds(project))) : null
+    const directory = accounts
+      .filter((account) => account.tenantId === request.auth.tenantId && account.approved && account.role !== 'platform-operator' && (!guestMemberIds || guestMemberIds.has(account.id)))
+      .map((account) => ({
+        id: account.id, name: account.name, team: account.team ?? '', jobRole: account.jobRole ?? '', kind: account.role === GUEST_ROLE ? 'guest' : 'employee',
+        // 게스트 항목에는 초대 범위를 실어 준다. 프로젝트 설정 화면이 범위 밖 프로젝트의 멤버 후보에서 게스트를 미리 빼기 위해서다(서버 400에만 맡기지 않는다).
+        ...(account.role === GUEST_ROLE ? { projectIds: [...(guestGrantOf(account.id)?.projectIds ?? [])] } : {}),
+      }))
     response.json({ projects, directory })
   })
   app.post('/api/projects', ...projectGuards, async (request, response) => {
@@ -5937,15 +6098,16 @@ export function createApp(options = {}) {
     const name = String(request.body?.name ?? '').trim().slice(0, 80)
     if (name.length < 2) { response.status(400).json({ error: { code: 'INVALID_PROJECT', message: '프로젝트 이름은 2자 이상 입력해 주세요.' } }); return }
     const now = new Date().toISOString()
+    const projectId = `PRJ-${Date.now().toString(36).toUpperCase()}-${randomBytes(2).toString('hex').toUpperCase()}`
     const project = {
-      id: `PRJ-${Date.now().toString(36).toUpperCase()}-${randomBytes(2).toString('hex').toUpperCase()}`,
+      id: projectId,
       name,
       description: String(request.body?.description ?? '').trim().slice(0, 500),
       visibility: request.body?.visibility === 'company' ? 'company' : 'members',
       status: 'active',
       ownerId: request.auth.id,
       ownerName: request.auth.name,
-      members: normalizeProjectMembers(request.auth.tenantId, request.auth.id, request.auth.name, request.body?.members),
+      members: normalizeProjectMembers(request.auth.tenantId, request.auth.id, request.auth.name, request.body?.members, projectId),
       stage: '', client: '', startDate: '', endDate: '', amount: 0, link: '', category: '',
       createdAt: now,
       updatedAt: now,
@@ -5971,14 +6133,14 @@ export function createApp(options = {}) {
     if (request.body?.description !== undefined) next.description = String(request.body.description).trim().slice(0, 500)
     if (request.body?.visibility !== undefined) next.visibility = request.body.visibility === 'company' ? 'company' : 'members'
     if (request.body?.status !== undefined) next.status = request.body.status === 'archived' ? 'archived' : 'active'
-    if (request.body?.members !== undefined) next.members = normalizeProjectMembers(request.auth.tenantId, project.ownerId, project.ownerName, request.body.members)
+    if (request.body?.members !== undefined) next.members = normalizeProjectMembers(request.auth.tenantId, project.ownerId, project.ownerName, request.body.members, project.id)
     applyProjectInfo(next, request.body)
     const tenantStore = workspaceStore.tenants[request.auth.tenantId]
     const previousSpaces = tenantStore['project-spaces']; const previousDocuments = tenantStore['company-documents']
     writeProjectData(request.auth.tenantId, 'project-spaces', projects.map((item, itemIndex) => itemIndex === index ? next : item), request.auth.id)
     // 멤버가 바뀌면 게시글·댓글 첨부 접근도 다시 부여
     const posts = projectPostsOf(request.auth.tenantId).filter((post) => post.projectId === project.id)
-    grantDocumentAccess(request.auth.tenantId, linkedDocumentIds(posts), projectMemberIds(next))
+    grantDocumentAccess(request.auth.tenantId, linkedDocumentIds(posts), projectMemberIds(next), { projectId: project.id })
     try { await commitWorkspaceStore() } catch {
       if (previousSpaces) tenantStore['project-spaces'] = previousSpaces; if (previousDocuments) tenantStore['company-documents'] = previousDocuments
       response.status(500).json({ error: { code: 'PROJECT_WRITE_FAILED', message: '프로젝트를 저장하지 못했습니다.' } }); return
@@ -6001,11 +6163,13 @@ export function createApp(options = {}) {
     }
     response.json({ ok: true })
   })
-  app.get('/api/projects/:id', ...projectGuards, (request, response) => {
+  app.get('/api/projects/:id', ...projectGuards, async (request, response) => {
     if (!requireTenant(request, response)) return
     const project = projectSpacesOf(request.auth.tenantId).find((item) => item?.id === request.params.id)
     const role = projectRoleOf(project, request.auth)
-    if (!project || !role) { response.status(404).json({ error: { code: 'PROJECT_NOT_FOUND', message: '프로젝트를 찾을 수 없거나 참여 권한이 없습니다.' } }); return }
+    // 게스트는 RLS 교집합까지 통과해야 한다. 못 보는 프로젝트는 "없는 프로젝트"와 같은 404다.
+    const visible = project && role ? (await guestVisibleRows(request.auth, 'project_spaces', [project])).length > 0 : false
+    if (!project || !role || !visible) { response.status(404).json({ error: { code: 'PROJECT_NOT_FOUND', message: '프로젝트를 찾을 수 없거나 참여 권한이 없습니다.' } }); return }
     const posts = projectPostsOf(request.auth.tenantId).filter((post) => post.projectId === project.id).sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || String(right.createdAt).localeCompare(String(left.createdAt)))
     response.json({ project: publicProject(project, posts, request.auth), posts })
   })
@@ -6022,11 +6186,11 @@ export function createApp(options = {}) {
     if (attachments === null) { response.status(400).json({ error: { code: 'INVALID_POST_ATTACHMENTS', message: '첨부파일을 찾을 수 없거나 열람 권한이 없습니다.' } }); return }
     if (!title && !body && attachments.length === 0) { response.status(400).json({ error: { code: 'POST_EMPTY', message: '제목, 내용 또는 파일 중 하나는 필요합니다.' } }); return }
     const now = new Date().toISOString()
-    const post = { id: `PP-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`, projectId: project.id, title: title || (body.split('\n')[0] || '파일 공유').slice(0, 80), body, attachments, authorId: request.auth.id, author: request.auth.name, pinned: false, comments: [], createdAt: now, updatedAt: now }
+    const post = { id: `PP-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`, projectId: project.id, title: title || (body.split('\n')[0] || '파일 공유').slice(0, 80), body, attachments, authorId: request.auth.id, author: request.auth.name, authorRole: request.auth.role, pinned: false, comments: [], createdAt: now, updatedAt: now }
     const tenantStore = workspaceStore.tenants[request.auth.tenantId]
     const previousPosts = tenantStore['project-posts']; const previousDocuments = tenantStore['company-documents']
     writeProjectData(request.auth.tenantId, 'project-posts', [post, ...projectPostsOf(request.auth.tenantId)].slice(0, 5_000), request.auth.id)
-    grantDocumentAccess(request.auth.tenantId, attachments.map((item) => item.id), projectMemberIds(project))
+    grantDocumentAccess(request.auth.tenantId, attachments.map((item) => item.id), projectMemberIds(project), { projectId: project.id })
     try { await commitWorkspaceStore() } catch {
       if (previousPosts) tenantStore['project-posts'] = previousPosts; else delete tenantStore['project-posts']; if (previousDocuments) tenantStore['company-documents'] = previousDocuments
       response.status(500).json({ error: { code: 'POST_WRITE_FAILED', message: '게시글을 저장하지 못했습니다.' } }); return
@@ -6052,7 +6216,7 @@ export function createApp(options = {}) {
       const attachments = await resolveMessengerAttachments(request.body.attachments, request.auth)
       if (attachments === null) { response.status(400).json({ error: { code: 'INVALID_POST_ATTACHMENTS', message: '첨부파일을 찾을 수 없거나 열람 권한이 없습니다.' } }); return }
       next.attachments = attachments
-      grantDocumentAccess(request.auth.tenantId, attachments.map((item) => item.id), projectMemberIds(project))
+      grantDocumentAccess(request.auth.tenantId, attachments.map((item) => item.id), projectMemberIds(project), { projectId: project.id })
     }
     const tenantStore = workspaceStore.tenants[request.auth.tenantId]
     const previousPosts = tenantStore['project-posts']
@@ -6087,13 +6251,18 @@ export function createApp(options = {}) {
     const attachments = await resolveMessengerAttachments(request.body?.attachments, request.auth)
     if (attachments === null) { response.status(400).json({ error: { code: 'INVALID_COMMENT_ATTACHMENTS', message: '첨부파일을 찾을 수 없거나 열람 권한이 없습니다.' } }); return }
     if (!text && attachments.length === 0) { response.status(400).json({ error: { code: 'COMMENT_EMPTY', message: '댓글 내용이나 파일을 추가해 주세요.' } }); return }
-    const comment = { id: `PC-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`, authorId: request.auth.id, author: request.auth.name, text, attachments, createdAt: new Date().toISOString() }
+    // authorRole: 화면이 게스트 댓글에 배지를 붙일 근거. 이름만으로는 직원과 외부인이 구분되지 않는다.
+    const comment = { id: `PC-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`, authorId: request.auth.id, author: request.auth.name, authorRole: request.auth.role, text, attachments, createdAt: new Date().toISOString() }
     const next = { ...posts[index], comments: [...(posts[index].comments ?? []), comment].slice(-300), updatedAt: comment.createdAt }
     const tenantStore = workspaceStore.tenants[request.auth.tenantId]
     const previousPosts = tenantStore['project-posts']; const previousDocuments = tenantStore['company-documents']
+    const previousAudits = workspaceStore.platform.auditEvents
     writeProjectData(request.auth.tenantId, 'project-posts', posts.map((item, itemIndex) => itemIndex === index ? next : item), request.auth.id)
-    grantDocumentAccess(request.auth.tenantId, attachments.map((item) => item.id), projectMemberIds(project))
-    try { await commitWorkspaceStore() } catch { if (previousPosts) tenantStore['project-posts'] = previousPosts; if (previousDocuments) tenantStore['company-documents'] = previousDocuments; response.status(500).json({ error: { code: 'COMMENT_WRITE_FAILED', message: '댓글을 저장하지 못했습니다.' } }); return }
+    grantDocumentAccess(request.auth.tenantId, attachments.map((item) => item.id), projectMemberIds(project), { projectId: project.id })
+    if (request.auth.role === GUEST_ROLE) {
+      appendPlatformAudit(workspaceStore.platform, { tenantId: request.auth.tenantId, event: '게스트 댓글', scope: `${project.name} · ${posts[index].title ?? '게시글'}${attachments.length ? ` · 첨부 ${attachments.length}건` : ''}`, actor: `게스트 ${request.auth.name}`, reference: request.auth.guestScope?.grantId ?? request.auth.id })
+    }
+    try { await commitWorkspaceStore() } catch { if (previousPosts) tenantStore['project-posts'] = previousPosts; if (previousDocuments) tenantStore['company-documents'] = previousDocuments; workspaceStore.platform.auditEvents = previousAudits; response.status(500).json({ error: { code: 'COMMENT_WRITE_FAILED', message: '댓글을 저장하지 못했습니다.' } }); return }
     response.status(201).json({ comment, post: next })
   })
   app.delete('/api/projects/:id/posts/:postId/comments/:commentId', ...projectGuards, async (request, response) => {
@@ -6317,7 +6486,7 @@ export function createApp(options = {}) {
         outputTokens: Number(result.usage?.output_tokens || 0),
         occurredAt: startedAt.toISOString(),
         durationMs: Date.now() - startedAt.getTime(),
-        metadata: { providerResponseModel: result.model || model, sourceCount: sources.length },
+        metadata: { providerResponseModel: result.model || model, sourceCount: sources.length, ...usageMetadataFor(request.auth) },
       }
       try {
         await billingService.recordUsageEvent(usageActor, usageEvent)
@@ -6448,6 +6617,19 @@ export function createApp(options = {}) {
     const isOwner = previous.ownerId === request.auth.id
     const isRequester = previous.requesterId === request.auth.id
 
+    if (request.auth.role === GUEST_ROLE) {
+      // 범위 밖 업무는 게스트에게 존재하지 않는다 — 목록에서 안 보이는 것과 같은 404.
+      if (!isGuestWorkItem(previous, request.auth)) {
+        response.status(404).json({ error: { code: 'WORK_ITEM_NOT_FOUND', message: '업무를 찾을 수 없습니다.' } })
+        return
+      }
+      // 게스트는 결재하지 않는다. 상태머신은 그대로이고, 승인·보완요청 행동만 명시적으로 닫는다.
+      if (!['accept', 'submit'].includes(action)) {
+        response.status(403).json({ error: { code: 'GUEST_REVIEW_FORBIDDEN', message: '외부 게스트는 업무를 시작하고 완료 보고만 할 수 있습니다. 결재는 회사 구성원이 합니다.' } })
+        return
+      }
+    }
+
     if (action === 'accept' && isOwner && previous.status === '업무요청') {
       next = { ...previous, status: '수행중' }
     } else if (action === 'submit' && isOwner && previous.status === '수행중') {
@@ -6468,7 +6650,8 @@ export function createApp(options = {}) {
         response.status(400).json({ error: { code: 'INVALID_DOCUMENT_REFERENCE', message: '증빙파일을 찾을 수 없거나 현재 계정에 열람 권한이 없습니다. 파일을 다시 첨부해 주세요.' } })
         return
       }
-      const completion = { summary, evidence, submittedAt: now, submittedById: request.auth.id, submittedByName: request.auth.name }
+      // submittedByRole: 진행 이력에서 "게스트가 보고했다"를 이름 없이도 알 수 있게 한다.
+      const completion = { summary, evidence, submittedAt: now, submittedById: request.auth.id, submittedByName: request.auth.name, submittedByRole: request.auth.role }
       next = {
         ...previous,
         status: '결재대기',
@@ -6516,10 +6699,15 @@ export function createApp(options = {}) {
     const record = { data: nextData, updatedAt: now, updatedBy: request.auth.id }
     tenantStore['work-items'] = record
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
+    const previousAudits = workspaceStore.platform.auditEvents
+    if (request.auth.role === GUEST_ROLE && action === 'submit') {
+      appendPlatformAudit(workspaceStore.platform, { tenantId: request.auth.tenantId, event: '게스트 완료 보고', scope: `${next.title} (${next.id})`, actor: `게스트 ${request.auth.name}`, reference: request.auth.guestScope?.grantId ?? request.auth.id })
+    }
     try {
       await commitWorkspaceStore()
     } catch (error) {
       tenantStore['work-items'] = previousRecord
+      workspaceStore.platform.auditEvents = previousAudits
       console.error('[work-transition] Failed to persist transition', { message: error?.message })
       response.status(500).json({ error: { code: 'WORK_TRANSITION_WRITE_FAILED', message: '업무 상태를 저장하지 못했습니다.' } })
       return
@@ -6555,7 +6743,8 @@ export function createApp(options = {}) {
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const tasks = Array.isArray(tenantStore['work-items']?.data) ? tenantStore['work-items'].data : []
     const previous = tasks.find((task) => task?.id === request.params.id)
-    if (!previous || !Array.isArray(previous.checklist)) {
+    // 게스트에게 범위 밖 업무는 존재하지 않는 업무다.
+    if (!previous || !Array.isArray(previous.checklist) || (request.auth.role === GUEST_ROLE && !isGuestWorkItem(previous, request.auth))) {
       response.status(404).json({ error: { code: 'CHECKLIST_NOT_FOUND', message: '점검 항목이 있는 업무를 찾을 수 없습니다.' } })
       return
     }
@@ -6797,7 +6986,14 @@ export function createApp(options = {}) {
       response.status(403).json({ error: { code: 'STORE_READ_FORBIDDEN', message: '현재 직무 권한으로 이 데이터를 볼 수 없습니다.' } })
       return
     }
-    if (key === 'work-items' || key === 'work-rules') {
+    // 외부 게스트: 게이트가 먼저 막지만, 이 라우트 혼자서도 같은 결론을 내야 한다(이중 방어).
+    if (request.auth.role === GUEST_ROLE && !GUEST_READ_KEYS.has(key)) {
+      response.status(403).json({ error: { code: 'STORE_READ_FORBIDDEN', message: '현재 직무 권한으로 이 데이터를 볼 수 없습니다.' } })
+      return
+    }
+    // 외부 게스트의 조회는 회사 업무를 만들어 내지 않는다. 도래한 반복 업무는 직원이
+    // 목록을 열 때나 스케줄러가 만들며, 게스트 id가 생성 주체로 남는 일도 없어야 한다.
+    if ((key === 'work-items' || key === 'work-rules') && request.auth.role !== GUEST_ROLE) {
       try {
         await materializeDueWorkRules(request.auth.tenantId, request.auth.id)
       } catch (error) {
@@ -6824,6 +7020,11 @@ export function createApp(options = {}) {
       if (key === 'calendar-events') data = record.data.filter((event) => isCalendarEventVisibleToMember(event, request.auth, accounts))
       if (key === 'messenger-conversations') data = record.data.filter((conversation) => isConversationVisibleToMember(conversation, request.auth, accounts))
     }
+    // 외부 게스트 행 필터: 업무는 범위 프로젝트 + 본인 담당, 대화는 참여 중인 프로젝트 채널·1:1만. PG 모드면 RLS와 교집합.
+    if (request.auth.role === GUEST_ROLE && Array.isArray(record?.data)) {
+      if (key === 'work-items') data = await guestVisibleRows(request.auth, 'work_items', record.data.filter((item) => isGuestWorkItem(item, request.auth)))
+      if (key === 'messenger-conversations') data = await guestVisibleRows(request.auth, 'messenger_conversations', record.data.filter((conversation) => isConversationVisibleToMember(conversation, request.auth, accounts)))
+    }
     if (request.auth.role === 'tenant-member' && key === 'leave-management') {
       const management = normalizeLeaveManagement(record?.data)
       data = management ? {
@@ -6848,6 +7049,11 @@ export function createApp(options = {}) {
       return
     }
     if (request.auth.role === 'tenant-member' && !TENANT_MEMBER_WRITE_KEYS.has(key)) {
+      response.status(403).json({ error: { code: 'STORE_WRITE_FORBIDDEN', message: '현재 직무 권한으로 이 데이터를 변경할 수 없습니다.' } })
+      return
+    }
+    // 외부 게스트는 generic 쓰기가 전혀 없다. 업무 전이·댓글·첨부는 전용 라우트로만 한다.
+    if (request.auth.role === GUEST_ROLE) {
       response.status(403).json({ error: { code: 'STORE_WRITE_FORBIDDEN', message: '현재 직무 권한으로 이 데이터를 변경할 수 없습니다.' } })
       return
     }
@@ -6911,6 +7117,9 @@ export function createApp(options = {}) {
         response.status(400).json({ error: { code: 'INVALID_WORK_ITEMS', message: '업무 데이터 또는 담당 계정 정보를 확인해 주세요.' } })
         return
       }
+      // 게스트 제약: 게스트는 결재자(요청자)가 될 수 없고, 담당자면 초대된 프로젝트에 귀속돼야 한다.
+      const violation = guestWorkItemViolation(nextData, accounts, guestGrantOf)
+      if (violation) { response.status(400).json({ error: violation }); return }
     }
     if (request.auth.role === 'tenant-admin' && key === 'work-rules') {
       nextData = normalizeAdminWorkRules(nextData, request.auth.tenantId, operatorAwareAccounts(request.auth))
@@ -7076,6 +7285,39 @@ export function createApp(options = {}) {
     commitWorkspaceStore,
     appendPlatformAudit,
     persistAccountProfile,
+  })
+
+  // 외부 게스트 초대 수명주기. 게이트·행 필터는 위에 이미 있고, 여기는 초대·수락·범위·해지·만료 라우트다.
+  const guestAccess = registerGuestRoutes({
+    app,
+    requireAuth,
+    requireTenantAdmin,
+    requireMatchingWorkspaceIdentity,
+    workspaceStore,
+    accounts,
+    sessions,
+    commitWorkspaceStore,
+    appendPlatformAudit,
+    passwordDigest,
+    validNewPassword,
+    guestInviteDelivery,
+    // 초대 링크의 도메인. 프록시 뒤에서는 request.host가 내부 주소일 수 있어 APP_PUBLIC_URL이 우선한다.
+    publicUrlOf: () => String((options.env ?? process.env).APP_PUBLIC_URL ?? '').trim() || null,
+    // 범위 변경·초대 때 첨부 allowedUserIds도 members와 함께 맞추기 위한 헬퍼.
+    grantDocumentAccess,
+    projectMemberIds,
+    linkedDocumentIds,
+  })
+  app.locals.guestAccess = guestAccess
+  scheduler.register({
+    id: 'guest-grant-expiry',
+    label: '게스트 접속 만료',
+    description: '접속 종료일이 지난 외부 게스트를 만료 처리하고 세션을 끊습니다.',
+    spec: { every: 'day', hour: 1, minute: 20 },
+    run: async ({ now }) => {
+      const { expired } = await guestAccess.expireGuestGrants({ now })
+      return { detail: expired ? `게스트 ${expired}명 만료 처리` : '만료할 게스트가 없었습니다.' }
+    },
   })
 
   /**
@@ -7359,6 +7601,10 @@ export function createApp(options = {}) {
     isDeveloperSupportConversation,
     notify,
     events,
+    // 프로젝트 채널(projectId 있는 방)과 게스트 참여 검증에 쓴다.
+    guestGrantOf,
+    projectSpacesOf,
+    projectRoleOf,
   })
   registerAttendanceRoutes({
     app,
@@ -7613,7 +7859,8 @@ export function createApp(options = {}) {
           outputTokens: Number(result.usage?.output_tokens || 0),
           occurredAt: usageStartedAt.toISOString(),
           durationMs: Date.now() - usageStartedAt.getTime(),
-          metadata: { providerResponseModel: result.model || model },
+          // actorRole·guestGrantId 태그: 스키마 변경 없이 역할별(게스트 포함) 사용량 축을 만든다.
+          metadata: { providerResponseModel: result.model || model, ...usageMetadataFor(request.auth) },
         }
         try {
           await billingService.recordUsageEvent(usageActor, usageEvent)

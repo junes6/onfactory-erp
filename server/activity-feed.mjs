@@ -18,15 +18,20 @@ const text = (value, max = 120) => String(value ?? '').replace(/\s+/g, ' ').trim
 const at = (value) => (typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null)
 const rows = (tenantStore, key) => (Array.isArray(tenantStore?.[key]?.data) ? tenantStore[key].data : [])
 
-/** 이 업무가 이 사람에게 보이는가. 관리자는 전부, 직원은 본인이 맡았거나 지시한 것만. */
+/**
+ * 이 업무가 이 사람에게 보이는가. 관리자는 전부, 직원은 본인이 맡았거나 지시한 것만.
+ * "관리자"는 role === 'tenant-admin'으로만 판정한다 — 예전의 !== 'tenant-member'는 모르는 역할을 관리자로 취급했다.
+ */
 const seesWorkItem = (item, auth) =>
-  auth.role !== 'tenant-member' || item?.ownerId === auth.id || item?.requesterId === auth.id
+  auth.role === 'tenant-admin' || item?.ownerId === auth.id || item?.requesterId === auth.id
 
 const seesJournal = (journal, auth) =>
-  auth.role !== 'tenant-member' || journal?.authorId === auth.id
+  auth.role === 'tenant-admin' || journal?.authorId === auth.id
 
 export function buildActivityFeed(tenantStore, auth, { limit = 20, now = new Date() } = {}) {
-  const isAdmin = auth?.role !== 'tenant-member'
+  // 외부 게스트에게 활동 피드는 없다. 라우트 게이트가 먼저 막지만, 이 함수 혼자서도 같은 결론을 내야 한다.
+  if (auth?.role === 'tenant-guest') return []
+  const isAdmin = auth?.role === 'tenant-admin'
   const entries = []
   const push = (entry) => { if (entry.at) entries.push(entry) }
 
