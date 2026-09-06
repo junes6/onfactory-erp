@@ -42,6 +42,12 @@ export type WorkspaceWriteResult = {
   persisted: boolean
   status?: number
   message?: string
+  /**
+   * 서버가 거절한 대상을 가리키는 값(지금은 커스텀 필드의 key 하나). 문장은 서버 것 하나 그대로 쓰고,
+   * 이 값은 '어느 칸인가'만 말한다 — 칸이 넷 그려진 모달에서 '항목 형식에 맞지 않는 값입니다.'만으로는
+   * 고칠 칸을 찾을 수 없다. 이 훅은 뜻을 해석하지 않고 그대로 실어 나른다.
+   */
+  key?: string
 }
 
 export type WorkspaceStateSetter<T> = (
@@ -54,9 +60,9 @@ type WriteContext<T> = {
   version: number
 }
 
-function emitWorkspaceFailure(key: string, status: number | undefined, message: string) {
+function emitWorkspaceFailure(key: string, status: number | undefined, message: string, errorKey?: string) {
   if (typeof window === 'undefined') return
-  const detail = { key, status, message }
+  const detail = { key, status, message, errorKey }
   window.dispatchEvent(new CustomEvent('onfactory:workspace-error', { detail }))
   if (status === 401) window.dispatchEvent(new CustomEvent('onfactory:auth-expired', { detail }))
 }
@@ -185,12 +191,16 @@ export function useWorkspaceState<T>(
       if (!response.ok) {
         let message = '공유 데이터를 저장하지 못했습니다. 다시 시도해 주세요.'
         let currentVersion: string | null = null
+        // 서버가 어느 항목을 거절했는지 함께 보내면 그대로 들고 나간다 — 부르는 화면이 그 key를 라벨로 바꿔
+        // 서버 문장 옆에 괄호로 붙인다(드로어의 추가 정보 편집이 이미 쓰는 형태).
+        let errorKey: string | undefined
         try {
-          const body = await response.json() as { error?: { message?: string }; currentVersion?: string }
+          const body = await response.json() as { error?: { message?: string; key?: string }; currentVersion?: string }
           if (body.error?.message) message = body.error.message
+          if (typeof body.error?.key === 'string') errorKey = body.error.key
           currentVersion = body.currentVersion ?? null
         } catch { /* the status code is still enough to report the failure */ }
-        emitWorkspaceFailure(key, response.status, message)
+        emitWorkspaceFailure(key, response.status, message, errorKey)
         if (response.status === 409 && activeIdentityRef.current === writeIdentity) {
           serverVersionRef.current = currentVersion
           try {
@@ -213,7 +223,7 @@ export function useWorkspaceState<T>(
               }
             }
           } catch { /* the conflict itself has already been reported */ }
-          return { ok: false, persisted: false, status: response.status, message }
+          return { ok: false, persisted: false, status: response.status, message, key: errorKey }
         }
         if (context && activeIdentityRef.current === writeIdentity && writeVersionRef.current === context.version) {
           valueRef.current = context.previousValue
@@ -222,7 +232,7 @@ export function useWorkspaceState<T>(
           setScopedValue({ identity: writeIdentity, value: context.previousValue })
           writeCache(cacheKey, context.previousValue)
         }
-        return { ok: false, persisted: false, status: response.status, message }
+        return { ok: false, persisted: false, status: response.status, message, key: errorKey }
       }
       try {
         const body = await response.json() as { version?: string }

@@ -106,6 +106,7 @@ const workspaceTables = [
   'attendance_records', 'tax_deliveries', 'lenses', 'opportunities', 'opportunity_settings', 'digests',
   'project_templates', 'ai_conversations', 'notices', 'webhook_endpoints', 'webhook_deliveries',
   'personal_todos', 'notifications', 'notification_settings', 'push_subscriptions',
+  'saved_views', 'custom_fields',
 ]
 for (const table of workspaceTables) {
   const definition = schema.match(new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+${table}\\s*\\(([\\s\\S]*?)\\);`, 'i'))?.[1] ?? ''

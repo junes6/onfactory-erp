@@ -24,6 +24,8 @@
 .library-toolbar > div { display: flex; gap: var(--space-4); overflow-x: auto; }
 .library-toolbar > div button { min-height: 37px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); white-space: nowrap; cursor: pointer; }
 .library-toolbar > div button.active { border-color: var(--forest); color: var(--color-white); background: var(--forest); }
+/* R16-K: 정렬만 붙인다 — 자료에는 사람이 끌어 옮길 상태축이 없어 보드를 만들지 않는다. */
+.library-sort { width: auto; min-height: 37px; padding: var(--space-0); border: none; background: transparent; }
 .library-list { display: grid; gap: var(--space-16); }
 .library-list > article { display: grid; grid-template-columns: auto minmax(240px,1fr) minmax(270px,auto) auto auto; align-items: center; gap: var(--space-12); padding: var(--card-inset); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); box-shadow: var(--shadow-none); }
 .library-file-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-blue); background: var(--color-blue-soft); }

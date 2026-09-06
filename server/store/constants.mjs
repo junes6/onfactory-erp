@@ -63,6 +63,12 @@ export const WORKSPACE_TABLES = Object.freeze({
   // stripSensitivePayload가 token/secret이 든 키를 지워 재기동 후 조용히 사라진다.
   'webhook-endpoints': 'webhook_endpoints',
   'webhook-deliveries': 'webhook_deliveries',
+  // R16-K: 저장된 보기(목록·보드·캘린더·타임라인 + 필터·정렬). '내 것만' 또는 '전사 공유'가 행마다 다르므로
+  // WORKSPACE_STORE_KEYS에는 넣지 않는다 — generic PUT에는 행 단위 소유권 개념이 없어 직원이 남의 보기를 통째로 덮어쓴다.
+  'saved-views': 'saved_views',
+  // R16-K: 업무 커스텀 필드 '정의'만 산다. 값은 work-items payload의 fields 안에 있다 —
+  // 정의를 바꿔도 값은 그 자리에 남고, 대조는 저장 직전 배열 후검증(customFieldViolation)에서 한 번 한다.
+  'custom-fields': 'custom_fields',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

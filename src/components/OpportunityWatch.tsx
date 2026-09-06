@@ -52,6 +52,7 @@ const money = (value: number) => value > 0 ? `${Math.round(value).toLocaleString
 export function OpportunityWatch({ workspaceScope, onToast }: { workspaceScope?: string; onToast: (message: string) => void }) {
   const [state, setState] = useState<WatchState | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [sort, setSort] = useState<'deadline' | 'score' | 'received'>('deadline')
   const headers = workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined
 
   const load = async () => {
@@ -64,7 +65,20 @@ export function OpportunityWatch({ workspaceScope, onToast }: { workspaceScope?:
   useEffect(() => { void load() }, [workspaceScope]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!state) return null
-  const belowThreshold = state.opportunities.filter((item) => item.status === 'below-threshold')
+  /**
+   * R16-K: 기회에는 정렬만 붙인다. 대상 집합은 그대로다.
+   *
+   * 보드를 만들지 않는 이유: status는 'queued'와 'below-threshold' 둘뿐이고 그 값은 워커의 점수 판정에서
+   * 파생된다 — 끌어서 바꾸면 판정을 손으로 덮어쓰는 것이 되어 '판정의 근거는 하나'라는 규칙과 충돌한다.
+   * 저장된 보기·필터 바도 넣지 않는다: 이 목록은 승인 큐 안의 details 한 덩어리라,
+   * 목록 도구를 하나 더 얹으면 카드 안의 카드가 된다.
+   */
+  const belowThreshold = [...state.opportunities.filter((item) => item.status === 'below-threshold')].sort((left, right) => {
+    if (sort === 'score') return (right.score ?? -1) - (left.score ?? -1)
+    if (sort === 'received') return String(right.receivedAt ?? '').localeCompare(String(left.receivedAt ?? ''))
+    // 마감 임박순: 마감을 모르는 것은 언제나 뒤로 — '없음'이 '가장 급함'보다 앞에 오면 거짓말이다.
+    return String(left.deadline || '9999-12-31').localeCompare(String(right.deadline || '9999-12-31'))
+  })
 
   return <section className="opportunity-watch" aria-labelledby="opportunity-watch-title">
     <header>
@@ -81,6 +95,12 @@ export function OpportunityWatch({ workspaceScope, onToast }: { workspaceScope?:
 
     {belowThreshold.length > 0 && <details className="opportunity-below">
       <summary>임계 미만으로 보류한 기회 {belowThreshold.length}건 — 승인 큐에는 올리지 않았습니다</summary>
+      <label className="opportunity-below-sort"><span className="sr-only">보류 기회 정렬</span>
+        <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
+          <option value="deadline">마감 임박순</option>
+          <option value="score">점수 높은 순</option>
+          <option value="received">최근 수신순</option>
+        </select></label>
       <ul>{belowThreshold.slice(0, 20).map((item) => <li key={item.id}>
         <div>
           <strong>{item.title}</strong>

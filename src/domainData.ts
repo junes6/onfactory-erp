@@ -78,6 +78,13 @@ export type WorkItem = {
   projectId?: string
   /** 상위 업무 id. 있으면 이 행은 하위 업무다(깊이 2). 상위와 같은 projectId를 가진다. 진행률은 저장하지 않는다. */
   parentId?: string
+  /** 착수 예정 시각(ISO UTC, 선택). 없으면 타임라인이 createdAt(없으면 마감 하루 전)에서 막대를 시작하고 '시작일 미정'으로 흐리게 그린다. */
+  startAt?: string
+  /**
+   * 관리자가 정의한 커스텀 필드의 값 맵. 키는 정의의 key이고 값은 string 또는 number 뿐이다.
+   * '값 없음'은 한 가지뿐이다 — 키가 없는 것. 빈 문자열·null을 저장 형태로 두지 않는다.
+   */
+  fields?: Record<string, string | number>
 }
 
 export type WorkRule = {

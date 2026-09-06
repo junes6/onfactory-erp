@@ -66,7 +66,9 @@ test('GuestWorkspace는 업무·채널·자료·게시판 네 탭과 게스트 �
   assert.match(guestWorkspace, /tone="warning" icon=\{<ShieldCheck size=\{13\} \/>\}>게스트 · \{orgName\}/)
   assert.match(guestWorkspace, /projects\.length > 1 && <label className="guest-project-select">/)
   // 허용 목록 밖 라우트는 부르지 않는다.
-  for (const forbidden of ['/api/directory', '/api/search', '/api/activity', '/api/chat', '/api/admin/', '/api/workspace/project-spaces', '/api/leave-approvers']) {
+  // R16-K: 저장된 보기·커스텀 필드는 게스트 allowlist 밖이라 게이트가 403을 낸다.
+  // 화면이 그 요청을 시작하기라도 하면 게스트는 자기가 못 볼 것을 기다리는 빈 칸을 보게 된다.
+  for (const forbidden of ['/api/directory', '/api/search', '/api/activity', '/api/chat', '/api/admin/', '/api/workspace/project-spaces', '/api/leave-approvers', '/api/saved-views', '/api/custom-fields']) {
     assert.equal(guestWorkspace.includes(forbidden), false, `GuestWorkspace가 ${forbidden}를 호출하면 안 된다`)
   }
   // 업무 행동은 accept/submit 둘만, 완료 보고는 공용 CompletionModal.

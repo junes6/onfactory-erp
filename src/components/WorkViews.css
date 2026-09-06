@@ -1,0 +1,309 @@
+/*
+ * 업무 보기(타임라인) — 토큰만 쓰는 화면 CSS.
+ *
+ * styles.css에 넣지 않는다: 그 파일에는 두 세대의 죽은 workflow 규칙이 남아 있어
+ * 새 규칙을 그 옆에 두면 다음 사람이 세대를 구분하지 못한다. .workflow-* 이름은 한 글자도 재사용하지 않는다.
+ * 버튼 모양은 여기서 정하지 않는다 — 공용 Button.css가 유일한 출처다.
+ */
+
+.work-timeline { --timeline-name: 200px; --timeline-cell: 40px; --timeline-row: 36px; }
+.work-timeline-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); }
+.view-switcher { flex: 0 0 auto; }
+/*
+ * 지금 보고 있는 창(또는 옮기는 중인 막대)을 글로도 말한다 — 눈금만으로는 며칠인지 세어야 한다.
+ *
+ * 언제나 제 줄을 차지하고 두 줄 높이를 미리 비워 둔다. 왜: 이 줄은 창 라벨('9.5 → 10.2 · 28일')과
+ * 훨씬 긴 편집 문장 사이를 오간다. 조작 줄 끝에 얹혀 있으면 긴 쪽이 다음 줄로 접히면서
+ * 조작 줄이 한 줄에서 두 줄이 되고 캔버스가 통째로 아래로 밀린다(800px 실측 46px → 74px).
+ * 그 밀림은 미리보기를 지운 mousedown과 mouseup 사이에 일어나, 다른 행의 막대를 겨눈 그 클릭이
+ * 빗나가게 만든다 — 눌렀는데 아무 일도 일어나지 않는다.
+ * min-height = font-13 × 1.5 × 두 줄. 미리보기가 있든 없든 캔버스의 시작점이 같아야 한다.
+ */
+.work-timeline-readout {
+  flex: 1 0 100%;
+  min-height: calc(var(--font-13) * 3);
+  margin: var(--space-0);
+  color: var(--muted); font-size: var(--font-13); line-height: 1.5;
+}
+.work-timeline-help { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-11); line-height: 1.6; }
+.work-timeline-help b { color: var(--ink); font-weight: var(--weight-medium); }
+
+/* 가로 스크롤은 이 상자에서만 일어난다. 캔버스는 어떤 포인터로도 넘길 수 있어야 한다(파일 끝 pointer 질의 참고). */
+.work-timeline-scroll { overflow-x: auto; overscroll-behavior-x: contain; margin-top: var(--space-12); }
+.work-timeline-grid {
+  position: relative;
+  display: grid;
+  /*
+   * 열의 합만큼은 반드시 넓다. 이 한 줄이 없으면 그리드 상자는 스크롤 상자의 보이는 폭(예: 1248px)에
+   * 머물고 열들만 그 밖으로 넘친다 — sticky는 제 담는 상자를 벗어나지 못하므로 이름 칸과 모서리가
+   * 스크롤 중간(clientWidth − --timeline-name)에서 붙기를 멈추고 왼쪽으로 흘러 나간다.
+   * 8주 창 실측: scrollWidth 2440, clientWidth 1248 — 끝까지 밀면 이름 칸이 화면 밖 −128px에 있었다.
+   * 그때 남는 것은 이름 없는 막대뿐이고, 그것이 누구 일인지는 화면 어디에도 없다.
+   * width가 아니라 min-width인 이유: 창이 넓어 열이 남을 때는 지금처럼 캔버스를 채우고 늘어난다.
+   */
+  min-width: max-content;
+  grid-template-columns: var(--timeline-name) repeat(var(--timeline-days), var(--timeline-cell));
+  align-items: center;
+  row-gap: var(--space-4);
+}
+
+/* 날짜 눈금은 이름 칸과 함께 얼어야 한다 — 모서리가 붙지 않으면 눈금이 이름 띠 위로 흘러들어와
+   그 아래 가려진 막대와 다른 날을 가리키는 것처럼 읽힌다. 이름 칸(3)보다 위(4). */
+.work-timeline-corner {
+  position: sticky; left: var(--space-0); z-index: 4;
+  min-height: var(--timeline-row); background: var(--surface);
+}
+.work-timeline-head { grid-column: 2 / -1; display: grid; grid-template-columns: repeat(var(--timeline-days), var(--timeline-cell)); }
+.work-timeline-tick { min-height: var(--timeline-row); display: grid; place-items: center; color: var(--muted); font-size: var(--font-11); }
+.work-timeline-tick em { display: block; color: var(--subtle); font-style: normal; }
+.work-timeline-tick b { font-weight: var(--weight-regular); }
+.work-timeline-tick.kind-sunday, .work-timeline-tick.kind-holiday { color: var(--color-danger); }
+.work-timeline-tick.is-today b {
+  min-width: 21px; display: inline-grid; place-items: center;
+  border-radius: var(--radius-8); color: var(--color-white); background: var(--color-primary); font-weight: var(--weight-medium);
+}
+
+/*
+ * 배경 눈금과 오늘 선. 그리드의 셀을 차지하면 뒤따르는 행이 밀려나므로 절대 배치로 겹쳐 놓는다
+ * (subgrid는 선언 그리드와 두 단계 떨어져 상속되지 않는다).
+ */
+.work-timeline-rule {
+  /* 머리 행 아래에서 시작한다: 절대 배치 층은 배치되지 않은 눈금 위에 그려지므로,
+     0에서 시작하면 주말·공휴일 배경이 날짜 숫자를 덮고 오늘 선이 오늘 알약을 가로지른다. */
+  position: absolute; top: var(--timeline-row); bottom: var(--space-0); left: var(--timeline-name);
+  display: grid; grid-template-columns: repeat(var(--timeline-days), var(--timeline-cell));
+  pointer-events: none;
+}
+.work-timeline-day { border-left: var(--hairline) solid var(--line); }
+.work-timeline-day.kind-saturday, .work-timeline-day.kind-sunday { background: var(--canvas); }
+/* 공휴일은 달력·타임라인이 같은 출처(koreanHolidays.ts)에서 같은 색을 받는다. */
+.work-timeline-day.kind-holiday { background: var(--color-danger-soft); }
+/*
+ * 오늘 선은 포인트 컬러다 — 지연 막대의 빨강과 경쟁하지 않게.
+ * 그리드 칸에 놓지 않고 절대 배치한다: 열 번호로 놓으면 그 칸이 이미 배경 칸에 차 있어
+ * 자동 배치가 새 줄을 만들고, 선과 배경이 각각 캔버스의 절반만 덮는다(실측으로 확인).
+ */
+.work-timeline-now { position: absolute; top: var(--space-0); bottom: var(--space-0); z-index: 2; width: 2px; background: var(--color-primary); }
+
+.work-timeline-group {
+  grid-column: 1 / -1;
+  margin: var(--space-12) var(--space-0) var(--space-0);
+  color: var(--muted); font-size: var(--font-11); font-weight: var(--weight-medium);
+}
+/*
+ * 묶음 이름도 이름 칸과 함께 남는다. 담당자별로 볼 때 '박지현'은 이 줄에만 있어서,
+ * 가로로 밀었을 때 이름이 나가면 화면에는 누구 것인지 알 수 없는 막대들만 남는다(실측: left −1176px).
+ * z-index는 이름 칸과 같은 3 — 절대 배치된 눈금 층(주말·공휴일 배경) 위로 올라와야 글자가 가려지지 않는다.
+ */
+.work-timeline-group > span {
+  position: sticky; left: var(--space-0); z-index: 3;
+  display: inline-block; padding-right: var(--space-8); background: var(--surface);
+}
+.work-timeline-group small { color: var(--subtle); font-weight: var(--weight-regular); }
+
+/* 이름 칸은 가로로 스크롤해도 남는다 — 막대만 흐르면 그것이 누구 일인지 알 수 없다. */
+.work-timeline-name {
+  /* 이름 칸(3) > 오늘 선(2) > 막대(1). 오늘 선은 막대 위를 지나되, 가로로 스크롤하면 이름 칸 아래로 들어가야 한다. */
+  position: sticky; left: var(--space-0); z-index: 3;
+  min-width: 0; display: flex; align-items: center; gap: var(--space-4);
+  padding-right: var(--space-8); background: var(--surface);
+}
+.work-timeline-name.is-child { padding-left: var(--space-12); border-left: var(--hairline) solid var(--line); }
+.work-timeline-open { min-width: 0; padding: var(--space-0); border: none; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.work-timeline-open strong { display: block; overflow: hidden; font-size: var(--font-13); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.work-timeline-open:hover strong { color: var(--color-primary); }
+
+.work-timeline-track { grid-column: 2 / -1; display: grid; grid-template-columns: repeat(var(--timeline-days), var(--timeline-cell)); align-items: center; }
+.work-timeline-offscreen { grid-column: 2 / -1; color: var(--muted); font-size: var(--font-11); }
+
+.work-timeline-bar {
+  position: relative; z-index: 1;
+  min-height: 28px; display: flex; align-items: stretch;
+  border-radius: var(--radius-8); color: var(--color-blue-deep); background: var(--color-primary-soft);
+}
+/*
+ * 지연 막대는 테두리까지 갖는다. 공휴일 칸도 같은 --color-danger-soft로 칠하므로(위 .kind-holiday)
+ * 추석 세 칸을 지나는 빨간 막대는 그 자리에서 배경과 정확히 같은 색이 되어 사라졌다(실측: 같은 계산색).
+ * 공휴일 토큰을 바꾸지 않는 이유: 달력이 같은 출처를 쓴다. 채우기를 더 진하게 하는 길은 다크에서
+ * 공휴일 칸이 24%로 진해져 다시 만나므로, 두 테마에서 모두 남는 선을 그린다.
+ * (is-assumed는 뒤에 와서 왼쪽 변만 점선으로 덮는다 — 두 사실이 각자의 변을 차지한다.)
+ */
+.work-timeline-bar.tone-overdue { color: var(--color-danger-ink); background: var(--color-danger-soft); border: var(--hairline) solid var(--color-danger); }
+.work-timeline-bar.tone-done { color: var(--muted); background: var(--color-gray-200); }
+/* 추론한 시작일은 점선으로 말한다 — 사람이 정한 날짜와 같은 선으로 그리면 정해진 것처럼 보인다. */
+.work-timeline-bar.is-assumed { border-left: var(--hairline) dashed var(--line-strong); }
+.work-timeline-bar.is-draft { outline: var(--hairline) solid var(--color-primary); outline-offset: var(--space-4); }
+/*
+ * 못 옮기는 막대는 조금 물러나 있는다. 손잡이가 투명해서 '손잡이가 없다'는 것만으로는 눈에 보이지 않고,
+ * title 툴팁은 마우스에게만 있다 — 터치·키보드 사용자는 눌러 보기 전까지 알 수 없었다.
+ * 몸통은 여전히 눌러서 상세를 열 수 있으므로 cursor는 건드리지 않는다(못 누르는 것이 아니라 못 옮기는 것이다).
+ * .is-pending(.6)보다 옅게 하지 않는다: 그쪽은 잠깐 도는 요청, 이쪽은 계속 그런 상태다.
+ */
+.work-timeline-bar.is-locked { opacity: .8; }
+.work-timeline-bar.is-pending { opacity: .6; }
+.work-timeline-bar.is-clipped-start { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.work-timeline-bar.is-clipped-end { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+
+.work-timeline-handle { width: 8px; flex: 0 0 auto; padding: var(--space-0); border: none; background: transparent; cursor: ew-resize; }
+.work-timeline-bar-body { flex: 1 1 auto; min-width: 0; padding: var(--space-0); border: none; color: inherit; background: transparent; cursor: pointer; }
+/*
+ * 포커스는 첫 방향키를 누르기 전에 보여야 한다. 손잡이는 8px짜리 투명한 상자라
+ * 전역 포커스 링(8% 검정 0.5px)으로는 한 행의 세 컨트롤 중 어디에 있는지 눈으로 알 수 없었다.
+ * is-draft가 쓰는 그 모양을 그대로 쓴다 — 방향키를 누른 뒤와 누르기 전이 같은 언어로 말한다.
+ */
+.work-timeline-handle:focus-visible, .work-timeline-bar-body:focus-visible {
+  outline: var(--hairline) solid var(--color-primary); outline-offset: var(--space-4);
+}
+
+/* 마감을 읽을 수 없는 업무도 버리지 않는다 — 캔버스 아래 접어 두고 상세로 가는 길을 남긴다. */
+.work-timeline-undated { margin-top: var(--space-16); color: var(--muted); font-size: var(--font-13); }
+.work-timeline-undated > summary { cursor: pointer; }
+.work-timeline-undated ul { display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
+.work-timeline-undated li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); min-height: 36px; }
+.work-timeline-undated li strong { overflow: hidden; color: var(--ink); font-size: var(--font-13); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+
+/* 상세 드로어의 '업무 기간' 칸 — 고르는 것과 적용하는 것을 나눈다(상위 바꾸기 칸과 같은 규율). */
+.workflow-drawer-schedule { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-8); margin-top: var(--space-8); }
+.workflow-drawer-schedule .form-field { flex: 1 1 140px; min-width: 140px; margin: var(--space-0); }
+
+@media (max-width: 1180px) { .work-timeline { --timeline-name: 148px; --timeline-cell: 32px; } }
+@media (max-width: 760px) {
+  .work-timeline { --timeline-name: 108px; --timeline-cell: 24px; }
+  /* 좁은 화면에서는 같은 문장이 세 줄까지 접힌다 — 비워 두는 자리도 그만큼이어야 캔버스가 안 밀린다. */
+  .work-timeline-readout { min-height: calc(var(--font-13) * 4.5); }
+}
+/* 손가락으로는 하루 칸을 정확히 집을 수 없다. 화면 쪽에서도 손잡이를 그리지 않지만, 여기서 한 번 더 잠근다. */
+@media (pointer: coarse) { .work-timeline-handle { display: none; } }
+/*
+ * 브라우저 제스처를 끄는 것은 실제로 끌 수 있는 포인터에서만.
+ * 터치에서는 화면 쪽에서 포인터 핸들러 자체를 붙이지 않으므로(dragEnabled) 이 선언은 할 일이 없는데,
+ * 그대로 두면 막대 위에서 시작한 손가락이 세로 스크롤도 캔버스 가로 패닝도 하지 못한다.
+ * 375px 캔버스는 780px라 가로 패닝이 필수이고, 막대는 한 행 폭의 대부분을 덮는다.
+ */
+@media (pointer: fine) { .work-timeline-bar { touch-action: none; } }
+
+/*
+ * ─────────────────────────────────────────────────────────────────────
+ * R16-K: 목록 · 캘린더 · 필터 · 저장된 보기 · 커스텀 필드
+ *
+ * 죽은 CSS 이름(.workflow-row-list·.workflow-card-list·.workflow-card-body·
+ * .workflow-summary-strip·.workflow-stepper)을 한 글자도 재사용하지 않는다 —
+ * styles.css에 두 세대가 살아 있어 같은 이름을 쓰면 옛 세대 규칙이 조용히 적용된다.
+ * ─────────────────────────────────────────────────────────────────────
+ */
+
+/* 목록 보기 — 한 줄 원칙: 상태 점 · 제목 · 마감 · 버튼 1개. 카드(article)를 만들지 않는다. */
+.work-list { display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-12) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
+.work-list-row { padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.work-list-row.is-done { background: var(--canvas); }
+.work-list-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); min-height: 44px; }
+.work-list-open { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--space-8); padding: var(--space-0); border: none; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.work-list-text { min-width: 0; }
+.work-list-text strong { display: block; overflow: hidden; color: var(--ink); font-size: var(--font-13); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.work-list-text small { display: block; overflow: hidden; color: var(--muted); font-size: var(--font-11); text-overflow: ellipsis; white-space: nowrap; }
+.work-list-open:hover .work-list-text strong { color: var(--color-primary); }
+.work-list-main > time { color: var(--muted); font-size: var(--font-11); white-space: nowrap; }
+.work-list-main > time.is-overdue { color: var(--color-danger); font-weight: var(--weight-medium); }
+.work-list-blocked { display: flex; align-items: center; gap: var(--space-4); margin: var(--space-4) var(--space-0) var(--space-0); color: var(--color-danger-ink); font-size: var(--font-11); }
+.work-list-children { margin-top: var(--space-4); }
+.work-list-children > summary { display: flex; align-items: center; gap: var(--space-4); color: var(--muted); font-size: var(--font-11); cursor: pointer; }
+.work-list-children > summary.is-complete { color: var(--color-success-ink); }
+.work-list-note { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--subtle); font-size: var(--font-11); }
+
+/* 캘린더 보기 — 마감일 기준. 일정 화면의 .calendar-*를 재사용하지 않는다(셀 구조가 다르다). */
+.work-calendar { margin-top: var(--space-12); }
+.work-calendar-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); margin-bottom: var(--space-8); }
+.work-calendar-controls strong { color: var(--ink); font-size: var(--font-15); font-weight: var(--weight-medium); }
+/* 칸 사이 선은 gap이 아니라 셀의 테두리로 그린다 — 간격 값은 공백 토큰만 쓸 수 있고, 0.5px 간격은 그 표에 없다. */
+.work-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); overflow: hidden; border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+/*
+ * 격자에는 행이 있어야 한다(ARIA: columnheader·gridcell은 row가 소유한다).
+ * display: contents로 행 상자를 눈에서만 지우고 구조는 남긴다 — 칸의 배치는 위 grid 선언 그대로다.
+ */
+.work-calendar-row { display: contents; }
+.work-calendar-weekday { padding: var(--space-4); border-bottom: var(--hairline) solid var(--line); color: var(--muted); font-size: var(--font-11); text-align: center; }
+.work-calendar-weekday.is-sunday, .work-calendar-weekday.is-saturday { color: var(--color-danger); }
+.work-calendar-day { display: flex; flex-direction: column; gap: var(--space-4); min-height: 96px; padding: var(--space-4); border-top: var(--hairline) solid var(--line); border-left: var(--hairline) solid var(--line); background: var(--surface); }
+.work-calendar-day:nth-child(7n + 1) { border-left: none; }
+.work-calendar-day.kind-saturday, .work-calendar-day.kind-sunday { background: var(--canvas); }
+/* 공휴일 색은 타임라인 눈금과 같은 출처(koreanHolidays.ts)를 따른다. */
+.work-calendar-day.kind-holiday { background: var(--color-danger-soft); }
+.work-calendar-day.is-outside { opacity: .5; }
+.work-calendar-date { display: flex; align-items: baseline; gap: var(--space-4); min-width: 0; }
+.work-calendar-date b { color: var(--ink); font-size: var(--font-11); font-weight: var(--weight-medium); }
+/*
+ * 오늘은 칸 배경이 아니라 날짜 알약으로 말한다 — 타임라인 눈금의 .is-today와 같은 언어다.
+ * 칸을 통째로 칠하면 오늘이 공휴일인 날에 빨간 배경이 사라져, 달력이 그날을 평일로 말하게 된다.
+ */
+.work-calendar-day.is-today .work-calendar-date b {
+  min-width: 21px; display: inline-grid; place-items: center;
+  border-radius: var(--radius-8); color: var(--color-white); background: var(--color-primary);
+}
+.work-calendar-holiday { overflow: hidden; color: var(--color-danger); font-size: var(--font-11); text-overflow: ellipsis; white-space: nowrap; }
+.work-calendar-item { display: flex; align-items: center; gap: var(--space-4); min-width: 0; padding: var(--space-4); border: none; border-radius: var(--radius-8); color: var(--color-blue-deep); background: var(--color-primary-soft); font-size: var(--font-11); text-align: left; cursor: pointer; }
+.work-calendar-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 지연 칸도 공휴일 칸과 같은 --color-danger-soft라 배경에 묻는다 — 타임라인 막대와 같이 선을 하나 더 그린다. */
+.work-calendar-item.tone-overdue { border: var(--hairline) solid var(--color-danger); color: var(--color-danger-ink); background: var(--color-danger-soft); }
+.work-calendar-item.tone-done { color: var(--muted); background: var(--color-gray-200); }
+.work-calendar-more { padding: var(--space-0); border: none; color: var(--muted); background: transparent; font-size: var(--font-11); text-align: left; cursor: pointer; }
+.work-calendar-undated { margin-top: var(--space-16); color: var(--muted); font-size: var(--font-13); }
+.work-calendar-undated > summary { cursor: pointer; }
+.work-calendar-undated ul { display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
+.work-calendar-undated li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-8); min-height: 36px; }
+.work-calendar-undated li strong { overflow: hidden; color: var(--ink); font-size: var(--font-13); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+
+/* 필터 — 접힌 한 줄. 적용된 조건은 언제나 칩으로 보인다(안 보이는 필터는 '데이터가 사라졌다'로 읽힌다). */
+.work-filter { margin-top: var(--space-8); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.work-filter > summary { display: flex; align-items: center; gap: var(--space-4); color: var(--ink); font-size: var(--font-13); cursor: pointer; }
+.work-filter-body { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-8); margin-top: var(--space-8); }
+.work-filter-search { display: flex; flex: 1 1 220px; align-items: center; gap: var(--space-4); min-width: 180px; padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--muted); }
+.work-filter-search input { flex: 1 1 auto; min-width: 0; border: none; color: var(--ink); background: transparent; font-size: var(--font-13); }
+/* input의 윤곽을 지웠으면 감싼 상자가 그 자리를 대신해야 한다 — 안 그러면 탭으로 들어온 사람에게 아무 표시도 없다
+   (styles.css의 .global-search·.input-with-icon가 쓰는 그 짝이다). */
+.work-filter-search input:focus { outline: none; }
+.work-filter-search:focus-within { border-color: var(--color-blue-deep); }
+.work-filter-select { flex: 0 1 160px; margin: var(--space-0); }
+.work-filter-range { display: flex; flex-wrap: wrap; gap: var(--space-8); }
+.work-filter-range .form-field { margin: var(--space-0); }
+.work-filter-sort { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-8); }
+.work-filter-chips { display: flex; flex-wrap: wrap; gap: var(--space-4); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
+.work-filter-chips button { display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--muted); background: var(--canvas); font-size: var(--font-11); cursor: pointer; }
+.work-filter-result { display: flex; align-items: center; gap: var(--space-8); margin: var(--space-8) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-11); }
+
+/* 저장된 보기 — 툴바 안 한 덩어리. */
+.work-saved-view { display: flex; align-items: center; gap: var(--space-4); }
+.work-saved-view select { max-width: 180px; }
+.saved-view-form { display: flex; flex-direction: column; gap: var(--space-12); }
+.saved-view-visibility, .saved-view-columns { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); margin: var(--space-0); padding: var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.saved-view-visibility legend, .saved-view-columns legend { padding: var(--space-0) var(--space-4); color: var(--muted); font-size: var(--font-11); }
+.saved-view-visibility label, .saved-view-columns label { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--ink); font-size: var(--font-13); }
+/* disabled를 쓰지 않으므로 '지금은 고를 수 없다'를 색으로도 말한다 — 포커스와 사유는 그대로 남는다. */
+.saved-view-visibility label[aria-disabled='true'], .saved-view-columns label[aria-disabled='true'] { color: var(--subtle); }
+.saved-view-visibility small { flex: 1 0 100%; color: var(--muted); font-size: var(--font-11); }
+
+/* 커스텀 필드 — 드로어의 값 칸과 관리자 모달. */
+.work-field-grid { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-8); margin-top: var(--space-8); }
+.work-field-grid .form-field { flex: 1 1 160px; min-width: 140px; margin: var(--space-0); }
+.work-field-readonly { display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-8) var(--space-0) var(--space-0); }
+.work-field-readonly div { display: flex; gap: var(--space-8); font-size: var(--font-13); }
+.work-field-readonly dt { color: var(--muted); }
+.work-field-readonly dd { margin: var(--space-0); color: var(--ink); }
+.work-field-admin { display: flex; flex-direction: column; gap: var(--space-12); }
+.work-field-admin-list { display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.work-field-admin-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto auto; align-items: center; gap: var(--space-4); min-height: 40px; padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.work-field-admin-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-field-admin-row strong { color: var(--ink); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.work-field-admin-row small { color: var(--muted); font-size: var(--font-11); }
+.work-field-admin-empty { padding: var(--space-8); color: var(--muted); font-size: var(--font-13); }
+.work-field-admin-archived > summary { color: var(--muted); font-size: var(--font-11); cursor: pointer; }
+.work-field-admin-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-8); padding-top: var(--space-8); border-top: var(--hairline) solid var(--line); }
+.work-field-admin-form .form-field { flex: 1 1 140px; min-width: 120px; margin: var(--space-0); }
+.work-field-admin-required { display: flex; flex: 1 0 100%; align-items: center; gap: var(--space-4); color: var(--ink); font-size: var(--font-13); }
+.work-field-admin-required small { display: block; color: var(--muted); font-size: var(--font-11); }
+
+@media (max-width: 760px) {
+  /* 좁은 화면에서는 한 줄이 두 줄이 된다 — 마감과 버튼을 제목 아래로 내린다. */
+  .work-list-main { grid-template-columns: minmax(0, 1fr); }
+  .work-calendar-day { min-height: 64px; }
+  .work-filter-select { flex: 1 1 140px; }
+}

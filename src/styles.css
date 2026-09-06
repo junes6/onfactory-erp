@@ -2593,6 +2593,14 @@ html[data-theme='dark'] :is(.workflow-card,.workflow-drawer,.workflow-column-mor
 .workflow-column.tone-progress .workflow-column-head { background: var(--color-primary-soft); }
 .workflow-column.tone-review .workflow-column-head { background: var(--color-warning-soft); }
 .workflow-column.tone-done .workflow-column-head { background: var(--color-success-soft); }
+/* R16-K: 카드를 끌 때의 응답. 놓을 수 있는 칼럼과 놓아도 소용없는 칼럼을 놓기 전에 구분한다. */
+.workflow-column.is-drop-target { background: var(--color-primary-soft); }
+.workflow-column.is-blocked { background: var(--color-danger-soft); cursor: not-allowed; }
+/* 거절 사유는 끝까지 읽혀야 한다. 평소의 칼럼 머리는 한 줄로 잘리지만(안내 문구는 짧다), 사유는 두 문장이라
+   그 자리에서 46%만 보였다 — HTML5 드래그 중에는 title 툴팁이 뜨지 않고 aria-live는 sr-only라, 마우스 사용자에게는
+   '무엇을 해야 하는지'를 말하는 두 번째 문장이 어느 경로로도 닿지 않았다. 늘어나는 것은 끌고 있는 동안뿐이다. */
+.workflow-column.is-blocked .workflow-column-head small { overflow: visible; text-overflow: clip; white-space: normal; }
+.workflow-card.is-dragging { opacity: .5; }
 .workflow-column-icon { width: 34px; height: 34px; }
 .workflow-column.tone-request .workflow-column-icon { color: var(--color-white); background: var(--color-violet); }
 .workflow-column.tone-progress .workflow-column-icon { color: var(--color-white); background: var(--color-primary); }

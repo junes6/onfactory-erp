@@ -8,3 +8,5 @@
 - Supabase CLI is a development dependency, but Docker and `psql` are not available on every workstation. A real Postgres E2E test therefore runs only against an explicitly supplied `DATABASE_URL`.
 
 The application still receives its existing in-memory facade. Postgres reads and writes the allow-listed workspace domains (`server/store/constants.mjs` `WORKSPACE_TABLES`) through separate entity tables, stores document metadata in core `items`, and rejects unknown keys. Messenger messages use child rows with canonical `created_at`. Every committed domain diff and its `events` outbox rows share one transaction.
+
+Some allow-listed keys are storage-only: they are in `WORKSPACE_TABLES` but **not** in `server/app.mjs` `WORKSPACE_STORE_KEYS`, so the generic `GET/PUT /api/workspace/:key` answers `404 STORE_KEY_NOT_FOUND` and a dedicated route is the only door. Today those are `ai-conversations`, `notices`, `webhook-endpoints`, `webhook-deliveries`, `saved-views` and `custom-fields` — each holds rows with a per-row owner, a per-row audience or a sealed secret, and the generic array PUT has no per-row ownership concept.

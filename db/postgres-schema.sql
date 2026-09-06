@@ -524,6 +524,23 @@ CREATE TABLE IF NOT EXISTS ai_conversations (
   created_by TEXT, PRIMARY KEY (org_id, id)
 );
 
+-- R16-K: 저장된 보기. private는 소유자만, tenant는 그 고객사 구성원 전부(게스트 제외).
+-- 누가 볼 수 있는지는 payload의 ownerId·visibility가 정하고 행 필터는 앱이 한다 — 여기에는 게스트 정책이 없다.
+CREATE TABLE IF NOT EXISTS saved_views (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
+-- R16-K: 업무 커스텀 필드 정의. 값은 work_items.payload->'fields'에 있고 여기에는 정의만 있다.
+CREATE TABLE IF NOT EXISTS custom_fields (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS company_assets (
   id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
   payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
@@ -610,6 +627,17 @@ ALTER TABLE webhook_deliveries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE webhook_deliveries FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS webhook_deliveries_service ON webhook_deliveries;
 CREATE POLICY webhook_deliveries_service ON webhook_deliveries USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+
+-- R16-K: 저장된 보기·커스텀 필드 정의는 게스트가 읽지 않는다. 게스트 정책을 만들지 않고 서비스 컨텍스트만 통과시킨다 —
+-- 보기 이름과 filters.ownerIds·projectIds는 사람·프로젝트의 열거원이고, 필드 라벨은 회사의 내부 어휘다.
+ALTER TABLE saved_views ENABLE ROW LEVEL SECURITY;
+ALTER TABLE saved_views FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS saved_views_service ON saved_views;
+CREATE POLICY saved_views_service ON saved_views USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+ALTER TABLE custom_fields ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custom_fields FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS custom_fields_service ON custom_fields;
+CREATE POLICY custom_fields_service ON custom_fields USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
 
 DROP POLICY IF EXISTS project_spaces_guest_read ON project_spaces;
 CREATE POLICY project_spaces_guest_read ON project_spaces FOR SELECT USING (
@@ -761,6 +789,9 @@ CREATE INDEX IF NOT EXISTS notices_project_idx ON notices (org_id, (payload ->> 
 -- 토큰 하나로 고객사를 역조회해야 하므로 org 없이 전역 유니크다.
 CREATE UNIQUE INDEX IF NOT EXISTS webhook_endpoints_token_idx ON webhook_endpoints ((payload ->> 'tokenHash')) WHERE deleted_at IS NULL AND payload ->> 'tokenHash' IS NOT NULL;
 CREATE INDEX IF NOT EXISTS webhook_deliveries_pending_idx ON webhook_deliveries (org_id, (payload ->> 'status'), (payload ->> 'nextAttemptAt')) WHERE deleted_at IS NULL;
+-- 보기 목록은 언제나 '내 것 + 전사 공유'라 소유자로 먼저 좁힌다. 필드 정의는 표면(work…)별로 한 번에 읽는다.
+CREATE INDEX IF NOT EXISTS idx_saved_views_active ON saved_views (org_id, (payload ->> 'ownerId'), position) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_custom_fields_active ON custom_fields (org_id, (payload ->> 'surface'), position) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ai_conversations_owner_idx ON ai_conversations (org_id, (payload ->> 'ownerId'), (payload ->> 'updatedAt') DESC);
 CREATE INDEX IF NOT EXISTS ai_conversations_trash_idx ON ai_conversations (org_id, (payload ->> 'deletedAt'));
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON auth_sessions (expires_at) WHERE revoked_at IS NULL;

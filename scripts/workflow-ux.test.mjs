@@ -60,6 +60,7 @@ test('새 업무 지시는 필수 3칸과 접힌 선택 항목으로 구성한�
   assert.match(taskModalSource, /initialDescription = ''/)
   assert.match(taskModalSource, /<details className="task-optional-fields" open=\{Boolean\(initialDescription\) \|\| Boolean\(initialParentId\)\}>/)
   assert.match(stylesSource, /\.task-optional-fields:not\(\[open\]\) > \.task-optional-fields-body \{ display: none; \}/)
-  for (const label of ['우선순위', '완료 기준', '사진·파일']) assert.match(taskModalSource, new RegExp(label))
+  // R16-F: 시작일은 접힌 선택 항목 안에 있다 — 필수 3칸은 그대로다.
+  for (const label of ['시작일', '우선순위', '완료 기준', '사진·파일']) assert.match(taskModalSource, new RegExp(label))
   assert.doesNotMatch(taskModalSource, /담당자가 업무 내용을 확인하고 완료 결과를 남깁니다/)
 })

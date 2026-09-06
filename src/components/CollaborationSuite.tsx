@@ -2053,6 +2053,7 @@ const scopeCopy: Record<CalendarScope, { label: string; description: string }> =
 
 const scheduleToday = seoulDateInputValue()
 
+/** 일요일 시작 42칸. utils/dateTime.ts의 monthGridKeys와 같은 규칙이다 — 한쪽을 고치면 다른 쪽도 같이 고친다. */
 function monthCells(viewMonth: Date) {
   const year = viewMonth.getFullYear()
   const month = viewMonth.getMonth()

@@ -977,6 +977,18 @@ test('invited members are tenant isolated and limited to safe collaboration oper
     assert.equal(tamperTask.status, 403)
     assert.equal((await tamperTask.json()).error.code, 'WORK_ITEM_TRANSITION_FORBIDDEN')
 
+    // R16-F·K: WORK_ITEM_OPTIONAL_FIELDS에 새 키를 더하면 sameWorkItemExceptStatus의 순회 대상이 늘어난다.
+    // 직원의 generic PUT은 상태 외의 어떤 필드도 바꿀 수 없어야 한다 — 기간과 추가 정보에는 전용 라우트가 있다.
+    for (const forged of [{ startAt: '2026-08-19T00:00:00.000Z' }, { fields: { vendor: 'A' } }]) {
+      const tamperField = await fetch(`${origin}/api/workspace/work-items`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', cookie: memberLogin.cookie },
+        body: JSON.stringify({ data: [{ ...assignedTask, status: '수행중', ...forged }] }),
+      })
+      assert.equal(tamperField.status, 403, JSON.stringify(forged))
+      assert.equal((await tamperField.json()).error.code, 'WORK_ITEM_TRANSITION_FORBIDDEN')
+    }
+
     const addTask = await fetch(`${origin}/api/workspace/work-items`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json', cookie: memberLogin.cookie },

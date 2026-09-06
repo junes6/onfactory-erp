@@ -43,6 +43,9 @@ import {
   WORK_RULE_MONTHLY_MODES as SCHEDULE_MONTHLY_MODES,
 } from './work-rule-schedule.mjs'
 import { workItemTreeViolation, openSubtaskCount, parentRefsFor, prependWithinCap, registerWorkItemTreeRoutes } from './work-item-tree.mjs'
+import { isScheduleInstant, scheduleArrayViolation, registerWorkItemScheduleRoutes } from './work-item-schedule.mjs'
+import { CUSTOM_FIELD_KEY, customFieldViolation, hasWorkFieldValuesShape, registerCustomFieldRoutes } from './custom-fields.mjs'
+import { registerSavedViewRoutes } from './saved-views.mjs'
 import { PROJECT_TEMPLATES_KEY, registerProjectTemplateRoutes } from './project-templates.mjs'
 import { NOTICES_KEY, registerNoticeRoutes } from './notices.mjs'
 // R16-L: 외부 연동. 봉인 헬퍼·수신 훅과 관리 라우트·발신 적재를 세 파일로 나눠 둔다.
@@ -195,7 +198,11 @@ const WORK_ITEM_ID_FIELDS = ['ownerId', 'requesterId']
 // projectId: 프로젝트 귀속(선택). 외부 게스트에게 배정하는 업무는 반드시 초대된 프로젝트에 귀속돼야 한다.
 // parentId: 상위 업무 id(선택). 깊이 2단 — parentId가 있는 행은 parentId가 없는 행만 가리킬 수 있다(배열 검증 workItemTreeViolation).
 // 진행률·차단 건수는 저장하지 않고 자식 status에서 파생한다.
-const WORK_ITEM_OPTIONAL_FIELDS = ['attachments', 'completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt', 'origin', 'checklist', 'projectId', 'parentId']
+// startAt: 착수 예정 시각(선택, ISO UTC 하나뿐). 타임라인 막대의 왼쪽 끝이다. due와 달리 자유 문자열('오늘 18:00')을
+// 받지 않는다 — 파싱에 실패하는 값이 하나 섞이면 막대 순서가 조용히 무너지고, 그 이유가 화면 어디에도 남지 않는다.
+// fields: 관리자가 정의한 커스텀 필드의 값 맵(string | number 뿐). 여기서는 모양만 보고,
+// 정의와의 대조는 store를 볼 수 있는 배열 후검증(customFieldViolation)에서 한 번 한다.
+const WORK_ITEM_OPTIONAL_FIELDS = ['attachments', 'completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt', 'origin', 'checklist', 'projectId', 'parentId', 'startAt', 'fields']
 const WORK_ITEM_FIELDS = [...WORK_ITEM_BASE_FIELDS, ...WORK_ITEM_ID_FIELDS, ...WORK_ITEM_OPTIONAL_FIELDS]
 const WORK_ITEM_STATUSES = new Set(['업무요청', '수행중', '결재대기', '결재완료'])
 const WORK_ITEM_PRIORITIES = new Set(['긴급', '높음', '보통'])
@@ -309,6 +316,11 @@ function hasWorkItemShape(value) {
   if (['ruleId', 'ruleOccurrence', 'createdAt'].some((key) => value[key] !== undefined && typeof value[key] !== 'string')) return false
   // 자기 참조는 어느 저장 경로에서도 만들 수 없다 — 가장 좁은 문에서 막는다. 나머지 트리 검사는 배열 단위(workItemTreeViolation).
   if (value.parentId !== undefined && (typeof value.parentId !== 'string' || !value.parentId || value.parentId === value.id)) return false
+  // 값이 없으면 키가 없다 — 빈 문자열·null·date-only·밀리초 없는 ISO는 전부 거절한다(JSON 모드와 PG 모드를 같게 유지한다).
+  if (value.startAt !== undefined && !isScheduleInstant(value.startAt)) return false
+  // 정의 대조가 아니라 순수 모양만 본다. 여기에 정의를 끌어들이면 canMemberReplaceWorkItems가
+  // 이전 배열까지 재검증하므로, 정의를 바꾼 뒤 옛 값을 가진 업무 하나 때문에 아무 저장도 못 하게 된다.
+  if (value.fields !== undefined && !hasWorkFieldValuesShape(value.fields)) return false
   if (value.attachments !== undefined && (!Array.isArray(value.attachments) || value.attachments.length > 10 || !value.attachments.every(hasWorkEvidenceShape))) return false
   if (value.completion !== undefined && !hasWorkCompletionShape(value.completion)) return false
   if (value.completionHistory !== undefined && (!Array.isArray(value.completionHistory) || value.completionHistory.length > 100 || !value.completionHistory.every(hasWorkCompletionShape))) return false
@@ -7403,6 +7415,13 @@ export function createApp(options = {}) {
       // 트리 무결성은 배열 전체를 봐야 판단된다. 정규화·게스트 제약 뒤, 저장 직전 한 번.
       const treeViolation = workItemTreeViolation(nextData, rowsBeforeWrite)
       if (treeViolation) { response.status(400).json({ error: treeViolation }); return }
+      // 기간도 배열 단위로 본다 — /schedule이 거절하는 짝(뒤집힘·2년 초과·범위 밖)이 이 문으로 들어오면 나갈 길이 없어진다.
+      const periodViolation = scheduleArrayViolation(nextData, rowsBeforeWrite)
+      if (periodViolation) { response.status(400).json({ error: periodViolation }); return }
+      // 커스텀 필드 값과 정의의 대조는 store를 봐야 한다. 정규화·게스트·트리·기간 검사 뒤, 저장 직전 한 번.
+      // 보관된 정의의 기존 값은 통과하고 새 값만 막힌다 — 전이·/parent·/schedule은 fields를 건드리지 않으므로 부르지 않는다.
+      const fieldViolation = customFieldViolation(nextData, rowsBeforeWrite, tenantStore[CUSTOM_FIELD_KEY]?.data, operatorAwareAccounts(request.auth), request.auth.tenantId)
+      if (fieldViolation) { response.status(400).json({ error: fieldViolation }); return }
     }
     if (request.auth.role === 'tenant-admin' && key === 'work-rules') {
       nextData = normalizeAdminWorkRules(nextData, request.auth.tenantId, operatorAwareAccounts(request.auth))
@@ -8028,6 +8047,22 @@ export function createApp(options = {}) {
   registerWorkItemTreeRoutes({
     app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, accounts, commitWorkspaceStore, events,
     guestGrantOf, hasWorkItemShape, isMemberWorkItem, workspaceRecordVersion,
+  })
+
+  registerWorkItemScheduleRoutes({
+    app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, commitWorkspaceStore, events,
+    hasWorkItemShape, workspaceRecordVersion, scheduleSentinel,
+  })
+
+  // 저장된 보기·커스텀 필드는 WORKSPACE_STORE_KEYS에 없다 — generic GET/PUT은 404로 끝나고 이 라우트들만 문이 된다.
+  registerSavedViewRoutes({
+    app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, commitWorkspaceStore, workspaceRecordVersion,
+    statuses: WORK_ITEM_STATUSES, priorities: WORK_ITEM_PRIORITIES,
+  })
+
+  registerCustomFieldRoutes({
+    app, requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, workspaceStore, accounts,
+    operatorAwareAccounts, commitWorkspaceStore, events, hasWorkItemShape, workspaceRecordVersion,
   })
 
   registerProjectTemplateRoutes({

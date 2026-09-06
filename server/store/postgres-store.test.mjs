@@ -48,8 +48,12 @@ function fixture() {
   snapshot.tenants['TENANT-HSB'] = {
     'work-items': {
       // WORK-2는 하위 업무. parentId는 payload JSONB 안에 그대로 남아야 한다(DDL 무변경).
+      // R16-F: startAt도 같은 자리다 — raw_start/start_at 컬럼을 만들지 않으므로 WORK-2처럼
+      // 시작일이 없던 행은 왕복 뒤에도 키가 없어야 한다(빈 문자열이 생기면 JSON 모드와 갈린다).
+      // R16-K: fields(커스텀 필드 값)도 같다. 숫자가 문자열로 굳어 돌아오면 number 정의와 어긋나
+      // 그 업무의 모든 저장이 CUSTOM_FIELD_TYPE으로 막힌다.
       data: [
-        { id: 'WORK-1', title: '점검', due: '오늘 18:00', status: '업무요청' },
+        { id: 'WORK-1', title: '점검', due: '오늘 18:00', status: '업무요청', startAt: '2026-08-19T00:00:00.000Z', fields: { vendor: 'A', amount: 5 } },
         { id: 'WORK-2', title: '하위', parentId: 'WORK-1', status: '업무요청', due: '2026-08-22T09:00:00.000Z' },
       ],
       updatedAt: '2026-08-20T01:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
@@ -133,6 +137,26 @@ function fixture() {
       }],
       updatedAt: '2026-08-20T06:05:00.000Z', updatedBy: 'system:webhook',
     },
+    // R16-K: 저장된 보기와 커스텀 필드 정의. 닫힌 스키마의 중첩(filters·sort·options)이
+    // payload JSONB로 그대로 왕복해야 한다 — 조건 하나가 왕복에서 사라지면 그 보기는 거짓말을 한다.
+    'saved-views': {
+      data: [{
+        id: 'VIEW-fixture-01', surface: 'work', name: '내 지연 업무', mode: 'list',
+        filters: { scope: 'mine', ownerIds: [], statuses: ['수행중'], priorities: [], categories: [], projectIds: [], originKinds: [], dueFrom: null, dueTo: '2026-09-30', dueWithinDays: null, overdueOnly: true, hasParent: null, text: '', fields: { vendor: ['A'] } },
+        sort: { field: 'due', direction: 'asc' }, columns: ['owner', 'cf:vendor'], visibility: 'tenant',
+        ownerId: 'USR-HSB-ADMIN', ownerName: 'HSB 관리자',
+        createdAt: '2026-08-20T06:00:00.000Z', updatedAt: '2026-08-20T06:00:00.000Z',
+      }],
+      updatedAt: '2026-08-20T06:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
+    },
+    'custom-fields': {
+      data: [{
+        id: 'CF-fixture-01', surface: 'work', key: 'vendor', label: '거래처', type: 'select',
+        options: ['A', 'B'], required: false, archivedAt: null, position: 0,
+        createdAt: '2026-08-20T06:00:00.000Z', updatedAt: '2026-08-20T06:00:00.000Z',
+      }],
+      updatedAt: '2026-08-20T06:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
+    },
   }
   snapshot.tenants['TENANT-POHANG'] = {
     'work-items': { data: [{ id: 'WORK-1', title: '별도 조합 업무', due: '2026-08-22T09:00:00.000Z', status: '업무요청' }], updatedAt: '2026-08-20T01:00:00.000Z' },
@@ -187,6 +211,8 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.equal(workRows.rows[0].payload.due, undefined)
     assert.equal(workRows.rows.find((row) => row.id === 'WORK-1').raw_due, '오늘 18:00')
     assert.equal(workRows.rows.find((row) => row.id === 'WORK-2').payload.parentId, 'WORK-1', '하위 업무의 parentId는 payload로 왕복한다')
+    assert.equal(workRows.rows.find((row) => row.id === 'WORK-1').payload.startAt, '2026-08-19T00:00:00.000Z', '시작일은 컬럼이 아니라 payload로 간다')
+    await assert.rejects(pool.query('SELECT start_at FROM work_items'), 'start_at 컬럼을 만들지 않는다')
     assert.equal(workRows.rows.find((row) => row.org_id === 'TENANT-POHANG').due_at.toISOString(), '2026-08-22T09:00:00.000Z')
 
     const templateRows = await pool.query('SELECT id, org_id, payload FROM project_templates')
@@ -258,6 +284,15 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.equal(roundTrippedRoom.lastTime, '14:42', '채널 목록 시각은 답글(15:10)이 아니라 본채널 마지막 말에서 나온다')
     assert.equal(facade.tenants['TENANT-HSB']['work-items'].data[0].due, '오늘 18:00')
     assert.equal(facade.tenants['TENANT-HSB']['work-items'].data.find((row) => row.id === 'WORK-2').parentId, 'WORK-1')
+    assert.equal(facade.tenants['TENANT-HSB']['work-items'].data.find((row) => row.id === 'WORK-1').startAt, '2026-08-19T00:00:00.000Z')
+    assert.equal('startAt' in facade.tenants['TENANT-HSB']['work-items'].data.find((row) => row.id === 'WORK-2'), false, '시작일이 없던 행은 왕복 뒤에도 키가 없다')
+    assert.deepEqual(facade.tenants['TENANT-HSB']['work-items'].data.find((row) => row.id === 'WORK-1').fields, { vendor: 'A', amount: 5 }, '커스텀 필드 값은 타입까지 그대로 왕복한다')
+    assert.equal('fields' in facade.tenants['TENANT-HSB']['work-items'].data.find((row) => row.id === 'WORK-2'), false, '값이 없던 행은 왕복 뒤에도 fields 키가 없다')
+    const roundTrippedView = facade.tenants['TENANT-HSB']['saved-views'].data[0]
+    assert.equal(roundTrippedView.filters.overdueOnly, true)
+    assert.deepEqual(roundTrippedView.filters.fields, { vendor: ['A'] }, '커스텀 필드 축이 왕복에서 사라지면 그 보기는 다른 뜻이 된다')
+    assert.deepEqual(roundTrippedView.columns, ['owner', 'cf:vendor'])
+    assert.deepEqual(facade.tenants['TENANT-HSB']['custom-fields'].data[0].options, ['A', 'B'])
     assert.equal(facade.tenants['TENANT-HSB']['project-templates'].data[0].tasks[0].children[0].title, '인터뷰')
     const roundTrippedNotice = facade.tenants['TENANT-HSB'].notices.data[0]
     assert.equal(roundTrippedNotice.body, '첫 줄\n둘째 줄', '공지 본문의 줄바꿈은 왕복에서 살아 있어야 한다')

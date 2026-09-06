@@ -5,6 +5,8 @@
 .opportunity-watch h2 svg { color: var(--color-primary); }
 .opportunity-watch > header p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-11); line-height: 1.6; }
 .opportunity-below summary { color: var(--color-primary); font-size: var(--font-13); cursor: pointer; }
+/* R16-K: 정렬만 붙인다 — status는 워커의 점수 판정에서 파생되므로 사람이 끌어 바꿀 축이 아니다. */
+.opportunity-below-sort { display: block; margin-top: var(--space-8); }
 .opportunity-below ul { display: grid; gap: var(--space-8); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
 .opportunity-below li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); padding-top: var(--space-8); border-top: var(--hairline) solid var(--line); }
 .opportunity-below li > div:first-child { min-width: 0; display: grid; gap: var(--space-4); }

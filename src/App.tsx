@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, BarChart3, BookOpen, Boxes, Building2, Check,
   CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCheck, Clock3,
@@ -38,6 +38,17 @@ import { useEventStream } from './hooks/useEventStream'
 import { ActivityFeed } from './components/ActivityFeed'
 import { OriginBadge } from './components/OriginBadge'
 import { ParentChip, SubtaskProgressBar, SubtaskRows } from './components/SubtaskList'
+import { ViewSwitcher, type WorkViewMode } from './components/ViewSwitcher'
+import { WorkTimeline } from './components/WorkTimeline'
+import { WorkListView } from './components/WorkListView'
+import { WorkCalendarView } from './components/WorkCalendarView'
+import { WorkFilterBar } from './components/WorkFilterBar'
+import { SavedViewMenu } from './components/SavedViewMenu'
+import { collectCreateFields, CustomFieldAdmin, CustomFieldCreateInputs, CustomFieldEditor, useCustomFields, type CustomFieldDefinition, type WorkFieldSaveResult } from './components/CustomFieldInputs'
+import { isWorkOverdue, projectBarLabel, scheduleBlockReason, workPeriodLabel, SCHEDULE_ORDER_HINT } from './utils/workTimeline'
+import type { ScheduleResult } from './utils/workTimeline'
+import { activeFilterCount, applyWorkFilters, DEFAULT_WORK_SORT, EMPTY_WORK_FILTERS, readStoredWorkView, sortWorkItems, writeStoredWorkView, type WorkFilters, type WorkSort } from './utils/workViews'
+import { boardDropAction, boardDropTargets, type BoardDrop } from './utils/workBoardDrop'
 import { brandLabelForIndustry, industrySurface, navigationForIndustry, resolveIndustry, routeLabel, routesForIndustry, type TenantRouteId } from './modules/registry'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
@@ -46,7 +57,7 @@ import { useWorkspaceState } from './hooks/useWorkspaceState'
 import { deleteDocumentAttachments, uploadDocumentAttachments } from './utils/documentAttachments'
 import { CompletionModal, useDialogFocus } from './components/CompletionModal'
 import { GuestWorkspace } from './components/GuestWorkspace'
-import { formatDateLabel, formatDateTime, formatMonthLabel, formatWorkDue, formatWorkRuleRun, seoulDateInputValue, seoulDateTimeInputValue, seoulLocalToUtcIso, toIsoUtc } from './utils/dateTime'
+import { formatDateLabel, formatDateTime, formatMonthLabel, formatWorkDue, formatWorkRuleRun, seoulDateInputValue, seoulDateTimeInputValue, seoulLocalToUtcIso, seoulTimeOf, toIsoUtc } from './utils/dateTime'
 import { workStatusLabel, workStatusTone } from './utils/workStatus'
 import { childrenOf, isSubtask, isTopLevelIn, parentCandidates, parentTitleOf, progressLabel, subtaskBlockMessage, subtaskBlockReason, subtaskProgress, type ParentRef } from './utils/workTree'
 import { dayKind, holidayName } from './utils/koreanHolidays'
@@ -563,6 +574,11 @@ function AIHome({ workItems, products, salesChannels, itProjects, itContracts, c
 type WorkTransitionAction = 'accept' | 'submit' | 'approve' | 'request-changes'
 /** kind는 /api/directory가 준다. 'guest'면 업무 지시 시 프로젝트를 반드시 골라야 하고, 요청자 후보에서는 빠진다. */
 type WorkAssignee = { id: string; name: string; kind?: 'employee' | 'guest' }
+/**
+ * 새 업무 지시의 결과. 실패하면 서버 문장과 '어느 항목이 거절됐는가'(커스텀 필드 key)를 함께 돌려준다 —
+ * 모달은 그 key를 자기 정의 목록에서 라벨로 바꿔 문장 옆에 괄호로 붙인다(드로어의 추가 정보 편집과 같은 형태).
+ */
+type WorkSaveResult = { ok: boolean; message?: string; key?: string }
 // 상태 문구는 src/utils/workStatus.ts 한 곳에서만 정한다 — 데스크톱·휴대폰·게스트가 같은 말을 쓴다.
 const legacyCompletionCriteria = '담당자가 업무 내용을 확인하고 완료 결과를 남깁니다.'
 const explicitCompletionCriteria = (item: WorkItem) => {
@@ -625,9 +641,17 @@ async function downloadWorkEvidence(file: WorkEvidence, workspaceScope?: string)
   return downloadStoredDocument(file.id, file.name, workspaceScope)
 }
 
-function WorkReviewModal({ item, industryType, workspaceScope, onToast, onClose, onSubmit }: { item: WorkItem; industryType?: string; workspaceScope?: string; onToast: (message: string) => void; onClose: () => void; onSubmit: (decision: 'approve' | 'request-changes', comment: string, requestedChanges?: string) => Promise<boolean> }) {
+/**
+ * 검토 모달. 어떤 결정으로 **열리는지**를 부르는 쪽이 정한다.
+ *
+ * 왜 initialMode인가: 보드에서 결재대기 카드를 '진행 중' 칼럼에 놓는 것은 보완 요청이고, 화면은 놓기 전에
+ * 이미 '진행 중(으)로 옮깁니다.'라고 말한다. 그런데 모달이 언제나 승인으로 열리면 가장 마찰이 적은 버튼
+ * ('승인 완료', 코멘트 없이도 제출된다)이 사람이 놓은 칼럼의 반대이고, 그 결과는 되돌릴 수 없는 결재완료다.
+ * 결정을 바꾸는 라디오는 그대로 둔다 — 검토는 결정하는 화면이지 확인만 하는 화면이 아니다.
+ */
+function WorkReviewModal({ item, industryType, workspaceScope, initialMode, onToast, onClose, onSubmit }: { item: WorkItem; industryType?: string; workspaceScope?: string; initialMode?: 'approve' | 'request-changes'; onToast: (message: string) => void; onClose: () => void; onSubmit: (decision: 'approve' | 'request-changes', comment: string, requestedChanges?: string) => Promise<boolean> }) {
   const dialogRef = useDialogFocus()
-  const [mode, setMode] = useState<'approve' | 'request-changes'>('approve')
+  const [mode, setMode] = useState<'approve' | 'request-changes'>(initialMode ?? 'approve')
   const [comment, setComment] = useState('')
   const [busy, setBusy] = useState(false)
   const valid = mode === 'approve' || comment.trim().length >= 2
@@ -749,7 +773,10 @@ function WorkRuleModal({ assignees, industryType, onClose, onSubmit }: { assigne
   </div>
 }
 
-function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, industryType, workspaceScope, focusId, parentRefs = {}, onToast, onOpenOrigin, onCreate, onCreateSubtask, onMoveParent, onTransition, onCreateRule, onToggleRule, onDeleteRule, onToggleChecklist }: {
+/** 업무 화면이 지금 제공하는 보기. 목록·캘린더는 뒤 절에서 같은 스위처에 붙는다. */
+const WORK_VIEW_MODES = ['list', 'board', 'calendar', 'timeline'] as const
+
+function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, industryType, workspaceScope, focusId, parentRefs = {}, onToast, onOpenOrigin, onCreate, onCreateSubtask, onMoveParent, onSchedule, onSaveFields, onTransition, onCreateRule, onToggleRule, onDeleteRule, onToggleChecklist }: {
   items: WorkItem[]; rules: WorkRule[]; currentUserId: string; canAssignTasks: boolean; assignees: WorkAssignee[]
   industryType?: string
   onOpenOrigin?: (page: string, focusId: string) => void
@@ -761,19 +788,58 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
   onCreate: () => void
   onCreateSubtask?: (parentId: string) => void
   onMoveParent?: (id: string, parentId: string | null) => Promise<boolean>
+  onSchedule?: (id: string, next: { due: string; startAt?: string | null }) => Promise<ScheduleResult>
+  /** 커스텀 필드 값 저장. null은 '그 키를 지워라'는 뜻이고, 결과가 빈 객체면 fields 키 자체가 사라진다. */
+  onSaveFields?: (id: string, values: Record<string, string | number | null>) => Promise<WorkFieldSaveResult>
   onTransition: (id: string, action: WorkTransitionAction, input?: Record<string, unknown>) => Promise<boolean>
   onCreateRule: (input: Record<string, unknown>) => Promise<boolean>
   onToggleRule: (rule: WorkRule) => Promise<boolean>
   onDeleteRule: (rule: WorkRule) => Promise<boolean>
   onToggleChecklist: (taskId: string, itemId: string, done: boolean) => Promise<boolean>
 }) {
-  const [boardTab, setBoardTab] = useState<'board' | 'rules'>('board')
-  const [scopeFilter, setScopeFilter] = useState<'all' | 'mine' | 'requested'>('all')
+  // 무엇을 보는가(업무 vs 반복 규칙)와 어떻게 보는가(목록·보드·캘린더·타임라인)는 한 값에 담는다 — 두 상태로 나누면 어긋난 조합이 생긴다.
+  // 마지막에 보던 방식은 개인 취향이라 이 브라우저에 남는다('이름 붙여 공유하는 조건 묶음'은 서버의 저장된 보기다).
+  const [viewMode, setViewMode] = useState<WorkViewMode | 'rules'>(() => readStoredWorkView(workspaceScope ?? ''))
+  // useRef의 인자는 React가 매 렌더 평가하고 첫 렌더 뒤에는 버린다 — 여기에 readStoredWorkView를 그대로 두면
+  // 검색어 한 글자마다·dragover마다 localStorage를 동기로 한 번씩 더 읽는다. 첫 값은 바로 위 useState가 이미 정했다.
+  const lastWorkViewRef = useRef<WorkViewMode>(viewMode === 'rules' ? 'list' : viewMode)
+  const [filters, setFilters] = useState<WorkFilters>(EMPTY_WORK_FILTERS)
+  const [sort, setSort] = useState<WorkSort>(DEFAULT_WORK_SORT)
+  /** 저장된 보기의 '보조 1줄' 항목. 보드 칼럼(columns)과 다른 것이라 이름을 나눈다. */
+  const [listColumns, setListColumns] = useState<string[]>(['owner'])
+  /**
+   * 지금 고른 저장된 보기의 id. filters·sort·listColumns와 **같은 자리**에 산다 —
+   * 보기의 이름은 그 네 값을 함께 가리키는 딱지이므로, 조건이 사는 곳과 다른 곳에 두면
+   * 한쪽만 바뀌는 순간이 생긴다(SavedViewMenu의 주석에 그 두 사고를 적어 두었다).
+   */
+  const [activeViewId, setActiveViewId] = useState('')
+  const [boardDragMode, setBoardDragMode] = useState(false)
+  const [dragCardId, setDragCardId] = useState('')
+  const [dragOver, setDragOver] = useState<{ status: WorkItem['status']; drop: BoardDrop } | null>(null)
+  const [dragStatus, setDragStatus] = useState('')
+  const [grabbedId, setGrabbedId] = useState('')
+  const [grabTarget, setGrabTarget] = useState<WorkItem['status'] | null>(null)
+  const [coarsePointer, setCoarsePointer] = useState(false)
+  const [fieldsAdminOpen, setFieldsAdminOpen] = useState(false)
   const [drawerId, setDrawerId] = useState<string | null>(null)
-  const [dialog, setDialog] = useState<{ type: 'completion' | 'review'; item: WorkItem } | { type: 'rule' } | null>(null)
+  /**
+   * 지금 열린 모달. 검토는 **어느 결정으로 열 셈이었는지**를 함께 싣는다 —
+   * 보드에서 결재대기 카드를 '진행 중'에 놓으면 화면은 '진행 중(으)로 옮깁니다.'라고 말해 놓고
+   * 승인으로 초기화된 모달이 열렸다(가장 마찰이 적은 버튼이 사람이 놓은 칼럼의 반대이자 되돌릴 수 없는 결재완료다).
+   */
+  const [dialog, setDialog] = useState<
+    | { type: 'completion'; item: WorkItem }
+    | { type: 'review'; item: WorkItem; decision: 'approve' | 'request-changes' }
+    | { type: 'rule' }
+    | null
+  >(null)
   const [showAllDone, setShowAllDone] = useState(false)
   const [reparentTarget, setReparentTarget] = useState('')
   const [parentBusy, setParentBusy] = useState(false)
+  const [startDraft, setStartDraft] = useState('')
+  const [dueDraft, setDueDraft] = useState('')
+  const [scheduleBusy, setScheduleBusy] = useState(false)
+  const [scheduleHint, setScheduleHint] = useState('')
   const stages: WorkItem['status'][] = ['업무요청', '수행중', '결재대기', '결재완료']
   const drawerRef = useDialogFocus(Boolean(drawerId))
   const handledFocusRef = useRef<string | undefined>(undefined)
@@ -783,13 +849,44 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
     const focused = items.find((item) => item.id === focusId)
     if (!focused) return
     handledFocusRef.current = focusId
-    setBoardTab('board')
-    setScopeFilter('all')
+    // 반복 규칙 탭에 있었다면 마지막으로 보던 업무 보기로 돌아온다 — 어떤 방식으로 보고 있었는지는 사람의 선택이다.
+    setViewMode((current) => current === 'rules' ? lastWorkViewRef.current : current)
+    // 필터는 반드시 지운다. 드로어는 네 보기 어디서든 뜨지만, 필터를 그대로 두면 배경 목록에 그 업무가 없어
+    // '알림을 눌렀는데 그 업무가 안 보인다'가 된다 — 사람은 그것을 '데이터가 사라졌다'로 읽는다.
+    setFilters(EMPTY_WORK_FILTERS)
+    // 조건을 떼면 이름도 함께 뗀다. 앱이 스스로 지운 필터를 '사람이 고친 것'으로 두면
+    // 배지가 '변경됨'이 되고 '변경 저장'이 그 보기를 **빈 조건으로 덮어쓴다**
+    // (회사 공유 보기라면 그 손실이 전 직원에게 간다). 두 줄은 언제나 같은 문 안에 있어야 한다.
+    setActiveViewId('')
     setDrawerId(focused.id)
   }, [focusId, items])
 
+  // 보기 방식은 바뀔 때마다 이 브라우저에 남는다. '반복 규칙'은 보기 방식이 아니므로 저장되지 않는다.
+  useEffect(() => { writeStoredWorkView(workspaceScope ?? '', viewMode) }, [viewMode, workspaceScope])
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    // HTML5 드래그는 터치에서 아예 동작하지 않는다. 카드의 행동 버튼이 이미 같은 전이를 부르므로 잃는 기능은 없다.
+    const query = window.matchMedia('(max-width: 760px), (pointer: coarse)')
+    const sync = () => setCoarsePointer(query.matches)
+    sync()
+    query.addEventListener('change', sync)
+    return () => query.removeEventListener('change', sync)
+  }, [])
+
   // 다른 업무를 열면 '상위 바꾸기'에서 고르다 만 값이 따라다니면 안 된다.
   useEffect(() => { setReparentTarget('') }, [drawerId])
+
+  // 기간 칸도 같다 — 연 업무의 현재 값에서 다시 시작한다. items 갱신에는 따라 움직이지 않는다(입력 중에 값이 튄다).
+  useEffect(() => {
+    const target = drawerId ? items.find((item) => item.id === drawerId) : null
+    const startIso = target?.startAt ? toIsoUtc(target.startAt) : null
+    const dueIso = target ? toIsoUtc(target.due) : null
+    setStartDraft(startIso ? seoulDateInputValue(new Date(startIso)) : '')
+    setDueDraft(dueIso ? seoulDateInputValue(new Date(dueIso)) : '')
+    setScheduleHint('')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawerId])
 
   useEffect(() => {
     if (!drawerId) return
@@ -802,21 +899,89 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
     (item.ownerId === currentUserId && (item.status === '업무요청' || item.status === '수행중'))
     || (item.requesterId === currentUserId && item.status === '결재대기')
   )
-  const isOverdue = (item: WorkItem) => {
-    const dueAt = Date.parse(toIsoUtc(item.due) ?? '')
-    return Number.isFinite(dueAt) && dueAt < Date.now() && item.status !== '결재완료'
-  }
+  // 지연 판정은 타임라인 막대와 한 함수에서 나온다 — 여기서 한 번 더 적으면 요약줄은 '1 마감 지연'인데
+  // 캔버스에는 빨간 막대가 하나도 없는 화면이 만들어진다(둘이 각각 순간과 날짜를 보던 때 실제로 그랬다).
+  // 감싸는 이유: filter가 넘기는 index가 두 번째 인자(now) 자리에 들어가면 안 된다.
+  const isOverdue = (item: WorkItem) => isWorkOverdue(item)
   const byDue = (left: WorkItem, right: WorkItem) => {
     const leftTime = new Date(toIsoUtc(left.due) ?? '9999-12-31').getTime()
     const rightTime = new Date(toIsoUtc(right.due) ?? '9999-12-31').getTime()
     return leftTime - rightTime
   }
+  /**
+   * 커스텀 필드 정의. App 최상위가 아니라 이 화면 안에서 읽는다 —
+   * 최상위에 useWorkspaceState를 하나 더 붙이면 게스트 계약이 고정한 데이터 스위치 3회가 깨진다
+   * (선례: 이 화면이 이미 /api/work-rules/compliance를 같은 방식으로 부른다).
+   */
+  const { definitions, setDefinitions, reload: reloadDefinitions } = useCustomFields(workspaceScope, viewMode !== 'rules')
+  /**
+   * 텍스트 항목의 값도 검색 칸이 훑는다. 필터 바는 텍스트 타입에 축을 만들지 않으므로
+   * 이 목록이 없으면 관리자가 만든 '발주번호'·'메모' 같은 항목으로는 **어떤 방법으로도** 좁힐 수 없다.
+   * 사람 항목(계정 id)·숫자·날짜는 넣지 않는다 — id 조각이 검색에 걸리면 안 된다.
+   */
+  const textFieldKeys = useMemo(() => definitions.filter((definition) => definition.type === 'text').map((definition) => definition.key), [definitions])
   // 아래 scopedIds가 이것을 기준으로 기억하므로 배열부터 같은 조건에서 같은 것으로 남아야 한다(매 렌더 새 배열이면 기억이 매번 깨진다).
-  const scoped = useMemo(() => items.filter((item) => scopeFilter === 'mine'
-    ? item.ownerId === currentUserId
-    : scopeFilter === 'requested' ? item.requesterId === currentUserId : true), [items, scopeFilter, currentUserId])
+  // 네 보기가 이 한 집합을 함께 쓴다 — 보기마다 필터를 따로 돌리면 보드에서 12건이던 것이 캘린더에서 9건이 된다.
+  const scoped = useMemo(
+    () => sortWorkItems(applyWorkFilters(items, filters, currentUserId, undefined, textFieldKeys), sort),
+    [items, filters, sort, currentUserId, textFieldKeys],
+  )
   // 필터를 적용한 뒤의 집합이 기준이다. '내가 담당'으로 상위가 빠져도 자식은 사라지지 않고 최상위 행이 되어 상위 칩을 단다.
   const scopedIds = useMemo(() => new Set(scoped.map((item) => item.id)), [scoped])
+  /**
+   * 프로젝트 이름. /api/projects는 이 화면에 없던 요청이므로, 실제로 이름이 필요할 때만 부른다 —
+   * 프로젝트에 묶인 업무가 하나도 없으면 그 축은 애초에 그려지지 않는다.
+   * 실패하면 빈 표를 쓰고 라벨이 사라질 뿐, 화면은 죽지 않는다.
+   */
+  const [projectNames, setProjectNames] = useState<Record<string, string>>({})
+  const needsProjectNames = viewMode !== 'rules' && items.some((item) => item.projectId)
+  useEffect(() => {
+    if (!needsProjectNames || !workspaceScope) return
+    let active = true
+    fetch('/api/projects', { headers: { 'x-workspace-identity': workspaceScope } })
+      .then((response) => response.ok ? response.json() : null)
+      .then((body: { projects?: { id: string; name: string }[] } | null) => {
+        if (active && body?.projects) setProjectNames(Object.fromEntries(body.projects.map((project) => [project.id, project.name])))
+      })
+      .catch(() => undefined)
+    return () => { active = false }
+  }, [needsProjectNames, workspaceScope])
+
+  /** 필터 축은 지금 있는 데이터에서만 자란다 — 없는 값을 골라 두면 목록이 언제나 0건이 된다. */
+  const filterOwners = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const item of items) if (item.ownerId) seen.set(item.ownerId, item.owner)
+    return [...seen].map(([id, label]) => ({ id, label })).sort((left, right) => left.label.localeCompare(right.label, 'ko'))
+  }, [items])
+  const filterCategories = useMemo(() => [...new Set(items.map((item) => item.category).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'ko')), [items])
+  const filterProjects = useMemo(() => {
+    const seen = new Set(items.map((item) => item.projectId ?? '').filter(Boolean))
+    // 이름을 못 받은 프로젝트는 '미지정'이라 부르지 않는다 — 이 option의 값은 진짜 프로젝트 id라서
+    // 고르면 '그 프로젝트의 업무만' 걸리는데, 라벨은 정반대를 말하게 된다. 이름 없는 것이 둘이면
+    // 구별할 수 없는 줄이 두 개 겹치기도 한다. 타임라인의 묶음 라벨과 **같은 함수**를 쓴다(두 표면이 한 말을 한다).
+    return [...seen].map((id) => ({ id, label: projectBarLabel(id, projectNames) })).sort((left, right) => left.label.localeCompare(right.label, 'ko'))
+  }, [items, projectNames])
+  const filterOrigins = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const item of items) if (item.origin?.kind) seen.set(item.origin.kind, item.origin.label ?? item.origin.kind)
+    return [...seen].map(([id, label]) => ({ id, label }))
+  }, [items])
+  /**
+   * 사람 항목의 후보. 값이 계정 id이고 보이는 것은 이름이다 — id를 화면에 노출하지 않는다.
+   *
+   * 'guest가 아닌 사람'이 아니라 '이 회사의 구성원'으로 좁힌다: /api/directory는 플랫폼 운영자
+   * (개발운영진, kind 없음)를 맨 앞에 얹는데, 서버는 그 계정을 사람 항목에 넣으면 400 CUSTOM_FIELD_PERSON으로
+   * 거절한다. 고를 수는 있는데 저장은 언제나 실패하는 후보를 내놓지 않는다(필터 축에서는 언제나 0건이 된다).
+   */
+  const employees = useMemo(() => assignees.filter((assignee) => assignee.kind === 'employee').map((assignee) => ({ id: assignee.id, name: assignee.name })), [assignees])
+  const peopleNames = useMemo(() => Object.fromEntries(employees.map((person) => [person.id, person.name])), [employees])
+  // 이름표는 세는 축과 같은 수만큼 있어야 한다 — 출처가 빠져 있어서 '필터 1개'인 보기의 이름 제안이 빈 줄이었다.
+  const filterNames = useMemo(() => ({
+    owners: Object.fromEntries(filterOwners.map((owner) => [owner.id, owner.label])),
+    projects: projectNames,
+    origins: Object.fromEntries(filterOrigins.map((origin) => [origin.id, origin.label])),
+    fields: Object.fromEntries(definitions.map((definition) => [definition.key, definition.label])),
+  }), [filterOwners, projectNames, filterOrigins, definitions])
   const columns: Array<{ status: WorkItem['status']; label: string; hint: string; tone: string; icon: typeof ListChecks }> = [
     { status: '업무요청', label: '요청됨', hint: '담당자 수락 대기', tone: 'request', icon: ClipboardCheck },
     { status: '수행중', label: '진행 중', hint: '수행 후 완료 보고', tone: 'progress', icon: PlayCircle },
@@ -838,7 +1003,8 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
 
   /** 차단 사유(blocked)는 누르기 전에 보여 준다. 눌러 보고서야 안 된다는 것을 아는 버튼은 막다른 길이다. */
   const primaryAction = (item: WorkItem): { label: string; run: () => void; blocked?: string } | null => {
-    if (item.requesterId === currentUserId && item.status === '결재대기') return { label: '검토하기', run: () => setDialog({ type: 'review', item }) }
+    // 카드·목록의 '검토하기'에는 방향의 의도가 없다 — 사람이 아직 아무 쪽도 고르지 않았으므로 승인으로 연다(지금까지의 동작 그대로).
+    if (item.requesterId === currentUserId && item.status === '결재대기') return { label: '검토하기', run: () => setDialog({ type: 'review', item, decision: 'approve' }) }
     if (item.ownerId === currentUserId && item.status === '업무요청') return { label: '업무 시작', run: () => void onTransition(item.id, 'accept') }
     if (item.ownerId === currentUserId && item.status === '수행중') {
       // 진행률·차단은 필터와 무관한 사실이므로 보이는 집합(scoped)이 아니라 items 전체로 센다.
@@ -851,6 +1017,76 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
     }
     return null
   }
+
+  /**
+   * 카드를 놓았을 때 실제로 일어나는 일. 반드시 기존 전이 라우트를 지난다 —
+   * generic PUT을 쓰면 관리자 계정에서 결재 상태머신이 통째로 우회되고, 감사 로그만 그럴듯하게 남는다.
+   * 본문이 필요한 전이(완료 보고·검토)는 모달이 먼저 뜨고, 취소하면 아무 일도 없었던 것이 된다 —
+   * 미리 옮겨 두면 취소한 순간 화면과 서버가 어긋난다(낙관적 이동을 하지 않는 이유).
+   */
+  const runBoardDrop = (item: WorkItem, drop: BoardDrop) => {
+    if (drop.kind !== 'action') return
+    if (drop.needsDialog === 'completion') { setDialog({ type: 'completion', item }); return }
+    // 놓기 전에 들린 문장('진행 중(으)로 옮깁니다.')과 열리는 모달이 같은 결정을 가리켜야 한다.
+    // 여기서 drop.action을 버리면 보완 요청으로 놓은 카드가 승인 모달로 열리고, 그 모달의 primary는 결재완료다.
+    if (drop.needsDialog === 'review') { setDialog({ type: 'review', item, decision: drop.action === 'approve' ? 'approve' : 'request-changes' }); return }
+    void onTransition(item.id, drop.action)
+  }
+  /** 놓기 전에 들리는 한 문장. 거절이면 사유, 허용이면 무슨 일이 일어나는지. */
+  const dropSentence = (item: WorkItem, status: WorkItem['status'], drop: BoardDrop) => {
+    const label = columns.find((column) => column.status === status)?.label ?? status
+    if (drop.kind === 'blocked') return `${label}(으)로 옮길 수 없습니다. ${drop.reason}`
+    if (drop.kind === 'none') return `${item.title}은(는) 이미 ${label}에 있습니다.`
+    return `${label}(으)로 옮깁니다.${drop.warning ? ` ${drop.warning}` : ''}`
+  }
+  const stageNeighbour = (status: WorkItem['status'], delta: number) => {
+    const index = stages.indexOf(status) + delta
+    return index >= 0 && index < stages.length ? stages[index] : null
+  }
+  /**
+   * 잡기·확정 한 동작. 아직 안 잡았으면 잡고, 잡은 뒤 다시 누르면 고른 칼럼으로 확정한다.
+   * 마우스(클릭)와 키보드(Enter·Space)가 같은 함수를 지나므로 두 길이 갈릴 수 없다.
+   */
+  const toggleGrab = (item: WorkItem) => {
+    if (grabbedId !== item.id || !grabTarget) {
+      setGrabbedId(item.id)
+      setGrabTarget(item.status)
+      setDragStatus(`${item.title} 단계 옮기기를 시작했습니다. 방향키로 고르고 Enter로 확정, Esc로 취소합니다.`)
+      return
+    }
+    const drop = boardDropAction(item, grabTarget, currentUserId, items)
+    setGrabbedId('')
+    setGrabTarget(null)
+    if (drop.kind === 'action') runBoardDrop(item, drop)
+    else setDragStatus(dropSentence(item, grabTarget, drop))
+  }
+  /** 드래그는 결코 유일한 길이 아니다 — grip에 포커스를 두고 방향키로 같은 표를 지난다. */
+  const handleGripKey = (event: ReactKeyboardEvent<HTMLButtonElement>, item: WorkItem) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Enter', ' ', 'Escape'].includes(event.key)) return
+    // 카드의 onKeyDown 가드는 target === currentTarget이라 여기 이벤트가 카드에 닿지 않지만,
+    // 그래도 멈춘다 — 옮기려던 키가 상세를 여는 일이 없어야 한다. preventDefault는 Space의 페이지 스크롤도 막는다.
+    event.stopPropagation()
+    event.preventDefault()
+    if (event.key === 'Escape') { setGrabbedId(''); setGrabTarget(null); setDragStatus('단계 옮기기를 취소했습니다.'); return }
+    if (event.key === 'Enter' || event.key === ' ') { toggleGrab(item); return }
+    const from = grabbedId === item.id && grabTarget ? grabTarget : item.status
+    const next = stageNeighbour(from, event.key === 'ArrowRight' ? 1 : -1)
+    if (!next) return
+    setGrabbedId(item.id)
+    setGrabTarget(next)
+    setDragStatus(dropSentence(item, next, boardDropAction(item, next, currentUserId, items)))
+  }
+
+  /**
+   * 키보드로 잡아 둔 카드. 반드시 지금 목록에 있는 것으로 찾는다 —
+   * 잡은 사이에 그 업무가 사라지면(다른 관리자의 삭제·재배정 뒤 재조회) 렌더 경로에서 undefined.status를 읽고
+   * 화면 전체가 빈 화면이 된다. 아래 effect가 잡기 자체도 함께 놓는다(렌더 중에 상태를 바꾸지 않는다).
+   */
+  const grabbedItem = grabbedId ? items.find((item) => item.id === grabbedId) ?? null : null
+  useEffect(() => {
+    if (!grabbedId) return
+    if (viewMode !== 'board' || !items.some((item) => item.id === grabbedId)) { setGrabbedId(''); setGrabTarget(null) }
+  }, [items, grabbedId, viewMode])
 
   const drawerItem = drawerId ? items.find((item) => item.id === drawerId) ?? null : null
   const drawerStep = drawerItem ? stages.indexOf(drawerItem.status) : -1
@@ -910,6 +1146,32 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
    * 그 경우는 '적용'을 누른 뒤 서버가 SUBTASK_DEPTH_EXCEEDED 문장을 토스트로 돌려준다.
    */
   const canReparent = Boolean(drawerItem) && (canAssignTasks || drawerItem?.requesterId === currentUserId) && drawerChildren.length === 0 && drawerItem?.status !== '결재완료'
+  /** 기간을 바꿀 수 없는 이유. 서버 SCHEDULE_ERRORS와 같은 문장을 쓰는 한 함수에서만 나온다. */
+  const scheduleBlocked = drawerItem ? scheduleBlockReason(drawerItem, currentUserId, canAssignTasks) : ''
+  /**
+   * 드로어의 '적용'이 기간을 바꾸는 유일한 호출 지점이다 — 날짜 칸을 훑다 실수로 남의 마감이 바뀌지 않게.
+   * 시각은 보존한다: 사람이 고른 것은 날짜이고, 18:00 마감이 00:00이 되는 것은 아무도 정한 적 없는 변경이다.
+   */
+  const applySchedule = async () => {
+    if (!drawerItem || !onSchedule || !dueDraft) return
+    const due = seoulLocalToUtcIso(dueDraft, seoulTimeOf(drawerItem.due, '18:00'))
+    const startAt = startDraft ? seoulLocalToUtcIso(startDraft, seoulTimeOf(drawerItem.startAt, '09:00')) : null
+    if (!due) { setScheduleHint('마감일을 확인해 주세요.'); return }
+    // 시작일도 같은 문을 지난다. 값이 들어 있는데 읽히지 않으면 null로 보내지 않는다 —
+    // 서버에서 null은 '시작일을 지워라'라는 뜻이라, date 칸이 담을 수 있는 다섯 자리 연도 하나가
+    // 저장돼 있던 시작일을 소리 없이 지우고 화면은 그것을 '바꿨습니다'라고 부른다.
+    if (startDraft && !startAt) { setScheduleHint('시작일을 확인해 주세요.'); return }
+    if (startAt && startAt > due) { setScheduleHint(SCHEDULE_ORDER_HINT); return }
+    setScheduleBusy(true)
+    setScheduleHint('')
+    // 거절 사유는 이 칸 아래에도 남는다. 좁은 화면·터치에서는 손잡이가 아예 없어 이 칸이 기간을 바꾸는 유일한 길인데,
+    // 사유가 토스트로만 지나가면 사람은 거절된 날짜가 그대로 들어 있는 칸 둘과 아무 말 없는 화면만 보게 된다.
+    // 문장은 서버가 준 그것 하나다(scheduleTask가 토스트에 싣는 그 문자열을 그대로 돌려준다).
+    try {
+      const saved = await onSchedule(drawerItem.id, { due, startAt })
+      if (!saved.ok) setScheduleHint(saved.message ?? '')
+    } finally { setScheduleBusy(false) }
+  }
   const drawerGuide = !drawerItem ? ''
     : drawerItem.status === '결재완료' ? '이 업무는 승인까지 끝났습니다.'
       : drawerItem.requesterId === currentUserId && drawerItem.status === '결재대기' ? '담당자의 완료 보고를 확인하고 승인하거나 보완을 요청하세요.'
@@ -929,14 +1191,34 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
     const progress = subtaskProgress(items, item.id)
     const cardChildren = childrenOf(scoped, item.id)
     const priorityTone = item.priority === '긴급' ? 'danger' : item.priority === '높음' ? 'warning' : 'neutral'
+    // 편집 모드에서만 잡힌다. 카드는 클릭으로 상세를 여는 표면이라, 언제나 draggable이면
+    // 몇 픽셀 움직인 드래그가 클릭으로 끝나 '옮기려다 상세가 열림'이 매번 재현된다(대시보드 위젯이 이미 같은 결정을 했다).
+    const canDrag = boardDragMode && !coarsePointer && boardDropTargets(item, currentUserId, items).length > 0
     // 카드 자체는 버튼 역할을 맡지 않는다 — ARIA가 버튼의 자식을 보조기술에서 지워 버려(children presentational)
     // 카드 안의 하위 목록·펼침·행동 버튼이 스크린리더에 통째로 사라진다. 그 역할은 제목이 맡고, 카드 클릭은 마우스 편의로만 남긴다.
     return <article
-      className={`workflow-card priority-${priorityTone}${needsMyAction(item) ? ' is-actionable' : ''}${drawerId === item.id ? ' is-open' : ''}${item.status === '결재완료' ? ' is-done' : ''}`}
+      className={`workflow-card priority-${priorityTone}${needsMyAction(item) ? ' is-actionable' : ''}${drawerId === item.id ? ' is-open' : ''}${item.status === '결재완료' ? ' is-done' : ''}${dragCardId === item.id ? ' is-dragging' : ''}`}
       key={item.id}
+      draggable={canDrag}
+      onDragStart={(event) => {
+        event.dataTransfer.setData('text/plain', item.id)
+        event.dataTransfer.effectAllowed = 'move'
+        setDragCardId(item.id)
+      }}
+      onDragEnd={() => { setDragCardId(''); setDragOver(null) }}
       onClick={() => setDrawerId(item.id)}
     >
       <div className="workflow-card-top">
+        {canDrag && <IconButton
+          tone="quiet"
+          size="sm"
+          className="workflow-card-grip"
+          aria-label={`${item.title} 단계 옮기기`}
+          aria-pressed={grabbedId === item.id}
+          aria-keyshortcuts="ArrowLeft ArrowRight Enter Escape"
+          onClick={(event) => { event.stopPropagation(); toggleGrab(item) }}
+          onKeyDown={(event) => handleGripKey(event, item)}
+        ><GripVertical size={14} /></IconButton>}
         <StatusBadge className="status-pill" dot tone={priorityTone}>{item.priority}</StatusBadge>
         {item.ruleId && <span className="workflow-card-flag"><Repeat2 size={12} /> 반복</span>}
         {item.review?.decision === 'changes-requested' && item.status !== '결재완료' && <span className="workflow-card-flag revision">보완 요청</span>}
@@ -967,31 +1249,126 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
 
     <div className="workflow-board-toolbar">
       <div className="workflow-board-tabs" role="tablist" aria-label="업무 화면 전환">
-        <button type="button" role="tab" aria-selected={boardTab === 'board'} onClick={() => setBoardTab('board')}><ListChecks size={17} /> 결재 보드</button>
-        {canAssignTasks && <button type="button" role="tab" aria-selected={boardTab === 'rules'} onClick={() => setBoardTab('rules')}><Repeat2 size={17} /> 반복 규칙 <em>{activeRuleCount}</em></button>}
+        <button type="button" role="tab" aria-selected={viewMode !== 'rules'} onClick={() => setViewMode((current) => current === 'rules' ? lastWorkViewRef.current : current)}><ListChecks size={17} /> 업무</button>
+        {canAssignTasks && <button type="button" role="tab" aria-selected={viewMode === 'rules'} onClick={() => setViewMode('rules')}><Repeat2 size={17} /> 반복 규칙 <em>{activeRuleCount}</em></button>}
       </div>
-      {boardTab === 'board' && <div className="workflow-scope-filter" role="group" aria-label="업무 범위 필터">
-        <button type="button" className={scopeFilter === 'all' ? 'active' : ''} aria-pressed={scopeFilter === 'all'} onClick={() => setScopeFilter('all')}>전체</button>
-        <button type="button" className={scopeFilter === 'mine' ? 'active' : ''} aria-pressed={scopeFilter === 'mine'} onClick={() => setScopeFilter('mine')}>내가 담당</button>
-        {canAssignTasks && <button type="button" className={scopeFilter === 'requested' ? 'active' : ''} aria-pressed={scopeFilter === 'requested'} onClick={() => setScopeFilter('requested')}>내가 지시</button>}
+      {/* 탭은 '무엇을 보는가', 스위처는 '어떻게 보는가'다. 두 축을 한 줄에 두되 역할을 겹치지 않는다. */}
+      {viewMode !== 'rules' && <ViewSwitcher modes={WORK_VIEW_MODES} value={viewMode} onChange={(mode) => { lastWorkViewRef.current = mode; setViewMode(mode) }} label="업무 보기 방식" />}
+      {/* 범위 버튼은 필터의 scope 축을 그대로 읽고 쓴다 — 두 벌이 되면 한쪽만 바뀌는 날이 온다. */}
+      {viewMode !== 'rules' && <div className="workflow-scope-filter" role="group" aria-label="업무 범위 필터">
+        <button type="button" className={filters.scope === 'all' ? 'active' : ''} aria-pressed={filters.scope === 'all'} onClick={() => setFilters((current) => ({ ...current, scope: 'all' }))}>전체</button>
+        <button type="button" className={filters.scope === 'mine' ? 'active' : ''} aria-pressed={filters.scope === 'mine'} onClick={() => setFilters((current) => ({ ...current, scope: 'mine' }))}>내가 담당</button>
+        {canAssignTasks && <button type="button" className={filters.scope === 'requested' ? 'active' : ''} aria-pressed={filters.scope === 'requested'} onClick={() => setFilters((current) => ({ ...current, scope: 'requested' }))}>내가 지시</button>}
       </div>}
-      {boardTab === 'board' && <div className="workflow-board-summary" aria-label="업무 요약">
+      {viewMode !== 'rules' && <SavedViewMenu
+        workspaceScope={workspaceScope}
+        enabled
+        canShare={canAssignTasks}
+        currentUserId={currentUserId}
+        mode={viewMode}
+        filters={filters}
+        sort={sort}
+        columns={listColumns}
+        definitions={definitions}
+        names={filterNames}
+        activeId={activeViewId}
+        onActiveIdChange={setActiveViewId}
+        onApply={(view) => { lastWorkViewRef.current = view.mode; setViewMode(view.mode); setFilters(view.filters); setSort(view.sort); setListColumns(view.columns) }}
+        onToast={onToast}
+      />}
+      {/* 옮기기 모드일 때만 카드가 잡힌다. 터치·좁은 화면에서는 HTML5 드래그가 동작하지 않으므로 토글도 그리지 않는다. */}
+      {viewMode === 'board' && !coarsePointer && <Button
+        tone="ghost"
+        size="sm"
+        type="button"
+        aria-pressed={boardDragMode}
+        onClick={() => {
+          const next = !boardDragMode
+          setBoardDragMode(next)
+          // 끌 수 있는 카드가 하나도 없는 화면에서 '끌 수 있습니다'는 거짓말이다 — 카드마다 이미 같은 판정을
+          // 하고 있으므로(renderCard의 canDrag) 말하기 전에 그 수를 센다. 세는 것은 누를 때 한 번뿐이다.
+          const draggableCount = scoped.filter((item) => boardDropTargets(item, currentUserId, items).length > 0).length
+          setDragStatus(!next ? ''
+            : draggableCount ? '카드를 끌어 단계를 옮길 수 있습니다.'
+              : '지금 화면에는 옮길 수 있는 카드가 없습니다. 담당자이거나 지시한 사람인 업무만 옮길 수 있습니다.')
+          if (!next) { setGrabbedId(''); setGrabTarget(null) }
+        }}
+      >카드 옮기기</Button>}
+      {viewMode !== 'rules' && <div className="workflow-board-summary" aria-label="업무 요약">
         <span className={myActionCount > 0 ? 'is-attention' : ''}><strong>{myActionCount}</strong> 내 처리 필요</span>
         <span className={overdueCount > 0 ? 'is-danger' : ''}><strong>{overdueCount}</strong> 마감 지연</span>
       </div>}
     </div>
 
-    {boardTab === 'board' && <div className="workflow-board" role="list" aria-label="업무 단계 보드">
+    {/* hideSort: 고른 정렬이 실제로 순서를 정하는 보기는 목록뿐이다 — 보드는 단계 칼럼이(내 처리 필요·결재 순서),
+        캘린더는 날짜 칸이, 타임라인은 막대 위치(groupBars)가 자기 순서를 이미 갖고 있다. */}
+    {viewMode !== 'rules' && <WorkFilterBar
+      filters={filters}
+      onChange={setFilters}
+      onClear={() => setFilters(EMPTY_WORK_FILTERS)}
+      visibleCount={scoped.length}
+      assignees={filterOwners}
+      categories={filterCategories}
+      projects={filterProjects}
+      originKinds={filterOrigins}
+      definitions={definitions}
+      people={employees}
+      sort={sort}
+      onSortChange={setSort}
+      hideStatus={viewMode === 'board'}
+      hideSort={viewMode !== 'list'}
+      canAssignTasks={canAssignTasks}
+      onManageFields={() => setFieldsAdminOpen(true)}
+    />}
+
+    {viewMode === 'board' && <div className="workflow-board" role="list" aria-label="업무 단계 보드">
       {columns.map((column) => {
         const Icon = column.icon
         const list = columnItems(column.status)
         const count = stageCount(column.status)
         const isDone = column.status === '결재완료'
         const visibleList = isDone && !showAllDone ? list.slice(0, 6) : list
-        return <section className={`workflow-column tone-${column.tone}`} role="listitem" aria-label={`${column.label} ${count}건`} key={column.status}>
+        // 끌고 있는 카드가 이 칼럼에서 무엇이 되는지. 키보드로 고른 칼럼(grabTarget)도 같은 표를 지난다.
+        const hovering = dragOver?.status === column.status ? dragOver.drop
+          : grabbedItem && grabTarget === column.status ? boardDropAction(grabbedItem, column.status, currentUserId, items)
+            : null
+        const blockedReason = hovering?.kind === 'blocked' ? hovering.reason : ''
+        return <section
+          className={`workflow-column tone-${column.tone}${hovering?.kind === 'action' ? ' is-drop-target' : ''}${blockedReason ? ' is-blocked' : ''}`}
+          role="listitem"
+          aria-label={`${column.label} ${count}건`}
+          // aria-disabled를 주지 않는다 — listitem이 지고 갈 수 있는 상태가 아니라 보조기술이 무시한다.
+          // 같은 사실은 이미 세 곳에서 말한다: is-blocked(눈), 칼럼 머리의 사유 한 줄, 그리고 #workflow-board-drag-status(귀).
+          title={blockedReason || undefined}
+          key={column.status}
+          onDragOver={(event) => {
+            const dragged = items.find((candidate) => candidate.id === dragCardId)
+            if (!dragged) return
+            const drop = boardDropAction(dragged, column.status, currentUserId, items)
+            // 놓을 수 없는 칼럼에서는 preventDefault를 부르지 않는다 — 브라우저가 금지 커서를 그린다.
+            if (drop.kind === 'action') { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }
+            else event.dataTransfer.dropEffect = 'none'
+            if (dragOver?.status !== column.status || dragOver.drop.kind !== drop.kind) {
+              setDragOver({ status: column.status, drop })
+              setDragStatus(dropSentence(dragged, column.status, drop))
+            }
+          }}
+          onDragLeave={() => setDragOver((current) => current?.status === column.status ? null : current)}
+          onDrop={(event) => {
+            event.preventDefault()
+            const dragged = items.find((candidate) => candidate.id === (event.dataTransfer.getData('text/plain') || dragCardId))
+            setDragCardId('')
+            setDragOver(null)
+            if (!dragged) return
+            const drop = boardDropAction(dragged, column.status, currentUserId, items)
+            if (drop.kind === 'action') runBoardDrop(dragged, drop)
+            else setDragStatus(dropSentence(dragged, column.status, drop))
+          }}
+        >
           <header className="workflow-column-head">
             <span className="workflow-column-icon"><Icon size={16} /></span>
-            <div><strong>{column.label}</strong><small>{column.hint}</small></div>
+            {/* 끌고 있는 동안에는 안내 대신 사유가 그 자리에 온다 — 놓기 전에 답이 보여야 한다. */}
+            <div><strong>{column.label}</strong><small>{blockedReason || column.hint}</small></div>
             <em>{count}</em>
           </header>
           <div className="workflow-column-body">
@@ -1007,7 +1384,49 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
       })}
     </div>}
 
-    {boardTab === 'rules' && canAssignTasks && <section className="panel recurring-work-panel"><header><div><span className="eyebrow">RECURRING RULES</span><h2>반복 업무 규칙</h2><p>도래한 규칙은 요청됨 단계에 자동 생성됩니다.</p></div><Button tone="secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Plus size={17} /> 규칙 추가</Button></header><div className="recurring-rule-grid">{rulesByCompliance.map((rule) => <article key={rule.id} className={complianceTone(compliance[rule.id]?.rate)}><div><span className={`rule-state ${rule.active ? 'active' : 'paused'}`}>{rule.active ? '활성' : '중지'}</span><strong>{rule.title}</strong><p>{rule.description}</p></div><dl><div><dt>주기</dt><dd>{workRuleScheduleLabel(rule)}</dd></div><div><dt>담당자</dt><dd>{rule.owner}{rule.assignMode === 'rotation' ? ` 외 ${(rule.rotation?.length ?? 1) - 1}명 순번` : ''}</dd></div><div><dt>다음 실행</dt><dd>{formatWorkRuleRun(rule.nextRun, rule.dueTime)}</dd></div><div><dt>이행률<small> 최근 12회</small></dt><dd>{complianceLabel(compliance[rule.id])}</dd></div>{rule.checklist?.length ? <div><dt>점검 항목</dt><dd>{rule.checklist.length}개</dd></div> : null}</dl><div className="recurring-rule-actions"><Button tone="ghost" type="button" onClick={() => void onToggleRule(rule)}>{rule.active ? <PauseCircle size={17} /> : <PlayCircle size={17} />}{rule.active ? ' 일시 중지' : ' 다시 활성화'}</Button><Button tone="danger" type="button" onClick={() => void onDeleteRule(rule)}><Trash2 size={17} /> 삭제</Button></div></article>)}{rules.length === 0 && <div className="empty-state"><Repeat2 size={30} /><h3>반복 규칙이 없습니다</h3><p>매주·매월 반복되는 점검을 자동화해 보세요.</p></div>}</div></section>}
+    {/* 놓기 전의 답은 눈에도 귀에도 닿아야 한다 — 칼럼 색·칼럼 머리 문장과 같은 문장이 여기서 읽힌다. */}
+    {viewMode === 'board' && <p className="sr-only" role="status" aria-live="polite" id="workflow-board-drag-status">{dragStatus}</p>}
+
+    {viewMode === 'list' && <WorkListView
+      items={scoped}
+      allItems={items}
+      scopedIds={scopedIds}
+      parentRefs={parentRefs}
+      definitions={definitions}
+      people={peopleNames}
+      projectNames={projectNames}
+      columns={listColumns}
+      // 0건일 때 빈 캔버스를 남기지 않는다 — 기본 보기가 목록이라, 업무가 아직 없는 회사가 이 화면을 처음 여는
+      // 순간이 정확히 그 상태다. 타임라인이 이미 받는 것과 같은 두 값으로 '조건 때문'과 '아직 없음'을 가른다.
+      filtered={activeFilterCount(filters) > 0}
+      canAssignTasks={canAssignTasks}
+      onOpen={(id) => setDrawerId(id)}
+      onClearFilter={() => setFilters(EMPTY_WORK_FILTERS)}
+      onCreate={onCreate}
+      actionFor={primaryAction}
+    />}
+
+    {viewMode === 'calendar' && <WorkCalendarView
+      items={scoped}
+      allItems={items}
+      parentRefs={parentRefs}
+      onOpen={(id) => setDrawerId(id)}
+    />}
+
+    {viewMode === 'timeline' && <WorkTimeline
+      items={scoped}
+      allItems={items}
+      parentRefs={parentRefs}
+      currentUserId={currentUserId}
+      canAssignTasks={canAssignTasks}
+      workspaceScope={workspaceScope}
+      filtered={activeFilterCount(filters) > 0}
+      onOpen={(id) => setDrawerId(id)}
+      onSchedule={onSchedule}
+      onClearFilter={() => setFilters(EMPTY_WORK_FILTERS)}
+    />}
+
+    {viewMode === 'rules' && canAssignTasks && <section className="panel recurring-work-panel"><header><div><span className="eyebrow">RECURRING RULES</span><h2>반복 업무 규칙</h2><p>도래한 규칙은 요청됨 단계에 자동 생성됩니다.</p></div><Button tone="secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Plus size={17} /> 규칙 추가</Button></header><div className="recurring-rule-grid">{rulesByCompliance.map((rule) => <article key={rule.id} className={complianceTone(compliance[rule.id]?.rate)}><div><span className={`rule-state ${rule.active ? 'active' : 'paused'}`}>{rule.active ? '활성' : '중지'}</span><strong>{rule.title}</strong><p>{rule.description}</p></div><dl><div><dt>주기</dt><dd>{workRuleScheduleLabel(rule)}</dd></div><div><dt>담당자</dt><dd>{rule.owner}{rule.assignMode === 'rotation' ? ` 외 ${(rule.rotation?.length ?? 1) - 1}명 순번` : ''}</dd></div><div><dt>다음 실행</dt><dd>{formatWorkRuleRun(rule.nextRun, rule.dueTime)}</dd></div><div><dt>이행률<small> 최근 12회</small></dt><dd>{complianceLabel(compliance[rule.id])}</dd></div>{rule.checklist?.length ? <div><dt>점검 항목</dt><dd>{rule.checklist.length}개</dd></div> : null}</dl><div className="recurring-rule-actions"><Button tone="ghost" type="button" onClick={() => void onToggleRule(rule)}>{rule.active ? <PauseCircle size={17} /> : <PlayCircle size={17} />}{rule.active ? ' 일시 중지' : ' 다시 활성화'}</Button><Button tone="danger" type="button" onClick={() => void onDeleteRule(rule)}><Trash2 size={17} /> 삭제</Button></div></article>)}{rules.length === 0 && <div className="empty-state"><Repeat2 size={30} /><h3>반복 규칙이 없습니다</h3><p>매주·매월 반복되는 점검을 자동화해 보세요.</p></div>}</div></section>}
 
     {drawerItem && <div className="workflow-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDrawerId(null) }}>
       <aside ref={drawerRef} className="workflow-drawer" role="dialog" aria-modal="true" aria-labelledby="workflow-drawer-title">
@@ -1057,6 +1476,27 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
               <Button tone="secondary" size="sm" type="button" disabled={parentBusy || (reparentTarget === '' && !isSubtask(drawerItem))} onClick={() => { setParentBusy(true); void onMoveParent(drawerItem.id, reparentTarget || null).then((ok) => { setParentBusy(false); if (ok) setReparentTarget('') }) }}>적용</Button>
             </div>
           </section>}
+          {/* 블록은 언제나 그린다 — 못 바꾸는 사람에게 통째로 사라지면 '그런 기능이 없다'로 읽힌다. 대신 이유를 적는다. */}
+          {onSchedule && <section className="workflow-drawer-block" aria-label="업무 기간">
+            <span>업무 기간</span>
+            {scheduleBlocked
+              ? <p className="workflow-drawer-blocked"><AlertTriangle size={15} /> {scheduleBlocked}</p>
+              : <div className="workflow-drawer-schedule">
+                <label className="form-field"><span>시작일 <em>선택</em></span>
+                  <input type="date" value={startDraft} disabled={scheduleBusy} onChange={(event) => setStartDraft(event.target.value)} /></label>
+                <label className="form-field"><span>마감일 <em>필수</em></span>
+                  <input type="date" value={dueDraft} disabled={scheduleBusy} onChange={(event) => setDueDraft(event.target.value)} /></label>
+                <Button tone="secondary" size="sm" type="button" disabled={scheduleBusy || !dueDraft} onClick={() => void applySchedule()}>적용</Button>
+              </div>}
+            {scheduleHint && <p className="workflow-drawer-blocked">{scheduleHint}</p>}
+          </section>}
+          {onSaveFields && <CustomFieldEditor
+            item={drawerItem}
+            definitions={definitions}
+            people={employees}
+            locked={['결재대기', '결재완료'].includes(drawerItem.status)}
+            onSave={(values) => onSaveFields(drawerItem.id, values)}
+          />}
           {drawerItem.checklist?.length ? <section className="workflow-drawer-block" aria-label="점검 항목">
             <span>점검 항목 <small>{drawerItem.checklist.filter((entry) => entry.done).length}/{drawerItem.checklist.length}</small></span>
             <ul className="workflow-checklist-run">
@@ -1087,15 +1527,19 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
                 : <div className={`workflow-record ${entry.review.decision === 'approved' ? 'approved' : 'changes'}`} key={`review-${entry.at}-${index}`}><ShieldCheck size={17} /><div><strong>{entry.review.decision === 'approved' ? '승인' : '보완 요청'} <time dateTime={entry.review.reviewedAt}>{formatDateTime(entry.review.reviewedAt)}</time></strong><p>{entry.review.requestedChanges || entry.review.comment}</p></div></div>)}
             </div>}
           </section>
-          <dl className="workflow-drawer-meta"><div><dt>마감</dt><dd><Clock3 size={15} /> {formatWorkDue(drawerItem.due)}</dd></div><div><dt>담당</dt><dd>{drawerItem.owner}</dd></div><div><dt>요청</dt><dd>{drawerItem.requestedBy}</dd></div></dl>
+          {/* 마감 하나가 아니라 기간을 읽는다 — 시작일이 없으면 없다고 말한다(추론한 날짜를 값처럼 적지 않는다).
+              두 끝은 같은 표기(M.D)다: formatWorkDue는 가까운 날을 요일 이름으로 돌려주어 '토요일 → 9.19'가 된다.
+              오늘 마감일 때만 시각이 붙는다('9.1 → 9.5 18:00') — 목록이 아는 그 시각이 드로어에서만 사라지지 않게. */}
+          <dl className="workflow-drawer-meta"><div><dt>기간</dt><dd><Clock3 size={15} /> {workPeriodLabel(drawerItem)}</dd></div><div><dt>담당</dt><dd>{drawerItem.owner}</dd></div><div><dt>요청</dt><dd>{drawerItem.requestedBy}</dd></div></dl>
         </div>
       </aside>
     </div>}
 
     {dialog?.type === 'completion' && <CompletionModal item={dialog.item} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(summary, evidence) => onTransition(dialog.item.id, 'submit', { completion: { summary, evidence } })} />}
-    {dialog?.type === 'review' && <WorkReviewModal item={dialog.item} industryType={industryType} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(decision, comment, requestedChanges) => onTransition(dialog.item.id, decision, { review: { comment, requestedChanges } })} />}
+    {dialog?.type === 'review' && <WorkReviewModal item={dialog.item} industryType={industryType} workspaceScope={workspaceScope} initialMode={dialog.decision} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(decision, comment, requestedChanges) => onTransition(dialog.item.id, decision, { review: { comment, requestedChanges } })} />}
     {/* 반복 규칙이 만드는 업무는 프로젝트가 없다. 게스트를 순번에 넣으면 서버가 GUEST_PROJECT_REQUIRED로 거절하므로 후보에서 뺀다. */}
     {dialog?.type === 'rule' && <WorkRuleModal assignees={assignees.filter((assignee) => assignee.kind !== 'guest')} industryType={industryType} onClose={() => setDialog(null)} onSubmit={onCreateRule} />}
+    {fieldsAdminOpen && <CustomFieldAdmin definitions={definitions} workspaceScope={workspaceScope} onClose={() => setFieldsAdminOpen(false)} onChanged={reloadDefinitions} onItems={setDefinitions} />}
   </div>
 }
 
@@ -1346,7 +1790,7 @@ function InventoryPage({ onToast, canManage, workspaceScope }: { onToast: (messa
 }
 
 function TaskModal({ initialText, initialDescription = '', initialParentId, items = [], requesterName, requesterId, assignees, industryType, workspaceScope, onClose, onSave }: {
-  initialText: string; initialDescription?: string; initialParentId?: string; items?: WorkItem[]; requesterName: string; requesterId: string; assignees: WorkAssignee[]; industryType?: string; workspaceScope?: string; onClose: () => void; onSave: (item: WorkItem) => Promise<boolean>
+  initialText: string; initialDescription?: string; initialParentId?: string; items?: WorkItem[]; requesterName: string; requesterId: string; assignees: WorkAssignee[]; industryType?: string; workspaceScope?: string; onClose: () => void; onSave: (item: WorkItem) => Promise<WorkSaveResult>
 }) {
   const [title, setTitle] = useState(initialText)
   const [description, setDescription] = useState(initialDescription)
@@ -1365,6 +1809,8 @@ function TaskModal({ initialText, initialDescription = '', initialParentId, item
   const selectedOwner = assignees.find((assignee) => assignee.id === ownerId)
   const ownerIsGuest = selectedOwner?.kind === 'guest'
   const [parentId, setParentId] = useState(initialParentId ?? '')
+  // 커스텀 필드 정의는 이 모달 안에서 읽는다 — App 최상위에 훅을 하나 더 붙이지 않는다(게스트 계약).
+  const { definitions } = useCustomFields(workspaceScope, true)
   const candidates = parentCandidates(items)
   const parent = candidates.find((item) => item.id === parentId)
   // 상위를 고르면 프로젝트가 따라온다 — 하위 업무는 상위와 같은 프로젝트에 있어야 서버가 받는다.
@@ -1389,7 +1835,23 @@ function TaskModal({ initialText, initialDescription = '', initialParentId, item
     if (owner.kind === 'guest' && parent && !parent.projectId) { setError('게스트에게 맡기는 하위 업무는 프로젝트가 있는 상위 업무 아래에만 둘 수 있습니다.'); return }
     if (owner.kind === 'guest' && !projectId) { setError('외부 게스트에게 지시하는 업무는 초대된 프로젝트를 골라야 합니다.'); return }
     const dueLocal = String(form.get('due') || '')
-    const due = seoulLocalToUtcIso(dueLocal.slice(0, 10), dueLocal.slice(11, 16)) ?? dueLocal
+    const dueIso = seoulLocalToUtcIso(dueLocal.slice(0, 10), dueLocal.slice(11, 16))
+    const due = dueIso ?? dueLocal
+    // 서버는 시작일을 ISO 하나만 받는다. 날짜만 고른 값은 여기서 업무가 시작되는 시각(09:00)으로 절대화한다.
+    const startLocal = String(form.get('startAt') || '')
+    const startAt = seoulLocalToUtcIso(startLocal, '09:00')
+    // 적어 넣었는데 읽히지 않는 값은 조용히 버리지 않는다 — date 칸은 다섯·여섯 자리 연도도 담는다.
+    // 여기서 흘려보내면 사람이 정한 시작일 없이 업무가 만들어지고, 아무도 그 사실을 듣지 못한다.
+    if (startLocal && !startAt) { setError('시작일을 확인해 주세요.'); return }
+    /*
+     * 거꾸로 된 기간은 여기서 막는다. 서버의 배열 문(scheduleArrayViolation)도 같은 문장으로 거절하고
+     * 뒤집힌 기간뿐 아니라 2년 초과·범위 밖까지 함께 본다. 그래도 여기서 먼저 말하는 이유는,
+     * 저장된 뒤에 알면 늦기 때문이다: 타임라인은 그 행을 하루짜리 막대로 그리고 첫 조작에서 시작일을 조용히 덮어쓴다.
+     * 문장은 하나다 — SCHEDULE_ORDER_HINT는 서버 SCHEDULE_ERRORS.ORDER.message와 글자 그대로 같다(계약 테스트).
+     * 둘 다 ISO로 읽혔을 때만 비교한다: 마감이 자유 문자열로 남은 경우 문자열 대소 비교는 뜻이 없다.
+     */
+    if (startAt && dueIso && startAt > dueIso) { setError(SCHEDULE_ORDER_HINT); return }
+    const createFields = collectCreateFields(form, definitions)
     setBusy(true)
     setError('')
     let uploadedIds: string[] = []
@@ -1420,14 +1882,24 @@ function TaskModal({ initialText, initialDescription = '', initialParentId, item
         ...(attachments.length ? { attachments } : {}),
         ...(projectId ? { projectId } : {}),
         ...(parentId ? { parentId } : {}),
+        ...(startAt ? { startAt } : {}),
+        // 빈 칸은 키 자체를 만들지 않는다 — '값 없음'이 한 가지여야 저장 경로마다 다른 뜻이 되지 않는다.
+        ...(Object.keys(createFields).length ? { fields: createFields } : {}),
         createdAt: new Date().toISOString(),
       })
-      if (!saved && attachments.length) {
+      if (!saved.ok && attachments.length) {
         const cleanup = await deleteDocumentAttachments(uploadedIds, workspaceScope)
         uploadedIds = cleanup.failed.map((failure) => failure.id)
         if (cleanup.failed.length) throw new Error(`업무 저장에 실패했고 첨부 ${cleanup.failed.length}개를 정리하지 못했습니다.`)
       }
-      if (!saved) setBusy(false)
+      if (!saved.ok) {
+        // 문장은 서버가 준 그 하나다. 서버가 함께 보낸 key만 라벨로 바꿔 괄호로 덧붙인다 —
+        // 이 모달에는 추가 항목이 여러 칸 그려져 있어 '항목 형식에 맞지 않는 값입니다.'만으로는 고칠 칸을 찾을 수 없다.
+        // (드로어의 CustomFieldEditor가 같은 사실을 같은 형태로 말한다.)
+        const label = saved.key ? definitions.find((definition) => definition.key === saved.key)?.label : ''
+        if (saved.message && label) setError(`${saved.message} (${label})`)
+        setBusy(false)
+      }
     } catch (uploadError) {
       const cleanup = uploadedIds.length ? await deleteDocumentAttachments(uploadedIds, workspaceScope) : { failed: [] }
       const message = uploadError instanceof Error ? uploadError.message : '업무 지시를 저장하지 못했습니다.'
@@ -1448,11 +1920,18 @@ function TaskModal({ initialText, initialDescription = '', initialParentId, item
             {ownerIsGuest && <label className="form-field full"><span>어느 프로젝트에서 <em>필수</em></span><select name="projectId" value={projectId} disabled={Boolean(parent?.projectId)} onChange={(event) => setProjectId(event.target.value)} required><option value="" disabled>{projectOptions === null ? '프로젝트 불러오는 중…' : projectOptions.length === 0 ? '진행 중인 프로젝트가 없습니다' : '프로젝트 선택'}</option>{(projectOptions ?? []).map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select><small className="task-guest-note">{parent ? (parent.projectId ? '상위 업무의 프로젝트를 그대로 따릅니다.' : '이 상위 업무는 프로젝트에 속하지 않아 게스트에게 맡길 수 없습니다. 상위를 바꾸거나 직원에게 맡겨 주세요.') : '게스트는 초대된 프로젝트 안의 업무만 볼 수 있어 프로젝트를 정해야 합니다.'}</small></label>}
           </div>
           <details className="task-optional-fields" open={Boolean(initialDescription) || Boolean(initialParentId)}>
-            <summary><ChevronDown size={17} /> 선택 항목 <span>우선순위 · 완료 기준 · 첨부 · 상위 업무</span></summary>
+            {/* 접힌 줄은 안에 있는 것을 빠짐없이 세어야 한다 — 관리자가 만든 항목이 이 안에서 그려지므로
+                ('입력 필요' 배지가 붙는 것까지) 그 항목이 하나라도 있으면 이름을 함께 적는다. open 조건은 그대로 둔다. */}
+            <summary><ChevronDown size={17} /> 선택 항목 <span>시작일 · 우선순위 · 완료 기준 · 첨부 · 상위 업무{definitions.some((definition) => !definition.archivedAt) ? ' · 추가 항목' : ''}</span></summary>
             <div className="task-optional-fields-body">
+              {/* 시작일은 없어도 되는 값이다 — 비워 두면 타임라인이 만든 날짜를 대신 쓰고 '시작일 미정'으로 흐리게 그린다. */}
+              <label className="form-field"><span>시작일 <em>선택</em></span><input name="startAt" type="date" /></label>
               <label className="form-field full"><span>상위 업무 <em>선택</em></span><select name="parentId" value={parentId} onChange={(event) => { setParentId(event.target.value); setError('') }}><option value="">없음 (독립 업무)</option>{candidates.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select>{parent && <small className="task-guest-note">‘{parent.title}’의 하위 업무가 됩니다{parent.projectId ? ' · 프로젝트도 상위를 따릅니다' : ''}.</small>}</label>
               <label className="form-field"><span>우선순위</span><select name="priority" defaultValue="보통"><option>긴급</option><option>높음</option><option>보통</option></select></label>
               <label className="form-field full"><span>완료 기준</span><textarea rows={3} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="필요할 때만 완료 조건을 적어 주세요." /></label>
+              {/* 관리자가 만든 항목만 여기에 생긴다. 필수 3칸은 늘리지 않고, 이 details의 open 조건도 바꾸지 않는다. */}
+              {/* 사람 항목의 후보는 드로어와 같은 집합이다 — 서버가 '이 회사의 구성원'만 받으므로 게스트도, 플랫폼 운영자 계정도 아니다. */}
+              <CustomFieldCreateInputs definitions={definitions} people={assignees.filter((assignee) => assignee.kind === 'employee')} />
               <section className="task-attachment-picker" aria-labelledby="task-attachment-title"><div><strong id="task-attachment-title">사진·파일</strong><small>선택 · 파일당 10MB 이하</small></div><input ref={inputRef} className="sr-only" type="file" multiple onChange={(event) => { setPendingFiles(Array.from(event.target.files ?? []).slice(0, 10)); event.target.value = '' }} /><Button tone="secondary" type="button" disabled={busy} onClick={() => inputRef.current?.click()}><Paperclip size={17} /> 파일 선택</Button></section>
               {pendingFiles.length > 0 && <div className="task-pending-files">{pendingFiles.map((file, index) => <span key={`${file.name}-${file.lastModified}`}><FileText size={15} /> {file.name}<button type="button" aria-label={`${file.name} 제외`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={14} /></button></span>)}</div>}
             </div>
@@ -1837,9 +2316,12 @@ export default function App() {
       })
       .then(({ members }) => {
         if (!active || !Array.isArray(members)) return
+        // kind를 받은 그대로 들고 온다 — 서버는 이 회사의 구성원에게만 'employee'를 붙이고
+        // 플랫폼 운영자 계정에는 아무 kind도 주지 않는다. 'guest만 표시'로 줄여 두면 그 셋을 구별할 수 없어,
+        // 사람 항목처럼 '구성원만' 받는 자리에서 저장이 반드시 실패하는 후보를 고르게 된다.
         setDirectoryAssignees(members
           .filter((member) => member.id && member.name)
-          .map((member) => ({ id: member.id, name: member.name, ...(member.kind === 'guest' ? { kind: 'guest' as const } : {}) })))
+          .map((member) => ({ id: member.id, name: member.name, ...(member.kind ? { kind: member.kind } : {}) })))
       })
       .catch(() => {
         if (active) setDirectoryAssignees([])
@@ -2144,6 +2626,61 @@ export default function App() {
       return true
     } catch { setToast('업무 처리 서버에 연결할 수 없습니다.'); return false }
   }
+  /**
+   * 업무 기간 바꾸기. 배정이 아니므로 알림은 가지 않는다(=/parent와 같은 판단).
+   *
+   * 거절 사유는 서버 문장을 그대로 옮기고, 그 문장을 부른 쪽에도 돌려준다 — 토스트와
+   * 타임라인의 상태 줄이 같은 한 문장을 말해야 한다. 화면이 다른 말로 바꿔 적으면 같은 사실이 두 문장이 된다.
+   */
+  const scheduleTask = async (id: string, next: { due: string; startAt?: string | null }): Promise<ScheduleResult> => {
+    if (!workspaceScope) return { ok: false }
+    try {
+      const response = await fetch(`/api/work-items/${encodeURIComponent(id)}/schedule`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-workspace-identity': workspaceScope },
+        body: JSON.stringify(next),
+      })
+      const body = await response.json() as { item?: WorkItem; version?: string; error?: { message?: string } }
+      if (!response.ok || !body.item) {
+        const message = body.error?.message || '업무 기간을 바꾸지 못했습니다.'
+        setToast(message)
+        return { ok: false, message }
+      }
+      await setWorkItems((current) => current.map((item) => item.id === id ? body.item! : item), { persist: false, serverVersion: body.version })
+      setToast('업무 기간을 바꿨습니다.')
+      return { ok: true }
+    } catch {
+      const message = '업무 처리 서버에 연결할 수 없습니다.'
+      setToast(message)
+      return { ok: false, message }
+    }
+  }
+  /**
+   * 커스텀 필드 값 저장. 기간 바꾸기와 같은 형태다 — 배정도 마감 변경도 아니므로 알림은 가지 않는다.
+   * 거절 사유는 서버 문장을 그대로 옮기고 부른 쪽에도 돌려준다: 드로어의 칸 아래와 토스트가 한 문장을 말해야 한다.
+   */
+  const saveTaskFields = async (id: string, values: Record<string, string | number | null>): Promise<WorkFieldSaveResult> => {
+    if (!workspaceScope) return { ok: false }
+    try {
+      const response = await fetch(`/api/work-items/${encodeURIComponent(id)}/fields`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-workspace-identity': workspaceScope },
+        body: JSON.stringify({ values }),
+      })
+      const body = await response.json() as { item?: WorkItem; version?: string; error?: { message?: string; key?: string } }
+      if (!response.ok || !body.item) {
+        const message = body.error?.message || '추가 정보를 저장하지 못했습니다.'
+        setToast(message)
+        // key는 서버가 거절한 그 항목이다 — 드로어가 라벨로 바꿔 문장 옆에 덧붙인다(문장은 서버 것 하나 그대로).
+        return { ok: false, message, key: body.error?.key }
+      }
+      await setWorkItems((current) => current.map((item) => item.id === id ? body.item! : item), { persist: false, serverVersion: body.version })
+      setToast('추가 정보를 저장했습니다.')
+      return { ok: true }
+    } catch {
+      const message = '업무 처리 서버에 연결할 수 없습니다.'
+      setToast(message)
+      return { ok: false, message }
+    }
+  }
   /** 점검 항목 하나 켜고 끄기. 결재 상태는 건드리지 않고 이 값만 바꾼다. */
   const toggleChecklistItem = async (taskId: string, itemId: string, done: boolean) => {
     if (!workspaceScope) return false
@@ -2165,13 +2702,14 @@ export default function App() {
     setWorkFocusId(item.id)
     navigate('tasks')
   }
-  const saveTask = async (item: WorkItem) => {
+  const saveTask = async (item: WorkItem): Promise<WorkSaveResult> => {
     const result = await setWorkItems((current) => [item, ...current])
-    if (!result.ok) return false
+    // 실패는 문장과 '어느 항목인가'를 함께 돌려준다 — 모달이 그 key를 라벨로 바꿔 서버 문장 옆에 붙인다.
+    if (!result.ok) return { ok: false, message: result.message, key: result.key }
     setTaskDraft(null)
     setToast(item.parentId ? `${item.owner}님에게 하위 업무를 지시했습니다.` : item.owner + '님에게 업무를 지시했습니다.')
     navigate('tasks')
-    return true
+    return { ok: true }
   }
   const createWorkRule = async (input: Record<string, unknown>) => {
     if (!workspaceScope) return false
@@ -2307,7 +2845,7 @@ export default function App() {
       // 상세를 열어야 하는 업무는 기존 업무 화면으로 넘긴다. 작은 화면용으로 상세를 새로 만들면
       // 결재·증빙 같은 것이 두 곳에서 갈라진다.
       if (workFocusId) {
-        return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
+        return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onSchedule={scheduleTask} onSaveFields={saveTaskFields} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
       }
       return (
         <MobileTaskList
@@ -2332,7 +2870,7 @@ export default function App() {
     }
     switch (page) {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
-      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
+      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onSchedule={scheduleTask} onSaveFields={saveTaskFields} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} focusProjectId={projectFocusId} onFocusHandled={() => setProjectFocusId(undefined)} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onNavigate={(target) => { if (target === 'people') setPeopleInitialTab('accounts'); navigate(target as PageId) }} />
       case 'finance': return <TaxAssetsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} industryType={account?.industryType ?? 'food_manufacturing'} onToast={setToast} />
