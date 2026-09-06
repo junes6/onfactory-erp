@@ -35,6 +35,9 @@ export const NOTIFICATION_TYPES = Object.freeze({
   'notice-reminder': { label: '필독 확인 요청', pushByDefault: true, page: 'messenger' },
   // 작성자 한 사람에게만 가는 집계다. 기본으로 울리면 공지를 자주 쓰는 사람이 알림을 꺼 버린다.
   'notice-unconfirmed-summary': { label: '미확인 명단', pushByDefault: false, page: 'messenger' },
+  // R16-J: 스레드 답글. source.kind가 'message'라 방별 무음이 그대로 적용된다.
+  // 기본 푸시는 꺼 둔다 — 스레드는 오래 이어져 울릴 일이 많고, 지목은 mention이 따로 한다.
+  'thread-reply': { label: '스레드 답글', pushByDefault: false, page: 'messenger' },
 })
 
 export const NOTIFICATION_TYPE_IDS = Object.freeze(Object.keys(NOTIFICATION_TYPES))

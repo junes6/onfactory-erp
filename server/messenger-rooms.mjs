@@ -1,7 +1,11 @@
 import { randomBytes } from 'node:crypto'
 
+import {
+  THREAD_ERRORS, liveThreadReplies, mainChannelMessages, threadParticipantIds, threadReadViolation, threadReplies,
+} from './messenger-threads.mjs'
+
 /**
- * 그룹 대화방과 메시지 조작 — 답장·반응·고정·수정·삭제.
+ * 그룹 대화방과 메시지 조작 — 답장·반응·고정·수정·삭제·스레드.
  *
  * 왜 전용 라우트인가: 일반 저장 경로(PUT /api/workspace/messenger-conversations)는
  * 메신저에 대해 사실상 읽기 전용이다. 데이터가 한 번 생기면 관리자도 "완전히 같은 배열"만
@@ -125,10 +129,25 @@ export function registerMessengerRoomRoutes({
   notify,
   events,
   clock = () => new Date(),
+  // 이 계정이 지금도 이 방을 볼 수 있는가 — 방을 나간 사람(hiddenFor)·초대가 끝난 게스트·로그인할 수 없는
+  // 계정(approved)을 함께 가른다. app.mjs의 accountSeesConversation 한 함수이고, 그 파일의 알림 두 갈래
+  // (notifyMentions·notifyThreadReply)도 같은 함수를 부른다.
+  // isConversationVisibleToMember를 여기서 직접 부르지 않는 이유: 그 판정은 게스트의 guestScope를 읽는데
+  // 그 값은 저장된 계정에 없고 요청마다 붙는 것이라, 부르는 쪽(app.mjs)만이 모든 차원을 실어 줄 수 있다.
+  // 주입되지 않으면(옛 호출자) 명단을 좁히지 않는다 — 승격 자체는 여전히 스레드 참여자만 할 수 있다.
+  conversationVisibleTo = () => true,
   // 외부 게스트·프로젝트 채널. 주입되지 않으면(옛 호출자) 게스트가 없는 것으로 동작한다.
   guestGrantOf = () => null,
   projectSpacesOf = () => [],
   projectRoleOf = () => null,
+  // R16-J 스레드. 공유 메시지의 @멘션은 본채널 메시지와 똑같이 알린다.
+  notifyMentions = () => {},
+  // 스레드 승격 세 갈래. 주입되지 않으면 승격 라우트가 501을 낸다 —
+  // 업무는 생기고 출처는 비는 반쪽 승격을 만드는 대신 기능을 켜지 않는다(fail-closed).
+  createTaskFromConclusion = null,
+  createDecisionFromConclusion = null,
+  createDocumentFromConclusion = null,
+  logger = console,
 }) {
   const conversationsOf = (tenantId) => {
     const record = workspaceStore.tenants[tenantId]?.[CONVERSATIONS_KEY]
@@ -391,7 +410,10 @@ export function registerMessengerRoomRoutes({
     const at = clock().toISOString()
     const edited = { ...target, text: body, editedAt: at }
     const messages = conversation.messages.map((message) => (message.id === edited.id ? edited : message))
-    const isLast = conversation.messages[conversation.messages.length - 1]?.id === edited.id
+    // '마지막'은 본채널의 마지막이다. 배열 마지막 원소가 스레드 답글일 때 그것을 고치면
+    // 채널 목록 미리보기가 스레드 본문으로 바뀌어, 스레드에 들어가지 않은 사람이 그 내용을 읽는다.
+    const main = mainChannelMessages(conversation.messages)
+    const isLast = main.at(-1)?.id === edited.id
     const next = { ...conversation, messages, ...(isLast ? { lastMessage: body } : {}) }
     if (await save(request, response, conversations, next, 'MESSENGER_MESSAGE_EDIT_FAILED')) response.json({ message: edited })
   })
@@ -416,9 +438,12 @@ export function registerMessengerRoomRoutes({
       return
     }
     const at = clock().toISOString()
+    // tombstone은 spread라 threadRootId·replyCount·lastReplyAt이 그대로 남는다.
+    // 루트를 지워도 답글은 갈 곳을 잃지 않고(스레드 조회는 threadReadViolation을 쓴다),
+    // 답글을 지워도 루트의 '답글 N개'가 흔들리지 않는다.
     const removed = stripUndefined(tombstoneMessage(target, request.auth.id, at))
     const messages = conversation.messages.map((message) => (message.id === removed.id ? removed : message))
-    const isLast = conversation.messages[conversation.messages.length - 1]?.id === removed.id
+    const isLast = mainChannelMessages(conversation.messages).at(-1)?.id === removed.id
     const next = stripUndefined({
       ...conversation,
       messages,
@@ -476,6 +501,11 @@ export function registerMessengerRoomRoutes({
       response.status(404).json({ error: { code: 'MESSAGE_NOT_FOUND', message: '메시지를 찾을 수 없습니다.' } })
       return
     }
+    // 고정 스트립은 본채널 화면이다. 답글을 고정하면 눌러도 갈 곳이 없다 — 그 말은 본채널에 없기 때문이다.
+    if (target.threadRootId) {
+      response.status(409).json({ error: THREAD_ERRORS.REPLY_NOT_PINNABLE })
+      return
+    }
     const current = conversation.pinnedMessageIds ?? []
     if (pin && current.length >= MAX_PINNED && !current.includes(target.id)) {
       response.status(409).json({ error: { code: 'TOO_MANY_PINNED', message: `고정은 ${MAX_PINNED}건까지 가능합니다. 먼저 하나를 풀어 주세요.` } })
@@ -502,9 +532,14 @@ export function registerMessengerRoomRoutes({
       .filter(({ message }) => !message.deletedAt && String(message.text ?? '').toLowerCase().includes(query))
       .slice(-100)
       .reverse()
+      // 스레드 답글도 검색 대상이다 — 방 안 검색에서 스레드만 빠지면 "여기 있었는데 안 나온다"가 된다.
+      // 대신 어디에 있는 말인지 알려 준다.
+      // 이 라우트를 쓰는 화면은 아직 없다(지금 방 안 검색은 화면이 가진 배열을 훑는다). threadRootId를
+      // 함께 내려 두는 것은 그 검색을 서버로 옮길 때 계약을 두 번 만들지 않기 위해서다.
       .map(({ message, index }) => ({
         id: message.id, index, text: message.text, senderName: message.senderName,
         time: message.time, createdAt: message.createdAt ?? '',
+        threadRootId: message.threadRootId ?? '',
       }))
     response.json({ query, total: matches.length, matches })
   })
@@ -513,7 +548,9 @@ export function registerMessengerRoomRoutes({
   app.get('/api/messenger/conversations/:id/messages', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
     const found = locate(request, response)
     if (!found) return
-    const all = found.conversation.messages
+    // 본채널 페이지에는 답글이 없다. before 커서·total·hasMore·readSummaries가 모두 이 배열 기준이므로,
+    // 여기서 한 번만 거르면 위로 올라가며 받아 가는 창이 스레드 때문에 어긋나지 않는다.
+    const all = mainChannelMessages(found.conversation.messages)
     const limit = Math.min(Math.max(Number.parseInt(String(request.query?.limit ?? ''), 10) || MESSAGE_PAGE_SIZE, 1), 200)
     const beforeId = String(request.query?.before ?? '')
     const end = beforeId ? all.findIndex((message) => message?.id === beforeId) : all.length
@@ -525,5 +562,187 @@ export function registerMessengerRoomRoutes({
       total: all.length,
       readSummaries: Object.fromEntries(all.slice(start, stop).map((message) => [message.id, readSummary(message, found.conversation)])),
     })
+  })
+
+  // ── 스레드 읽기 ─────────────────────────────────────────────────
+  // 페이징을 두지 않는다. 답글은 방 상한 5,000건을 본문과 공유하므로, 한 스레드가 그 절반을 넘는 일은
+  // 스레드가 아니라 방 자체가 한계인 상황이다. 그때 필요한 것은 페이지가 아니라 보관 처리다.
+  app.get('/api/messenger/conversations/:id/messages/:messageId/thread', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+    const found = locate(request, response)
+    if (!found) return
+    const { conversation } = found
+    // 읽기 쪽 판정이라 루트가 지워진 스레드도 열린다. 여기서 404를 내면 남의 답글이
+    // 배열에만 남고 화면 어디에서도 열리지 않는다(방 안 검색은 여전히 그 말을 찾아 준다).
+    if (threadReadViolation(conversation.messages, request.params.messageId)) {
+      response.status(404).json({ error: { code: 'MESSAGE_NOT_FOUND', message: '메시지를 찾을 수 없습니다.' } })
+      return
+    }
+    const root = conversation.messages.find((item) => item?.id === request.params.messageId)
+    const replies = threadReplies(conversation.messages, root.id)
+    // 답글 수는 여기서 다시 센다. 루트에 저장된 replyCount는 본채널 요약용 값일 뿐이고,
+    // 사람이 보는 목록은 언제나 실제 배열에서 나와야 한다.
+    // 저장값이 실제와 어긋나면 조용히 넘어가지 않고 한 줄 남긴다 — 복원·수동 편집으로만 생길 수 있는 상태다.
+    if (Number.isInteger(root.replyCount) && root.replyCount !== replies.length) {
+      logger?.warn?.(`[thread] replyCount 불일치 conversation=${conversation.id} root=${root.id} stored=${root.replyCount} actual=${replies.length}`)
+    }
+    response.json({
+      root,
+      replies,
+      // 남아 있는 답글 수도 함께 준다. 화면의 [채널에 공유]가 이 수로 켜지고 꺼져야
+      // 서버의 THREAD_EMPTY 판정과 같은 것을 세게 된다 — 지운 답글 하나만 남은 스레드에서
+      // 버튼은 켜져 있고 누르면 409가 나는 자리를 만들지 않는다.
+      liveReplyCount: liveThreadReplies(conversation.messages, root.id).length,
+      // participants·readSummaries·replyCount·lastReplyAt은 싣지 않는다. 참여자 명단은 공유·승격 403이
+      // 서버 안에서 쓰는 사실이고(threadParticipantIds), 읽음 표시는 본채널의 것이라 패널이 답글에 그리지 않으며,
+      // 답글 수와 마지막 시각은 본채널 요약 줄이 대화 배열에서 직접 읽는 값이다(패널은 replies를 그대로 센다).
+      // 아무도 읽지 않는 필드를 계약에 남겨 두면 다음 사람이 그것을 근거로 화면을 만들고, 그때 규칙이 두 벌이 된다.
+    })
+  })
+
+  // ── 채널에 공유 ─────────────────────────────────────────────────
+  app.post('/api/messenger/conversations/:id/threads/:rootId/share', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    const found = locate(request, response)
+    if (!found) return
+    const { conversations, conversation } = found
+    // 루트가 지워졌어도 그 아래 결론은 남는다. 열어서 읽을 수 있는 스레드면 결론도 낼 수 있다.
+    if (threadReadViolation(conversation.messages, request.params.rootId)) {
+      response.status(404).json({ error: { code: 'MESSAGE_NOT_FOUND', message: '메시지를 찾을 수 없습니다.' } })
+      return
+    }
+    const root = conversation.messages.find((item) => item?.id === request.params.rootId)
+    // 스레드 결론을 채널에 올리는 것은 '그 대화에 있던 사람'의 일이다. 방을 보기만 한 사람이
+    // 남의 스레드 요약으로 채널 미리보기를 갈아 끼우지 못하게 한다(방장은 예외 — 방을 치울 사람이다).
+    const participants = threadParticipantIds(conversation.messages, root.id)
+    if (!participants.includes(request.auth.id) && !canManageRoom(conversation, request.auth)) {
+      response.status(403).json({ error: { code: 'THREAD_SHARE_FORBIDDEN', message: '이 스레드에 참여한 사람만 채널에 공유할 수 있습니다.' } })
+      return
+    }
+    // text()를 쓰지 않는다 — 그 함수는 \s+를 공백 하나로 접어 요약의 줄바꿈을 없앤다.
+    const body = String(request.body?.text ?? '').replace(/\r\n/g, '\n').trim()
+    if (!body || body.length > 4_000) {
+      response.status(400).json({ error: { code: 'INVALID_MESSAGE', message: '메시지는 1자 이상 4,000자 이하로 입력해 주세요.' } })
+      return
+    }
+    // 승격과 같은 뜻으로 센다 — 지운 답글만 남은 스레드에는 옮겨 적을 결론이 없다.
+    if (!liveThreadReplies(conversation.messages, root.id).length) {
+      response.status(409).json({ error: THREAD_ERRORS.THREAD_EMPTY })
+      return
+    }
+    if (conversation.messages.length >= 5_000) {
+      response.status(409).json({ error: { code: 'MESSENGER_MESSAGE_CAPACITY_REACHED', message: '이 대화의 메시지 보관 한도(스레드 답글 포함 5,000건)에 도달했습니다. 개발운영진에게 보관 처리를 요청해 주세요.' } })
+      return
+    }
+    const at = clock().toISOString()
+    const message = {
+      id: newId('m'),
+      senderId: request.auth.id,
+      senderName: request.auth.name,
+      senderRole: request.auth.role,
+      text: body,
+      time: seoulTime(at),
+      createdAt: at,
+      readBy: [request.auth.id],
+      replyTo: root.id,
+      sharedFromThreadId: root.id,
+    }
+    const next = { ...conversation, messages: [...conversation.messages, message], lastMessage: body, lastTime: message.time }
+    if (!(await save(request, response, conversations, next, 'MESSENGER_WRITE_FAILED'))) return
+    // proposeTaskFromMessage는 부르지 않는다. 요약문이 지시 문형이면 방금 결론 낸 일이
+    // 승인 큐에 제안으로 다시 쌓인다 — 결론을 낸 대가가 결재 한 건이면 아무도 요약하지 않는다.
+    try { notifyMentions(request.auth, conversations, [next]) } catch { /* 알림 실패가 공유를 되돌리지 않는다 */ }
+    response.status(201).json({ conversation: next, message })
+  })
+
+  // ── 스레드 승격 (업무·결정·자료) ────────────────────────────────
+  app.post('/api/messenger/conversations/:id/threads/:rootId/promote', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    const found = locate(request, response)
+    if (!found) return
+    const { conversation } = found
+    if (threadReadViolation(conversation.messages, request.params.rootId)) {
+      response.status(404).json({ error: { code: 'MESSAGE_NOT_FOUND', message: '메시지를 찾을 수 없습니다.' } })
+      return
+    }
+    const root = conversation.messages.find((item) => item?.id === request.params.rootId)
+    // 공유보다 무거운 일에 문이 더 넓으면 안 된다. 승격은 스레드 본문을 업무 설명·결정 근거·자료 파일로
+    // 방 밖에 옮겨 적는 일이므로, 공유와 같은 사람들(스레드 참여자 ∪ 방장)만 할 수 있다.
+    const promoters = threadParticipantIds(conversation.messages, root.id)
+    if (!promoters.includes(request.auth.id) && !canManageRoom(conversation, request.auth)) {
+      response.status(403).json({ error: { code: 'THREAD_PROMOTE_FORBIDDEN', message: '이 스레드에 참여한 사람만 업무·결정·자료로 올릴 수 있습니다.' } })
+      return
+    }
+    const kind = String(request.body?.kind ?? '')
+    const makers = { task: createTaskFromConclusion, decision: createDecisionFromConclusion, document: createDocumentFromConclusion }
+    if (!Object.prototype.hasOwnProperty.call(makers, kind)) {
+      response.status(400).json({ error: { code: 'UNSUPPORTED_PROMOTION', message: '업무·결정·자료 중에서 골라 주세요.' } })
+      return
+    }
+    const make = makers[kind]
+    if (typeof make !== 'function') {
+      response.status(501).json({ error: { code: 'PROMOTION_UNAVAILABLE', message: '승격 기능이 설정되지 않았습니다. 개발운영진에게 문의해 주세요.' } })
+      return
+    }
+    const replies = liveThreadReplies(conversation.messages, root.id)
+    if (!replies.length) {
+      response.status(409).json({ error: THREAD_ERRORS.THREAD_EMPTY })
+      return
+    }
+    // 루트와 답글을 한 덩이 본문으로 잇는다. 승격된 업무를 보는 사람은 스레드를 못 열 수도 있으므로
+    // 무슨 말이 오갔는지가 그 자리에 남아 있어야 한다.
+    // 지워진 루트는 싣지 않는다 — tombstone('삭제된 메시지')이 맨 앞에 오면 자동 제목이 그 문구가 되어
+    // 아무도 읽을 수 없는 말의 이름을 단 업무가 결재함에 선다. 승격이 옮겨 적는 것은 남아 있는 말이다.
+    const content = [...(root.deletedAt ? [] : [root.text]), ...replies.map((item) => item.text)].join('\n\n').slice(0, 4_000)
+    let created
+    try {
+      created = await make({
+        auth: request.auth,
+        conversation: { id: conversation.id, title: conversation.name ?? '메신저', scope: 'messenger' },
+        message: { id: root.id, content },
+        title: String(request.body?.title ?? '').trim(),
+        // focusId는 방 id가 아니라 §J의 합성 규약이다 — 배지를 눌렀을 때 방이 아니라 그 스레드가 열려야 한다.
+        origin: {
+          kind: 'thread', label: '스레드에서 승격', detail: String(conversation.name ?? '').slice(0, 120),
+          page: 'messenger', focusId: `${conversation.id}:thread:${root.id}`,
+        },
+        decisionKind: 'thread-conclusion',
+        // 같은 스레드를 두 번 결정으로 올리면 기존 sourceKey 규칙이 막는다 — 여기서 따로 세지 않는다.
+        sourceKey: `thr:${conversation.id}:${root.id}`,
+        // 그 거절이 사람에게 닿을 때의 낱말은 부르는 쪽이 정한다. 'AI 대화의 답'이 아니라 '스레드'다.
+        duplicateMessage: '이미 결정으로 올린 스레드입니다.',
+        sourceLabel: `스레드 「${conversation.name ?? '메신저'}」`,
+        tags: ['thread', `conversation:${conversation.id}`],
+        // 자료로 올릴 때의 공개 범위. AI 대화는 승격한 사람 자신의 글이라 전사 공개가 기본이지만,
+        // 스레드는 참여자 명단이 있는 방에서 오간 남의 말이다. 한 번의 클릭으로 회사 전체가 읽게 되면
+        // 그건 승격이 아니라 유출이다 — 방에 있던 사람들에게만 연다(관리자·올린 사람은 원래 읽는다).
+        // 명단은 한 갈래로 세지 않는다. participantIds가 없는 방이 지금도 있고(데모 테넌트의 team-ops·
+        // direct-yoon 등), 그 방에서 올리면 명단이 올린 사람 하나로 줄어 정작 그 말을 한 사람들이
+        // 자기 말로 만든 파일을 못 연다. 방의 명단 ∪ 스레드에서 말한 사람 ∪ 1:1의 상대 ∪ 올린 사람.
+        //
+        // 그리고 그 합집합을 "지금도 이 방을 볼 수 있는 사람"으로 다시 좁힌다. participantIds는 방을
+        // 나가도 그대로 남고(leave 라우트는 hiddenFor에만 이름을 넣는다) 게스트의 초대는 나중에 다른
+        // 프로젝트로 옮겨 갈 수 있다 — 그 사람들이 명단에 남으면 나간 뒤에 오간 말을 파일로 읽는다.
+        // 바로 옆 notifyThreadReply가 같은 술어로 같은 것을 막는다(HARD-WON RULE 8).
+        // 올린 사람 자신은 언제나 남긴다 — 자기가 만든 파일을 못 여는 승격은 승격이 아니다.
+        visibility: 'restricted',
+        allowedUserIds: Array.from(new Set([
+          ...(Array.isArray(conversation.participantIds) ? conversation.participantIds : []),
+          ...promoters,
+          ...(typeof conversation.memberId === 'string' && conversation.memberId ? [conversation.memberId] : []),
+          request.auth.id,
+        ])).filter((id) => id === request.auth.id || conversationVisibleTo(conversation, id, request.auth.tenantId)),
+        // 프로젝트 채널에서 나온 자료는 그 프로젝트에 귀속된다. 게스트 초대 범위가 나중에 좁혀질 때
+        // 자료실의 회수 스윕이 이 한 칸만 보고 명단에서 게스트를 뺀다 — 없으면 회수되지 않는다.
+        projectId: typeof conversation.projectId === 'string' && conversation.projectId ? conversation.projectId : null,
+      })
+    } catch (error) {
+      // 같은 스레드를 두 번 결정으로 올리는 것은 서버 고장이 아니라 업무 규칙 거절이다 —
+      // 이 파일의 다른 거절(THREAD_EMPTY·용량)과 같은 409로 답한다.
+      if (error?.code === 'ALREADY_PROMOTED') {
+        response.status(409).json({ error: { code: 'THREAD_ALREADY_PROMOTED', message: error.message } })
+        return
+      }
+      response.status(500).json({ error: { code: 'PROMOTION_FAILED', message: error?.message || '올리지 못했습니다.' } })
+      return
+    }
+    response.status(201).json({ created })
   })
 }

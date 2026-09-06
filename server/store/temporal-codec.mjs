@@ -67,7 +67,11 @@ function messengerPayload(source, referenceDate) {
     if (createdAt) next.createdAt = createdAt
     return next
   })
-  const lastMessageAt = payload.messages.at(-1)?.createdAt ?? null
+  // 채널 목록의 시각은 '본채널의 마지막 말'이다. 배열 마지막 원소가 스레드 답글이면
+  // PG 왕복 뒤 lastTime이 답글 시각으로 되살아나 채널 밖에서 스레드 활동이 읽힌다.
+  // JSON 모드에서는 절대 드러나지 않는 갈래라 여기서 미리 막는다.
+  const main = payload.messages.filter((message) => !message?.threadRootId)
+  const lastMessageAt = (main.at(-1) ?? payload.messages.at(-1))?.createdAt ?? null
   delete payload.lastTime
   return { payload, lastMessageAt }
 }

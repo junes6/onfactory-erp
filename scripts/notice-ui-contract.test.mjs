@@ -111,7 +111,11 @@ test('본문 상한 숫자는 화면과 서버가 같다 — 어긋나면 막지
 test('딥링크는 focusId 한 문자열로 가고, onNavigate 시그니처는 그대로 두 인자다', () => {
   assert.match(noticeCenter, /export function parseMessengerFocus/)
   assert.match(noticeCenter, /event\.nativeEvent\.isComposing/)
-  assert.equal((app.match(/parseMessengerFocus\(focusId\)/g) ?? []).length, 1)
+  // 규약을 읽는 함수는 여전히 한 벌(NoticeCenter)이고, 부르는 자리만 늘어난다.
+  // R16-J에서 업무 출처 배지(스레드에서 승격)가 두 번째 호출부가 됐다 — 'messenger'는 industryRoutes에
+  // 없어 navigate로는 토스트로 끝나므로, 여기서도 서랍을 그 자리에 여는 같은 갈래를 탄다.
+  assert.equal((app.match(/parseMessengerFocus\(focusId\)/g) ?? []).length, 2)
+  assert.match(app, /const openWorkOrigin = \(originPage: string, focusId: string\) => \{[\s\S]{0,400}?originPage === 'messenger' \? parseMessengerFocus\(focusId\) : null/)
   assert.equal((app.match(/hit\.kind === 'notice'/g) ?? []).length, 1)
   assert.match(notificationCenter, /onNavigate: \(page: string, focusId: string\) => void/)
 })
@@ -153,7 +157,9 @@ test('공지 보드를 보는 중에는 현재 항목이 둘이 되지 않고, �
   assert.match(collaboration, /aria-current=\{pane === 'chat' && conversation\.id === selectedId \? 'true' : undefined\}/)
   // 방을 고르는 세 길(목록 행·새 대화·새 그룹방)이 모두 한 곳을 지난다. 하나라도 새면 보드가 열린 채
   // 선택만 바뀌어 화면이 아무 반응도 하지 않고, 휴대폰에서는 사이드바만 사라져 보드에 갇힌다.
-  assert.match(collaboration, /const selectConversation = \(id: string\) => \{\s+setPane\('chat'\)\s+setSelectedId\(id\)\s+setMobilePane\('chat'\)\s+\}/)
+  // R16-J에서 스레드 닫기가 한 줄 더 붙었다. 세 줄의 순서와 내용은 그대로 잠그되, 이 자리에
+  // '방을 바꿀 때 함께 되돌려야 하는 것'이 늘어나는 것 자체는 막지 않는다 — 그것이 이 함수의 일이다.
+  assert.match(collaboration, /const selectConversation = \(id: string\) => \{\s+setPane\('chat'\)\s+setSelectedId\(id\)\s+setMobilePane\('chat'\)\s/)
   assert.equal((collaboration.match(/selectConversation\(/g) ?? []).length, 5, '딥링크 두 갈래 + 방을 고르는 세 길')
   const body = (name) => collaboration.slice(collaboration.indexOf(`const ${name} = `), collaboration.indexOf(`const ${name} = `) + 1_600)
   for (const name of ['chooseConversation', 'startDirectConversation', 'createGroupRoom']) {

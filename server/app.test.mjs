@@ -1873,6 +1873,15 @@ test('messenger direct rooms keep one conversation, record reads, and enforce le
       method: 'POST', headers: { 'content-type': 'application/json', cookie: admin.cookie }, body: JSON.stringify({ text: '현재 세대 원본 메시지' }),
     })
     assert.equal(sendCurrent.status, 201)
+    // R16-J: 루트(replyCount·lastReplyAt)와 답글(threadRootId) 두 건을 픽스처에 심는다.
+    // 아래 '변경 없는 PUT은 200'이 스레드 필드를 가진 배열에서도 성립해야 한다 —
+    // 여기서 400이 나면 MESSAGE_OPTIONAL_FIELDS/hasMessageShape에서 네 필드가 빠진 것이다.
+    const threadRoot = (await sendCurrent.json()).message
+    const sendThreadReply = await fetch(`${origin}/api/messenger/conversations/${afterDelete.conversation.id}/messages`, {
+      method: 'POST', headers: { 'content-type': 'application/json', cookie: admin.cookie },
+      body: JSON.stringify({ text: '스레드 답글', threadRootId: threadRoot.id }),
+    })
+    assert.equal(sendThreadReply.status, 201)
     const currentRaw = (await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: { cookie: admin.cookie } })).json()).data
     const forgedSenderData = structuredClone(currentRaw)
     const forgedActive = forgedSenderData.find((conversation) => conversation.id === afterDelete.conversation.id)
@@ -1909,7 +1918,9 @@ test('messenger direct rooms keep one conversation, record reads, and enforce le
     })
     assert.equal(unchangedWrite.status, 200)
     const memberAfterAttacks = await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: { cookie: member.cookie } })
-    assert.deepEqual((await memberAfterAttacks.json()).data[0].messages.map((message) => message.text), ['현재 세대 원본 메시지'])
+    // 답글은 generic GET의 원본 배열에는 그대로 있다(감독 열람·백업이 이 배열 하나를 본다).
+    // 답글을 감추는 것은 화면과 페이지 라우트의 일이다.
+    assert.deepEqual((await memberAfterAttacks.json()).data[0].messages.map((message) => message.text), ['현재 세대 원본 메시지', '스레드 답글'])
   })
 })
 

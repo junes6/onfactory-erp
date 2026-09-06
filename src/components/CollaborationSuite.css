@@ -446,6 +446,103 @@
 .messenger-chat > .messenger-messages { flex: 1 1 auto; }
 .messenger-chat > :is(.messenger-chat-header, .messenger-room-search, .messenger-notices, .messenger-pinned, .messenger-composer) { flex: 0 0 auto; }
 
+/* 스레드는 세 번째 열이다. 열면 드로어를 넓히고, 그럴 자리가 없으면 채널 목록을 접는다 —
+   900px 안에 목록 330 + 본문 + 스레드를 밀어 넣으면 본문이 200px대가 되어 둘 다 못 읽는다.
+   드로어 폭이 min(1240px, 100vw - 32px)이므로 뷰포트 1272px가 경계다. */
+.messenger-drawer.has-thread { width: min(1240px, calc(100vw - 32px)); }
+.messenger-drawer.has-thread .messenger-layout { grid-template-columns: 330px minmax(0, 1fr) 360px; }
+/* 임베드는 담은 칸을 채우는 것이 규칙이다(.is-embedded, 위). 스레드를 연다고 1,240px로 커지면
+   게스트 채널 탭이 페이지 밖으로 삐져나온다 — 같은 특이도라 순서가 이기므로 여기서 되돌려 둔다. */
+.messenger-drawer.is-embedded.has-thread { width: 100%; }
+
+/* 임베드는 뷰포트가 아니라 담은 칸(게스트 화면에서 약 1,030px)이 폭을 정한다. 미디어 쿼리는 그 폭을
+   볼 수 없으므로, 넓은 화면에서도 세 열을 세우면 본문이 340px대로 눌린다. 임베드에서는 스레드를 열면
+   언제나 목록을 접고 두 열로 선다(휴대폰은 아래 720px 블록이 한 칸씩 갈아 끼운다). */
+@media (min-width: 721px) {
+  .messenger-drawer.is-embedded.has-thread .messenger-layout { grid-template-columns: minmax(0, 1fr) 320px; }
+  .messenger-drawer.is-embedded.has-thread .messenger-sidebar { display: none; }
+}
+
+/* 이 접기는 세 열이 나란히 서는 폭에서만 뜻이 있다. 휴대폰까지 걸리면 '대화 목록으로'가
+   목록·채널·스레드가 모두 숨은 빈 서랍으로 이어진다(show-list + has-thread). */
+@media (min-width: 721px) and (max-width: 1271px) {
+  .messenger-drawer.has-thread .messenger-layout { grid-template-columns: minmax(0, 1fr) 360px; }
+  .messenger-drawer.has-thread .messenger-sidebar { display: none; }
+}
+
+.messenger-thread {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: var(--hairline) solid var(--line);
+  background: var(--surface);
+}
+
+/* 헤더는 스크롤과 무관하게 늘 보인다. '스레드 닫기'가 유일한 출구라 사라지면 나갈 길이 없다. */
+.messenger-thread-header {
+  min-height: 69px;
+  display: flex;
+  /* 승격 세 단추가 함께 선다. 스레드 칸은 데스크톱에서 360px, 휴대폰에서 화면 전체라
+     넷을 한 줄에 세울 자리가 어느 쪽에도 없다 — 접히는 자리를 열어 둔다. */
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+  flex: 0 0 auto;
+  padding: var(--space-12) var(--space-16);
+  border-bottom: var(--hairline) solid var(--line);
+}
+
+.messenger-thread-header > div { min-width: 0; }
+/* 제목 칸만 줄어든다(flex-basis 0). flex-wrap이 켜져 있으면 줄바꿈이 flex-shrink보다 먼저 일어나므로,
+   basis가 auto인 채로는 white-space: nowrap인 방 이름의 max-content 폭이 그대로 가정 폭이 되어
+   긴 이름 하나에 제목이 통째로 둘째 줄로 밀리고 닫기가 셋째 줄로 내려간다(375px에서 헤더 209px).
+   basis를 0으로 두면 뒤로 가기·제목·닫기는 어느 폭에서도 첫 줄에 남고 제목만 말줄임된다.
+   승격 줄은 :not()으로 뺀다 — 이 선택자가 .messenger-thread-promotions보다 특이도가 높아
+   빼지 않으면 flex: 0 0 auto를 덮어써서 둘째 줄 규약이 깨진다. */
+.messenger-thread-header > div:not(.messenger-thread-promotions) { flex: 1 1 0; }
+.messenger-thread-header strong { display: block; font-size: var(--font-15); }
+.messenger-thread-header span { display: block; overflow: hidden; color: var(--muted); font-size: var(--font-11); text-overflow: ellipsis; white-space: nowrap; }
+/* 닫기는 어떤 폭에서도 첫 줄 오른쪽 끝이다. 승격이 둘째 줄로 내려가도 이 자리는 움직이지 않는다. */
+.messenger-thread-header > .ui-icon-button { margin-left: auto; }
+/* 승격 세 단추는 줄지 않는다(flex: 0 0 auto). 그 셋을 제목·닫기와 한 줄에 세우면 360px 칸에서는
+   제목이 3px로 눌려 글자가 한 자씩 쌓이고, 375px에서는 닫기가 뷰포트 밖으로 밀려난다
+   ('업무로 올림'처럼 라벨이 길어지면 아예 화면에 없다). 그래서 승격만 둘째 줄에 세운다. */
+.messenger-thread-promotions { order: 1; width: 100%; display: flex; gap: var(--space-4); flex: 0 0 auto; }
+
+/* 승격의 공개 범위, 그리고 지워진 루트에 답글을 달 수 없다는 사실. 단추 옆에 서는 보조 문장이다. */
+.messenger-thread-note {
+  flex: 0 0 auto;
+  margin: var(--space-0);
+  padding: var(--space-8) var(--space-16);
+  color: var(--muted);
+  font-size: var(--font-11);
+}
+/* 컴포저가 서던 자리를 대신하는 줄. 위쪽 경계가 있어야 말 목록과 섞이지 않는다. */
+.messenger-thread-note.is-blocked {
+  padding: var(--space-12) var(--space-16);
+  border-top: var(--hairline) solid var(--line);
+  font-size: var(--font-13);
+}
+
+.messenger-thread-messages {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: var(--space-12);
+  padding: var(--space-16);
+  background: var(--canvas);
+}
+
+/* 서버 응답을 기다리는 동안의 한 줄. 휴대폰에서는 패널이 화면 전체를 덮으므로,
+   이 줄이 없으면 목록·채널이 숨은 빈 화면이 잠깐 그대로 보인다. */
+.messenger-thread-loading { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); }
+
+.messenger-thread-composer, .messenger-thread-share { flex: 0 0 auto; }
+.messenger-thread-share { display: flex; justify-content: flex-end; padding: var(--space-0) var(--space-16) var(--space-12); }
+
 .messenger-chat-header {
   min-height: 69px;
   display: flex;
@@ -1172,6 +1269,12 @@
   .messenger-drawer.show-list .messenger-chat { display: none; }
   .messenger-drawer.show-list .messenger-notice-board { display: none; }
   .messenger-drawer.show-chat .messenger-sidebar { display: none; }
+  /* 휴대폰에서는 세 칸이 나란히 설 자리가 없다. 스레드는 채널 위가 아니라 채널 대신 선다. */
+  .messenger-drawer.has-thread { inset: 0; width: 100%; }
+  .messenger-drawer.has-thread .messenger-layout { grid-template-columns: 1fr; }
+  .messenger-drawer.show-thread :is(.messenger-sidebar, .messenger-chat) { display: none; }
+  .messenger-drawer:not(.show-thread) .messenger-thread { display: none; }
+  .messenger-thread { border-left: none; }
   .messenger-sidebar { border-right: none; }
   .messenger-back-button { display: grid; }
   .messenger-header { min-height: 74px; padding: var(--space-12) var(--space-12); }
@@ -1636,11 +1739,11 @@ html[data-theme='dark'] :is(.journal-week-nav > button,.journal-range-field inpu
 .messenger-composer textarea { border-color: var(--line); }
 .messenger-composer textarea:focus { border-color: var(--color-primary); outline: none; }
 
-html[data-theme='dark'] :is(.messenger-sidebar,.messenger-chat-header,.messenger-composer,.messenger-date-divider span,.messenger-bubble-row p,.messenger-composer > button) { background: var(--surface); }
+html[data-theme='dark'] :is(.messenger-sidebar,.messenger-chat-header,.messenger-thread-header,.messenger-composer,.messenger-date-divider span,.messenger-bubble-row p,.messenger-composer > button) { background: var(--surface); }
 html[data-theme='dark'] .messenger-message.mine .messenger-bubble-row p { background: var(--color-primary); }
 /* 공지 보드는 .messenger-chat 자리를 대신하므로 같은 역할 스왑을 받는다.
    토큰만 쓰는 나머지 공지 클래스는 여기 등록하지 않는다 — tokens.css가 다크에서 코어 토큰을 뒤집는다. */
-html[data-theme='dark'] :is(.messenger-chat,.messenger-messages,.messenger-notice-board) { background: var(--canvas); }
+html[data-theme='dark'] :is(.messenger-chat,.messenger-messages,.messenger-thread-messages,.messenger-notice-board) { background: var(--canvas); }
 
 /* =====================================================================
    v4 개편: 업무일지 블록 에디터
@@ -1801,6 +1904,8 @@ html[data-theme='dark'] :is(.journal-file-block,.journal-comment-composer textar
 }
 .messenger-room-search-results { grid-column: 1 / -1; display: grid; gap: var(--space-0); margin: var(--space-0); padding: var(--space-0); list-style: none; max-height: 220px; overflow-y: auto; }
 .messenger-room-search-results li.empty { padding: var(--space-12); color: var(--muted); font-size: var(--font-13); }
+/* 두 구획을 가르는 줄. 아래 것은 눌러도 스크롤이 아니라 스레드가 열린다. */
+.messenger-room-search-results li.messenger-room-search-label { padding: var(--space-8) var(--space-12) var(--space-4); color: var(--muted); font-size: var(--font-11); font-weight: var(--weight-medium); }
 .messenger-room-search-results button {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -1838,6 +1943,8 @@ html[data-theme='dark'] :is(.journal-file-block,.journal-comment-composer textar
   color: var(--muted);
   min-height: 32px;
 }
+/* 갈 곳이 없는 인용(미리보기)은 단추가 아니다. 손 모양 커서로 누를 수 있다고 말하지 않는다. */
+.messenger-quote.is-static { cursor: default; }
 .messenger-quote strong { color: var(--ink); }
 .messenger-quote span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -2007,6 +2114,7 @@ html[data-theme='dark'] :is(.journal-file-block,.journal-comment-composer textar
   border-top: var(--hairline) solid var(--line);
   padding: var(--space-12) var(--space-16);
 }
+.messenger-dialog-note { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); }
 .messenger-dialog-section { display: grid; gap: var(--space-8); }
 .messenger-dialog-section h4 { margin: var(--space-0); font-size: var(--font-13); color: var(--muted); }
 .messenger-field { display: grid; gap: var(--space-4); }

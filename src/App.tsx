@@ -1018,7 +1018,8 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
               <StatusBadge className="status-pill" dot tone={drawerItem.priority === '긴급' ? 'danger' : drawerItem.priority === '높음' ? 'warning' : 'neutral'}>{drawerItem.priority}</StatusBadge>
               <span>{drawerItem.category}</span>
               {drawerItem.ruleId && <span><Repeat2 size={13} /> 반복</span>}
-              <OriginBadge origin={drawerItem.origin} onOpen={(page, focusId) => { setDrawerId(null); onToast(page === 'projects' ? '프로젝트에서 출처를 확인하세요.' : '승인 큐에서 원인을 확인하세요.'); onOpenOrigin?.(page, focusId) }} />
+              {/* 메신저 출처는 서랍이 그 자리에서 열린다 — 어디로 가라는 안내가 필요 없고, 하면 거짓말이 된다. */}
+              <OriginBadge origin={drawerItem.origin} onOpen={(page, focusId) => { setDrawerId(null); if (page === 'projects') onToast('프로젝트에서 출처를 확인하세요.'); else if (page !== 'messenger') onToast('승인 큐에서 원인을 확인하세요.'); onOpenOrigin?.(page, focusId) }} />
               {isSubtask(drawerItem) && <ParentChip title={parentTitleOf(drawerItem, items, parentRefs)} onOpen={items.some((candidate) => candidate.id === drawerItem.parentId) ? () => setDrawerId(drawerItem.parentId) : undefined} />}
             </div>
             <h2 id="workflow-drawer-title">{drawerItem.title}</h2>
@@ -2032,6 +2033,10 @@ export default function App() {
    * 휴대폰은 아래 네 칸이 화면을 정하므로 page만 바꾸면 업무 탭에 그대로 남는다 — 탭도 함께 옮겨야 실제로 도착한다.
    */
   const openWorkOrigin = (originPage: string, focusId: string) => {
+    // 스레드에서 승격한 업무의 출처는 메신저다. navigate('messenger')는 industryRoutes에 없어
+    // '이 회사의 업종 모듈에 없는 메뉴입니다'로 끝나므로, 알림과 같은 규약으로 서랍을 그 자리에 연다.
+    const focus = originPage === 'messenger' ? parseMessengerFocus(focusId) : null
+    if (focus) { setMessengerFocus(focus); setMessengerOpen(true); if (phoneShell) setMobileTab('chat'); return }
     if (originPage === 'projects') { setProjectFocusId(focusId); setWorkFocusId(''); setMobileTab('more') }
     navigate(originPage as PageId)
   }

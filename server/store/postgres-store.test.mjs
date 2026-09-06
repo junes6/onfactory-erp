@@ -58,8 +58,16 @@ function fixture() {
       data: [{ id: 'CAL-1', title: '생산', date: '2026-08-21', start: '09:00', end: '10:30' }],
       updatedAt: '2026-08-20T01:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
     },
+    // R16-J: 배열의 마지막 원소가 스레드 답글인 방. 채널 목록 시각(last_message_at)은
+    // 답글이 아니라 본채널의 마지막 말에서 나와야 한다 — JSON 모드에서는 드러나지 않는 갈래다.
     'messenger-conversations': {
-      data: [{ id: 'ROOM-1', messages: [{ id: 'MSG-1', senderId: 'USR-HSB-ADMIN', senderName: '관리자', text: '민감 본문', time: '14:42' }] }],
+      data: [{
+        id: 'ROOM-1',
+        messages: [
+          { id: 'MSG-1', senderId: 'USR-HSB-ADMIN', senderName: '관리자', text: '민감 본문', time: '14:42', replyCount: 1, lastReplyAt: '2026-08-20T06:10:00.000Z' },
+          { id: 'MSG-2', senderId: 'USR-HSB-ADMIN', senderName: '관리자', text: '스레드 답글', time: '15:10', threadRootId: 'MSG-1' },
+        ],
+      }],
       updatedAt: '2026-08-20T05:42:00.000Z', updatedBy: 'USR-HSB-ADMIN',
     },
     'daily-journals': {
@@ -219,6 +227,11 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.equal(facade.tenantMetadata['TENANT-HSB'].isDemo, true)
     assert.equal(facade.tenants['TENANT-HSB']['calendar-events'].data[0].start, '09:00')
     assert.equal(facade.tenants['TENANT-HSB']['messenger-conversations'].data[0].messages[0].time, '14:42')
+    const roundTrippedRoom = facade.tenants['TENANT-HSB']['messenger-conversations'].data[0]
+    assert.equal(roundTrippedRoom.messages[0].replyCount, 1, '루트의 답글 집계는 왕복에서 살아 있어야 한다')
+    assert.equal(roundTrippedRoom.messages[0].lastReplyAt, '2026-08-20T06:10:00.000Z')
+    assert.equal(roundTrippedRoom.messages[1].threadRootId, 'MSG-1', '답글의 루트 참조는 왕복에서 살아 있어야 한다')
+    assert.equal(roundTrippedRoom.lastTime, '14:42', '채널 목록 시각은 답글(15:10)이 아니라 본채널 마지막 말에서 나온다')
     assert.equal(facade.tenants['TENANT-HSB']['work-items'].data[0].due, '오늘 18:00')
     assert.equal(facade.tenants['TENANT-HSB']['work-items'].data.find((row) => row.id === 'WORK-2').parentId, 'WORK-1')
     assert.equal(facade.tenants['TENANT-HSB']['project-templates'].data[0].tasks[0].children[0].title, '인터뷰')

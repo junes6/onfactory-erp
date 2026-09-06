@@ -35,6 +35,9 @@ export const GUEST_ROUTE_ALLOWLIST = [
   ['GET', /^\/api\/documents$/], ['POST', /^\/api\/documents$/], ['GET', /^\/api\/documents\/[^/]+\/download$/], ['DELETE', /^\/api\/documents\/[^/]+$/],
   ['POST', /^\/api\/messenger\/conversations\/[^/]+\/(read|messages|mute)$/],
   ['GET', /^\/api\/messenger\/conversations\/[^/]+\/(messages|search)$/],
+  // R16-J: 게스트는 이미 POST /:id/messages로 답글을 쓸 수 있다. 읽을 길이 없으면 반쪽이다.
+  // 공유·승격은 목록 밖이라 게이트가 자동으로 403을 낸다 — 채널 미리보기와 업무 저장소는 직원의 것이다.
+  ['GET', /^\/api\/messenger\/conversations\/[^/]+\/messages\/[^/]+\/thread$/],
   ['POST', /^\/api\/messenger\/conversations\/[^/]+\/messages\/[^/]+\/reactions$/],
   ['GET', /^\/api\/notifications$/], ['POST', /^\/api\/notifications\/(read|subscribe|unsubscribe)$/], ['PUT', /^\/api\/notifications\/settings$/],
   ['GET', /^\/api\/events$/],

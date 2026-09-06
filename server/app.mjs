@@ -20,6 +20,7 @@ import express from 'express'
 import { registerBillingRoutes } from './billing-routes.mjs'
 import { registerAttendanceRoutes } from './attendance-routes.mjs'
 import { registerMessengerRoomRoutes } from './messenger-rooms.mjs'
+import { isMainChannelMessage, rootAggregates, threadParticipantIds, threadRootViolation } from './messenger-threads.mjs'
 import { registerOversightRoutes } from './oversight-routes.mjs'
 import { registerGlobalSearchRoute } from './global-search.mjs'
 import {
@@ -221,7 +222,11 @@ const CONVERSATION_FIELDS = ['id', 'type', 'name', 'subtitle', 'unread', 'lastMe
 const MESSAGE_FIELDS = ['id', 'senderId', 'senderName', 'text', 'time']
 // 답장·반응·수정흔적·삭제흔적. 전부 선택 필드라 옛 메시지는 그대로 통과한다.
 // senderRole: 보낸 사람의 신원 종류(직원/외부 게스트). 없으면 옛 메시지다.
-const MESSAGE_OPTIONAL_FIELDS = ['readBy', 'createdAt', 'attachments', 'replyTo', 'reactions', 'editedAt', 'deletedAt', 'deletedBy', 'senderRole']
+// R16-J 스레드 필드 넷:
+// threadRootId: 이 메시지가 붙은 스레드의 루트 메시지 id(답글일 때만). 깊이 1단이다.
+// replyCount·lastReplyAt: 루트에만 붙는 집계. 본채널은 이 두 값으로 '답글 N개 · 시각' 한 줄만 그린다.
+// sharedFromThreadId: [채널에 공유]로 본채널에 올라온 요약이 어느 스레드에서 왔는지.
+const MESSAGE_OPTIONAL_FIELDS = ['readBy', 'createdAt', 'attachments', 'replyTo', 'reactions', 'editedAt', 'deletedAt', 'deletedBy', 'senderRole', 'threadRootId', 'replyCount', 'lastReplyAt', 'sharedFromThreadId']
 const CONVERSATION_OPTIONAL_FIELDS = [
   'memberId', 'participantIds', 'hiddenFor', 'lineageId', 'generation', 'lifecycle', 'closedAt', 'deletedAt',
   'systemChannel', 'supportRequesterId', 'supportTicketId',
@@ -1106,6 +1111,13 @@ function hasMessageShape(value) {
         && typeof reaction.emoji === 'string' && reaction.emoji.length > 0 && reaction.emoji.length <= 16
         && Array.isArray(reaction.by) && reaction.by.length > 0 && reaction.by.length <= 2_000
         && reaction.by.every((id) => typeof id === 'string' && id))))
+    && (value.threadRootId === undefined || (typeof value.threadRootId === 'string' && value.threadRootId.length > 0 && value.threadRootId.length <= 120 && value.threadRootId !== value.id))
+    && (value.sharedFromThreadId === undefined || (typeof value.sharedFromThreadId === 'string' && value.sharedFromThreadId.length > 0 && value.sharedFromThreadId.length <= 120))
+    && (value.replyCount === undefined || (Number.isInteger(value.replyCount) && value.replyCount >= 0 && value.replyCount <= 5_000))
+    && (value.lastReplyAt === undefined || (typeof value.lastReplyAt === 'string' && !Number.isNaN(Date.parse(value.lastReplyAt))))
+    // 답글은 스레드의 루트가 될 수 없다 — 스레드 안의 스레드를 만들면 본채널 요약이 무엇을 세는지 알 수 없어진다.
+    && !(value.threadRootId !== undefined && (value.replyCount !== undefined || value.lastReplyAt !== undefined || value.sharedFromThreadId !== undefined))
+    && !(value.replyCount === undefined && value.lastReplyAt !== undefined)
 }
 
 function isDeveloperSupportConversation(conversation) {
@@ -1250,6 +1262,11 @@ function mergeMemberConversations(previousData, nextData, account, accounts) {
     const normalizedAppended = []
     for (const message of appended) {
       if (!hasMessageShape(message) || existingIds.has(message.id)) return null
+      // 스레드는 전용 라우트에서만 생긴다. 일반 저장 경로로 threadRootId를 실어 보내면
+      // 루트의 replyCount·lastReplyAt이 갱신되지 않아 본채널에 유령 요약이 남고,
+      // 반대로 replyCount만 실어 보내면 있지도 않은 답글 N개가 채널에 표시된다.
+      if (message.threadRootId !== undefined || message.replyCount !== undefined
+        || message.lastReplyAt !== undefined || message.sharedFromThreadId !== undefined) return null
       existingIds.add(message.id)
       normalizedAppended.push({ ...message, senderId: account.id, senderName: account.name })
     }
@@ -3512,6 +3529,26 @@ export function createApp(options = {}) {
   }
 
   /**
+   * "이 계정이 지금도 이 방을 볼 수 있는가" — 방의 본문을 방 밖으로 옮기는 세 자리가 함께 쓰는 한 벌.
+   * 멘션 알림 · 스레드 답글 알림 · 승격 자료의 명단(messenger-rooms.mjs의 conversationVisibleTo)이
+   * 이 함수 하나만 부른다. 같은 물음에 술어가 셋이면 그중 하나만 차원을 덜 읽어도 그 자리로 샌다
+   * (HARD-WON RULE 8 — 게스트 판정이 프로젝트 역할만 읽고 채널 참여를 안 읽어 D가 샜던 그 모양이다).
+   *
+   * 읽는 차원 세 가지:
+   *  1) 로그인할 수 있는 계정인가(approved). 못 읽는 계정이 수신자당 상한 300건을 나눠 갖지 않게 한다.
+   *  2) 게스트라면 지금 초대된 프로젝트 범위. guestScope는 저장된 계정에 없고 effectiveAuth가 요청마다
+   *     붙이는 값이라, 저장된 계정을 그대로 넘기면 초대된 채널에서도 언제나 false가 된다.
+   *  3) 방을 나갔는가(hiddenFor). participantIds는 나가도 그대로 남는다 — leave는 hiddenFor에만 넣는다.
+   */
+  const accountSeesConversation = (conversation, account) => {
+    if (!account || account.approved === false) return false
+    const scoped = account.role === GUEST_ROLE
+      ? { ...account, guestScope: guestScopeOf(guestGrantOf(account.id)) }
+      : account
+    return isConversationVisibleToMember(conversation, scoped, accounts)
+  }
+
+  /**
    * 대화에 새로 붙은 메시지에서 @이름을 찾아 그 사람에게 알린다.
    * 참여자 중에서만 찾으므로 다른 고객사 사람이 불려 나올 수 없다.
    */
@@ -3520,15 +3557,23 @@ export function createApp(options = {}) {
     for (const conversation of Array.isArray(previousData) ? previousData : []) {
       seen.set(conversation?.id, new Set((conversation?.messages ?? []).map((message) => message?.id)))
     }
-    const roster = accounts.filter((account) => account.tenantId === auth.tenantId && account.approved !== false)
+    // 테넌트 경계만 여기서 자른다. '로그인할 수 있는 계정인가'(approved)는 아래 accountSeesConversation이
+    // 읽는 차원이라 여기서 한 번 더 세지 않는다 — 같은 조건이 두 줄에 있으면 한쪽만 고쳐진다.
+    const roster = accounts.filter((account) => account.tenantId === auth.tenantId)
     const drafts = []
     for (const conversation of Array.isArray(nextData) ? nextData : []) {
       const known = seen.get(conversation?.id) ?? new Set()
       // 참여자가 명시된 방이면 그 안에서만 찾는다. 예전에는 테넌트 전 직원을 대상으로 해서
       // 방에 없는 사람도 @이름 한 줄로 불려 나왔다 — 게스트가 보낸 메시지라면 직원 이름 열거 통로가 된다.
-      const targets = Array.isArray(conversation?.participantIds)
+      //
+      // 명단에 있다는 것만으로는 부족하다. 방을 나가도 participantIds에는 이름이 남고(leave는 hiddenFor에만
+      // 넣는다) 게스트의 초대는 나중에 다른 프로젝트로 옮겨 갈 수 있다 — 그 사람에게 알림을 보내면
+      // 본문 200자가 함께 간다. 알림 본문은 방이 아니라 알림 센터에 사는 말이라, 방이 404를 내도 읽힌다.
+      // 바로 아래 notifyThreadReply와 messenger-rooms.mjs의 승격 명단이 같은 술어로 같은 것을 막는다.
+      const targets = (Array.isArray(conversation?.participantIds)
         ? roster.filter((account) => conversation.participantIds.includes(account.id))
         : roster
+      ).filter((account) => accountSeesConversation(conversation, account))
       for (const message of conversation?.messages ?? []) {
         if (!message?.id || known.has(message.id)) continue
         const body = String(message.text ?? '')
@@ -3539,11 +3584,40 @@ export function createApp(options = {}) {
             type: 'mention', recipientId: account.id, actorId: auth.id,
             title: `${auth.name}님이 회원님을 언급했습니다`,
             body: body.slice(0, 200),
-            page: 'messenger', focusId: conversation.id,
+            // 스레드 답글 안의 @이름은 본채널에 없는 말이다. 방 id만 실으면 눌러도 서랍만 열리고
+            // 그 말은 채널 어디에도 없다 — 답글이면 스레드까지 가리키는 합성 규약을 쓴다(§J).
+            page: 'messenger',
+            focusId: message.threadRootId ? `${conversation.id}:thread:${message.threadRootId}` : conversation.id,
             source: { kind: 'message', id: conversation.id, label: '메신저' },
           })
         }
       }
+    }
+    notify(auth.tenantId, drafts)
+  }
+
+  /**
+   * 스레드 답글은 그 스레드에 있던 사람에게만 간다 — 루트를 쓴 사람과 먼저 답한 사람들.
+   * 방 전체에 울리면 스레드는 "조용한 곁방"이라는 뜻을 잃는다.
+   * source.kind는 'message'라서 방별 무음(notifications.mjs)이 그대로 적용된다.
+   */
+  const notifyThreadReply = (auth, conversation, message) => {
+    if (!message?.threadRootId) return
+    const audience = new Set(threadParticipantIds(conversation.messages, message.threadRootId))
+    audience.delete(auth.id)
+    const drafts = []
+    for (const recipientId of audience) {
+      const account = accounts.find((item) => item.id === recipientId && item.tenantId === auth.tenantId)
+      // 방을 나갔거나 초대가 끝났거나 로그인할 수 없는 사람에게는 보내지 않는다 —
+      // 볼 수 없는 방의 본문을 알림으로 보내면 그게 유출이다. 판정은 accountSeesConversation 한 곳에 있다.
+      if (!accountSeesConversation(conversation, account)) continue
+      drafts.push({
+        type: 'thread-reply', recipientId, actorId: auth.id,
+        title: `${auth.name}님이 스레드에 답글을 남겼습니다`,
+        body: String(message.text ?? '').slice(0, 200),
+        page: 'messenger', focusId: `${conversation.id}:thread:${message.threadRootId}`,
+        source: { kind: 'message', id: conversation.id, label: conversation.name ?? '메신저' },
+      })
     }
     notify(auth.tenantId, drafts)
   }
@@ -4986,10 +5060,14 @@ export function createApp(options = {}) {
       response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '참여 중인 대화를 찾을 수 없습니다.' } })
       return
     }
+    // 방을 열었다는 것은 본채널을 봤다는 뜻이다. 스레드는 따로 열어야 보이므로 답글까지 읽음으로 찍으면,
+    // 스레드 패널의 읽음 표시가 "들어가 본 적 없는 사람이 읽었다"고 말하게 된다 — 거짓말을 하느니 세지 않는다.
     const conversation = {
       ...previous,
       unread: 0,
-      messages: previous.messages.map((message) => ({ ...message, readBy: Array.from(new Set([...(message.readBy ?? []), request.auth.id])) })),
+      messages: previous.messages.map((message) => (isMainChannelMessage(message)
+        ? { ...message, readBy: Array.from(new Set([...(message.readBy ?? []), request.auth.id])) }
+        : message)),
     }
     if (isDeepStrictEqual(conversation, previous)) {
       response.json({ conversation })
@@ -5017,8 +5095,10 @@ export function createApp(options = {}) {
       response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '참여 중인 대화를 찾을 수 없습니다.' } })
       return
     }
+    // 답글은 이 상한을 본문과 공유한다. 스레드에 따로 5,000건을 더 주면 방 하나가
+    // 사실상 10,000건이 되어 PG 재조립과 백업이 이 방 하나에서 무너진다.
     if (previous.messages.length >= 5_000) {
-      response.status(409).json({ error: { code: 'MESSENGER_MESSAGE_CAPACITY_REACHED', message: '이 대화의 메시지 보관 한도에 도달했습니다. 개발운영진에게 보관 처리를 요청해 주세요.' } })
+      response.status(409).json({ error: { code: 'MESSENGER_MESSAGE_CAPACITY_REACHED', message: '이 대화의 메시지 보관 한도(스레드 답글 포함 5,000건)에 도달했습니다. 개발운영진에게 보관 처리를 요청해 주세요.' } })
       return
     }
     const attachments = await resolveMessengerAttachments(request.body?.attachments, request.auth)
@@ -5035,6 +5115,31 @@ export function createApp(options = {}) {
       response.status(400).json({ error: { code: 'INVALID_REPLY_TARGET', message: '답장할 메시지를 찾을 수 없습니다.' } })
       return
     }
+    // 스레드는 1단이다. 답글의 답글도, 삭제된 말의 스레드도 만들지 않는다.
+    const threadRootId = String(request.body?.threadRootId ?? '').trim()
+    if (threadRootId) {
+      if (isDeveloperSupportConversation(previous)) {
+        response.status(403).json({ error: { code: 'SYSTEM_CONVERSATION_IMMUTABLE', message: '개발운영진 지원 채널은 스레드를 쓸 수 없습니다.' } })
+        return
+      }
+      const violation = threadRootViolation(previous.messages, threadRootId)
+      if (violation) {
+        response.status(400).json({ error: violation })
+        return
+      }
+      // 스레드 안의 인용은 그 스레드 안에서만 가리킬 수 있다(루트 자신 포함).
+      // 아니면 옆 스레드나 본채널의 말이 이 스레드 안에 인용문으로 끌려 들어온다.
+      if (replyTo && replyTo !== threadRootId
+        && !previous.messages.some((item) => item?.id === replyTo && item.threadRootId === threadRootId)) {
+        response.status(400).json({ error: { code: 'INVALID_REPLY_TARGET', message: '답장할 메시지를 찾을 수 없습니다.' } })
+        return
+      }
+    } else if (replyTo && previous.messages.some((item) => item?.id === replyTo && item.threadRootId)) {
+      // 반대 방향도 같은 이유로 막는다. 본채널 말이 답글을 인용하면 인용 줄에 그 답글 본문이 실려,
+      // 스레드에 들어가지 않은 사람이 본채널에서 그 말을 읽는다 — 본채널에 남기기로 한 것은 '답글 N개'뿐이다.
+      response.status(400).json({ error: { code: 'INVALID_REPLY_TARGET', message: '답장할 메시지를 찾을 수 없습니다.' } })
+      return
+    }
     const message = {
       id: `m-${Date.now()}-${randomBytes(3).toString('hex')}`,
       senderId: request.auth.id,
@@ -5047,13 +5152,25 @@ export function createApp(options = {}) {
       readBy: [request.auth.id],
       ...(attachments.length ? { attachments } : {}),
       ...(replyTo ? { replyTo } : {}),
+      ...(threadRootId ? { threadRootId } : {}),
     }
-    const conversation = {
-      ...previous,
-      messages: [...previous.messages, message],
-      lastMessage: text,
-      lastTime: sentAt,
-    }
+    const conversation = threadRootId
+      ? {
+          ...previous,
+          // 답글은 채널의 마지막 말을 바꾸지 않는다. 목록 미리보기가 스레드 안의 말로 흔들리면
+          // 스레드에 들어가지 않은 사람이 채널 목록만 보고 스레드 내용을 읽게 된다.
+          // 루트 집계 갱신과 답글 append가 같은 커밋에 들어가므로 둘이 어긋난 상태로 저장되지 않는다.
+          messages: [
+            ...previous.messages.map((item) => (item?.id === threadRootId ? rootAggregates(item, createdAt) : item)),
+            message,
+          ],
+        }
+      : {
+          ...previous,
+          messages: [...previous.messages, message],
+          lastMessage: text,
+          lastTime: sentAt,
+        }
     if (isDeveloperSupportConversation(previous)) {
       const ticketIndex = previous.supportTicketId
         ? workspaceStore.platform.supportTickets.findIndex((ticket) => ticket?.id === previous.supportTicketId
@@ -5144,17 +5261,22 @@ export function createApp(options = {}) {
       return
     }
     try {
-      const recipientIds = (Array.isArray(conversation.participantIds) ? conversation.participantIds : []).filter((id) => id !== request.auth.id)
-      const recipients = conversation.type === 'direct'
-        ? recipientIds.map((id) => accounts.find((account) => account.id === id && account.tenantId === request.auth.tenantId)).filter(Boolean).map((account) => ({ id: account.id, name: account.name }))
-        : []
-      enqueueProposal(request.auth.tenantId, proposeTaskFromMessage({ message, conversation, recipients }))
+      // 스레드는 조용한 곁방이다 — 승격은 [업무로] 단추가 한다. 답글 한 줄이 지시 문형이라는 이유로
+      // 그 스레드에 없던 관리자 전원에게 승인 큐 알림이 울리면 "참여자에게만 간다"는 문장이 깨진다.
+      if (!message.threadRootId) {
+        const recipientIds = (Array.isArray(conversation.participantIds) ? conversation.participantIds : []).filter((id) => id !== request.auth.id)
+        const recipients = conversation.type === 'direct'
+          ? recipientIds.map((id) => accounts.find((account) => account.id === id && account.tenantId === request.auth.tenantId)).filter(Boolean).map((account) => ({ id: account.id, name: account.name }))
+          : []
+        enqueueProposal(request.auth.tenantId, proposeTaskFromMessage({ message, conversation, recipients }))
+      }
     } catch { /* 제안 실패가 메시지 전송을 막지 않는다 */ }
     // 이 두 줄이 없어서, 화면이 쓰는 전송 경로로 보낸 메시지는 상대에게 실시간으로 닿지도
     // 않았고 @멘션 알림도 나가지 않았다. 알림·SSE는 일반 저장 경로에만 붙어 있었는데
     // 클라이언트는 그 경로를 쓰지 않는다.
     events.publish(request.auth.tenantId, 'message', { key: 'messenger-conversations', conversationId: conversation.id })
     try { notifyMentions(request.auth, conversations, [conversation]) } catch { /* 알림 실패가 전송을 되돌리지 않는다 */ }
+    try { notifyThreadReply(request.auth, conversation, message) } catch { /* 알림 실패가 전송을 되돌리지 않는다 */ }
     response.status(201).json({ conversation, message })
   })
 
@@ -7363,7 +7485,9 @@ export function createApp(options = {}) {
     focusId: String(conversation.id ?? ''),
   })
 
-  const createTaskFromConclusion = async ({ auth, conversation, message, title }) => {
+  // origin·decisionKind·sourceKey·sourceLabel·tags는 기본값 인자로만 넓힌다. AI 대화 호출부는 한 글자도
+  // 바뀌지 않고, 스레드 승격은 "어디서 왔는가"만 갈아 끼운다 — 저장 구조와 멱등 규칙은 그대로다.
+  const createTaskFromConclusion = async ({ auth, conversation, message, title, origin = conclusionOrigin(conversation) }) => {
     const now = new Date().toISOString()
     const workItem = {
       id: `WK-${Date.now().toString().slice(-8)}`,
@@ -7378,7 +7502,7 @@ export function createApp(options = {}) {
       status: '업무요청',
       category: '일반',
       createdAt: now,
-      origin: conclusionOrigin(conversation),
+      origin,
     }
     const normalized = normalizeAdminWorkItems([workItem], auth.tenantId, operatorAwareAccounts(auth))
     if (!normalized) throw new Error('업무 정보를 확인해 주세요.')
@@ -7402,14 +7526,20 @@ export function createApp(options = {}) {
    * 올려 두 번 판단하게 하는 대신, 이미 결정된 것으로 기록한다 — 대화에서
    * 결론을 내린 순간이 곧 판단한 순간이기 때문이다.
    */
-  const createDecisionFromConclusion = async ({ auth, conversation, message, title }) => {
+  const createDecisionFromConclusion = async ({
+    auth, conversation, message, title,
+    decisionKind = 'ai-conclusion', sourceKey = `aic:${conversation.id}:${message.id}`,
+    // 중복 거절 문구도 기본값 인자다. '답'은 AI 대화에서 어시스턴트가 준 답을 가리키는 낱말이라
+    // 스레드 화면에 그대로 나가면 낱말 하나에 뜻이 둘이 된다 — 부르는 쪽이 자기 낱말을 준다.
+    duplicateMessage = '이미 결정으로 올린 답입니다.',
+  }) => {
     const now = new Date().toISOString()
     const decision = {
       id: `PRP-AIC-${Date.now().toString(36)}`,
-      kind: 'ai-conclusion',
+      kind: decisionKind,
       status: 'approved',
       confidence: 1,
-      sourceKey: `aic:${conversation.id}:${message.id}`,
+      sourceKey,
       summary: (title || autoTitle(message.content)).slice(0, 200),
       evidence: String(message.content).slice(0, 2_000),
       payload: { conversationId: conversation.id, messageId: message.id, scope: conversation.scope },
@@ -7421,7 +7551,9 @@ export function createApp(options = {}) {
     }
     const existing = proposalsOf(auth.tenantId)
     if (existing.some((item) => item?.sourceKey === decision.sourceKey)) {
-      throw new Error('이미 결정으로 올린 답입니다.')
+      // code를 함께 싣는다. 부르는 쪽이 '고장'과 '규칙 거절'을 가려 상태 코드를 정할 수 있어야 한다
+      // (스레드 승격은 이 갈래를 409로 답한다).
+      throw Object.assign(new Error(duplicateMessage), { code: 'ALREADY_PROMOTED' })
     }
     writeProposals(auth.tenantId, [decision, ...existing], auth.id)
     try {
@@ -7432,11 +7564,20 @@ export function createApp(options = {}) {
     return { id: decision.id, label: decision.summary, kind: 'decision' }
   }
 
-  const createDocumentFromConclusion = async ({ auth, conversation, message, title }) => {
+  // visibility·allowedUserIds도 기본값 인자다. AI 대화는 승격한 사람 자신의 글이라 전사 공개가 맞지만,
+  // 참여자 명단이 있는 방에서 오간 말은 그 명단 밖으로 나가면 안 된다 — 부르는 쪽이 범위를 안다.
+  // projectId도 같은 이유의 기본값 인자다. 게스트 회수 스윕(guest-access.mjs의 syncGuestMembership)은
+  // "이 문서가 어느 프로젝트의 것인가"로만 범위 축소를 판정한다 — projectId가 비어 있으면 해지가 아닌
+  // 범위 축소에서는 영영 걸리지 않아, 초대가 다른 프로젝트로 옮겨 간 게스트의 이름이 allowedUserIds에 남는다.
+  const createDocumentFromConclusion = async ({
+    auth, conversation, message, title,
+    sourceLabel = `AI 대화 「${conversation.title}」`, tags = ['ai-conversation'],
+    visibility = 'all', allowedUserIds = [], projectId = null,
+  }) => {
     if (!documentStorage) throw new Error('파일 저장소가 설정되지 않았습니다.')
     const name = `${(title || autoTitle(message.content)).slice(0, 120)}.md`
     const body = Buffer.from(
-      `# ${title || conversation.title}\n\n${message.content}\n\n---\n출처: AI 대화 「${conversation.title}」 · ${new Date().toISOString().slice(0, 10)}\n`,
+      `# ${title || conversation.title}\n\n${message.content}\n\n---\n출처: ${sourceLabel} · ${new Date().toISOString().slice(0, 10)}\n`,
       'utf8',
     )
     const id = `DOC-${Date.now()}-${randomBytes(4).toString('hex')}`
@@ -7448,10 +7589,12 @@ export function createApp(options = {}) {
       mime: 'text/markdown',
       size: body.length,
       category: '공통자료',
-      visibility: 'all',
+      visibility: visibility === 'restricted' ? 'restricted' : 'all',
       departments: [],
-      allowedUserIds: [],
-      tags: ['ai-conversation'],
+      allowedUserIds: visibility === 'restricted' ? [...new Set([...allowedUserIds, auth.id])] : [],
+      // 프로젝트 채널에서 나온 자료는 그 프로젝트에 귀속된다. 이 한 칸이 게스트 회수 스윕의 유일한 열쇠다.
+      ...(projectId ? { projectId: String(projectId) } : {}),
+      tags,
       summary: String(message.content).replace(/\s+/g, ' ').slice(0, 300),
       uploadedAt: new Date().toISOString(),
       uploadedById: auth.id,
@@ -7630,12 +7773,27 @@ export function createApp(options = {}) {
     commitConversationData,
     isConversationVisibleToMember,
     isDeveloperSupportConversation,
+    // 승격 자료의 명단을 좁히는 술어. 알림 두 갈래(notifyMentions·notifyThreadReply)와 **같은 함수**를
+    // 부른다 — '같은 판정'이라고 주석으로 적어 두는 것과 같은 함수를 부르는 것은 다르다.
+    conversationVisibleTo: (conversation, accountId, tenantId) => {
+      // 대화 객체에는 tenantId 칸이 없다(테넌트별 저장소 안에 산다). 부르는 쪽이 요청의 테넌트를 실어 준다 —
+      // 그게 없으면 같은 id의 다른 고객사 계정이 판정을 통과한다.
+      const account = accounts.find((item) => item.id === accountId && item.tenantId === tenantId)
+      return accountSeesConversation(conversation, account)
+    },
     notify,
     events,
     // 프로젝트 채널(projectId 있는 방)과 게스트 참여 검증에 쓴다.
     guestGrantOf,
     projectSpacesOf,
     projectRoleOf,
+    // R16-J 스레드. 공유 메시지의 @멘션은 본채널 메시지와 똑같이 알린다.
+    notifyMentions,
+    // 스레드 승격 세 갈래. 없으면 라우트가 501을 내고 스레드는 읽기·공유까지만 된다 —
+    // 반쪽 승격(업무는 생기고 출처는 비는)을 만드는 대신 기능을 켜지 않는다.
+    createTaskFromConclusion,
+    createDecisionFromConclusion,
+    createDocumentFromConclusion,
   })
 
   const { runNoticeAckWatch } = registerNoticeRoutes({

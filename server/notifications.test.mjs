@@ -48,7 +48,8 @@ test('only the immediate types are pushed by default; the rest are opt-in', () =
   // 미확인 명단 요약은 작성자 한 사람에게만 가는 집계라 그대로 opt-in이다.
   assert.deepEqual(settings.push.sort(), ['approval-requested', 'changes-requested', 'mention', 'notice-posted', 'notice-reminder', 'quiet-digest', 'task-assigned'].sort())
   assert.deepEqual(settings.muted, [])
-  for (const type of ['proposal-pending', 'sentinel-warning', 'opportunity-new', 'notice-unconfirmed-summary']) {
+  // R16-J의 스레드 답글도 opt-in이다 — 스레드는 오래 이어져 울릴 일이 많고, 지목은 mention이 따로 한다.
+  for (const type of ['proposal-pending', 'sentinel-warning', 'opportunity-new', 'notice-unconfirmed-summary', 'thread-reply']) {
     assert.equal(shouldPush(draft({ type, recipientId: 'U1' }), {}), false, `${type}은 사용자가 직접 켜야 한다`)
   }
   assert.equal(shouldPush(draft({ type: 'mention' }), {}), true)

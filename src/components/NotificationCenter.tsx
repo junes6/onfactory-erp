@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, BellOff, BellRing, CheckCircle2, ClipboardCheck, ListChecks, Megaphone, MessageCircle, Moon, Radar, Settings2, ShieldAlert, Smartphone, Sparkles } from 'lucide-react'
+import { AlertTriangle, BellOff, BellRing, CheckCircle2, ClipboardCheck, ListChecks, Megaphone, MessageCircle, MessagesSquare, Moon, Radar, Settings2, ShieldAlert, Smartphone, Sparkles } from 'lucide-react'
 import { formatDateTime, formatListDateTime } from '../utils/dateTime'
 import { Button, IconButton } from './ui/Button'
 import './NotificationCenter.css'
@@ -9,6 +9,8 @@ export type NotificationType =
   | 'mention' | 'proposal-pending' | 'sentinel-warning' | 'opportunity-new' | 'quiet-digest'
   // R16-D: 공지 게시·필독 확인 요청·미확인 명단.
   | 'notice-posted' | 'notice-reminder' | 'notice-unconfirmed-summary'
+  // R16-J: 스레드 답글. 그 스레드에 있던 사람에게만 간다.
+  | 'thread-reply'
 
 export type AppNotification = {
   id: string
@@ -55,6 +57,7 @@ const typeIcon: Record<NotificationType, typeof ListChecks> = {
   'notice-posted': Megaphone,
   'notice-reminder': BellRing,
   'notice-unconfirmed-summary': ListChecks,
+  'thread-reply': MessagesSquare,
 }
 
 const typeTone: Record<NotificationType, string> = {
@@ -69,6 +72,7 @@ const typeTone: Record<NotificationType, string> = {
   'notice-posted': 'amber',
   'notice-reminder': 'amber',
   'notice-unconfirmed-summary': 'blue',
+  'thread-reply': 'violet',
 }
 
 /** base64url 공개키 → Uint8Array. 브라우저 구독 API가 요구하는 형식이다. */

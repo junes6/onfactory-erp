@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUpRight, BookOpen, Check, ClipboardCheck, FileText, Keyboard, MessageCircle, Pencil, Radar, RefreshCw, ShieldAlert, Sparkles, X } from 'lucide-react'
+import { ArrowUpRight, BookOpen, Check, ClipboardCheck, FileText, Keyboard, MessageCircle, MessagesSquare, Pencil, Radar, RefreshCw, ShieldAlert, Sparkles, X } from 'lucide-react'
 import { formatDateTime } from '../utils/dateTime'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ApprovalQueue.css'
 import { Button, IconButton } from './ui/Button'
 import { OpportunityWatch } from './OpportunityWatch'
 
-type ProposalKind = 'document-classification' | 'task-from-message' | 'sentinel-task' | 'lens-task' | 'opportunity' | 'principle'
+type ProposalKind = 'document-classification' | 'task-from-message' | 'sentinel-task' | 'lens-task' | 'opportunity' | 'principle' | 'thread-conclusion'
 type ProposalStatus = 'pending' | 'approved' | 'edited' | 'rejected' | 'expired'
 
 type Proposal = {
@@ -40,6 +40,8 @@ const kindMeta: Record<ProposalKind, KindMeta> = {
   'lens-task': { label: '문서 렌즈', tone: 'info', icon: Sparkles },
   opportunity: { label: '외부 기회', tone: 'success', icon: Radar },
   principle: { label: '규범 제안', tone: 'info', icon: BookOpen },
+  // R16-J: 스레드에서 결정으로 올린 것. 라벨이 없으면 목록에 영문 슬러그가 그대로 뜬다.
+  'thread-conclusion': { label: '스레드 결론', tone: 'success', icon: MessagesSquare },
 }
 
 /**

@@ -1,0 +1,64 @@
+/*
+  스레드의 작은 조각들. 3열 배치와 패널 뼈대는 메신저 서랍의 것이라 CollaborationSuite.css에 있다.
+  여기 있는 규칙은 자리와 무관하게 혼자 선다 — 본채널 말풍선 아래에도, 스레드 패널 안에도 같은 모양으로 붙는다.
+*/
+
+.messenger-thread-summary {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  padding: var(--space-0) var(--space-8);
+  border: 0;
+  border-radius: var(--radius-8);
+  background: var(--color-blue-soft);
+  color: var(--color-primary);
+  font-size: var(--font-11);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.messenger-thread-summary.is-open {
+  outline: var(--hairline) solid var(--color-primary);
+}
+
+.messenger-thread-summary time {
+  color: var(--muted);
+}
+
+.messenger-thread-origin {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  padding: var(--space-0);
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-11);
+  cursor: pointer;
+}
+
+/* '여기서부터 답글'을 말하는 줄. 날짜가 아니라 개수를 말한다 — 본채널의 '오늘' 하드코딩을 복제하지 않는다. */
+.messenger-thread-divider {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-8);
+  margin: var(--space-0);
+  border: 0;
+  color: var(--muted);
+  font-size: var(--font-11);
+}
+
+.messenger-thread-divider::before {
+  content: attr(data-label);
+}
+
+.messenger-thread-divider::after {
+  content: '';
+  height: var(--hairline);
+  background: var(--line);
+}

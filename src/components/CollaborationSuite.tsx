@@ -60,7 +60,8 @@ import {
 } from '../utils/documentAttachments'
 import './CollaborationSuite.css'
 import { Button, IconButton } from './ui/Button'
-import { GroupRoomDialog, MentionSuggestions, MessageActionBar, QuotedMessage, ReactionRow, RoomSearchPanel } from './MessengerExtras'
+import { GroupRoomDialog, MentionSuggestions, MessageActionBar, QuotedMessage, ReactionRow, RoomSearchPanel, ThreadShareDialog } from './MessengerExtras'
+import { ThreadEmpty, ThreadOriginButton, ThreadReplyDivider, ThreadSummaryButton, type ThreadData } from './ThreadPanel'
 import {
   NoticeAckDialog, NoticeBoard, NoticeComposerDialog, NoticeStrip, parseMessengerFocus, useNotices,
   type MessengerFocus, type Notice, type NoticeAckList, type NoticeDraft,
@@ -230,6 +231,13 @@ type ChatMessage = {
   editedAt?: string
   deletedAt?: string
   deletedBy?: string
+  /** 이 말이 붙은 스레드의 루트. 있으면 본채널의 어느 목록에도 나오지 않는다. */
+  threadRootId?: string
+  /** 루트에만 붙는 집계. 본채널은 이 둘로 '답글 N개 · 시각' 한 줄만 그린다. */
+  replyCount?: number
+  lastReplyAt?: string
+  /** [채널에 공유]로 올라온 요약이 어느 스레드에서 왔는지. */
+  sharedFromThreadId?: string
 }
 
 type Conversation = {
@@ -266,11 +274,65 @@ type Conversation = {
 
 type MessengerListMode = 'recent' | 'teams' | 'people'
 
+/** 좁은 화면에서 지금 무엇을 보여 주는가. 스레드는 채널 위가 아니라 채널 옆이다. */
+type MessengerPane = 'list' | 'chat' | 'thread'
+
 /**
  * 한 번에 그리는 메시지 수. 방 하나에 5,000건까지 쌓일 수 있어 전부 그리면 화면이 멈춘다.
  * 위로 올라가면 이만큼씩 더 편다.
  */
 const MESSAGE_WINDOW = 60
+
+/**
+ * 스레드를 방 밖으로 옮기는 세 갈래. 무엇이 되는지는 서버가 정하고 화면은 이름만 안다.
+ * '올림' 문구를 함께 두는 이유: 올리기 전과 후가 똑같이 보이면 사람은 한 번 더 누르고,
+ * 업무·자료는 서버가 두 번을 막지 않으므로 같은 결론이 두 벌 생긴다.
+ */
+type ThreadPromotionKind = 'task' | 'decision' | 'document'
+/** duplicates: 같은 스레드를 두 번 올리면 두 건이 생기는가. 결정만 서버가 sourceKey로 409를 낸다 —
+ *  그 사실이 여기 한 곳에 있어야 화면의 사전 안내가 서버가 실제로 하는 일과 어긋나지 않는다. */
+const THREAD_PROMOTIONS: { kind: ThreadPromotionKind; label: string; doneLabel: string; duplicates: boolean }[] = [
+  { kind: 'task', label: '업무로', doneLabel: '업무로 올림', duplicates: true },
+  { kind: 'decision', label: '결정으로', doneLabel: '결정으로 올림', duplicates: false },
+  { kind: 'document', label: '자료로', doneLabel: '자료로 올림', duplicates: true },
+]
+
+/**
+ * 지워진 루트에 답글을 붙이려 할 때의 한 문장.
+ *
+ * server/messenger-threads.mjs의 THREAD_ERRORS.ROOT_DELETED.message와 **글자 그대로 같아야 한다**
+ * (scripts/thread-ui-contract.test.mjs가 두 문자열을 맞대어 본다). 화면의 사전 안내와 서버의 거절 문구가
+ * 갈라지면 같은 사실이 자리마다 다르게 보인다 — 한 사실에 한 문장이다.
+ */
+const THREAD_ROOT_DELETED_NOTICE = '지워진 말에는 답글을 달 수 없습니다. 결론은 [채널에 공유]로 남길 수 있습니다.'
+
+/**
+ * 답글이 전부 지워졌을 때의 한 문장.
+ *
+ * 헤더의 '답글 N개'는 tombstone까지 센다(본채널 요약 줄의 수와 같아야 하므로). [채널에 공유]와 승격
+ * 세 단추는 살아 있는 답글(liveReplyCount)로 켜고 끈다 — 서버의 THREAD_EMPTY와 같은 수다.
+ * 그래서 답글 하나를 지우고 나면 화면이 '답글 1개'라고 적어 놓고 네 단추를 모두 꺼 버리는 순간이 생긴다.
+ * 수를 적었으면 왜 거절하는지도 같은 화면에서 말해야 한다.
+ */
+const THREAD_ALL_REPLIES_DELETED_NOTICE = '남아 있는 답글이 없어 채널에 공유하거나 업무·결정·자료로 올릴 수 없습니다.'
+
+/**
+ * 승격 세 갈래의 공개 범위. 나란히 선 세 단추가 같은 범위처럼 보이므로, 그 사실을 화면이 한 줄로 말한다.
+ * 확인 대화상자를 세우지는 않는다.
+ *
+ * 서버에서 실제로 읽히는 사람(코드에서 확인한 것만 적는다 — 추측을 적으면 사람이 그 문장을 믿고 누른다):
+ *  - 업무: createTaskFromConclusion이 ownerId·requesterId를 둘 다 올린 사람으로 적고(app.mjs),
+ *    GET /api/workspace/work-items는 tenant-member에게 isMemberWorkItem(= 담당 ∪ 요청자)만 내준다.
+ *    관리자는 필터가 없어 전부 본다 → **올린 사람 + 관리자**. '회사 구성원 전체'가 아니다.
+ *  - 결정: /api/proposals의 가드가 requireTenantAdmin이다 → **관리자만**. 셋 중 가장 좁다.
+ *  - 자료: visibility 'restricted' + allowedUserIds(지금 이 방을 볼 수 있는 사람 ∪ 올린 사람)이지만
+ *    canReadDocument가 tenant-admin에게는 방 여부와 무관하게 true를 준다
+ *    → **이 방의 사람들(초대된 외부 게스트 포함) + 관리자**. 셋 중 가장 넓다.
+ *
+ * 즉 넓이 순서는 자료 > 업무 > 결정이다. 예전 문장은 이 순서를 정확히 뒤집어 적어서, 내용을 방 안에
+ * 두고 싶은 사람을 가장 넓은 갈래로 안내했다.
+ */
+const THREAD_PROMOTION_SCOPE_NOTICE = '업무로 올리면 나와 관리자에게, 결정으로 올리면 관리자에게 보입니다. 자료로 올리면 이 방의 사람들(외부 게스트 포함)과 관리자에게 열립니다.'
 
 function legacyParticipantIds(conversation: Conversation): string[] {
   if (Array.isArray(conversation.participantIds) && conversation.participantIds.length > 0) return conversation.participantIds
@@ -307,7 +369,7 @@ export function MessengerDrawer({
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const [listMode, setListMode] = useState<MessengerListMode>('recent')
-  const [mobilePane, setMobilePane] = useState<'list' | 'chat'>('list')
+  const [mobilePane, setMobilePane] = useState<MessengerPane>('list')
   const [showConversationMenu, setShowConversationMenu] = useState(false)
   /** 방별 알림 세기와 그 밖의 알림 설정. 저장은 알림 설정 한 곳에서만 한다. */
   const [roomAlertModes, setRoomAlertModes] = useState<Record<string, 'all' | 'mention' | 'off'>>({})
@@ -330,7 +392,9 @@ export function MessengerDrawer({
   const messageEndRef = useRef<HTMLDivElement>(null)
   // ── A절 확장 ──
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
-  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
+  // 같은 루트가 본채널과 스레드 패널 양쪽에 그려진다. 수정 상태에 어느 칸인지가 없으면 두 벌이 함께
+  // 편집 상자로 바뀌어 autoFocus 둘이 초점을 다투고 '저장'(primary)이 한 화면에 두 개 선다.
+  const [editing, setEditing] = useState<{ id: string; text: string; inThread: boolean } | null>(null)
   const [roomSearchOpen, setRoomSearchOpen] = useState(false)
   const [roomSearchQuery, setRoomSearchQuery] = useState('')
   const [groupDialog, setGroupDialog] = useState<'create' | 'manage' | null>(null)
@@ -340,6 +404,30 @@ export function MessengerDrawer({
   const [visibleCount, setVisibleCount] = useState(MESSAGE_WINDOW)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const messageRefs = useRef<Record<string, HTMLElement | null>>({})
+  // ── R16-J: 스레드 ──
+  // 방을 바꾸면 닫는다(selectConversation). 열려 있는 동안은 이 방의 배열이 아니라 서버가 준 스레드를 그린다 —
+  // 답글 수는 언제나 실제 배열에서 나와야 하고, 그 배열은 서버가 들고 있다.
+  const [threadRootId, setThreadRootId] = useState<string | null>(null)
+  const [thread, setThread] = useState<ThreadData<ChatMessage> | null>(null)
+  const [threadMessage, setThreadMessage] = useState('')
+  // 스레드 안의 '답장'은 스레드 안에만 머문다. 본채널의 replyTo와 한 칸을 나눠 쓰면 옆 칸에서 누른 답장이
+  // 본채널 컴포저를 무장시켜, 답글 본문이 본채널의 인용 줄로 새어 나간다(서버도 그 방향을 400으로 막는다).
+  const [threadReplyTo, setThreadReplyTo] = useState<ChatMessage | null>(null)
+  const [threadSending, setThreadSending] = useState(false)
+  const [threadPending, setThreadPending] = useState(false)
+  // 이 스레드를 열어 둔 동안 무엇으로 올렸는지. 업무·자료는 서버가 두 번을 막지 않으므로(결정만 sourceKey로 막는다)
+  // 화면이 기억하지 않으면 같은 결론이 조용히 두 벌 생기고, 단추는 올리기 전후가 똑같이 보인다.
+  // 이 기억은 단추의 낱말만 바꾼다 — 막지는 않는다. 새로고침으로 되살릴 수 없는 값으로 서버가 허용하는
+  // 행동을 막으면, 두 건이 필요한 사람은 패널을 닫았다 여는 우회로를 배운다.
+  const [threadPromoted, setThreadPromoted] = useState<Record<string, ThreadPromotionKind[]>>({})
+  // 이미 올린 갈래를 한 번 더 눌렀는가. 막는 대신 한 번 되묻기 위한 자리다 —
+  // 되물은 다음 누름은 그대로 올라가고, 판정하는 쪽은 여전히 서버다.
+  const [threadPromoteAgain, setThreadPromoteAgain] = useState<ThreadPromotionKind | null>(null)
+  const [shareOpen, setShareOpen] = useState(false)
+  const threadComposerRef = useRef<HTMLTextAreaElement>(null)
+  // 지금 열려 있어야 하는 루트. 상태는 다음 렌더에야 바뀌므로 openThread가 바로 이어서 부르는
+  // refreshThread는 state로 자기 자신을 판정할 수 없다 — 늦게 온 응답을 가려내는 것은 이 ref다.
+  const threadRootIdRef = useRef<string | null>(null)
   // ── R16-D: 공지 ──
   // '회사 공지'를 selectedId에 넣지 않는다. selectedConversation에서 파생되는 자리가 많아
   // (컴포저 disabled, /read, callRoom, unreadForConversation, 방 메뉴, roomSearch, pendingAttachments)
@@ -397,9 +485,12 @@ export function MessengerDrawer({
     messages: [],
   }
   const unreadForConversation = (conversation: Conversation) => {
-    const hasReceipts = conversation.messages.some((item) => Array.isArray(item.readBy))
+    // 미읽음도 본채널의 것만 센다. 스레드 답글까지 세면 목록 배지가 "내가 들어가지 않은 스레드"의
+    // 활동을 알려 주게 되고, 방을 열어도 그 숫자를 지울 방법이 없어 배지가 남아 있는다.
+    const rows = conversation.messages.filter((item) => !item.threadRootId)
+    const hasReceipts = rows.some((item) => Array.isArray(item.readBy))
     if (!hasReceipts) return conversation.unread
-    return conversation.messages.filter((item) => {
+    return rows.filter((item) => {
       const mine = currentIdentityIds.includes(item.senderId) || item.senderId === 'me'
       return !mine && !item.readBy?.some((readerId) => currentIdentityIds.includes(readerId))
     }).length
@@ -446,17 +537,99 @@ export function MessengerDrawer({
     }
   }
 
+  /**
+   * 스레드를 닫는다. 나가는 길은 이 하나뿐이라 여기만 맞으면 어디서 닫아도 같은 상태가 된다.
+   * 휴대폰에서는 패널이 화면 전체를 덮으므로 pane도 함께 되돌린다 — 안 그러면 빈 화면에 갇힌다.
+   */
+  const closeThread = () => {
+    threadRootIdRef.current = null
+    setThreadRootId(null)
+    setThread(null)
+    setThreadMessage('')
+    setThreadReplyTo(null)
+    setThreadPromoted({})
+    setThreadPromoteAgain(null)
+    setShareOpen(false)
+    setMobilePane((current) => (current === 'thread' ? 'chat' : current))
+  }
+
+  /**
+   * 열려 있는 스레드를 서버에서 다시 읽는다.
+   *
+   * 방 목록(conversations)에도 답글이 들어 있지만 그 배열을 그대로 그리지 않는다 —
+   * 게스트의 SSE는 방 id 없이 축약돼 오므로, 어느 방이 바뀌었는지 모르는 채로 스레드만 다시 물어야 한다.
+   * 한 곳(서버)에서만 세면 본채널 요약과 패널이 어긋날 자리가 없다.
+   *
+   * closeOnFailure는 여는 순간에만 참이다. 여는 중의 404는 '그런 스레드가 없다'라서 패널을 닫는 것이
+   * 맞지만, 이미 열려 있는 스레드를 다시 읽다 실패한 것은 서버가 잠깐 흔들린 것이다 —
+   * SSE 틱마다 도는 이 함수가 500 한 번에 패널을 닫으면 쓰던 답글이 함께 사라진다.
+   * 본채널 컴포저는 전송이 실패해도 message를 비우지 않는다. 초안은 사람의 것이지 fetch의 것이 아니다.
+   */
+  const refreshThread = async (rootId: string, conversationId = selectedConversation.id, { closeOnFailure = false } = {}) => {
+    if (!rootId || !conversationId) return
+    // 실패했을 때 무엇을 할지도 한 곳에서만 정한다 — 두 갈래(응답 실패·연결 실패)가 갈라지면
+    // 한쪽만 초안을 지키는 상태가 생긴다.
+    const fail = (text: string) => {
+      if (closeOnFailure) closeThread()
+      onToast(text)
+    }
+    try {
+      const response = await fetch(
+        `/api/messenger/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(rootId)}/thread`,
+        { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined },
+      )
+      // 늦게 온 응답이 지금 열려 있는 스레드를 덮어쓰지 않게 한다. SSE의 refreshThread는 그 렌더가
+      // 붙잡은 rootId로 떠나므로, openThread(B) 직전에 떠난 A의 응답이 B보다 늦게 오면 패널은 A를
+      // 그리면서 컴포저는 B에 쓴다. 실패 갈래도 같다 — A의 404가 방금 연 B를 닫아 버리면 안 된다.
+      if (threadRootIdRef.current !== rootId) return
+      if (!response.ok) {
+        fail('스레드를 불러오지 못했습니다.')
+        return
+      }
+      const data = await response.json() as ThreadData<ChatMessage>
+      if (data?.root?.id !== rootId || threadRootIdRef.current !== rootId) return
+      setThread(data)
+    } catch {
+      if (threadRootIdRef.current !== rootId) return
+      fail('메신저 서버에 연결하지 못했습니다.')
+    }
+  }
+
+  // conversationId를 받는 이유: 딥링크는 방을 고른 바로 그 순간에 스레드를 연다. 그때
+  // selectedConversation은 아직 이전 방이라(상태 갱신은 다음 렌더다) 여기서 물어보면 남의 방을 읽는다.
+  const openThread = async (rootId: string, conversationId = selectedConversation.id) => {
+    threadRootIdRef.current = rootId
+    setThreadRootId(rootId)
+    setThread(null)
+    setMobilePane('thread')
+    setRoomSearchOpen(false)
+    // 여는 중의 실패만 패널을 닫는다. 아직 잃을 초안이 없고, 404는 '그런 스레드가 없다'는 뜻이다.
+    await refreshThread(rootId, conversationId, { closeOnFailure: true })
+    window.setTimeout(() => threadComposerRef.current?.focus(), 60)
+  }
+
+  /** 본채널에 보이는 메시지. 답글은 스레드 안에만 산다 — 서버 isMainChannelMessage와 같은 규칙이다. */
+  const channelMessages = selectedConversation.messages.filter((item) => !item.threadRootId)
+
   const pinnedMessages = (selectedConversation.pinnedMessageIds ?? [])
-    .map((id) => selectedConversation.messages.find((item) => item.id === id))
+    .map((id) => channelMessages.find((item) => item.id === id))
     .filter((item): item is ChatMessage => Boolean(item) && !item!.deletedAt)
 
-  const visibleMessages = selectedConversation.messages.slice(Math.max(0, selectedConversation.messages.length - visibleCount))
-  const hiddenMessageCount = Math.max(0, selectedConversation.messages.length - visibleMessages.length)
+  const visibleMessages = channelMessages.slice(Math.max(0, channelMessages.length - visibleCount))
+  const hiddenMessageCount = Math.max(0, channelMessages.length - visibleMessages.length)
 
   const roomSearchMatches = roomSearchQuery.trim().length >= 2
-    ? selectedConversation.messages
+    ? channelMessages
       .filter((item) => !item.deletedAt && item.text.toLowerCase().includes(roomSearchQuery.trim().toLowerCase()))
       .slice(-100)
+      .reverse()
+    : []
+
+  /** 스레드 안에서 걸린 것. 본채널에는 그 말이 없으므로 점프 대신 스레드를 연다. */
+  const threadSearchMatches = roomSearchQuery.trim().length >= 2
+    ? selectedConversation.messages
+      .filter((item) => item.threadRootId && !item.deletedAt && item.text.toLowerCase().includes(roomSearchQuery.trim().toLowerCase()))
+      .slice(-50)
       .reverse()
     : []
 
@@ -499,10 +672,17 @@ export function MessengerDrawer({
     : []
 
   const jumpToMessage = (messageId: string) => {
+    // 답글은 본채널에 없다. 스크롤할 자리가 없으므로 그 말이 사는 스레드를 연다.
+    const target = selectedConversation.messages.find((item) => item.id === messageId)
+    if (target?.threadRootId) { void openThread(target.threadRootId); setRoomSearchOpen(false); return }
+    // 여기부터는 본채널로 가는 길이다. 휴대폰에서 스레드 패널이 화면을 덮고 있으면 본채널은
+    // display:none이라 scrollIntoView가 아무 일도 하지 않는다 — 갈 자리를 먼저 화면에 세운다.
+    // (스레드 루트가 본채널 말을 인용한 경우가 그 길이다. closeThread와 같은 한 줄이다.)
+    setMobilePane((current) => (current === 'thread' ? 'chat' : current))
     // 창 밖에 있으면 먼저 그 지점까지 펼친다. 안 그러면 눌러도 아무 일도 안 일어난다.
-    const index = selectedConversation.messages.findIndex((item) => item.id === messageId)
+    const index = channelMessages.findIndex((item) => item.id === messageId)
     if (index >= 0) {
-      const needed = selectedConversation.messages.length - index
+      const needed = channelMessages.length - index
       if (needed > visibleCount) setVisibleCount(needed + 10)
     }
     setRoomSearchOpen(false)
@@ -527,10 +707,12 @@ export function MessengerDrawer({
     return (person.name + ' ' + person.team + ' ' + person.role).toLowerCase().includes(normalizedQuery)
   })
 
+  // 맨 아래로 따라 내려가는 것도 본채널의 일이다. 배열 전체 길이를 보면 옆 칸에 답글이 붙을 때마다
+  // 본채널이 아무것도 나타나지 않은 채로 바닥까지 끌려 내려간다.
   useEffect(() => {
     if (!open) return
     messageEndRef.current?.scrollIntoView({ block: 'nearest' })
-  }, [open, selectedId, selectedConversation?.messages.length])
+  }, [open, selectedId, channelMessages.length])
 
   useEffect(() => {
     if (!open) return
@@ -585,6 +767,9 @@ export function MessengerDrawer({
   useEventStream(open, (event) => {
     if (event.kind !== 'message' && event.kind !== 'resync') return
     messengerRefreshRef.current?.()
+    // 게스트의 이벤트는 {key, version}으로 축약돼 방 id를 싣지 못한다. 어느 방이 바뀌었는지 모르므로
+    // 열려 있는 스레드는 무조건 다시 읽는다 — 남의 방 때문에 한 번 더 읽는 편이, 내 스레드가 멈춰 있는 것보다 낫다.
+    if (threadRootId) void refreshThread(threadRootId)
     // 공지도 같은 'message' 이벤트를 탄다. 새 SSE 종류를 만들면 게스트 축약 규약까지 손대야 한다.
     reloadNotices()
     setNoticeRefreshToken((token) => token + 1)
@@ -609,6 +794,8 @@ export function MessengerDrawer({
     setPane('chat')
     setSelectedId(id)
     setMobilePane('chat')
+    // 스레드는 방에 매여 있다. 방을 바꾸고도 열어 두면 옆 칸이 다른 방의 대화를 그린 채 남는다.
+    closeThread()
   }
 
   /**
@@ -633,7 +820,8 @@ export function MessengerDrawer({
           return
         }
         // 게스트에게는 회사 공지도 공지 보드도 존재하지 않는다 — 없는 화면으로 보내지 않는다.
-        if (!readOnlyRooms) { setPane('notices'); setMobilePane('chat') }
+        // 열려 있던 스레드도 함께 닫는다 — 공지 보드 옆에 다른 방의 스레드가 서 있으면 안 된다.
+        if (!readOnlyRooms) { setPane('notices'); setMobilePane('chat'); closeThread() }
         onFocusHandled?.()
         return
       }
@@ -662,18 +850,25 @@ export function MessengerDrawer({
         pendingNoticeScrollRef.current = target.id
         setPane('notices')
         setMobilePane('chat')
+        closeThread()
       }
       onFocusHandled?.()
       return
     }
     if (focus.conversationId) {
       selectConversation(focus.conversationId)
+      // 스레드 딥링크는 방을 연 다음 옆 칸을 연다. selectConversation이 방금 스레드를 닫았으므로
+      // 여는 것은 그 뒤여야 한다 — 순서가 뒤집히면 열자마자 닫힌다.
+      if (focus.threadRootId) void openThread(focus.threadRootId, focus.conversationId)
       if (focus.messageId) {
         // 찾아갈 말이 창 밖이면 먼저 그 지점까지 펼친다. jumpToMessage는 지금 열려 있는 방을 보므로
         // 방을 막 바꾼 이 순간에는 대상 방을 직접 찾아 세어야 한다.
+        // 세는 배열은 여기서도 본채널이다 — visibleCount는 channelMessages 위에서 잘리는 수이므로,
+        // 답글이 섞인 배열로 세면 그리지도 않을 말을 창 크기에 넣어 창이 필요 이상으로 넓어진다.
         const room = conversations.find((item) => item.id === focus.conversationId)
-        const index = room?.messages.findIndex((item) => item.id === focus.messageId) ?? -1
-        if (room && index >= 0) setVisibleCount((current) => Math.max(current, room.messages.length - index + 10))
+        const mainMessages = (room?.messages ?? []).filter((item) => !item.threadRootId)
+        const index = mainMessages.findIndex((item) => item.id === focus.messageId)
+        if (index >= 0) setVisibleCount((current) => Math.max(current, mainMessages.length - index + 10))
         window.setTimeout(() => jumpToMessage(focus.messageId!), 120)
       }
     }
@@ -735,11 +930,24 @@ export function MessengerDrawer({
     }
   }
 
-  const sendMessage = async (event: FormEvent) => {
+  /**
+   * 메시지 한 건 보내기. 스레드 답글이면 threadRootId를 함께 싣는다 —
+   * 서버가 답글 append와 루트 집계를 같은 커밋에서 갱신하므로, 돌려받은 대화 하나로
+   * 본채널 요약과 스레드가 동시에 맞는다.
+   */
+  const sendMessage = async (event: FormEvent, target?: { threadRootId: string }) => {
     event.preventDefault()
-    const text = message.trim()
-    if (!text || !activeConversation || messageSending || attachmentUploading) return
-    setMessageSending(true)
+    const inThread = Boolean(target?.threadRootId)
+    const text = (inThread ? threadMessage : message).trim()
+    // 두 컴포저는 서로를 막지 않는다. 한쪽이 보내는 중이라고 다른 쪽 단추가 조용히 아무 일도 하지 않으면,
+    // 사람은 눌린 단추가 왜 반응하지 않는지 알 길이 없다 — 막을 것이면 그 단추를 disabled로 적는다.
+    if (!text || !activeConversation) return
+    if (inThread ? threadSending : (messageSending || attachmentUploading)) return
+    // 첨부는 본채널 컴포저에만 있다. 스레드 답글이 방의 첨부 대기줄을 함께 비우면
+    // 본채널에 올리려던 파일이 말없이 사라진다.
+    const attachments = inThread ? [] : activePendingAttachments
+    const setSending = inThread ? setThreadSending : setMessageSending
+    setSending(true)
     try {
       const response = await fetch(`/api/messenger/conversations/${encodeURIComponent(activeConversation.id)}/messages`, {
         method: 'POST',
@@ -747,7 +955,14 @@ export function MessengerDrawer({
           'content-type': 'application/json',
           ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}),
         },
-        body: JSON.stringify({ text, attachments: activePendingAttachments, ...(replyTo ? { replyTo: replyTo.id } : {}) }),
+        body: JSON.stringify({
+          text,
+          attachments,
+          // 인용 대상은 컴포저마다 따로다. 스레드에서 고른 말은 그 스레드 안만 가리킬 수 있고
+          // (서버가 다시 판정한다), 본채널에서 고른 말은 답글일 수 없다.
+          ...((inThread ? threadReplyTo : replyTo) ? { replyTo: (inThread ? threadReplyTo : replyTo)!.id } : {}),
+          ...(target?.threadRootId ? { threadRootId: target.threadRootId } : {}),
+        }),
       })
       const body = await response.json().catch(() => null) as { conversation?: Conversation; error?: { message?: string } } | null
       if (!response.ok || !body?.conversation) {
@@ -755,6 +970,12 @@ export function MessengerDrawer({
         return
       }
       await replaceConversationLocally(body.conversation)
+      if (inThread) {
+        setThreadMessage('')
+        setThreadReplyTo(null)
+        await refreshThread(target!.threadRootId)
+        return
+      }
       setMessage('')
       setReplyTo(null)
       setMentionState(null)
@@ -766,7 +987,76 @@ export function MessengerDrawer({
     } catch {
       onToast('메신저 서버에 연결하지 못해 메시지를 보내지 않았습니다.')
     } finally {
-      setMessageSending(false)
+      setSending(false)
+    }
+  }
+
+  /** 스레드 결론을 본채널에 올린다. 성공하면 채널 미리보기가 그 요약으로 바뀐다. */
+  const shareThread = async (text: string) => {
+    if (!activeConversation || !threadRootId || threadPending) return
+    setThreadPending(true)
+    try {
+      const response = await fetch(
+        `/api/messenger/conversations/${encodeURIComponent(activeConversation.id)}/threads/${encodeURIComponent(threadRootId)}/share`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}) },
+          body: JSON.stringify({ text }),
+        },
+      )
+      const body = await response.json().catch(() => null) as { conversation?: Conversation; error?: { message?: string } } | null
+      if (!response.ok || !body?.conversation) {
+        onToast(body?.error?.message ?? '채널에 공유하지 못했습니다.')
+        return
+      }
+      await replaceConversationLocally(body.conversation)
+      setShareOpen(false)
+      onToast('스레드 내용을 채널에 공유했습니다.')
+    } catch {
+      onToast('메신저 서버에 연결하지 못했습니다.')
+    } finally {
+      setThreadPending(false)
+    }
+  }
+
+  /** 스레드를 업무·결정·자료로 올린다. 무엇이 되는지는 서버가 정하고, 화면은 결과만 말한다. */
+  const promoteThread = async (kind: ThreadPromotionKind) => {
+    if (!activeConversation || !threadRootId || threadPending) return
+    const rootId = threadRootId
+    // 이미 올린 갈래면 막지 않고 한 번 되묻는다. 업무·자료는 서버가 두 번을 허용하므로 화면이 영영 막으면
+    // 서버가 허락한 일을 화면이 금지하게 된다(HARD-WON RULE 1) — 대신 무슨 일이 생기는지 먼저 말한다.
+    // 결정은 되묻지 않는다. 서버가 409로 답하므로 '한 건 더 생긴다'는 말은 거짓이 되고,
+    // 그 거절 문장은 서버가 자기 낱말로 이미 가지고 있다.
+    const promotion = THREAD_PROMOTIONS.find((item) => item.kind === kind)
+    if (promotion?.duplicates && (threadPromoted[rootId] ?? []).includes(kind) && threadPromoteAgain !== kind) {
+      setThreadPromoteAgain(kind)
+      onToast(`이미 ${promotion.label} 올렸습니다. 한 번 더 누르면 같은 내용으로 한 건 더 생깁니다.`)
+      return
+    }
+    setThreadPending(true)
+    try {
+      const response = await fetch(
+        `/api/messenger/conversations/${encodeURIComponent(activeConversation.id)}/threads/${encodeURIComponent(threadRootId)}/promote`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}) },
+          body: JSON.stringify({ kind }),
+        },
+      )
+      const body = await response.json().catch(() => null) as { created?: { label?: string }; error?: { message?: string } } | null
+      if (!response.ok || !body?.created) {
+        onToast(body?.error?.message ?? '올리지 못했습니다.')
+        return
+      }
+      // 올린 사실을 단추가 기억한다. 업무·자료는 서버가 두 번을 막지 않으므로, 화면이 말하지 않으면
+      // 같은 결론이 조용히 두 벌 생긴다. 스레드를 닫으면 이 기억도 사라진다 — 판정하는 쪽은 여전히 서버다.
+      setThreadPromoted((current) => ({ ...current, [rootId]: [...(current[rootId] ?? []), kind] }))
+      setThreadPromoteAgain(null)
+      onToast(`${kind === 'task' ? '업무' : kind === 'decision' ? '결정' : '자료'}로 올렸습니다: ${body.created.label ?? ''}`.trim())
+    } catch {
+      onToast('메신저 서버에 연결하지 못했습니다.')
+    } finally {
+      setThreadPending(false)
     }
   }
 
@@ -895,6 +1185,9 @@ export function MessengerDrawer({
     setPane('notices')
     setShowConversationMenu(false)
     setMobilePane('chat')
+    // 스레드는 방에 매여 있다(selectConversation과 같은 이유). 보드로 갈아 끼운 가운데 칸 옆에
+    // 남의 방 스레드가 그대로 서 있으면, 화면 하나가 서로 다른 두 자리를 동시에 말한다.
+    closeThread()
   }
 
   const noticeHandlers = (notice: Notice) => ({
@@ -1039,13 +1332,140 @@ export function MessengerDrawer({
     }
   }
 
+  /**
+   * 말풍선 하나. 본채널과 스레드 패널이 같은 함수를 쓴다 — 인용·반응·첨부·수정/삭제가
+   * 두 벌이 되면 한쪽에만 고쳐지고, 사람은 같은 말이 자리마다 다르게 보이는 화면을 얻는다.
+   *
+   * inThread일 때 다른 것: 고정 단추가 없고(고정 스트립은 본채널 화면이다), 스레드 열기 단추가 없으며
+   * (이미 그 안이다), 답글 요약 줄을 그리지 않고(같은 말을 두 번 한다), '답장'이 스레드 컴포저를 겨눈다.
+   *
+   * 루트는 본채널과 패널 양쪽에 그려지므로 수정 상태도 칸까지 함께 본다 — 아니면 두 벌이 동시에 편집 상자가 된다.
+   */
+  const renderMessage = (item: ChatMessage, { inThread = false }: { inThread?: boolean } = {}) => {
+    const mine = currentIdentityIds.includes(item.senderId) || item.senderId === 'me'
+    const quoted = item.replyTo ? selectedConversation.messages.find((candidate) => candidate.id === item.replyTo) : undefined
+    const senderInactive = !mine && directory.find((person) => person.id === item.senderId || person.accountId === item.senderId)?.active === false
+    // 읽음 표시는 본채널의 것이다. /read는 본채널 메시지만 찍으므로 답글의 readBy에는 보낸 사람뿐이고,
+    // 그 수를 '안 읽음'으로 그리면 아무도 안 읽었다는 거짓말이 된다.
+    const receipts = item.threadRootId ? '' : readCountFor(item)
+    // 인용을 눌렀을 때 갈 곳이 있는가. 패널 안 말풍선은 ref를 달지 않으므로(점프의 목적지는 언제나 본채널이다)
+    // 같은 스레드 안을 가리키는 인용은 스크롤할 자리가 없다 — 375px show-thread에서는 본채널 열이 아예 display:none이다.
+    // 비교 대상은 지금 열려 있는 스레드의 루트다. item.threadRootId로 재면 패널에 그려지는 루트에서
+    // undefined === undefined가 참이 되어, 본채널에 멀쩡히 있는 인용까지 갈 곳 없는 문장으로 바뀐다.
+    const quotedInThread = inThread && Boolean(quoted) && (quoted!.threadRootId === threadRootId || quoted!.id === threadRootId)
+    const pinned = (selectedConversation.pinnedMessageIds ?? []).includes(item.id)
+    const removed = Boolean(item.deletedAt)
+    const isEditing = editing?.id === item.id && editing.inThread === inThread
+    return (
+      <article
+        className={'messenger-message' + (mine ? ' mine' : '') + (removed ? ' removed' : '')}
+        key={item.id}
+        // 스레드 패널에도 같은 루트가 그려진다. 두 곳이 같은 ref 칸을 쓰면 나중에 그려진 쪽이 이겨서
+        // 본채널 점프가 옆 칸으로 간다 — 점프의 목적지는 언제나 본채널이다.
+        ref={inThread ? undefined : (node) => { messageRefs.current[item.id] = node }}
+      >
+        {!mine && <Avatar name={item.senderName} compact />}
+        <div>
+          {!mine && <strong>{item.senderName}{senderInactive && <span className="messenger-inactive-tag">비활성</span>}</strong>}
+          {quoted && <QuotedMessage senderName={quoted.senderName} text={quoted.deletedAt ? '삭제된 메시지' : quoted.text} onJump={quotedInThread ? undefined : () => jumpToMessage(quoted.id)} />}
+          <div className="messenger-bubble-row">
+            {mine && (
+              <span className="messenger-message-meta">
+                {receipts && <small>{receipts}</small>}
+                <time>{item.time}</time>
+              </span>
+            )}
+            {isEditing ? (
+              <span className="messenger-edit-box">
+                <label>
+                  <span className="sr-only">메시지 수정</span>
+                  <textarea
+                    rows={2}
+                    value={editing.text}
+                    autoFocus
+                    onChange={(event) => setEditing({ id: item.id, text: event.target.value, inThread })}
+                    onKeyDown={(event) => {
+                      if (event.nativeEvent.isComposing) return
+                      if (event.key === 'Escape') setEditing(null)
+                      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submitEdit() }
+                    }}
+                  />
+                </label>
+                <span className="messenger-edit-actions">
+                  <Button tone="quiet" size="sm" onClick={() => setEditing(null)}>취소</Button>
+                  <Button tone="primary" size="sm" onClick={() => void submitEdit()}>저장</Button>
+                </span>
+              </span>
+            ) : (
+              <p>{item.text}{item.editedAt && !removed && <span className="messenger-edited">수정됨</span>}</p>
+            )}
+            {!mine && <time>{item.time}</time>}
+          </div>
+          {/* 루트가 지워져도 요약 줄은 남는다 — 답글은 다른 사람의 말이고, 여기가 그 스레드로 가는 유일한 문이다. */}
+          {!inThread && !item.threadRootId && (item.replyCount ?? 0) > 0 && (
+            <ThreadSummaryButton
+              replyCount={item.replyCount ?? 0}
+              lastReplyAt={item.lastReplyAt}
+              open={threadRootId === item.id}
+              onOpen={() => void openThread(item.id)}
+            />
+          )}
+          {!inThread && item.sharedFromThreadId && (
+            <ThreadOriginButton onOpen={() => void openThread(item.sharedFromThreadId!)} />
+          )}
+          {!removed && !isEditing && (
+            <MessageActionBar
+              canEdit={mine && !readOnlyRooms}
+              canDelete={(mine || canManage || selectedConversation.ownerId === currentUserId) && !readOnlyRooms}
+              canPin={!readOnlyRooms}
+              // 고정 스트립은 본채널 화면이다. 답글은 서버가 언제나 409로 되돌리므로
+              // (THREAD_REPLY_NOT_PINNABLE), 눌러도 오류 토스트만 나는 단추를 답글마다 세우지 않는다.
+              pinnable={!item.threadRootId}
+              onOpenThread={inThread || item.threadRootId ? undefined : () => void openThread(item.id)}
+              pinned={pinned}
+              // 답장도 칸을 따라간다. 스레드에서 누른 답장이 본채널 컴포저를 겨누면, 휴대폰에서는
+              // 그 컴포저가 display:none이라 아무 일도 일어나지 않고, 데스크톱에서는 답글 본문이
+              // 본채널 인용 줄로 새어 나간다.
+              onReply={inThread
+                ? () => { setThreadReplyTo(item); threadComposerRef.current?.focus() }
+                : () => { setReplyTo(item); composerRef.current?.focus() }}
+              onReact={(emoji) => toggleReaction(item.id, emoji)}
+              onPin={() => togglePin(item.id, !pinned)}
+              onEdit={() => setEditing({ id: item.id, text: item.text, inThread })}
+              onDelete={() => removeMessage(item.id)}
+            />
+          )}
+          <ReactionRow reactions={item.reactions} currentIdentityIds={currentIdentityIds} onToggle={(emoji) => toggleReaction(item.id, emoji)} />
+          {item.attachments && item.attachments.length > 0 && (
+            <div className="messenger-message-attachments" aria-label="메시지 첨부파일">
+              {item.attachments.map((attachment) => (
+                <button
+                  type="button"
+                  key={attachment.id}
+                  onClick={() => void downloadDocumentAttachment(attachment, workspaceScope)
+                    .catch((reason) => onToast(reason instanceof Error ? reason.message : '첨부파일을 내려받지 못했습니다.'))}
+                >
+                  <Download size={15} aria-hidden="true" />
+                  <span><strong>{attachment.name}</strong><small>{attachment.size}</small></span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </article>
+    )
+  }
+
   return (
     <div className={'collab-overlay messenger-overlay' + (embedded ? ' is-embedded' : '')}>
       {!embedded && <button className="collab-overlay-backdrop" type="button" aria-label="메신저 닫기" onClick={onClose} />}
       <div
         id="company-messenger"
         ref={overlayRef}
-        className={'messenger-drawer ' + (mobilePane === 'list' ? 'show-list' : 'show-chat') + (embedded ? ' is-embedded' : '')}
+        className={['messenger-drawer',
+          mobilePane === 'list' ? 'show-list' : mobilePane === 'thread' ? 'show-thread' : 'show-chat',
+          threadRootId ? 'has-thread' : '',
+          embedded ? 'is-embedded' : ''].filter(Boolean).join(' ')}
         role={embedded ? 'region' : 'dialog'}
         aria-modal={embedded ? undefined : true}
         aria-labelledby="messenger-title"
@@ -1225,8 +1645,10 @@ export function MessengerDrawer({
               <RoomSearchPanel
                 query={roomSearchQuery}
                 matches={roomSearchMatches}
+                threadMatches={threadSearchMatches}
                 onQueryChange={setRoomSearchQuery}
                 onJump={jumpToMessage}
+                onOpenThread={(rootId) => void openThread(rootId)}
                 onClose={() => { setRoomSearchOpen(false); setRoomSearchQuery('') }}
               />
             )}
@@ -1266,92 +1688,10 @@ export function MessengerDrawer({
                 </div>
               )}
               <div className="messenger-date-divider"><span>오늘</span></div>
-              {selectedConversation.messages.length === 0 && (
+              {channelMessages.length === 0 && (
                 <div className="collab-empty"><MessageCircle size={32} /><strong>첫 메시지를 보내세요</strong><span>업무 내용과 파일을 안전하게 공유할 수 있습니다.</span></div>
               )}
-              {visibleMessages.map((item) => {
-                const mine = currentIdentityIds.includes(item.senderId) || item.senderId === 'me'
-                const quoted = item.replyTo ? selectedConversation.messages.find((candidate) => candidate.id === item.replyTo) : undefined
-                const senderInactive = !mine && directory.find((person) => person.id === item.senderId || person.accountId === item.senderId)?.active === false
-                const receipts = readCountFor(item)
-                const pinned = (selectedConversation.pinnedMessageIds ?? []).includes(item.id)
-                const removed = Boolean(item.deletedAt)
-                return (
-                  <article
-                    className={'messenger-message' + (mine ? ' mine' : '') + (removed ? ' removed' : '')}
-                    key={item.id}
-                    ref={(node) => { messageRefs.current[item.id] = node }}
-                  >
-                    {!mine && <Avatar name={item.senderName} compact />}
-                    <div>
-                      {!mine && <strong>{item.senderName}{senderInactive && <span className="messenger-inactive-tag">비활성</span>}</strong>}
-                      {quoted && <QuotedMessage senderName={quoted.senderName} text={quoted.deletedAt ? '삭제된 메시지' : quoted.text} onJump={() => jumpToMessage(quoted.id)} />}
-                      <div className="messenger-bubble-row">
-                        {mine && (
-                          <span className="messenger-message-meta">
-                            <small>{receipts}</small>
-                            <time>{item.time}</time>
-                          </span>
-                        )}
-                        {editing?.id === item.id ? (
-                          <span className="messenger-edit-box">
-                            <label>
-                              <span className="sr-only">메시지 수정</span>
-                              <textarea
-                                rows={2}
-                                value={editing.text}
-                                autoFocus
-                                onChange={(event) => setEditing({ id: item.id, text: event.target.value })}
-                                onKeyDown={(event) => {
-                                  if (event.nativeEvent.isComposing) return
-                                  if (event.key === 'Escape') setEditing(null)
-                                  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submitEdit() }
-                                }}
-                              />
-                            </label>
-                            <span className="messenger-edit-actions">
-                              <Button tone="quiet" size="sm" onClick={() => setEditing(null)}>취소</Button>
-                              <Button tone="primary" size="sm" onClick={() => void submitEdit()}>저장</Button>
-                            </span>
-                          </span>
-                        ) : (
-                          <p>{item.text}{item.editedAt && !removed && <span className="messenger-edited">수정됨</span>}</p>
-                        )}
-                        {!mine && <time>{item.time}</time>}
-                      </div>
-                      {!removed && editing?.id !== item.id && (
-                        <MessageActionBar
-                          canEdit={mine && !readOnlyRooms}
-                          canDelete={(mine || canManage || selectedConversation.ownerId === currentUserId) && !readOnlyRooms}
-                          canPin={!readOnlyRooms}
-                          pinned={pinned}
-                          onReply={() => { setReplyTo(item); composerRef.current?.focus() }}
-                          onReact={(emoji) => toggleReaction(item.id, emoji)}
-                          onPin={() => togglePin(item.id, !pinned)}
-                          onEdit={() => setEditing({ id: item.id, text: item.text })}
-                          onDelete={() => removeMessage(item.id)}
-                        />
-                      )}
-                      <ReactionRow reactions={item.reactions} currentIdentityIds={currentIdentityIds} onToggle={(emoji) => toggleReaction(item.id, emoji)} />
-                      {item.attachments && item.attachments.length > 0 && (
-                        <div className="messenger-message-attachments" aria-label="메시지 첨부파일">
-                          {item.attachments.map((attachment) => (
-                            <button
-                              type="button"
-                              key={attachment.id}
-                              onClick={() => void downloadDocumentAttachment(attachment, workspaceScope)
-                                .catch((reason) => onToast(reason instanceof Error ? reason.message : '첨부파일을 내려받지 못했습니다.'))}
-                            >
-                              <Download size={15} aria-hidden="true" />
-                              <span><strong>{attachment.name}</strong><small>{attachment.size}</small></span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </article>
-                )
-              })}
+              {visibleMessages.map((item) => renderMessage(item))}
               <div ref={messageEndRef} />
             </div>
 
@@ -1444,8 +1784,135 @@ export function MessengerDrawer({
             </form>
           </section>
           )}
+
+          {/* 패널이 서는 조건과 has-thread·show-thread가 붙는 조건은 하나다(threadRootId). 둘로 나뉘면
+              휴대폰에서 목록·채널이 숨겨진 채 패널만 아직 없는 순간이 생겨 빈 서랍에 갇힌다. */}
+          {threadRootId && (
+            <aside className="messenger-thread" aria-label="스레드">
+              {/* 헤더는 늘 보인다(flex: 0 0 auto). 스크롤을 내렸다고 '스레드 닫기'가 사라지면 나갈 길이 없다. */}
+              <header className="messenger-thread-header">
+                <button type="button" className="messenger-back-button" aria-label="대화로" onClick={() => setMobilePane('chat')}><ArrowLeft size={21} /></button>
+                <div>
+                  <strong>스레드</strong>
+                  {/* 답글이 0이면 수를 적지 않는다. 바로 아래 '아직 답글이 없습니다'가 같은 말을 이미 한다. */}
+                  <span>{conversationName(selectedConversation)}{thread && thread.replies.length > 0 ? ` · 답글 ${thread.replies.length}개` : ''}</span>
+                </div>
+                {!readOnlyRooms && thread && (
+                  <div className="messenger-thread-promotions">
+                    {/* [채널에 공유]와 같은 조건으로 켜고 끈다 — 서버는 넷 모두를 살아 있는 답글 수로 판정한다
+                        (THREAD_EMPTY). 이 수는 SSE마다 서버에서 다시 오므로 화면이 영영 막는 자리가 아니다.
+                        올린 뒤에도 단추는 켜져 있다. 서버가 업무·자료의 두 번째를 허용하므로 화면이 막을 자리가
+                        아니고(HARD-WON RULE 1), 바뀌는 것은 낱말뿐이다 — 다시 누르면 promoteThread가 한 번 되묻는다. */}
+                    {THREAD_PROMOTIONS.map(({ kind, label, doneLabel }) => {
+                      const done = (threadPromoted[threadRootId] ?? []).includes(kind)
+                      return (
+                        <Button
+                          key={kind}
+                          tone="quiet"
+                          size="sm"
+                          disabled={!thread || thread.liveReplyCount === 0 || threadPending}
+                          onClick={() => void promoteThread(kind)}
+                        >
+                          {done ? doneLabel : label}
+                        </Button>
+                      )
+                    })}
+                  </div>
+                )}
+                <IconButton tone="quiet" size="sm" aria-label="스레드 닫기" onClick={closeThread}><X size={16} /></IconButton>
+              </header>
+
+              {/* 세 단추가 나란히 서 있으면 같은 범위처럼 보인다. 승격 줄이 서는 곳에서만 그 사실을 말한다.
+                  남은 답글이 하나도 없으면 그 자리에 다른 문장이 선다 — 지금 할 수 없는 일의 공개 범위를
+                  설명하는 것은 안내가 아니라 소음이고, 거절의 이유가 그 자리에 없으면 화면은 '답글 1개'를
+                  적어 놓고 말없이 네 단추를 끈다. 두 문장은 같은 자리를 나눠 쓰지 함께 서지 않는다. */}
+              {!readOnlyRooms && thread && (
+                <p className="messenger-thread-note">
+                  {thread.liveReplyCount === 0 && thread.replies.length > 0
+                    ? THREAD_ALL_REPLIES_DELETED_NOTICE
+                    : THREAD_PROMOTION_SCOPE_NOTICE}
+                </p>
+              )}
+
+              <div className="messenger-thread-messages" aria-live="polite">
+                {thread ? (
+                  <>
+                    {renderMessage(thread.root, { inThread: true })}
+                    {thread.replies.length === 0
+                      ? <ThreadEmpty />
+                      : <ThreadReplyDivider count={thread.replies.length} />}
+                    {thread.replies.map((item) => renderMessage(item, { inThread: true }))}
+                  </>
+                ) : (
+                  <p className="messenger-thread-loading">스레드를 불러오는 중입니다…</p>
+                )}
+              </div>
+
+              {/* 읽기는 열리는데 쓰기만 거절되는 유일한 갈래다(server/messenger-threads.mjs의 threadRootViolation).
+                  컴포저를 켜 둔 채로는 사람이 눈앞에 열린 스레드를 두고 거절 문장을 받는다 — 켜진 컴포저 대신
+                  그 자리에 같은 문장을 그린다. 문장은 서버와 한 벌이다(THREAD_ROOT_DELETED_NOTICE). */}
+              {thread?.root.deletedAt ? (
+                <p className="messenger-thread-note is-blocked">{THREAD_ROOT_DELETED_NOTICE}</p>
+              ) : (
+              <form className="messenger-composer messenger-thread-composer" onSubmit={(event) => void sendMessage(event, { threadRootId })}>
+                {threadReplyTo && (
+                  <div className="messenger-reply-strip">
+                    <CornerUpLeft size={15} aria-hidden="true" />
+                    <span><strong>{threadReplyTo.senderName}</strong>에게 답장 · {threadReplyTo.text.length > 50 ? `${threadReplyTo.text.slice(0, 49)}…` : threadReplyTo.text}</span>
+                    <IconButton tone="quiet" size="sm" aria-label="답장 취소" onClick={() => setThreadReplyTo(null)}><X size={15} /></IconButton>
+                  </div>
+                )}
+                <label>
+                  <span className="sr-only">스레드에 답글 작성</span>
+                  <textarea
+                    ref={threadComposerRef}
+                    rows={1}
+                    value={threadMessage}
+                    onChange={(event) => setThreadMessage(event.target.value)}
+                    onKeyDown={(event) => {
+                      // 한글 조합 중의 Enter는 글자 확정용이다. 막지 않으면 조합 중인 낱말이 그대로 전송된다.
+                      if (event.nativeEvent.isComposing) return
+                      if (event.key === 'Escape') {
+                        // 서랍의 Escape(useOverlayFocus)까지 올라가면 메신저가 통째로 닫힌다.
+                        event.stopPropagation()
+                        if (threadReplyTo) { setThreadReplyTo(null); return }
+                        if (!threadMessage.trim()) closeThread()
+                        return
+                      }
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault()
+                        event.currentTarget.form?.requestSubmit()
+                      }
+                    }}
+                    placeholder="이 스레드에 답글 쓰기"
+                  />
+                </label>
+                {/* 본채널 컴포저와 같은 문장을 쓴다. sendMessage가 !activeConversation에서 조용히 되돌아가므로
+                    (딥링크가 방 목록보다 먼저 도착한 순간이 그렇다) 그 사실을 disabled로 적어야 한다. */}
+                <button className="send" type="submit" aria-label="답글 보내기" disabled={!activeConversation || !threadMessage.trim() || threadSending}><Send size={20} /></button>
+              </form>
+              )}
+
+              {!readOnlyRooms && (
+                <div className="messenger-thread-share">
+                  {/* 서버가 THREAD_EMPTY를 판정하는 것과 같은 수(살아 있는 답글)로 켜고 끈다. */}
+                  <Button tone="secondary" size="sm" disabled={!thread || thread.liveReplyCount === 0 || threadPending} onClick={() => setShareOpen(true)}>채널에 공유</Button>
+                </div>
+              )}
+            </aside>
+          )}
         </div>
       </div>
+      {shareOpen && thread && (
+        <ThreadShareDialog
+          rootSenderName={thread.root.senderName}
+          rootText={thread.root.deletedAt ? '삭제된 메시지' : thread.root.text}
+          replyCount={thread.replies.length}
+          pending={threadPending}
+          onSubmit={(text) => void shareThread(text)}
+          onClose={() => { if (!threadPending) setShareOpen(false) }}
+        />
+      )}
       {groupDialog && (
         <GroupRoomDialog
           mode={groupDialog}

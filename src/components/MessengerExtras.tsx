@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, CornerUpLeft, Hash, Pencil, Pin, PinOff, Search, SmilePlus, Trash2, UserMinus, UserPlus, X } from 'lucide-react'
+import { Check, CornerUpLeft, Hash, MessagesSquare, Pencil, Pin, PinOff, Search, SmilePlus, Trash2, UserMinus, UserPlus, X } from 'lucide-react'
 
 import { Button, IconButton } from './ui/Button'
 
@@ -64,24 +64,31 @@ export function MessageActionBar({
   canEdit,
   canDelete,
   canPin = true,
+  pinnable = true,
   pinned,
   onReply,
   onReact,
   onPin,
   onEdit,
   onDelete,
+  onOpenThread,
 }: {
   canEdit: boolean
   canDelete: boolean
   /** 고정은 이 방에서 늘 보이게 두는 일이다. 공지(NTC)와 다른 기능이다.
    *  게스트처럼 방을 관리할 수 없는 사람에게는 버튼을 두지 않는다. */
   canPin?: boolean
+  /** 이 말 자체를 고정할 수 있는가. canPin이 "사람의 자격"이라면 이쪽은 "말의 자격"이다 —
+   *  답글은 서버가 언제나 409로 되돌리므로(THREAD_REPLY_NOT_PINNABLE), 눌러도 오류만 나는 단추를 두지 않는다. */
+  pinnable?: boolean
   pinned: boolean
   onReply: () => void
   onReact: (emoji: string) => void
   onPin: () => void
   onEdit: () => void
   onDelete: () => void
+  /** 스레드를 열 수 있는 말에만 준다. 답글에는 없고(깊이는 1단이다), 스레드 패널 안에서도 없다(이미 그 안이다). */
+  onOpenThread?: () => void
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const pickerRef = useRef<HTMLDivElement>(null)
@@ -104,8 +111,9 @@ export function MessageActionBar({
   return (
     <div className="messenger-message-actions" ref={pickerRef}>
       <IconButton tone="quiet" size="sm" aria-label="답장" onClick={onReply}><CornerUpLeft size={15} /></IconButton>
+      {onOpenThread && <IconButton tone="quiet" size="sm" aria-label="스레드 열기" onClick={onOpenThread}><MessagesSquare size={15} /></IconButton>}
       <IconButton tone="quiet" size="sm" aria-label="반응 남기기" aria-expanded={pickerOpen} onClick={() => setPickerOpen((open) => !open)}><SmilePlus size={15} /></IconButton>
-      {canPin && <IconButton tone="quiet" size="sm" aria-label={pinned ? '고정 해제' : '고정'} onClick={onPin}>{pinned ? <PinOff size={15} /> : <Pin size={15} />}</IconButton>}
+      {canPin && pinnable && <IconButton tone="quiet" size="sm" aria-label={pinned ? '고정 해제' : '고정'} onClick={onPin}>{pinned ? <PinOff size={15} /> : <Pin size={15} />}</IconButton>}
       {canEdit && <IconButton tone="quiet" size="sm" aria-label="메시지 수정" onClick={onEdit}><Pencil size={15} /></IconButton>}
       {canDelete && <IconButton tone="quiet" size="sm" aria-label="메시지 삭제" onClick={onDelete}><Trash2 size={15} /></IconButton>}
       {pickerOpen && (
@@ -121,7 +129,12 @@ export function MessageActionBar({
   )
 }
 
-/** 답장 대상 인용. 말풍선 위에 한 줄로 접어 두고 누르면 원문으로 간다. */
+/**
+ * 답장 대상 인용. 말풍선 위에 한 줄로 접어 두고 누르면 원문으로 간다.
+ *
+ * 갈 곳이 없으면(onJump 없이 미리보기로만 쓰는 자리) 단추가 아니라 그냥 한 줄이다 —
+ * 키보드와 스크린리더에게 '원문으로 이동'이라고 알려 주고는 아무 일도 안 하는 초점 자리를 만들지 않는다.
+ */
 export function QuotedMessage({
   senderName,
   text,
@@ -131,10 +144,16 @@ export function QuotedMessage({
   text: string
   onJump?: () => void
 }) {
-  return (
-    <button className="messenger-quote" type="button" onClick={onJump} aria-label={`${senderName}님의 원문으로 이동`}>
+  const body = (
+    <>
       <strong>{senderName}</strong>
       <span>{text.length > 80 ? `${text.slice(0, 79)}…` : text}</span>
+    </>
+  )
+  if (!onJump) return <div className="messenger-quote is-static">{body}</div>
+  return (
+    <button className="messenger-quote" type="button" onClick={onJump} aria-label={`${senderName}님의 원문으로 이동`}>
+      {body}
     </button>
   )
 }
@@ -175,18 +194,27 @@ export function MentionSuggestions({
   )
 }
 
-/** 방 안 검색 결과. 누르면 그 메시지로 이동한다. */
+/**
+ * 방 안 검색 결과. 누르면 그 메시지로 이동한다.
+ *
+ * 두 구획으로 나눈다 — 본채널의 말은 그 자리로 스크롤하지만, 스레드 안의 말은 본채널에 없어서
+ * 스크롤할 자리가 없다. 한 목록에 섞어 두면 절반은 눌러도 아무 일이 일어나지 않는 것처럼 보인다.
+ */
 export function RoomSearchPanel({
   query,
   matches,
+  threadMatches = [],
   onQueryChange,
   onJump,
+  onOpenThread,
   onClose,
 }: {
   query: string
   matches: { id: string; text: string; senderName: string; time: string }[]
+  threadMatches?: { id: string; text: string; senderName: string; time: string; threadRootId?: string }[]
   onQueryChange: (value: string) => void
   onJump: (messageId: string) => void
+  onOpenThread?: (rootId: string) => void
   onClose: () => void
 }) {
   return (
@@ -199,11 +227,21 @@ export function RoomSearchPanel({
       <IconButton tone="quiet" size="sm" aria-label="방 검색 닫기" onClick={onClose}><X size={16} /></IconButton>
       {query.trim().length >= 2 && (
         <ul className="messenger-room-search-results">
-          {matches.length === 0 && <li className="empty">일치하는 메시지가 없습니다.</li>}
+          {matches.length === 0 && threadMatches.length === 0 && <li className="empty">일치하는 메시지가 없습니다.</li>}
           {matches.map((match) => (
             <li key={match.id}>
               <button type="button" onClick={() => onJump(match.id)}>
                 <strong>{match.senderName}</strong>
+                <span>{match.text.length > 90 ? `${match.text.slice(0, 89)}…` : match.text}</span>
+                <time>{match.time}</time>
+              </button>
+            </li>
+          ))}
+          {threadMatches.length > 0 && <li className="messenger-room-search-label">스레드 안 {threadMatches.length}건</li>}
+          {threadMatches.map((match) => (
+            <li key={match.id}>
+              <button type="button" onClick={() => match.threadRootId && onOpenThread?.(match.threadRootId)}>
+                <strong><MessagesSquare size={13} aria-hidden="true" /> {match.senderName}</strong>
                 <span>{match.text.length > 90 ? `${match.text.slice(0, 89)}…` : match.text}</span>
                 <time>{match.time}</time>
               </button>
@@ -352,6 +390,72 @@ export function GroupRoomDialog({
                 <Button tone="primary" disabled={pending || !name.trim()} onClick={() => onSubmit({ name: name.trim(), icon: icon.trim(), participantIds: [] })}>저장</Button>
               </>
             )}
+        </footer>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 스레드 결론을 채널에 올린다.
+ *
+ * 요약 칸을 비워 둔다. 마지막 답글을 채워 두면 사람은 그대로 보내고, 그러면 그것은 요약이 아니라
+ * 복사다 — 본채널에 올리는 이유가 사라진다.
+ */
+export function ThreadShareDialog({
+  rootSenderName,
+  rootText,
+  replyCount,
+  pending,
+  onSubmit,
+  onClose,
+}: {
+  rootSenderName: string
+  rootText: string
+  replyCount: number
+  pending: boolean
+  onSubmit: (text: string) => void
+  onClose: () => void
+}) {
+  const [text, setText] = useState('')
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    // capture 단계에서 잡고 더 올라가지 않게 한다. 이 대화상자는 메신저 서랍 안에 겹쳐 있어서,
+    // 여기서 멈추지 않으면 Escape 한 번에 대화상자와 서랍이 함께 닫힌다.
+    const onKey = (event: KeyboardEvent) => { if (event.key !== 'Escape') return; event.stopImmediatePropagation(); onClose() }
+    document.addEventListener('keydown', onKey, true)
+    dialogRef.current?.querySelector('textarea')?.focus()
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [onClose])
+
+  return (
+    <div className="messenger-dialog-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <div className="messenger-dialog" role="dialog" aria-modal="true" aria-label="스레드 결론을 채널에 공유" ref={dialogRef}>
+        <header>
+          <span className="messenger-team-icon"><MessagesSquare size={18} /></span>
+          <strong>채널에 공유</strong>
+          <IconButton tone="quiet" size="sm" aria-label="닫기" onClick={onClose}><X size={18} /></IconButton>
+        </header>
+
+        <div className="messenger-dialog-body">
+          <QuotedMessage senderName={rootSenderName} text={rootText} />
+          <p className="messenger-dialog-note">답글 {replyCount}개가 오간 스레드입니다.</p>
+          <label className="messenger-field">
+            <span>채널에 남길 요약</span>
+            <textarea
+              rows={4}
+              maxLength={4000}
+              value={text}
+              placeholder="무엇을 정했는지 한두 줄로 적어 주세요."
+              onChange={(event) => setText(event.target.value)}
+            />
+          </label>
+        </div>
+
+        <footer>
+          <Button tone="quiet" onClick={onClose}>취소</Button>
+          <Button tone="primary" disabled={!text.trim() || pending} onClick={() => onSubmit(text.trim())}>채널에 공유</Button>
         </footer>
       </div>
     </div>

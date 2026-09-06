@@ -137,10 +137,12 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
       if (!matches(`${message?.text ?? ''} ${message?.senderName ?? ''} ${roomName}`, words)) continue
       push('message', hit({
         kind: 'message', id: `${conversation.id}:${message.id}`, title: roomName || '대화',
-        meta: message.createdAt ? String(message.createdAt).slice(0, 10) : String(message.time ?? ''),
+        // 스레드 답글은 본채널에 없다. 어디 있는 말인지 적어 두지 않으면 눌러도 찾지 못한다.
+        meta: `${message.createdAt ? String(message.createdAt).slice(0, 10) : String(message.time ?? '')}${message.threadRootId ? ' · 스레드' : ''}`,
         // 공지와 같은 focusId 규약('<방>:<종류>:<id>')을 쓴다. 방 id만 실으면 화면이 그것을 해석하지 못해
         // 결과를 눌러도 마지막으로 보던 방이 열린다 — 그 결손을 여기서 닫는다.
-        owner: message.senderName, page: 'ai', focusId: `${conversation.id}:message:${message.id}`,
+        owner: message.senderName, page: 'ai',
+        focusId: message.threadRootId ? `${conversation.id}:thread:${message.threadRootId}` : `${conversation.id}:message:${message.id}`,
         snippet: excerpt(message.text, first),
       }))
       if (found.get('message').length >= PER_TYPE_LIMIT) break

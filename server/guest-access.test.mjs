@@ -132,6 +132,10 @@ test('allowlist는 메서드+경로 정규식으로 판정하고, 밖은 전부 
   assert.equal(isGuestRouteAllowed('PATCH', '/api/notices/NTC-1'), false)
   assert.equal(isGuestRouteAllowed('POST', '/api/notices/NTC-1/remind'), false)
   assert.equal(isGuestRouteAllowed('POST', '/api/notices/NTC-1/archive'), false)
+  // R16-J: 스레드는 읽기만. 답글 쓰기는 기존 /messages가 맡고, 공유·승격은 목록 밖이다.
+  assert.equal(isGuestRouteAllowed('GET', '/api/messenger/conversations/grp-1/messages/m-1/thread'), true)
+  assert.equal(isGuestRouteAllowed('POST', '/api/messenger/conversations/grp-1/threads/m-1/share'), false)
+  assert.equal(isGuestRouteAllowed('POST', '/api/messenger/conversations/grp-1/threads/m-1/promote'), false)
   assert.ok(GUEST_ROUTE_ALLOWLIST.every(([method, pattern]) => typeof method === 'string' && pattern instanceof RegExp))
 })
 
