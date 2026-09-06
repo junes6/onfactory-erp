@@ -29,6 +29,12 @@ export const NOTIFICATION_TYPES = Object.freeze({
   'opportunity-new': { label: '새 기회', pushByDefault: false, page: 'approvals' },
   // 방해 금지 시간에 참아 둔 알림을 아침에 한 건으로 묶어 전한다.
   'quiet-digest': { label: '아침 요약', pushByDefault: true, page: 'ai' },
+  // R16-D: 공지. source.kind가 'message'가 아니라서 방별 무음(pushDecision)이 적용되지 않는다 —
+  // 채널을 조용히 해 둔 사람에게도 회사 공지는 닿아야 한다. 못 보고 지나가면 그게 사고인 종류다.
+  'notice-posted': { label: '새 공지', pushByDefault: true, page: 'messenger' },
+  'notice-reminder': { label: '필독 확인 요청', pushByDefault: true, page: 'messenger' },
+  // 작성자 한 사람에게만 가는 집계다. 기본으로 울리면 공지를 자주 쓰는 사람이 알림을 꺼 버린다.
+  'notice-unconfirmed-summary': { label: '미확인 명단', pushByDefault: false, page: 'messenger' },
 })
 
 export const NOTIFICATION_TYPE_IDS = Object.freeze(Object.keys(NOTIFICATION_TYPES))

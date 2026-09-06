@@ -87,6 +87,20 @@ function fixture() {
       }],
       updatedAt: '2026-08-20T06:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
     },
+    // R16-D: 공지. 확인 명단과 리마인더 이력이 payload JSONB로 그대로 왕복해야 한다 —
+    // 확인 기록이 왕복에서 사라지면 "누가 언제 확인했다"는 증거가 배포마다 리셋된다.
+    'notices': {
+      data: [{
+        id: 'NTC-fixture-01', scope: 'project', conversationId: 'ROOM-1', projectId: 'PRJ-A',
+        title: '점검 일정 공지', body: '첫 줄\n둘째 줄', attachments: [],
+        authorId: 'USR-HSB-ADMIN', authorName: '관리자', mustRead: true,
+        targetIds: ['USR-HSB-ADMIN', 'USR-TENANT-HSB-GUEST01'],
+        acknowledgements: [{ accountId: 'USR-TENANT-HSB-GUEST01', at: '2026-08-20T07:00:00.000Z' }],
+        reminders: { remindedAt: { 'USR-TENANT-HSB-GUEST01': '2026-08-20T08:00:00.000Z' }, summary48SentAt: null, lastManualRemindAt: null },
+        archivedAt: null, createdAt: '2026-08-20T06:00:00.000Z', updatedAt: '2026-08-20T07:00:00.000Z',
+      }],
+      updatedAt: '2026-08-20T07:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
+    },
   }
   snapshot.tenants['TENANT-POHANG'] = {
     'work-items': { data: [{ id: 'WORK-1', title: '별도 조합 업무', due: '2026-08-22T09:00:00.000Z', status: '업무요청' }], updatedAt: '2026-08-20T01:00:00.000Z' },
@@ -208,6 +222,10 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.equal(facade.tenants['TENANT-HSB']['work-items'].data[0].due, '오늘 18:00')
     assert.equal(facade.tenants['TENANT-HSB']['work-items'].data.find((row) => row.id === 'WORK-2').parentId, 'WORK-1')
     assert.equal(facade.tenants['TENANT-HSB']['project-templates'].data[0].tasks[0].children[0].title, '인터뷰')
+    const roundTrippedNotice = facade.tenants['TENANT-HSB'].notices.data[0]
+    assert.equal(roundTrippedNotice.body, '첫 줄\n둘째 줄', '공지 본문의 줄바꿈은 왕복에서 살아 있어야 한다')
+    assert.deepEqual(roundTrippedNotice.acknowledgements, [{ accountId: 'USR-TENANT-HSB-GUEST01', at: '2026-08-20T07:00:00.000Z' }])
+    assert.deepEqual(roundTrippedNotice.reminders.remindedAt, { 'USR-TENANT-HSB-GUEST01': '2026-08-20T08:00:00.000Z' })
     assert.equal(facade.tenants['TENANT-HSB']['company-documents'].data[0].name, '점검표.pdf')
     assert.equal(facade.tenants['TENANT-HSB']['performance-settings'].data.employeeVisible, false)
     assert.equal(facade.tenants['TENANT-HSB']['performance-reports'].data[0].id, 'PERFS-1')
@@ -304,7 +322,9 @@ test('guest scope RLS policies exist in the schema for the six tables plus core_
   const table = await readFile(new URL('../../supabase/migrations/20260906000000_guest_grants.sql', import.meta.url), 'utf8')
   for (const sql of [schema, migration]) {
     assert.match(sql, /CREATE OR REPLACE FUNCTION app_guest_project_ids\(\)/)
-    assert.match(sql, /ARRAY\['project_spaces', 'project_posts', 'work_items', 'messenger_conversations', 'items', 'guest_grants'\]/)
+    // 닫는 대괄호는 보지 않는다. 이 루프는 [schema, migration] 두 파일에 같은 리터럴을 요구하는데,
+    // 베이스라인은 R16-D에서 'notices'가 더해져 일곱이고 이미 적용된 20260906010000은 여섯 그대로이기 때문이다.
+    assert.match(sql, /ARRAY\['project_spaces', 'project_posts', 'work_items', 'messenger_conversations', 'items', 'guest_grants'/)
     assert.match(sql, /FORCE ROW LEVEL SECURITY/)
     for (const policy of ['project_spaces_guest_read', 'project_posts_guest_read', 'work_items_guest_read', 'messenger_conversations_guest_read', 'items_guest_read', 'core_accounts_guest_self']) {
       assert.match(sql, new RegExp(`CREATE POLICY ${policy} ON \\w+ FOR SELECT USING \\([\\s\\S]*?'tenant-guest'`))
@@ -322,7 +342,7 @@ test('guest scope RLS policies exist in the schema for the six tables plus core_
   // DO 루프 첫 반복에서 'relation does not exist'로 RLS 마이그레이션 전체가 실패하고, 환경별 격리 수준이 갈라진다.
   const migrationsDir = new URL('../../supabase/migrations/', import.meta.url)
   const chain = (await Promise.all((await readdir(migrationsDir)).filter((name) => name.endsWith('.sql')).sort().map((name) => readFile(new URL(name, migrationsDir), 'utf8')))).join('\n')
-  for (const tableName of ['project_spaces', 'project_posts', 'work_items', 'messenger_conversations', 'items', 'guest_grants', 'core_accounts']) {
+  for (const tableName of ['project_spaces', 'project_posts', 'work_items', 'messenger_conversations', 'items', 'guest_grants', 'core_accounts', 'notices']) {
     assert.match(chain, new RegExp(`CREATE TABLE IF NOT EXISTS ${tableName}\\b`), `${tableName}가 supabase/migrations 안에서 만들어져야 한다`)
   }
   // 그리고 RLS 마이그레이션 파일 이름은 테이블 마이그레이션보다 뒤여야 한다(사전순 적용).

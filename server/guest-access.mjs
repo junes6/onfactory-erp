@@ -22,6 +22,13 @@ export const GUEST_ROUTE_ALLOWLIST = [
   ['PATCH', /^\/api\/me\/profile$/], ['POST', /^\/api\/me\/password$/],
   ['GET', /^\/api\/guest\/me$/], ['GET', /^\/api\/guest\/invitations\/[^/]+$/], ['POST', /^\/api\/guest\/invitations\/[^/]+\/accept$/],
   ['GET', /^\/api\/projects$/], ['GET', /^\/api\/projects\/[^/]+$/],
+  // R16-D: 공지는 '초대된 프로젝트' 且 '내가 참여자인 채널'의 것만 보이고, 확인만 누를 수 있다.
+  // 두 조건 모두 noticeVisibleTo가 게스트 갈래에서 요구한다(방 판정이 빠지면 같은 프로젝트 아래
+  // 내부 전용 채널의 공지가 제목·본문 통째로 내려간다). notices_guest_read 정책이 PG 층에서 같은 두
+  // 조건을 한 번 더 본다 — 앱 필터가 실수해도 DB가 자른다.
+  // 쓰기·수정·다시 알림·보관은 목록 밖이라 게이트가 자동으로 403을 낸다.
+  ['GET', /^\/api\/notices$/], ['GET', /^\/api\/notices\/[^/]+$/],
+  ['POST', /^\/api\/notices\/[^/]+\/ack$/],
   ['POST', /^\/api\/projects\/[^/]+\/posts\/[^/]+\/comments$/], ['DELETE', /^\/api\/projects\/[^/]+\/posts\/[^/]+\/comments\/[^/]+$/],
   ['GET', /^\/api\/workspace\/(work-items|messenger-conversations)$/],
   ['POST', /^\/api\/work-items\/[^/]+\/(transition|checklist)$/],

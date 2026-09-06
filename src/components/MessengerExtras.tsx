@@ -73,7 +73,8 @@ export function MessageActionBar({
 }: {
   canEdit: boolean
   canDelete: boolean
-  /** 고정은 방 공지를 바꾸는 일이다. 게스트처럼 방을 관리할 수 없는 사람에게는 버튼을 두지 않는다. */
+  /** 고정은 이 방에서 늘 보이게 두는 일이다. 공지(NTC)와 다른 기능이다.
+   *  게스트처럼 방을 관리할 수 없는 사람에게는 버튼을 두지 않는다. */
   canPin?: boolean
   pinned: boolean
   onReply: () => void
@@ -104,7 +105,7 @@ export function MessageActionBar({
     <div className="messenger-message-actions" ref={pickerRef}>
       <IconButton tone="quiet" size="sm" aria-label="답장" onClick={onReply}><CornerUpLeft size={15} /></IconButton>
       <IconButton tone="quiet" size="sm" aria-label="반응 남기기" aria-expanded={pickerOpen} onClick={() => setPickerOpen((open) => !open)}><SmilePlus size={15} /></IconButton>
-      {canPin && <IconButton tone="quiet" size="sm" aria-label={pinned ? '고정 해제' : '공지로 고정'} onClick={onPin}>{pinned ? <PinOff size={15} /> : <Pin size={15} />}</IconButton>}
+      {canPin && <IconButton tone="quiet" size="sm" aria-label={pinned ? '고정 해제' : '고정'} onClick={onPin}>{pinned ? <PinOff size={15} /> : <Pin size={15} />}</IconButton>}
       {canEdit && <IconButton tone="quiet" size="sm" aria-label="메시지 수정" onClick={onEdit}><Pencil size={15} /></IconButton>}
       {canDelete && <IconButton tone="quiet" size="sm" aria-label="메시지 삭제" onClick={onDelete}><Trash2 size={15} /></IconButton>}
       {pickerOpen && (
@@ -217,7 +218,7 @@ export function RoomSearchPanel({
 /**
  * 그룹방 만들기·관리.
  *
- * 인원 상한을 두지 않는다. 테넌트 전원이 들어오는 공지방이 정상적인 쓰임이고,
+ * 인원 상한을 두지 않는다. 테넌트 전원이 들어오는 전사 채널이 정상적인 쓰임이고,
  * 사람이 많아질 때를 대비해 목록은 검색으로 좁힌다.
  */
 export function GroupRoomDialog({
@@ -262,10 +263,12 @@ export function GroupRoomDialog({
   }, [people, search, mode, members, currentUserId])
 
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
+    // capture 단계에서 잡고 더 올라가지 않게 한다. 이 대화상자는 메신저 서랍 안에 겹쳐 있어서,
+    // 여기서 멈추지 않으면 Escape 한 번에 대화상자와 서랍이 함께 닫힌다(useOverlayFocus의 document 리스너까지 올라간다).
+    const onKey = (event: KeyboardEvent) => { if (event.key !== 'Escape') return; event.stopImmediatePropagation(); onClose() }
+    document.addEventListener('keydown', onKey, true)
     dialogRef.current?.querySelector('input')?.focus()
-    return () => document.removeEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey, true)
   }, [onClose])
 
   const toggle = (id: string) => setPicked((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])

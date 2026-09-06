@@ -5,7 +5,7 @@ import { Button, IconButton } from './ui/Button'
 import { StatusBadge } from './StatusBadge'
 import { CompletionModal } from './CompletionModal'
 import { NotificationCenter, type NotificationFeed } from './NotificationCenter'
-import { MessengerDrawer, type MessengerRosterEntry } from './CollaborationSuite'
+import { MessengerDrawer, parseMessengerFocus, type MessengerFocus, type MessengerRosterEntry } from './CollaborationSuite'
 import { ProjectSpacesPage } from './ProjectSpaces'
 import { ParentChip, SubtaskRows } from './SubtaskList'
 import { IndustryProvider } from '../modules/IndustryContext'
@@ -93,6 +93,8 @@ export function GuestWorkspace({ account, workspaceScope, notificationFeed, onRe
   const [me, setMe] = useState<GuestMe | null>(null)
   const [scopeState, setScopeState] = useState<ScopeState>('loading')
   const [tab, setTab] = useState<GuestTab>('tasks')
+  /** 알림이 가리킨 채널 안의 자리(공지·메시지). 채널 탭의 메신저가 소비한 뒤 비운다. */
+  const [channelFocus, setChannelFocus] = useState<MessengerFocus | null>(null)
   const [projectId, setProjectId] = useState('')
   const [workItems, setWorkItems] = useState<WorkItem[]>([])
   const [workState, setWorkState] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -196,7 +198,7 @@ export function GuestWorkspace({ account, workspaceScope, notificationFeed, onRe
   const openFromNotification = (page: string, focusId: string) => {
     // 하위 업무 알림이면 그 자식을 품은 상위의 목록도 함께 펼친다 — 접힌 <details> 안에서 상세를 열면 화면에는 아무 일도 일어나지 않는다.
     if (page === 'tasks') { setTab('tasks'); if (focusId) { setOpenTaskId(focusId); openChildListOf(focusId) } return }
-    if (page === 'messenger') { setTab('channels'); return }
+    if (page === 'messenger') { setTab('channels'); setChannelFocus(parseMessengerFocus(focusId)); return }
     setTab('tasks')
   }
 
@@ -371,7 +373,7 @@ export function GuestWorkspace({ account, workspaceScope, notificationFeed, onRe
               </div>}
 
               {tab === 'channels' && <div className="guest-tab-body guest-channels" role="tabpanel" aria-label="프로젝트 채널">
-                <MessengerDrawer embedded readOnlyRooms open rosterOverride={roster} currentUserId={account.id} currentUserName={account.name} currentUserTeam={orgName} canManage={false} workspaceScope={workspaceScope} onClose={() => undefined} onToast={onToast} />
+                <MessengerDrawer embedded readOnlyRooms open rosterOverride={roster} currentUserId={account.id} currentUserName={account.name} currentUserTeam={orgName} canManage={false} workspaceScope={workspaceScope} onClose={() => undefined} onToast={onToast} focus={channelFocus} onFocusHandled={() => setChannelFocus(null)} />
               </div>}
 
               {tab === 'files' && <div className="guest-tab-body" role="tabpanel" aria-label="공유 자료">

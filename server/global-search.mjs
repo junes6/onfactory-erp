@@ -10,6 +10,8 @@
  * 언젠가 한 곳이 어긋나 남의 것이 검색에 뜬다. 권한 판정을 하는 쪽에서 검색한다.
  */
 
+import { NOTICES_KEY, noticeFocusId, noticeVisibleTo, readNotices } from './notices.mjs'
+
 /** 유형 하나에서 가져오는 최대 건수. 한 유형이 목록을 다 차지하지 않게 한다. */
 export const PER_TYPE_LIMIT = 5
 export const MIN_QUERY_LENGTH = 2
@@ -22,6 +24,7 @@ export const SEARCH_TYPES = Object.freeze([
   { id: 'conversation', label: 'AI 대화', page: 'ai' },
   { id: 'opportunity', label: '기회', page: 'approvals' },
   { id: 'person', label: '인물', page: 'people' },
+  { id: 'notice', label: '공지', page: 'messenger' },
 ])
 
 /**
@@ -72,7 +75,7 @@ function hit({ kind, id, title, meta, owner, page, focusId, snippet }) {
  * 권한 판정 함수는 호출하는 쪽(app.mjs)에서 그대로 받는다. 여기서 다시 만들면
  * 규칙이 두 벌이 된다.
  */
-export function searchTenant({ query, auth, tenantStore, accounts, canReadDocument, isConversationVisibleToMember }) {
+export function searchTenant({ query, auth, tenantStore, accounts, canReadDocument, isConversationVisibleToMember, projectRoleOf }) {
   const words = terms(query)
   if (words.length === 0 || query.trim().length < MIN_QUERY_LENGTH) return { groups: [], total: 0 }
   // 외부 게스트는 전역 검색이 없다. 사람 검색 한 갈래만으로도 직원 명단이 열거되기 때문이다. 게이트가 먼저 막지만 여기서도 끊는다.
@@ -135,7 +138,9 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
       push('message', hit({
         kind: 'message', id: `${conversation.id}:${message.id}`, title: roomName || '대화',
         meta: message.createdAt ? String(message.createdAt).slice(0, 10) : String(message.time ?? ''),
-        owner: message.senderName, page: 'ai', focusId: conversation.id,
+        // 공지와 같은 focusId 규약('<방>:<종류>:<id>')을 쓴다. 방 id만 실으면 화면이 그것을 해석하지 못해
+        // 결과를 눌러도 마지막으로 보던 방이 열린다 — 그 결손을 여기서 닫는다.
+        owner: message.senderName, page: 'ai', focusId: `${conversation.id}:message:${message.id}`,
         snippet: excerpt(message.text, first),
       }))
       if (found.get('message').length >= PER_TYPE_LIMIT) break
@@ -178,6 +183,30 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
     }))
   }
 
+  // 공지 — 가시성은 notices.mjs 한 곳에서 판정한다. 여기서 규칙을 다시 쓰면 목록과 검색이 어긋난다.
+  // 행을 고르는 문도 같은 곳이다: readNotices가 거른 성한 행만 본다. 저장소 배열을 그대로 읽으면
+  // 목록이 "형식이 깨져 다루지 않는다"고 판정한 행 위에서 scope·projectId를 믿고 권한을 판정하게 된다.
+  const projects = rows('project-spaces')
+  // deps 세 개를 그대로 채운다. 하나라도 빠지면 여기서만 판정이 느슨해져 목록과 검색이 어긋난다
+  // (게스트는 위에서 이미 빈 결과이므로 conversationById는 지금 쓰이지 않지만, 시그니처가 한 벌이어야
+  //  게스트 갈래가 열리는 날 검색만 조용히 옛 규칙으로 남지 않는다).
+  const conversations = rows('messenger-conversations')
+  const noticeDeps = {
+    projectById: (id) => projects.find((item) => item?.id === id) ?? null,
+    projectRoleOf,
+    conversationById: (id) => conversations.find((item) => item?.id === id) ?? null,
+  }
+  for (const notice of readNotices(tenantStore?.[NOTICES_KEY]).rows) {
+    if (!noticeVisibleTo(notice, auth, noticeDeps)) continue
+    if (!matches(`${notice.title} ${notice.body} ${notice.authorName}`, words)) continue
+    push('notice', hit({
+      kind: 'notice', id: notice.id, title: notice.title,
+      meta: `${notice.scope === 'company' ? '회사 공지' : '프로젝트 공지'}${notice.mustRead ? ' · 필독' : ''} · ${String(notice.createdAt).slice(0, 10)}${notice.archivedAt ? ' · 보관' : ''}`,
+      owner: notice.authorName, page: 'messenger', focusId: noticeFocusId(notice),
+      snippet: excerpt(notice.body, first),
+    }))
+  }
+
   const groups = SEARCH_TYPES
     // 그룹도 항목과 같은 이유로 `kind`와 `type`을 함께 내려보낸다(hit() 주석 참고).
     .map((type) => ({ kind: type.id, type: type.id, label: type.label, items: found.get(type.id) }))
@@ -185,7 +214,7 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
   return { groups, total: groups.reduce((sum, group) => sum + group.items.length, 0) }
 }
 
-export function registerGlobalSearchRoute({ app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, accounts, canReadDocument, isConversationVisibleToMember }) {
+export function registerGlobalSearchRoute({ app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, accounts, canReadDocument, isConversationVisibleToMember, projectRoleOf }) {
   app.get('/api/search', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
     if (!request.auth.tenantId) { response.json({ groups: [], total: 0 }); return }
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
@@ -196,6 +225,7 @@ export function registerGlobalSearchRoute({ app, requireAuth, requireMatchingWor
       accounts,
       canReadDocument,
       isConversationVisibleToMember,
+      projectRoleOf,
     })
     response.json(result)
   })

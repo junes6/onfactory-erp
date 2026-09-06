@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, Clock3, FileText, HelpCircle, Lightbulb, ListChecks, MessageCircle, NotebookPen, Search, Sparkles, User, X } from 'lucide-react'
+import { ArrowRight, Clock3, FileText, HelpCircle, Lightbulb, ListChecks, Megaphone, MessageCircle, NotebookPen, Search, Sparkles, User, X } from 'lucide-react'
 
 /**
  * 전역 검색.
@@ -12,7 +12,7 @@ import { ArrowRight, Clock3, FileText, HelpCircle, Lightbulb, ListChecks, Messag
  */
 
 /** 서버 SEARCH_TYPES의 id와 같은 낱말. 여기 없는 값은 '기타'로 묶어 눈에 띄게 한다. */
-export type SearchKind = 'task' | 'document' | 'journal' | 'message' | 'conversation' | 'opportunity' | 'person'
+export type SearchKind = 'task' | 'document' | 'journal' | 'message' | 'conversation' | 'opportunity' | 'person' | 'notice'
 
 export type SearchHit = {
   /**
@@ -62,6 +62,7 @@ const KIND_LABEL: Record<SearchKind, string> = {
   conversation: 'AI 대화',
   opportunity: '기회',
   person: '인물',
+  notice: '공지',
 }
 
 const KIND_ICON: Record<string, typeof ListChecks> = {
@@ -72,6 +73,7 @@ const KIND_ICON: Record<string, typeof ListChecks> = {
   conversation: Sparkles,
   opportunity: Lightbulb,
   person: User,
+  notice: Megaphone,
   [OTHER_KIND]: HelpCircle,
 }
 

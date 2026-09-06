@@ -15,6 +15,7 @@ import {
   FileText,
   Hash,
   MapPin,
+  Megaphone,
   MessageCircle,
   LogOut,
   MoreHorizontal,
@@ -60,6 +61,11 @@ import {
 import './CollaborationSuite.css'
 import { Button, IconButton } from './ui/Button'
 import { GroupRoomDialog, MentionSuggestions, MessageActionBar, QuotedMessage, ReactionRow, RoomSearchPanel } from './MessengerExtras'
+import {
+  NoticeAckDialog, NoticeBoard, NoticeComposerDialog, NoticeStrip, parseMessengerFocus, useNotices,
+  type MessengerFocus, type Notice, type NoticeAckList, type NoticeDraft,
+} from './NoticeCenter'
+import { canJudgeMissingNotice } from '../utils/noticeFocus'
 import { useIndustrySurface } from '../modules/IndustryContext'
 import { useEventStream } from '../hooks/useEventStream'
 
@@ -94,7 +100,14 @@ type MessengerDrawerProps = OverlayProps & CurrentUserProps & {
   readOnlyRooms?: boolean
   /** 오버레이가 아니라 화면 안에 그대로 그린다(게스트 채널 탭). 배경 스크림·닫기 버튼·초점 가두기가 빠진다. */
   embedded?: boolean
+  /** 알림·전역 검색이 가리킨 자리. focusId 문자열 하나에 종류가 실려 있다(parseMessengerFocus). */
+  focus?: MessengerFocus | null
+  onFocusHandled?: () => void
 }
+
+/** 공지·스레드·메시지 딥링크를 이 컴포넌트 밖에서도 만들 수 있게 그대로 다시 내보낸다. */
+export { parseMessengerFocus }
+export type { MessengerFocus, Notice }
 
 type PageProps = CurrentUserProps & {
   onToast: ToastHandler
@@ -199,6 +212,8 @@ type Person = {
   system?: boolean
   /** 비활성(퇴사) 계정. 기록은 남기되 새 대화 상대로는 고르지 않는다. */
   active?: boolean
+  /** 외부 게스트는 회사 전체 공지의 대상이 아니다. 서버 roster 판정과 같은 구분이다. */
+  kind?: 'employee' | 'guest'
 }
 
 type ChatMessage = {
@@ -245,6 +260,8 @@ type Conversation = {
   createdAt?: string
   pinnedMessageIds?: string[]
   mutedFor?: string[]
+  /** 프로젝트 채널. 공지를 올릴 수 있는 방인지가 이 값 하나로 갈린다. */
+  projectId?: string
 }
 
 type MessengerListMode = 'recent' | 'teams' | 'people'
@@ -274,6 +291,8 @@ export function MessengerDrawer({
   rosterOverride,
   readOnlyRooms = false,
   embedded = false,
+  focus = null,
+  onFocusHandled,
 }: MessengerDrawerProps) {
   // 화면 안에 박힌 채널 탭은 대화상자가 아니다. 초점을 가두면 위의 탭 버튼으로 나갈 수 없다.
   const overlayRef = useOverlayFocus(open && !embedded, onClose)
@@ -321,6 +340,28 @@ export function MessengerDrawer({
   const [visibleCount, setVisibleCount] = useState(MESSAGE_WINDOW)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const messageRefs = useRef<Record<string, HTMLElement | null>>({})
+  // ── R16-D: 공지 ──
+  // '회사 공지'를 selectedId에 넣지 않는다. selectedConversation에서 파생되는 자리가 많아
+  // (컴포저 disabled, /read, callRoom, unreadForConversation, 방 메뉴, roomSearch, pendingAttachments)
+  // 한 곳만 새면 /api/messenger/conversations/company-notices/... 로 404가 난다. 대신 pane 상태를 둔다.
+  const [pane, setPane] = useState<'chat' | 'notices'>('chat')
+  const { notices, state: noticesState, loadedAt: noticesLoadedAt, reload: reloadNotices } = useNotices(open, workspaceScope)
+  const [openNoticeId, setOpenNoticeId] = useState<string | null>(null)
+  const [noticeDialog, setNoticeDialog] = useState<
+    | { mode: 'create' | 'edit'; conversationId: string | null; notice?: Notice }
+    | { mode: 'acks'; notice: Notice }
+    | null>(null)
+  const [noticeAcks, setNoticeAcks] = useState<NoticeAckList>({ confirmed: [], unconfirmed: [] })
+  const [noticeAcksState, setNoticeAcksState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [noticeBusyId, setNoticeBusyId] = useState('')
+  const [noticePending, setNoticePending] = useState(false)
+  const [noticeRefreshToken, setNoticeRefreshToken] = useState(0)
+  /** 딥링크가 가리킨 공지. 카드가 아직 화면에 없을 수 있으므로 '언제 스크롤할지'를 시간이 아니라 이 값이 정한다. */
+  const pendingNoticeScrollRef = useRef('')
+  /** 목록을 다시 읽어 본 딥링크의 클릭 시각. 한 번의 클릭이 다시 읽기를 한 번만 부르게 막는다. */
+  const focusReloadRef = useRef(0)
+  /** 방 목록 요청이 한 번은 답했는가(성공·실패 모두). 딥링크가 '들어갈 수 있는 방인가'를 판정할 자격이다. */
+  const [conversationsSettled, setConversationsSettled] = useState(false)
 
   const directoryIdentity = directory.find((person) => person.accountId === currentUserId || person.id === currentUserId)
     ?? directory.find((person) => person.name === currentUserName && sameDepartment(person.team, currentUserTeam))
@@ -419,6 +460,36 @@ export function MessengerDrawer({
       .reverse()
     : []
 
+  // 이 채널의 공지 / 회사 공지 / 내가 아직 확인하지 않은 필독 건수.
+  // 채널 스트립은 방 하나만 서버에 물어본다 — 전체 목록은 200건에서 잘리므로 그것을 화면에서
+  // 다시 거르면 공지가 쌓인 테넌트에서 스트립이 조용히 비어 버린다.
+  const { notices: channelNoticeRows } = useNotices(
+    open && pane === 'chat' && Boolean(activeConversation?.id),
+    workspaceScope,
+    { conversationId: activeConversation?.id ?? '', refreshToken: noticeRefreshToken },
+  )
+  const channelNotices = channelNoticeRows.filter((item) => !item.archivedAt && item.conversationId === selectedConversation.id)
+  // 사이드바 '회사 공지' 행도 자기 몫을 따로 물어본다. 전체 목록에서 걸러 쓰면 공지가 200건을 넘긴 순간
+  // 회사 공지가 있는데도 '아직 공지가 없습니다'라고 말한다(가짜 0). 게스트에게는 이 행이 없으므로 부르지도 않는다.
+  // state도 함께 받는다 — 아직 안 온 목록(또는 못 받은 목록)으로 '아직 공지가 없습니다'라고 말하면
+  // 그것도 가짜 0이다. 보드는 같은 훅에서 세 상태를 갈라 말한다(NoticeCenter.tsx).
+  const { notices: companyNoticeRows, state: companyNoticesState } = useNotices(open && !readOnlyRooms, workspaceScope, { scope: 'company', refreshToken: noticeRefreshToken })
+  const companyNotices = companyNoticeRows.filter((item) => !item.archivedAt)
+  // 행에 적는 시각·제목은 '가장 새것' 한 건이다. 서버 정렬은 필독을 앞세우므로(notices.mjs) 그대로 [0]을 쓰면
+  // 어제 올린 필독이 오늘 올린 일반 공지 자리에 앉는다.
+  const latestCompanyNotice = [...companyNotices].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0]
+  // 미확인 배지는 전체 목록에서 센다. 서버가 필독을 앞세워 200건에서 자르므로, 미확인 필독이 200건을
+  // 넘기 전까지 이 수는 정확하다. 그 너머는 세 번째 요청 대신 창(200건)을 받아들인다.
+  const myUnconfirmed = notices.filter((item) => item.canAck).length
+  /** 공지를 올릴 수 있는 후보 채널. 최종 판정은 서버가 한다(403) — 화면은 프로젝트 채널만 골라 보여 준다. */
+  const noticeChannels = myConversations
+    .filter((item) => Boolean(item.projectId) && item.systemChannel !== 'developer-support')
+    .map((item) => ({ id: item.id, name: conversationName(item), participantIds: legacyParticipantIds(item) }))
+  const noticeRoster = directory
+    .filter((person) => !person.system && person.active !== false)
+    .map((person) => ({ id: person.accountId ?? person.id, name: person.name, team: person.team, kind: person.kind }))
+  const canComposeNotice = !readOnlyRooms && (canManage || noticeChannels.length > 0)
+
   /** 방에 있는 사람 중 @로 부를 수 있는 후보. 비활성 계정은 부르지 않는다. */
   const mentionCandidates = mentionState
     ? directory
@@ -472,7 +543,10 @@ export function MessengerDrawer({
     fetch('/api/directory')
       .then(async (response) => {
         if (!response.ok) throw new Error('directory-load')
-        return response.json() as Promise<{ members?: Array<{ id: string; name: string; team: string; role: string; status: Person['status']; system?: boolean }> }>
+        // kind와 active를 타입에 적는다. 둘 다 서버가 실제로 내려보내고(app.mjs의 /api/directory)
+        // 아래 스프레드로 흘러 노티스 컴포저의 회사 갈래가 게스트를 빼는 근거가 된다. 타입이 이 사실을
+        // 말하지 않으면, 매핑을 명시적으로 바꾸는 순간 게스트가 '확인 대상'에 되돌아온다.
+        return response.json() as Promise<{ members?: Array<{ id: string; name: string; team: string; role: string; status: Person['status']; system?: boolean; kind?: 'employee' | 'guest'; active?: boolean }> }>
       })
       .then(({ members }) => {
         if (!active || !Array.isArray(members)) return
@@ -498,6 +572,9 @@ export function MessengerDrawer({
           if (active && Array.isArray(data)) void setConversations(data, { persist: false })
         })
         .catch(() => undefined)
+        // 성공이든 실패든 '방 목록 요청이 한 번은 답했다'를 남긴다. 딥링크가 '들어갈 수 있는 방인가'를
+        // 판정하려면 이 사실이 필요하고, 실패에도 켜야 기다림에 끝이 있다(영영 안 열리는 딥링크를 만들지 않는다).
+        .finally(() => { if (active) setConversationsSettled(true) })
     }
     refresh()
     // 5초 폴링을 서버 이벤트 스트림으로 대체했다. 새 메시지가 있을 때만 다시 읽는다.
@@ -506,7 +583,11 @@ export function MessengerDrawer({
   }, [open, setConversations, workspaceScope])
 
   useEventStream(open, (event) => {
-    if (event.kind === 'message' || event.kind === 'resync') messengerRefreshRef.current?.()
+    if (event.kind !== 'message' && event.kind !== 'resync') return
+    messengerRefreshRef.current?.()
+    // 공지도 같은 'message' 이벤트를 탄다. 새 SSE 종류를 만들면 게스트 축약 규약까지 손대야 한다.
+    reloadNotices()
+    setNoticeRefreshToken((token) => token + 1)
   })
 
   useEffect(() => {
@@ -518,6 +599,90 @@ export function MessengerDrawer({
     setSelectedId(myConversations[0].id)
   }, [activeConversation, myConversations])
 
+  /**
+   * 방을 고르는 모든 길이 지나는 한 곳.
+   *
+   * pane까지 되돌리지 않으면 공지 보드가 열린 채 선택만 바뀌어, 데스크톱에서는 아무 반응이 없고
+   * 휴대폰에서는 사이드바만 사라져 보드에 갇힌다. 네 번째 경로가 생겨도 여기만 부르면 새지 않는다.
+   */
+  const selectConversation = (id: string) => {
+    setPane('chat')
+    setSelectedId(id)
+    setMobilePane('chat')
+  }
+
+  /**
+   * 알림·전역 검색이 가리킨 자리를 연다. 클릭보다 나중에 도착한 목록에서만 "그런 공지 없다"를
+   * 판정하고, 그 전에는 focus를 소비하지 않은 채 목록이 도착할 때 다시 시도한다.
+   * 다 읽고도 목록에 없으면(권한이 없거나 보관됨) 화면을 갈아 끼우지 않고 공지 보드만 연다 —
+   * "그 공지는 없습니다"를 빈 화면으로 말하는 것보다 목록을 보여 주는 편이 낫다.
+   */
+  useEffect(() => {
+    if (!focus?.at) return
+    if (focus.noticeId) {
+      const target = notices.find((item) => item.id === focus.noticeId)
+      if (!target) {
+        // 판정 자격은 시각이 정한다(utils/noticeFocus). 클릭보다 먼저 받은 목록으로 "없다"고 말하면
+        // focus가 소비되어 재시도가 영영 오지 않고, 사용자는 공지 대신 공지 보드에 떨어진다.
+        if (!canJudgeMissingNotice(noticesState, noticesLoadedAt, focus.at) && focusReloadRef.current !== focus.at) {
+          // 기다리기만 하면 목록을 다시 읽을 계기가 없을 수도 있다(서랍이 이미 열려 있고 SSE가 끊긴 경우).
+          // 클릭 한 번에 딱 한 번만 다시 읽는다: 그 응답이 성공이든 실패든 이 effect가 한 번 더 돌고,
+          // 그때는 이 가지를 지나 아래로 내려간다 — 기다리다 영영 아무 일도 안 하는 자리를 남기지 않는다.
+          focusReloadRef.current = focus.at
+          reloadNotices()
+          return
+        }
+        // 게스트에게는 회사 공지도 공지 보드도 존재하지 않는다 — 없는 화면으로 보내지 않는다.
+        if (!readOnlyRooms) { setPane('notices'); setMobilePane('chat') }
+        onFocusHandled?.()
+        return
+      }
+      // 볼 수는 있어도 들어갈 수 없는 방이 있다. 프로젝트 공지는 프로젝트 멤버 전원에게 보이지만
+      // (notices.mjs의 noticeVisibleTo는 내부 구성원에게 projectRoleOf만 본다) 채널 참여자가 아니면
+      // 그 방은 내 목록에 없다 — 그대로 고르면 activeConversation이 사라져 '대화를 선택하세요'로
+      // 떨어지고 공지는 어디에도 뜨지 않는다. 그런 공지는 회사 공지와 같은 자리(공지 보드)에서 연다.
+      const room = target.conversationId && myConversations.some((item) => item.id === target.conversationId)
+        ? target.conversationId
+        : null
+      // '못 들어가는 방'이라는 판정에만 자격이 필요하다. 목록에 이미 있으면 증거가 손안에 있으니 바로 간다.
+      // 없다고 말하려면 방 목록이 한 번은 답해야 한다 — conversations는 localStorage 캐시에서 동기로
+      // 시작하지만(useWorkspaceState) 처음 여는 브라우저·캐시를 지운 경우·방금 초대된 방이면 공지 응답이
+      // 방 목록보다 먼저 도착한다. 그때 판정하면 내부 구성원은 방 대신 보드로 떨어지고, 게스트는 아래
+      // !readOnlyRooms 때문에 아무 갈래도 타지 못한 채 focus만 소비된다 — 딥링크가 아무 일도 하지 않는다.
+      // 목록 요청은 성공·실패 모두 conversationsSettled를 켜므로 이 기다림에는 끝이 있다.
+      if (target.conversationId && !room && !conversationsSettled) return
+      setOpenNoticeId(target.id)
+      if (room) {
+        // 스트립은 방마다 따로 물어보므로 방을 바꾸는 이 순간에는 카드가 아직 없다.
+        // 몇 밀리초를 세는 대신 '카드가 붙으면'을 기다린다(noticeCardRef).
+        pendingNoticeScrollRef.current = target.id
+        selectConversation(room)
+      } else if (!readOnlyRooms) {
+        // 게스트에게는 공지 보드가 없다 — 없는 화면으로 보내지 않는다(위 갈래와 같은 가드).
+        pendingNoticeScrollRef.current = target.id
+        setPane('notices')
+        setMobilePane('chat')
+      }
+      onFocusHandled?.()
+      return
+    }
+    if (focus.conversationId) {
+      selectConversation(focus.conversationId)
+      if (focus.messageId) {
+        // 찾아갈 말이 창 밖이면 먼저 그 지점까지 펼친다. jumpToMessage는 지금 열려 있는 방을 보므로
+        // 방을 막 바꾼 이 순간에는 대상 방을 직접 찾아 세어야 한다.
+        const room = conversations.find((item) => item.id === focus.conversationId)
+        const index = room?.messages.findIndex((item) => item.id === focus.messageId) ?? -1
+        if (room && index >= 0) setVisibleCount((current) => Math.max(current, room.messages.length - index + 10))
+        window.setTimeout(() => jumpToMessage(focus.messageId!), 120)
+      }
+    }
+    onFocusHandled?.()
+    // 목록이 늦게 도착하는 경우를 위해 도착 시각과 적재 상태도 함께 본다. focus.at은 클릭마다 새로 찍힌다.
+    // 방 목록도 같은 이유로 deps에 있다 — 물러난 뒤 목록이 도착하면 이 effect가 한 번 더 돌아야 한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.at, notices.length, noticesState, noticesLoadedAt, conversationsSettled])
+
   if (!open) return null
 
   const replaceConversationLocally = (next: Conversation) => setConversations((current) => {
@@ -527,9 +692,9 @@ export function MessengerDrawer({
 
   const chooseConversation = async (id: string) => {
     if (!myConversations.some((item) => item.id === id)) return
-    setSelectedId(id)
+    // 공지 보드를 보는 중일 수 있다. pane까지 되돌리지 않으면 읽음 처리만 하고 화면은 그대로다.
+    selectConversation(id)
     setShowConversationMenu(false)
-    setMobilePane('chat')
     try {
       const response = await fetch(`/api/messenger/conversations/${encodeURIComponent(id)}/read`, {
         method: 'POST',
@@ -561,10 +726,9 @@ export function MessengerDrawer({
         const remaining = current.filter((item) => !closedIds.has(item.id) && item.id !== body.conversation!.id)
         return [body.conversation!, ...remaining]
       }, { persist: false })
-      setSelectedId(body.conversation.id)
+      selectConversation(body.conversation.id)
       setListMode('recent')
       setQuery('')
-      setMobilePane('chat')
       onToast(body.created ? person.name + '님과 새 대화를 시작했습니다.' : person.name + '님과 진행 중인 대화를 열었습니다.')
     } catch {
       onToast('메신저 서버에 연결하지 못했습니다.')
@@ -635,7 +799,133 @@ export function MessengerDrawer({
 
   const togglePin = (messageId: string, pinned: boolean) =>
     void callRoom(`/messages/${encodeURIComponent(messageId)}/pin`, { method: 'POST', body: JSON.stringify({ pinned }) }, '고정을 바꾸지 못했습니다.')
-      .then((body) => { if (body) onToast(pinned ? '공지로 고정했습니다.' : '고정을 해제했습니다.') })
+      .then((body) => { if (body) onToast(pinned ? '고정했습니다.' : '고정을 해제했습니다.') })
+
+  // ── 공지 호출 한 벌 ──────────────────────────────────────────
+  // 모든 네트워크 호출을 try/catch로 감싼다. 거절된 fetch가 버튼을 영영 잠그면 안 된다.
+  const refreshNotices = () => { reloadNotices(); setNoticeRefreshToken((token) => token + 1) }
+  const callNotice = async (path: string, init: RequestInit, failure: string) => {
+    try {
+      const response = await fetch(`/api/notices${path}`, {
+        ...init,
+        headers: {
+          ...(init.body ? { 'content-type': 'application/json' } : {}),
+          ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}),
+        },
+      })
+      // 화면은 error.message만 읽는다. code로 갈라지는 자리가 하나도 없으므로 타입에도 두지 않는다 —
+      // 남겨 두면 다음 사람이 '어딘가 code로 분기하는 곳이 있나 보다'라고 읽는다.
+      const body = await response.json().catch(() => null) as { notice?: Notice; reminded?: number; error?: { message?: string } } | null
+      if (!response.ok) {
+        // 문구는 서버가 짓는다. 쿨다운의 남은 분까지 서버 message에 들어 있으므로 여기서 다시 짓지 않는다 —
+        // 같은 사실에 대한 문장이 두 파일에 있으면 한쪽만 고쳐도 갈라진다.
+        onToast(body?.error?.message ?? failure)
+        return null
+      }
+      refreshNotices()
+      return body ?? {}
+    } catch {
+      onToast('서버에 연결하지 못했습니다.')
+      return null
+    }
+  }
+
+  const ackNotice = async (notice: Notice) => {
+    setNoticeBusyId(notice.id)
+    try { if (await callNotice(`/${encodeURIComponent(notice.id)}/ack`, { method: 'POST' }, '확인을 기록하지 못했습니다.')) onToast('확인했습니다.') }
+    finally { setNoticeBusyId('') }
+  }
+
+  const archiveNotice = async (notice: Notice, archived: boolean) => {
+    setNoticeBusyId(notice.id)
+    try {
+      const body = await callNotice(`/${encodeURIComponent(notice.id)}/archive`, { method: 'POST', body: JSON.stringify({ archived }) }, '보관 상태를 바꾸지 못했습니다.')
+      if (body) onToast(archived ? '공지를 보관했습니다. 보관함에서 되살릴 수 있습니다.' : '공지를 다시 올렸습니다.')
+    } finally { setNoticeBusyId('') }
+  }
+
+  const loadNoticeAcks = async (notice: Notice) => {
+    setNoticeAcksState('loading')
+    try {
+      const response = await fetch(`/api/notices/${encodeURIComponent(notice.id)}`, { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+      if (!response.ok) throw new Error('notice-acks')
+      const body = await response.json() as NoticeAckList
+      setNoticeAcks({ confirmed: body.confirmed ?? [], unconfirmed: body.unconfirmed ?? [] })
+      setNoticeAcksState('ready')
+    } catch {
+      setNoticeAcksState('error')
+    }
+  }
+
+  const remindNotice = async (notice: Notice) => {
+    setNoticeBusyId(notice.id)
+    setNoticePending(true)
+    try {
+      const body = await callNotice(`/${encodeURIComponent(notice.id)}/remind`, { method: 'POST' }, '다시 알리지 못했습니다.')
+      if (body) { onToast(`미확인 ${body.reminded ?? 0}명에게 다시 알렸습니다.`); void loadNoticeAcks(notice) }
+    } finally { setNoticeBusyId(''); setNoticePending(false) }
+  }
+
+  const openNoticeAcks = (notice: Notice) => {
+    setNoticeAcks({ confirmed: [], unconfirmed: [] })
+    setNoticeDialog({ mode: 'acks', notice })
+    void loadNoticeAcks(notice)
+  }
+
+  const saveNotice = async (draft: NoticeDraft) => {
+    const editing = noticeDialog && noticeDialog.mode === 'edit' ? noticeDialog.notice : undefined
+    setNoticePending(true)
+    try {
+      const payload = editing
+        ? { title: draft.title, body: draft.body, attachments: draft.attachments, mustRead: draft.mustRead, ...(draft.targetIds ? { targetIds: draft.targetIds } : {}) }
+        : { scope: draft.conversationId ? 'project' : 'company', ...(draft.conversationId ? { conversationId: draft.conversationId } : {}), title: draft.title, body: draft.body, attachments: draft.attachments, mustRead: draft.mustRead, ...(draft.targetIds ? { targetIds: draft.targetIds } : {}) }
+      const body = await callNotice(
+        editing ? `/${encodeURIComponent(editing.id)}` : '',
+        { method: editing ? 'PATCH' : 'POST', body: JSON.stringify(payload) },
+        editing ? '공지를 저장하지 못했습니다.' : '공지를 올리지 못했습니다.',
+      )
+      if (!body) return
+      setNoticeDialog(null)
+      if (body.notice) setOpenNoticeId(body.notice.id)
+      onToast(editing ? '공지를 저장했습니다.' : '공지를 올렸습니다.')
+    } finally { setNoticePending(false) }
+  }
+
+  const openNoticeBoard = () => {
+    setPane('notices')
+    setShowConversationMenu(false)
+    setMobilePane('chat')
+  }
+
+  const noticeHandlers = (notice: Notice) => ({
+    readOnly: readOnlyRooms,
+    workspaceScope,
+    onAck: () => void ackNotice(notice),
+    onOpenAcks: () => openNoticeAcks(notice),
+    onRemind: () => void remindNotice(notice),
+    onEdit: () => setNoticeDialog({ mode: 'edit', conversationId: notice.conversationId, notice }),
+    onArchive: (archived: boolean) => void archiveNotice(notice, archived),
+    onToast,
+  })
+  /**
+   * 딥링크가 가리킨 카드로 데려간다 — 시간이 아니라 '그 카드가 화면에 붙었는가'가 신호다.
+   *
+   * 판정을 effect가 아니라 이 ref 콜백에서 하는 이유: 스트립과 보드는 서로 다른 목록을 따로
+   * 물어보고(보드는 NoticeBoard 안에서 useNotices를 돌린다), effect의 deps로는 보드의 목록이
+   * 도착한 순간을 알 길이 없다. 카드를 그리는 쪽이 알려 주게 하면 두 화면이 한 벌을 쓴다.
+   * (이 콜백은 렌더마다 새로 만들어지므로 React가 매번 떼었다 붙인다 — 카드가 이미 붙어 있는
+   *  방에서 딥링크를 눌러도 이 자리를 지난다.)
+   * 손으로 펼친 카드는 대상이 아니다 — pendingNoticeScrollRef에 적힌 한 건만 본다.
+   * 타이머는 effect 정리에 매달지 않는다. 매달면 옆방 메시지 한 건에 목록이 다시 읽히는 순간
+   * 정리가 돌아 타이머만 죽고 강조가 카드에 그대로 굳는다.
+   */
+  const noticeCardRef = (id: string) => (node: HTMLElement | null) => {
+    if (!node || pendingNoticeScrollRef.current !== id) return
+    pendingNoticeScrollRef.current = ''
+    node.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    node.classList.add('is-focused')
+    window.setTimeout(() => node.classList.remove('is-focused'), 1_600)
+  }
 
   const removeMessage = (messageId: string) =>
     void callRoom(`/messages/${encodeURIComponent(messageId)}`, { method: 'DELETE' }, '메시지를 삭제하지 못했습니다.')
@@ -661,10 +951,9 @@ export function MessengerDrawer({
         return
       }
       await replaceConversationLocally(body.conversation)
-      setSelectedId(body.conversation.id)
+      selectConversation(body.conversation.id)
       setListMode('recent')
       setGroupDialog(null)
-      setMobilePane('chat')
       onToast(`"${body.conversation.name}" 방을 만들었습니다.`)
     } catch {
       onToast('메신저 서버에 연결하지 못했습니다.')
@@ -801,6 +1090,24 @@ export function MessengerDrawer({
             </div>
 
             <div className="messenger-conversation-list">
+              {/* 전사 채널(team-ops)이 없는 새 테넌트에도 늘 있는 자리다. 게스트는 회사 공지가 존재하지 않으므로
+                  이 행도 보드도 없다 — 게스트의 공지는 자기 채널 스트립에만 뜬다. */}
+              {!readOnlyRooms && (
+                <button
+                  type="button"
+                  className={'messenger-conversation-row messenger-notice-home' + (pane === 'notices' ? ' active' : '')}
+                  aria-current={pane === 'notices' ? 'true' : undefined}
+                  onClick={openNoticeBoard}
+                >
+                  <span className="messenger-team-icon"><Megaphone size={20} aria-hidden="true" /></span>
+                  <span className="messenger-conversation-copy">
+                    <span><strong>회사 공지</strong><time>{latestCompanyNotice ? formatListDateTime(latestCompanyNotice.createdAt) : ''}</time></span>
+                    {/* 목록이 도착한 뒤에만 '없다'고 말한다. 오는 중이거나 못 받았으면 아무 말도 하지 않는다. */}
+                    <small>{latestCompanyNotice?.title ?? (companyNoticesState === 'ready' ? '아직 공지가 없습니다' : '')}</small>
+                  </span>
+                  {myUnconfirmed > 0 && <em aria-label={`확인하지 않은 필독 공지 ${myUnconfirmed}개`}>{myUnconfirmed}</em>}
+                </button>
+              )}
               {listMode === 'people' ? (
                 <>
                   <div className="messenger-list-label">직원 {filteredPeople.length}명</div>
@@ -818,11 +1125,13 @@ export function MessengerDrawer({
                     <span>{listMode === 'teams' ? readOnlyRooms ? '프로젝트 채널' : '팀 대화' : '최근 대화'} {filteredConversations.length}개</span>
                     {!readOnlyRooms && <Button tone="quiet" size="sm" onClick={() => setGroupDialog('create')}><Plus size={15} /> 새 그룹방</Button>}
                   </div>
+                  {/* 공지 보드를 보는 중에는 대화 행이 '지금 이 화면'이 아니다. 두 행이 동시에
+                      현재로 표시되면 화면 낭독기가 현재 항목을 둘이라고 말한다. */}
                   {filteredConversations.map((conversation) => (
                     <button
-                      className={'messenger-conversation-row' + (conversation.id === selectedId ? ' active' : '')}
+                      className={'messenger-conversation-row' + (pane === 'chat' && conversation.id === selectedId ? ' active' : '')}
                       type="button"
-                      aria-current={conversation.id === selectedId ? 'true' : undefined}
+                      aria-current={pane === 'chat' && conversation.id === selectedId ? 'true' : undefined}
                       onClick={() => chooseConversation(conversation.id)}
                       key={conversation.id}
                     >
@@ -844,6 +1153,22 @@ export function MessengerDrawer({
             </div>
           </aside>
 
+          {pane === 'notices' ? (
+            <NoticeBoard
+              workspaceScope={workspaceScope}
+              channels={noticeChannels}
+              canCompose={canComposeNotice}
+              openId={openNoticeId}
+              busyId={noticeBusyId}
+              refreshToken={noticeRefreshToken}
+              onOpenChange={setOpenNoticeId}
+              onBack={() => setPane('chat')}
+              onBackToList={() => { setPane('chat'); setMobilePane('list') }}
+              onCompose={() => setNoticeDialog({ mode: 'create', conversationId: null })}
+              handlers={noticeHandlers}
+              cardRef={noticeCardRef}
+            />
+          ) : (
           <section className="messenger-chat" aria-label={conversationName(selectedConversation) + ' 대화'}>
             <header className="messenger-chat-header">
               <button className="messenger-back-button" type="button" aria-label="대화 목록으로" onClick={() => setMobilePane('list')}>
@@ -861,6 +1186,10 @@ export function MessengerDrawer({
                     <div className="messenger-room-menu">
                       {!readOnlyRooms && activeConversation.kind === 'group' && (activeConversation.ownerId === currentUserId || canManage) && (
                         <button type="button" onClick={() => { setGroupDialog('manage'); setShowConversationMenu(false) }}><Users size={17} /> 방 이름·참여자 관리</button>
+                      )}
+                      {/* 프로젝트 채널에만 공지를 올릴 수 있다. 권한 최종 판정은 서버가 한다(403). */}
+                      {!readOnlyRooms && Boolean(activeConversation.projectId) && (
+                        <button type="button" onClick={() => { setNoticeDialog({ mode: 'create', conversationId: activeConversation.id }); setShowConversationMenu(false) }}><Megaphone size={17} /> 공지 올리기</button>
                       )}
                       {/*
                         R15-I: 방마다 알림 세기를 셋 중에서 고른다. 끄기만 있으면
@@ -902,8 +1231,17 @@ export function MessengerDrawer({
               />
             )}
 
+            <NoticeStrip
+              notices={channelNotices}
+              openId={openNoticeId}
+              busyId={noticeBusyId}
+              onOpenChange={setOpenNoticeId}
+              handlers={noticeHandlers}
+              cardRef={noticeCardRef}
+            />
+
             {pinnedMessages.length > 0 && (
-              <div className="messenger-pinned" aria-label="고정된 공지">
+              <div className="messenger-pinned" aria-label="고정된 메시지">
                 <Pin size={15} aria-hidden="true" />
                 <ul>
                   {pinnedMessages.map((item) => (
@@ -1105,6 +1443,7 @@ export function MessengerDrawer({
               <button className="send" type="submit" aria-label="메시지 보내기" disabled={!activeConversation || !message.trim() || messageSending || attachmentUploading}><Send size={20} /></button>
             </form>
           </section>
+          )}
         </div>
       </div>
       {groupDialog && (
@@ -1126,6 +1465,32 @@ export function MessengerDrawer({
           onTransfer={(id) => void callRoom('/owner', { method: 'POST', body: JSON.stringify({ ownerId: id }) }, '방장을 위임하지 못했습니다.')
             .then((body) => { if (body) onToast('방장을 위임했습니다.') })}
           onClose={() => setGroupDialog(null)}
+        />
+      )}
+      {noticeDialog && noticeDialog.mode !== 'acks' && (
+        <NoticeComposerDialog
+          mode={noticeDialog.mode}
+          notice={noticeDialog.notice}
+          channels={noticeChannels}
+          roster={noticeRoster}
+          currentUserId={currentUserId}
+          canCompany={canManage}
+          lockedConversationId={noticeDialog.conversationId}
+          pending={noticePending}
+          workspaceScope={workspaceScope}
+          onSubmit={(draft) => void saveNotice(draft)}
+          onToast={onToast}
+          onClose={() => { if (!noticePending) setNoticeDialog(null) }}
+        />
+      )}
+      {noticeDialog && noticeDialog.mode === 'acks' && (
+        <NoticeAckDialog
+          notice={noticeDialog.notice}
+          list={noticeAcks}
+          state={noticeAcksState}
+          pending={noticePending}
+          onRemind={() => void remindNotice(noticeDialog.notice)}
+          onClose={() => setNoticeDialog(null)}
         />
       )}
       {conversationAction && activeConversation && (

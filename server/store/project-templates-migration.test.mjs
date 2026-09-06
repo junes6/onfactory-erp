@@ -51,8 +51,10 @@ test('baseline schema carries project_templates and the ai_conversations table t
   assert.match(chain, /CREATE TABLE IF NOT EXISTS project_templates\b/i)
   assert.match(chain, /CREATE TABLE IF NOT EXISTS ai_conversations\b/i)
 
-  // 게스트 RLS DO 루프의 테이블 목록은 그대로다 — 템플릿은 그 목록에 들어가지 않는다.
-  assert.match(schema, /ARRAY\['project_spaces', 'project_posts', 'work_items', 'messenger_conversations', 'items', 'guest_grants'\]/)
+  // 템플릿은 게스트 RLS DO 루프에 들어가지 않는다. 목록 자체는 R16-D에서 'notices'가 더해져 늘어나므로
+  // 닫는 대괄호는 보지 않는다 — 여기서 고정할 것은 "템플릿이 그 목록에 없다"는 사실이다.
+  assert.match(schema, /ARRAY\['project_spaces', 'project_posts', 'work_items', 'messenger_conversations', 'items', 'guest_grants'/)
+  assert.doesNotMatch(schema, /ARRAY\[[^\]]*'project_templates'/)
 
   // 베이스라인은 빈 데이터베이스에 한 번 적용된다(applyStoreSchema). 두 번 적용은 pg-mem이
   // CREATE OR REPLACE VIEW를 못 다시 읽어 실패하므로, 멱등성은 체인 파일 쪽 테스트가 지킨다.
@@ -65,7 +67,10 @@ test('baseline schema carries project_templates and the ai_conversations table t
 })
 
 test('the new migration sorts after the last existing one', async () => {
-  assert.ok('20260906010000_guest_scope_rls.sql' < '20260907000000_project_templates.sql')
+  // 뒤에 오는 파일이 더 생겨도 이 관계는 그대로여야 한다(사전순 적용). 마지막 파일 이름을 박아 두면
+  // 다음 절이 마이그레이션을 하나 더할 때마다 이 테스트가 깨진다 — 고정할 것은 순서다.
   const files = (await readdir(migrationsDir)).filter((name) => name.endsWith('.sql')).sort()
-  assert.equal(files.at(-1), '20260907000000_project_templates.sql')
+  const index = files.indexOf('20260907000000_project_templates.sql')
+  assert.ok(index >= 0, '템플릿 마이그레이션이 체인에 있어야 한다')
+  assert.equal(files[index - 1], '20260906010000_guest_scope_rls.sql')
 })

@@ -19,7 +19,7 @@ import { IpRightsPage } from './components/IpRights'
 import { ProductManagement, SalesChannels } from './components/BusinessPages'
 import { BillingDashboard } from './components/BillingDashboard'
 import { CompanyLibrary } from './components/CompanyLibrary'
-import { DailyJournalPage, MessengerDrawer, SchedulePage } from './components/CollaborationSuite'
+import { DailyJournalPage, MessengerDrawer, parseMessengerFocus, SchedulePage, type MessengerFocus } from './components/CollaborationSuite'
 import { ComplianceCenter } from './components/ComplianceCenter'
 import {
   DashboardLayoutButton, FrequentFilesWidget, QuickLinksWidget, defaultDashboardWidgets,
@@ -1555,6 +1555,8 @@ export default function App() {
   const [moreSheetOpen, setMoreSheetOpen] = useState(false)
   const [messengerOpen, setMessengerOpen] = useState(false)
   const [messengerUnread, setMessengerUnread] = useState(0)
+  /** 알림·전역 검색이 가리킨 메신저 안의 자리(공지·메시지). 서랍이 소비한 뒤 비운다. */
+  const [messengerFocus, setMessengerFocus] = useState<MessengerFocus | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   // 렌즈 패널: 어느 화면의 파일 카드에서 열든 같은 오른쪽 패널을 쓴다.
   const [lensTarget, setLensTarget] = useState<LensTarget | null>(null)
@@ -2411,6 +2413,14 @@ export default function App() {
                 workspaceScope={workspaceScope}
                 placeholder={tenantSurface.globalSearchPlaceholder}
                 onOpen={(hit) => {
+                  // 공지와 메신저 메시지는 같은 focusId 규약('<방>:<종류>:<id>')을 쓴다. 이 한 갈래가
+                  // "메시지 결과를 눌러도 그 방이 열리지 않던" 기존 결손도 함께 닫는다.
+                  // 아래 message 갈래는 그대로 둔다 — 규약이 바뀌기 전에 저장된 '최근 연 항목'은
+                  // 아직 방 id만 들고 있어 parse가 null이고, 그때는 서랍만 여는 옛 행동이 맞다.
+                  if (hit.kind === 'notice' || hit.kind === 'message') {
+                    const focus = parseMessengerFocus(hit.focusId)
+                    if (focus) { setMessengerFocus(focus); setMessengerOpen(true); return }
+                  }
                   if (hit.kind === 'task') setWorkFocusId(hit.focusId)
                   else if (hit.kind === 'message' || hit.kind === 'conversation') { setMessengerOpen(hit.kind === 'message'); if (hit.kind === 'message') return }
                   else setPlatformFocusId(hit.focusId)
@@ -2435,7 +2445,15 @@ export default function App() {
                 workspaceScope={workspaceScope}
                 feed={notificationFeed}
                 onReload={loadNotifications}
-                onNavigate={(page, focusId) => { if (focusId) setWorkFocusId(focusId); navigate(page as PageId) }}
+                onNavigate={(page, focusId) => {
+                  // 공지·멘션 알림은 화면을 갈아 끼우지 않고 메신저 서랍을 그 자리에 연다.
+                  // navigate('messenger')는 industryRoutes에 없어 토스트로 끝난다(기존 결손).
+                  const focus = page === 'messenger' ? parseMessengerFocus(focusId) : null
+                  if (focus) { setMessengerFocus(focus); setMessengerOpen(true); setNotificationsOpen(false); if (phoneShell) setMobileTab('chat'); return }
+                  if (page === 'messenger') { setMessengerOpen(true); setNotificationsOpen(false); if (phoneShell) setMobileTab('chat'); return }
+                  if (focusId) setWorkFocusId(focusId)
+                  navigate(page as PageId)
+                }}
                 onToast={setToast}
                 onClose={() => setNotificationsOpen(false)}
               />}
@@ -2480,7 +2498,7 @@ export default function App() {
         />
       )}
 
-      <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => { setMessengerOpen(false); if (phoneShell && mobileTab === 'chat') setMobileTab('today') }} onToast={setToast} onUnreadChange={setMessengerUnread} />
+      <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => { setMessengerOpen(false); if (phoneShell && mobileTab === 'chat') setMobileTab('today') }} onToast={setToast} onUnreadChange={setMessengerUnread} focus={messengerFocus} onFocusHandled={() => setMessengerFocus(null)} />
       {lensTarget && <LensPanel target={lensTarget} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} onClose={() => setLensTarget(null)} onToast={setToast} onPendingChange={setPendingProposals} />}
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? BRAND.name} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
       {profileOpen && account && <ProfileEditor account={account} onClose={() => setProfileOpen(false)} onToast={setToast} onSaved={(next) => { setAccount((current) => current ? { ...current, ...next } as AuthAccount : current) }} />}

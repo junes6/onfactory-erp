@@ -55,6 +55,9 @@ export const WORKSPACE_TABLES = Object.freeze({
   // R16-B: 프로젝트 템플릿. 전용 라우트(/api/project-templates)로만 읽고 쓴다.
   // 본문에는 역할 문자열과 상대 마감일만 — 실명·계정 id는 저장하지 않는다.
   'project-templates': 'project_templates',
+  // R16-D: 공지 게시글 + 필독 확인. 채널 안에 살지만 메시지가 아니다 —
+  // 장문·확인 명단·리마인더 이력을 방당 5,000건 상한과 4,000자 상한 안에 우겨넣지 않는다.
+  'notices': 'notices',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))
@@ -108,4 +111,6 @@ export const GUEST_SCOPE_TABLES = Object.freeze({
   messenger_conversations: Object.freeze({}),
   // items는 여러 종류를 담는 공용 테이블이라 회사 자료만 걸러 본다.
   items: Object.freeze({ itemType: 'company-document' }),
+  // R16-D: 게스트는 초대된 프로젝트 채널의 공지만 본다(notices_guest_read). 회사 공지는 정책의 scope 조건에서 걸린다.
+  notices: Object.freeze({}),
 })

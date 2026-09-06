@@ -42,9 +42,47 @@ const STORE = {
   'opportunities': { data: [
     { id: 'OP-1', title: '냉장창고 설비 지원사업', agency: '중소벤처기업부', source: 'bizinfo', noticeNo: '2026-1', deadline: '2026-10-01', rationale: '설비 투자 대상' },
   ] },
+  'project-spaces': { data: [
+    { id: 'PRJ-A', name: '창고 개선', visibility: 'members', members: [{ id: 'U-ADMIN', role: 'owner' }, { id: 'U-PARK', role: 'editor' }] },
+  ] },
+  'notices': { data: [
+    {
+      id: 'NTC-srch-0011aa', scope: 'company', conversationId: null, projectId: null,
+      title: '냉장창고 점검 공지', body: '이번 주 냉장창고 점검을 합니다.', attachments: [],
+      authorId: 'U-ADMIN', authorName: '김서원', mustRead: true, targetIds: ['U-PARK'], acknowledgements: [],
+      reminders: { remindedAt: {}, summary48SentAt: null, lastManualRemindAt: null },
+      archivedAt: null, createdAt: '2026-09-04T00:00:00.000Z', updatedAt: '2026-09-04T00:00:00.000Z',
+    },
+    {
+      // 스키마 밖 키가 하나 섞인 행. 목록(readNotices)은 이런 행을 다루지 않는다고 판정하므로
+      // 검색만 그 위에서 scope·projectId를 믿고 권한을 판정하면 '가장 좁은 문' 규약이 한 곳에서만 뚫린다.
+      id: 'NTC-brok-0011bb', scope: 'company', conversationId: null, projectId: null,
+      title: '냉장창고 깨진 공지', body: '형식이 깨진 행입니다.', attachments: [],
+      authorId: 'U-ADMIN', authorName: '김서원', mustRead: false, targetIds: [], acknowledgements: [],
+      reminders: { remindedAt: {}, summary48SentAt: null, lastManualRemindAt: null },
+      archivedAt: null, createdAt: '2026-09-04T00:00:00.000Z', updatedAt: '2026-09-04T00:00:00.000Z',
+      extraKey: '스키마 밖',
+    },
+    {
+      // 프로젝트 공지. 이 한 건이 없으면 noticeVisibleTo의 project 갈래(projectById·projectRoleOf·
+      // conversationById)가 검색에서 한 번도 불리지 않아, 배선이 사라져도 테스트가 초록으로 남는다.
+      id: 'NTC-proj-0011cc', scope: 'project', conversationId: 'CV-1', projectId: 'PRJ-A',
+      title: '냉장창고 개선 회의', body: '창고 개선 프로젝트 회의록입니다.', attachments: [],
+      authorId: 'U-ADMIN', authorName: '김서원', mustRead: false, targetIds: ['U-PARK'], acknowledgements: [],
+      reminders: { remindedAt: {}, summary48SentAt: null, lastManualRemindAt: null },
+      archivedAt: null, createdAt: '2026-09-03T00:00:00.000Z', updatedAt: '2026-09-03T00:00:00.000Z',
+    },
+  ] },
 }
 
-const search = (query, auth) => searchTenant({ query, auth, tenantStore: STORE, accounts: ACCOUNTS, canReadDocument, isConversationVisibleToMember })
+// 공지 갈래는 프로젝트 역할 판정을 그대로 받는다 — 검색이 자기 규칙을 새로 짜면 목록과 어긋난다.
+const projectRoleOf = (project, auth) => {
+  if (!project) return null
+  if (auth.role === 'tenant-admin') return 'owner'
+  return (project.members ?? []).find((member) => member.id === auth.id)?.role ?? null
+}
+
+const search = (query, auth) => searchTenant({ query, auth, tenantStore: STORE, accounts: ACCOUNTS, canReadDocument, isConversationVisibleToMember, projectRoleOf })
 const typeItems = (result, type) => result.groups.find((group) => group.type === type)?.items ?? []
 
 test('낱말은 모두 들어 있어야 걸린다', () => {
@@ -58,12 +96,33 @@ test('짧은 검색어로는 목록을 쏟지 않는다', () => {
   assert.ok(search('냉장창고', ADMIN).total > 0)
 })
 
-test('한 검색어로 일곱 갈래를 함께 찾는다', () => {
+test('한 검색어로 여덟 갈래를 함께 찾는다', () => {
   const result = search('냉장창고', ADMIN)
   const kinds = result.groups.map((group) => group.type)
-  for (const expected of ['task', 'document', 'journal', 'message', 'opportunity']) {
+  for (const expected of ['task', 'document', 'journal', 'message', 'opportunity', 'notice']) {
     assert.ok(kinds.includes(expected), `${expected}가 결과에 없다`)
   }
+})
+
+test('공지는 볼 수 있는 사람에게만 검색된다 — 게스트는 앞머리에서 이미 빈 결과다', () => {
+  const seen = typeItems(search('냉장창고', MEMBER), 'notice')
+  // 형식이 깨진 행은 목록과 같은 문(readNotices)에서 걸러진다 — 검색만 저장소 배열을 그대로 읽으면,
+  // "다루지 않는다"고 판정한 데이터 위에서 검증되지 않은 scope로 권한을 판정하게 된다.
+  assert.deepEqual(seen.map((item) => item.id), ['NTC-srch-0011aa', 'NTC-proj-0011cc'])
+  assert.deepEqual(typeItems(search('냉장창고', ADMIN), 'notice').map((item) => item.id), ['NTC-srch-0011aa', 'NTC-proj-0011cc'])
+  assert.match(seen[0].meta, /회사 공지 · 필독/)
+  assert.equal(seen[0].focusId, 'company:notice:NTC-srch-0011aa', '알림·검색·웹푸시가 같은 focusId 규약을 쓴다')
+
+  // 프로젝트 공지는 프로젝트 역할로 판정한다. 오태식은 PRJ-A 멤버가 아니므로 회사 공지만 본다 —
+  // 이 단언이 있어야 searchTenant의 projectRoleOf 배선이 사라지는 순간 빨개진다.
+  assert.deepEqual(typeItems(search('냉장창고', OTHER), 'notice').map((item) => item.id), ['NTC-srch-0011aa'])
+  const project = seen[1]
+  assert.match(project.meta, /프로젝트 공지/)
+  assert.equal(project.focusId, 'CV-1:notice:NTC-proj-0011cc', '방 공지의 딥링크는 그 방을 연다')
+
+  // 제목이 약속하는 것: 게스트는 갈래를 돌기 전에 이미 빈 결과다(프로젝트 공지 한 건이 있어도 그렇다).
+  const GUEST = { id: 'U-GUEST', name: '홍거래', role: 'tenant-guest', tenantId: 'T1', team: '파트너상사', guestScope: { projectIds: ['PRJ-A'] } }
+  assert.equal(search('냉장창고', GUEST).total, 0)
 })
 
 test('일반 직원은 자기 업무만 본다', () => {
@@ -88,6 +147,8 @@ test('참여하지 않은 방의 말은 검색으로도 새지 않는다', () =>
   assert.equal(seen.length, 1)
   assert.equal(seen[0].title, '품질관리팀')
   assert.match(seen[0].snippet, /점검표/)
+  // 공지와 같은 규약이어야 화면이 그 방을 열고 그 말로 뛴다. 방 id만 실으면 해석되지 않는다.
+  assert.equal(seen[0].focusId, 'CV-1:message:M1')
 })
 
 test('AI 대화는 본인 것만, 휴지통은 빼고', () => {
@@ -106,7 +167,7 @@ test('사람은 이름·팀·직무로 찾는다', () => {
 
 test('한 갈래가 목록을 다 차지하지 않는다', () => {
   const many = { ...STORE, 'work-items': { data: Array.from({ length: 20 }, (_, index) => ({ id: `WK-${index}`, title: '냉장창고 점검', description: '', owner: '김서원', ownerId: 'U-ADMIN', requesterId: 'U-ADMIN', status: '수행중', category: '품질', due: '' })) } }
-  const result = searchTenant({ query: '냉장창고', auth: ADMIN, tenantStore: many, accounts: ACCOUNTS, canReadDocument, isConversationVisibleToMember })
+  const result = searchTenant({ query: '냉장창고', auth: ADMIN, tenantStore: many, accounts: ACCOUNTS, canReadDocument, isConversationVisibleToMember, projectRoleOf })
   assert.equal(result.groups.find((group) => group.type === 'task').items.length, PER_TYPE_LIMIT)
 })
 
@@ -118,8 +179,8 @@ test('걸린 자리를 잘라 보여 준다', () => {
 })
 
 test('모든 항목과 그룹에 kind가 채워져 있고 SEARCH_TYPES 안의 값이다', () => {
-  // 사람까지 일곱 갈래가 전부 걸리도록 두 검색어를 합친다.
-  // 관리자는 AI 대화를 못 보고, 사람은 이름으로만 걸린다. 셋을 합쳐야 일곱 갈래가 모두 나온다.
+  // 사람까지 여덟 갈래가 전부 걸리도록 두 검색어를 합친다.
+  // 관리자는 AI 대화를 못 보고, 사람은 이름으로만 걸린다. 셋을 합쳐야 여덟 갈래가 모두 나온다.
   const results = [search('냉장창고', ADMIN), search('냉장창고', MEMBER), search('박지현', MEMBER)]
   const seen = new Set()
   for (const result of results) {
@@ -137,7 +198,7 @@ test('모든 항목과 그룹에 kind가 채워져 있고 SEARCH_TYPES 안의 �
     }
   }
   // 어느 한 갈래가 kind를 빼먹으면 위 단언에서 걸리지만, 갈래 자체가 결과에 안 나와 검사를 피하는 일도 막는다.
-  assert.deepEqual([...seen].sort(), [...SEARCH_KINDS].sort(), '일곱 갈래가 모두 검사를 거쳐야 한다')
+  assert.deepEqual([...seen].sort(), [...SEARCH_KINDS].sort(), '여덟 갈래가 모두 검사를 거쳐야 한다')
 })
 
 test('SEARCH_KINDS 와 클라이언트 KIND_LABEL 사전의 키가 같다', async () => {

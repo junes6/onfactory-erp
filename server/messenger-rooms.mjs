@@ -179,7 +179,7 @@ export function registerMessengerRoomRoutes({
   }
 
   // ── 그룹방 만들기 ────────────────────────────────────────────────
-  // 인원 상한을 두지 않는다. 테넌트 전원이 들어오는 공지방이 정상적인 쓰임이다.
+  // 인원 상한을 두지 않는다. 테넌트 전원이 들어오는 전사 채널이 정상적인 쓰임이다.
   app.post('/api/messenger/conversations/group', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     const name = text(request.body?.name, MAX_NAME)
     if (!name) {
@@ -464,7 +464,8 @@ export function registerMessengerRoomRoutes({
     if (await save(request, response, conversations, next, 'MESSENGER_REACTION_FAILED')) response.json({ message: updated })
   })
 
-  // ── 고정(공지) ──────────────────────────────────────────────────
+  // ── 메시지 고정 ────────────────────────────────────────────────
+  // 말풍선을 방 맨 위에 붙박아 두는 일이다. 제목·본문·확인 기록을 가진 공지(notices.mjs)와는 다른 것이다.
   app.post('/api/messenger/conversations/:id/messages/:messageId/pin', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     const found = locate(request, response)
     if (!found) return

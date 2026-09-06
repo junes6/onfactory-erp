@@ -124,6 +124,14 @@ test('allowlist는 메서드+경로 정규식으로 판정하고, 밖은 전부 
   assert.equal(isGuestRouteAllowed('GET', '/api/directory'), false)
   assert.equal(isGuestRouteAllowed('POST', '/api/messenger/conversations/direct'), false)
   assert.equal(isGuestRouteAllowed('POST', '/api/messenger/conversations/grp-1/messages'), true)
+  // R16-D: 공지는 읽고 확인만. 쓰기·수정·다시 알림·보관은 목록 밖이다.
+  assert.equal(isGuestRouteAllowed('GET', '/api/notices'), true)
+  assert.equal(isGuestRouteAllowed('GET', '/api/notices/NTC-1'), true)
+  assert.equal(isGuestRouteAllowed('POST', '/api/notices/NTC-1/ack'), true)
+  assert.equal(isGuestRouteAllowed('POST', '/api/notices'), false)
+  assert.equal(isGuestRouteAllowed('PATCH', '/api/notices/NTC-1'), false)
+  assert.equal(isGuestRouteAllowed('POST', '/api/notices/NTC-1/remind'), false)
+  assert.equal(isGuestRouteAllowed('POST', '/api/notices/NTC-1/archive'), false)
   assert.ok(GUEST_ROUTE_ALLOWLIST.every(([method, pattern]) => typeof method === 'string' && pattern instanceof RegExp))
 })
 

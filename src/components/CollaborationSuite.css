@@ -433,13 +433,18 @@
 .messenger-person-row > svg { color: var(--color-gray-400); }
 .messenger-system-label { display: inline-flex; align-items: center; margin-left: var(--space-8); padding: var(--space-0) var(--space-4); border-radius: var(--radius-8); color: var(--forest-dark); background: var(--forest-soft); font-size: var(--font-13); font-style: normal; font-weight: var(--weight-medium); }
 
+/* 자식이 셋일 때만 맞던 3행 그리드였다. 검색·공지·고정이 함께 열리면 메시지 영역이
+   암시적 auto 행으로 밀려 스크롤이 사라진다. 열 것이 늘어나는 곳은 flex가 맞다. */
 .messenger-chat {
   min-width: 0;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   background: var(--surface);
 }
+
+.messenger-chat > .messenger-messages { flex: 1 1 auto; }
+.messenger-chat > :is(.messenger-chat-header, .messenger-room-search, .messenger-notices, .messenger-pinned, .messenger-composer) { flex: 0 0 auto; }
 
 .messenger-chat-header {
   min-height: 69px;
@@ -1165,6 +1170,7 @@
 
   .messenger-layout { grid-template-columns: 1fr; }
   .messenger-drawer.show-list .messenger-chat { display: none; }
+  .messenger-drawer.show-list .messenger-notice-board { display: none; }
   .messenger-drawer.show-chat .messenger-sidebar { display: none; }
   .messenger-sidebar { border-right: none; }
   .messenger-back-button { display: grid; }
@@ -1632,7 +1638,9 @@ html[data-theme='dark'] :is(.journal-week-nav > button,.journal-range-field inpu
 
 html[data-theme='dark'] :is(.messenger-sidebar,.messenger-chat-header,.messenger-composer,.messenger-date-divider span,.messenger-bubble-row p,.messenger-composer > button) { background: var(--surface); }
 html[data-theme='dark'] .messenger-message.mine .messenger-bubble-row p { background: var(--color-primary); }
-html[data-theme='dark'] :is(.messenger-chat,.messenger-messages) { background: var(--canvas); }
+/* 공지 보드는 .messenger-chat 자리를 대신하므로 같은 역할 스왑을 받는다.
+   토큰만 쓰는 나머지 공지 클래스는 여기 등록하지 않는다 — tokens.css가 다크에서 코어 토큰을 뒤집는다. */
+html[data-theme='dark'] :is(.messenger-chat,.messenger-messages,.messenger-notice-board) { background: var(--canvas); }
 
 /* =====================================================================
    v4 개편: 업무일지 블록 에디터
@@ -1742,7 +1750,7 @@ html[data-theme='dark'] :is(.journal-file-block,.journal-comment-composer textar
 
 /* ── R15-A 메신저 확장 ─────────────────────────────────────────── */
 
-/* 고정된 공지. 방에 들어오면 먼저 보이고, 눌러 원문으로 간다. */
+/* 고정된 메시지. 방에 들어오면 먼저 보이고, 눌러 원문으로 간다. 공지(NoticeCenter)와는 다른 것이다. */
 .messenger-pinned {
   display: grid;
   grid-template-columns: auto 1fr;

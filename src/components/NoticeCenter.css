@@ -1,0 +1,183 @@
+/* 공지 — 채널 상단 스트립과 공지 목록 화면.
+   대화상자·필드·명단은 메신저의 것을 그대로 쓴다(CollaborationSuite.css). 여기에는 공지만의 것만 둔다.
+   토큰만 쓰므로 다크 열거 선택자에 등록하지 않는다 — tokens.css가 코어 토큰 자체를 뒤집는다. */
+
+.messenger-notices {
+  display: grid;
+  gap: var(--space-4);
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: var(--space-8) var(--space-16);
+  border-bottom: var(--hairline) solid var(--line);
+  background: var(--color-primary-soft);
+}
+
+.messenger-notice { min-width: 0; }
+.messenger-notice-row { min-width: 0; display: flex; align-items: center; gap: var(--space-8); }
+
+.messenger-notice-open {
+  min-width: 0;
+  min-height: 36px;
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-0);
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.messenger-notice-open > svg { color: var(--color-primary); }
+.messenger-notice-open strong { overflow: hidden; font-size: var(--font-13); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.messenger-notice-open time { color: var(--muted); font-size: var(--font-11); white-space: nowrap; }
+
+.messenger-notice-badge {
+  padding: var(--space-0) var(--space-8);
+  border-radius: var(--radius-8);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  font-size: var(--font-11);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+.messenger-notice-badge.is-done { color: var(--color-success-ink); background: var(--color-primary-soft); }
+.messenger-notice-acked { color: var(--color-success-ink); font-size: var(--font-11); white-space: nowrap; }
+
+.messenger-notice-body {
+  display: grid;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-0) var(--space-4);
+}
+/* display를 적은 규칙은 브라우저 기본 스타일시트의 [hidden] { display: none }을 이긴다.
+   이 한 줄이 없으면 hidden={!expanded}가 아무 일도 하지 않아 카드가 늘 펼쳐진 채 뜨고,
+   접기 버튼은 aria-expanded만 바꾸는 죽은 버튼이 된다(화면 낭독기에는 거짓말이 된다). */
+.messenger-notice-body[hidden] { display: none; }
+.messenger-notice-body p {
+  margin: var(--space-0);
+  color: var(--ink);
+  font-size: var(--font-13);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.messenger-notice-attachments { display: grid; gap: var(--space-4); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.messenger-notice-attachments li { min-width: 0; display: flex; align-items: center; gap: var(--space-4); }
+.messenger-notice-attachments li > button,
+.messenger-notice-attachments li > span {
+  min-width: 0;
+  min-height: 32px;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-0) var(--space-8);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  color: var(--ink);
+  background: var(--surface);
+  text-align: left;
+}
+.messenger-notice-attachments li > button { cursor: pointer; }
+.messenger-notice-attachments strong { overflow: hidden; font-size: var(--font-13); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.messenger-notice-attachments small { color: var(--muted); font-size: var(--font-11); white-space: nowrap; }
+
+.messenger-notice-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  color: var(--muted);
+  font-size: var(--font-11);
+}
+.messenger-notice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
+
+.messenger-notice.is-focused {
+  border-radius: var(--radius-8);
+  outline: var(--hairline) solid var(--color-primary);
+  outline-offset: var(--space-4);
+}
+
+/* ── 공지 목록 화면 ───────────────────────────────────────────── */
+
+.messenger-notice-board {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+
+.messenger-notice-filters {
+  display: grid;
+  gap: var(--space-8);
+  flex: 0 0 auto;
+  padding: var(--space-12) var(--space-16);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.messenger-notice-filters > div { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.messenger-notice-filters > div > button {
+  min-height: 32px;
+  padding: var(--space-0) var(--space-12);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  color: var(--muted);
+  background: var(--surface);
+  font-size: var(--font-13);
+  cursor: pointer;
+}
+.messenger-notice-filters > div > button.is-active { color: var(--color-primary); border-color: var(--color-primary); background: var(--color-primary-soft); }
+
+.messenger-notice-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: var(--space-12);
+  padding: var(--space-16);
+}
+.messenger-notice-list > .messenger-notice {
+  padding: var(--space-12);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+}
+.messenger-notice-empty { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); }
+
+/* ── 컴포저 ───────────────────────────────────────────────────── */
+
+.messenger-notice-count { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); text-align: right; }
+.messenger-notice-mustread { display: flex; align-items: center; gap: var(--space-8); color: var(--ink); font-size: var(--font-13); }
+.messenger-notice-targets { border: var(--hairline) solid var(--line); border-radius: var(--radius-8); padding: var(--space-8); }
+.messenger-notice-targets > summary { color: var(--muted); font-size: var(--font-13); cursor: pointer; }
+.messenger-notice-targets ul { max-height: 30vh; overflow-y: auto; display: grid; gap: var(--space-4); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
+.messenger-notice-targets li > button {
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-0) var(--space-4);
+  border: none;
+  border-radius: var(--radius-8);
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.messenger-notice-targets li > button strong { font-size: var(--font-13); font-weight: var(--weight-medium); }
+.messenger-notice-targets li > button small { margin-left: var(--space-8); color: var(--muted); font-size: var(--font-11); }
+.messenger-notice-allclear { margin: var(--space-0); color: var(--color-success-ink); font-size: var(--font-13); }
+
+/* 대상자가 아니면 첨부 버튼 대신 이 한 줄만 본다 — 눌러도 404가 나는 버튼은 그리지 않는다. */
+.messenger-notice-restricted { margin: var(--space-0); color: var(--muted); font-size: var(--font-11); }
+/* 한도를 넘긴 글자수. 문장은 서버가 하고 화면은 숫자로만 말한다. */
+.messenger-notice-count.is-over { color: var(--color-danger); font-weight: var(--weight-medium); }
+.messenger-notice-targets-note { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-11); line-height: 1.5; }
+
+/* 대화 목록 맨 위의 '회사 공지' 행. 한눈에 대화방과 구별되게 아이콘만 포인트 색으로 둔다. */
+.messenger-notice-home .messenger-team-icon { color: var(--color-primary); background: var(--color-primary-soft); }

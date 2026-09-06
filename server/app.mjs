@@ -43,6 +43,7 @@ import {
 } from './work-rule-schedule.mjs'
 import { workItemTreeViolation, openSubtaskCount, parentRefsFor, prependWithinCap, registerWorkItemTreeRoutes } from './work-item-tree.mjs'
 import { PROJECT_TEMPLATES_KEY, registerProjectTemplateRoutes } from './project-templates.mjs'
+import { NOTICES_KEY, registerNoticeRoutes } from './notices.mjs'
 import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
 import { registerPersonalCoreRoutes } from './personal-core-routes.mjs'
 import { backupSettings, BACKUP_STATUS_KEY, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
@@ -2221,7 +2222,12 @@ export function createApp(options = {}) {
   const documentIsReferenced = (tenantId, id) => {
     const tenantStore = workspaceStore.tenants[tenantId] ?? {}
     const document = (Array.isArray(documentRecord(tenantId)?.data) ? documentRecord(tenantId).data : []).find((item) => item.id === id)
+    // 보관한 공지는 채널에서 내려간 글이다. 그 첨부까지 영구 잠그면 자료실을 정리할 길이 사라진다
+    // (공지에는 삭제 라우트가 없다).
+    const activeNotices = (Array.isArray(tenantStore[NOTICES_KEY]?.data) ? tenantStore[NOTICES_KEY].data : [])
+      .filter((notice) => !notice?.archivedAt)
     return isFactoryDrawingDocument(document)
+      || linkedDocumentIds(activeNotices).includes(id)
       || ['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations', 'project-posts', 'it-contracts', 'it-deliverables', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights']
         .some((key) => linkedDocumentIds(tenantStore[key]?.data).includes(id))
   }
@@ -7537,6 +7543,8 @@ export function createApp(options = {}) {
     accounts,
     canReadDocument,
     isConversationVisibleToMember,
+    // 공지 가시성은 notices.mjs 한 곳에서 판정한다. 여기서 규칙을 다시 쓰면 목록과 검색이 어긋난다.
+    projectRoleOf,
   })
 
   const sweepConversationTrash = registerAiConversationRoutes({
@@ -7629,6 +7637,28 @@ export function createApp(options = {}) {
     projectSpacesOf,
     projectRoleOf,
   })
+
+  const { runNoticeAckWatch } = registerNoticeRoutes({
+    app, requireAuth, requireMatchingWorkspaceIdentity,
+    workspaceStore, accounts, commitWorkspaceStore,
+    resolveMessengerAttachments, grantDocumentAccess, guestVisibleRows,
+    projectSpacesOf, projectRoleOf, isConversationVisibleToMember, isDeveloperSupportConversation,
+    notify, events,
+    ...(typeof options.noticeClock === 'function' ? { clock: options.noticeClock } : {}),
+  })
+  scheduler.register({
+    id: 'notice-ack-watch',
+    label: '필독 공지 확인 챙기기',
+    description: '24시간이 지나도 확인하지 않은 사람에게 한 번 더 알리고, 48시간이 되면 작성자에게 미확인 명단을 보냅니다.',
+    // 35분은 기존 잡(00·05·10·20)과 겹치지 않는다 — tick이 순차 실행이라 겹치면 서로 밀린다.
+    spec: { every: 'hour', minute: 35 },
+    run: async ({ now }) => {
+      const { reminded, summaries } = await runNoticeAckWatch(now)
+      return { detail: reminded || summaries ? `리마인드 ${reminded}건 · 미확인 요약 ${summaries}건` : '보낼 것이 없었습니다.' }
+    },
+  })
+  app.locals.runNoticeAckWatch = runNoticeAckWatch
+
   registerAttendanceRoutes({
     app,
     requireAuth,

@@ -490,6 +490,15 @@ CREATE TABLE IF NOT EXISTS project_templates (
   created_by TEXT, PRIMARY KEY (org_id, id)
 );
 
+-- R16-D: 공지 게시글 + 필독 확인. 확인 명단과 리마인더 이력이 payload 안에 함께 산다.
+-- 게스트 정책은 아래 게스트 RLS 구간에 notices_guest_read로 붙는다(프로젝트 공지만).
+CREATE TABLE IF NOT EXISTS notices (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
 -- R15-E: AI 대화 히스토리. supabase/migrations/20260905000000_ai_conversations.sql 에만 있고
 -- 이 베이스라인에 빠져 있던 것을 보충한다 — applySchema는 이 파일 하나만 읽는다.
 CREATE TABLE IF NOT EXISTS ai_conversations (
@@ -556,7 +565,7 @@ DO $$
 DECLARE
   t TEXT;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['project_spaces', 'project_posts', 'work_items', 'messenger_conversations', 'items', 'guest_grants'] LOOP
+  FOREACH t IN ARRAY ARRAY['project_spaces', 'project_posts', 'work_items', 'messenger_conversations', 'items', 'guest_grants', 'notices'] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
     EXECUTE format('DROP POLICY IF EXISTS %I_service ON %I', t, t);
@@ -601,6 +610,24 @@ CREATE POLICY messenger_conversations_guest_read ON messenger_conversations FOR 
   AND org_id = current_setting('app.org_id', TRUE)
   AND payload->'participantIds' ? current_setting('app.current_account_id', TRUE)
   AND (payload->>'type' = 'direct' OR payload->>'projectId' = ANY (app_guest_project_ids()))
+);
+-- R16-D: 회사 공지는 scope 조건에서 걸러진다. 게스트에게는 PG 층에서도 존재하지 않는다.
+-- 프로젝트 조건만으로는 부족하다 — 같은 프로젝트 아래 '내부 전용' 채널의 공지가 그대로 내려간다.
+-- 바로 위 messenger_conversations_guest_read와 같은 participantIds 조건을 방을 물어 한 번 더 본다
+-- (앱의 noticeVisibleTo가 게스트 갈래에서 요구하는 것과 같은 문장이다).
+DROP POLICY IF EXISTS notices_guest_read ON notices;
+CREATE POLICY notices_guest_read ON notices FOR SELECT USING (
+  current_setting('app.role', TRUE) = 'tenant-guest'
+  AND org_id = current_setting('app.org_id', TRUE)
+  AND payload->>'scope' = 'project'
+  AND payload->>'projectId' = ANY (app_guest_project_ids())
+  AND EXISTS (
+    SELECT 1 FROM messenger_conversations c
+    WHERE c.org_id = notices.org_id
+      AND c.id = notices.payload->>'conversationId'
+      AND c.deleted_at IS NULL
+      AND c.payload->'participantIds' ? current_setting('app.current_account_id', TRUE)
+  )
 );
 DROP POLICY IF EXISTS items_guest_read ON items;
 CREATE POLICY items_guest_read ON items FOR SELECT USING (
@@ -702,6 +729,8 @@ CREATE INDEX IF NOT EXISTS idx_documents_active ON items (org_id, position) WHER
 CREATE INDEX IF NOT EXISTS idx_attendance_records_active ON attendance_records (org_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_personal_todos_active ON personal_todos (org_id, (payload->>'ownerId'), position) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_project_templates_active ON project_templates (org_id, (payload ->> 'origin'), position) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS notices_channel_idx ON notices (org_id, (payload ->> 'conversationId'), (payload ->> 'createdAt') DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS notices_project_idx ON notices (org_id, (payload ->> 'scope'), (payload ->> 'projectId')) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ai_conversations_owner_idx ON ai_conversations (org_id, (payload ->> 'ownerId'), (payload ->> 'updatedAt') DESC);
 CREATE INDEX IF NOT EXISTS ai_conversations_trash_idx ON ai_conversations (org_id, (payload ->> 'deletedAt'));
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON auth_sessions (expires_at) WHERE revoked_at IS NULL;

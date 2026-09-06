@@ -44,9 +44,11 @@ test('only the immediate types are pushed by default; the rest are opt-in', () =
   const settings = defaultNotificationSettings()
   // R15-I의 아침 요약이 더해졌다. 밤사이 참아 둔 것을 전하는 유일한 통로라 기본으로 켠다 —
   // 이것까지 꺼져 있으면 방해 금지 시간에 온 알림을 영영 모르게 된다.
-  assert.deepEqual(settings.push.sort(), ['approval-requested', 'changes-requested', 'mention', 'quiet-digest', 'task-assigned'].sort())
+  // R16-D의 공지 두 종류가 더해졌다. 공지는 못 보고 지나가면 그게 사고인 종류라 기본으로 켠다 —
+  // 미확인 명단 요약은 작성자 한 사람에게만 가는 집계라 그대로 opt-in이다.
+  assert.deepEqual(settings.push.sort(), ['approval-requested', 'changes-requested', 'mention', 'notice-posted', 'notice-reminder', 'quiet-digest', 'task-assigned'].sort())
   assert.deepEqual(settings.muted, [])
-  for (const type of ['proposal-pending', 'sentinel-warning', 'opportunity-new']) {
+  for (const type of ['proposal-pending', 'sentinel-warning', 'opportunity-new', 'notice-unconfirmed-summary']) {
     assert.equal(shouldPush(draft({ type, recipientId: 'U1' }), {}), false, `${type}은 사용자가 직접 켜야 한다`)
   }
   assert.equal(shouldPush(draft({ type: 'mention' }), {}), true)
