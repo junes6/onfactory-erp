@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { ArrowLeft, Building2, CalendarDays, Coins, Download, ExternalLink, FileText, FolderKanban, Lock, MessageCircle, Paperclip, Pencil, Pin, Plus, Send, Settings2, Tag, Trash2, Upload, Users, X } from 'lucide-react'
-import { formatDateLabel, formatDateTime } from '../utils/dateTime'
+import { ArrowLeft, Building2, CalendarDays, Coins, Download, ExternalLink, FileText, FolderKanban, LayoutTemplate, Lock, MessageCircle, Paperclip, Pencil, Pin, Plus, Send, Settings2, Tag, Trash2, Upload, Users, X } from 'lucide-react'
+import { formatDateLabel, formatDateTime, seoulDateInputValue } from '../utils/dateTime'
 import { downloadDocumentAttachment, uploadDocumentAttachments, type StoredDocumentAttachment } from '../utils/documentAttachments'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ProjectSpaces.css'
 import { Button, ButtonLink, IconButton } from './ui/Button'
 import { useIndustrySurface } from '../modules/IndustryContext'
+import { ProjectOriginBadge, TemplateManagerDrawer, TemplatePicker, TemplateRoleMapper, TemplateSaveDialog, useProjectTemplates, type ProjectOrigin, type ProjectTemplate } from './TemplatePicker'
 
 type ProjectRole = 'owner' | 'editor' | 'viewer'
 /** kind는 서버가 붙인다. 'guest'는 외부 거래처 계정 — 역할은 항상 viewer로 고정되고 화면은 배지를 단다. */
@@ -28,6 +29,10 @@ type Project = {
   ownerId: string
   ownerName: string
   members: ProjectMember[]
+  /** 템플릿으로 만든 프로젝트만 가진다. 게스트 응답에서는 서버가 지운다 — 템플릿 이름은 내부 프로세스명이다. */
+  origin?: ProjectOrigin | null
+  /** 템플릿이 정해 준 자료 분류. 상세 헤더 칩이자 글·댓글 첨부의 기본 분류가 된다. */
+  documentCategories?: string[]
   createdAt: string
   updatedAt: string
   role: ProjectRole | null
@@ -45,6 +50,8 @@ function GuestBadge() {
   return <StatusBadge className="status-pill project-guest-badge" tone="warning">게스트</StatusBadge>
 }
 
+/** 자료 분류를 따로 정하지 않은 프로젝트의 첨부 분류. 지금까지의 동작이 그대로 기본값이다. */
+const PROJECT_DOCUMENT_CATEGORY = '프로젝트'
 const roleLabel: Record<ProjectRole, string> = { owner: '소유자', editor: '편집', viewer: '열람' }
 const roleTone: Record<ProjectRole, StatusBadgeTone> = { owner: 'info', editor: 'success', viewer: 'neutral' }
 const PROJECT_STAGES = ['준비', '수주 검토', '수주 확정', '진행 중', '검수', '완료', '보류'] as const
@@ -55,9 +62,15 @@ function money(value?: number) {
   return value ? `${Math.round(value).toLocaleString('ko-KR')}원` : ''
 }
 
-async function readJson<T>(response: Response): Promise<T & { error?: { message?: string } }> {
+/**
+ * 서버 오류는 code·message에 더해 실패한 역할 목록·역할 이름·막힌 자리처럼 사실을 담고 온다.
+ * 화면은 그 사실로 문장을 다시 만든다 — '같은 회사 직원만 배정할 수 있습니다'만으로는 어느 역할인지 알 수 없다.
+ */
+type ApiError = { code?: string; message?: string; roles?: string[]; role?: string; path?: string }
+
+async function readJson<T>(response: Response): Promise<T & { error?: ApiError }> {
   const text = await response.text()
-  try { return JSON.parse(text) } catch { return { error: { message: text } } as T & { error?: { message?: string } } }
+  try { return JSON.parse(text) } catch { return { error: { message: text } } as T & { error?: ApiError } }
 }
 
 export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserName, canManage, onToast, onNavigate, guestMode = false, focusProjectId, onFocusHandled }: {
@@ -92,6 +105,11 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
   const [composerOpen, setComposerOpen] = useState(false)
   const [filter, setFilter] = useState<'active' | 'archived'>('active')
   const [detailTab, setDetailTab] = useState<'feed' | 'files'>('feed')
+  // 템플릿 드로어와 프로젝트 편집기는 같은 화면의 기본 버튼을 각각 하나씩 가진다. 그래서 둘은 동시에 열리지 않는다.
+  const [templatesOpen, setTemplatesOpen] = useState(false)
+  const [templateInitialId, setTemplateInitialId] = useState<string>()
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
+  const [presetTemplateId, setPresetTemplateId] = useState('')
 
   const loadProjects = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -136,15 +154,71 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
   const isOwner = !guestMode && role === 'owner'
 
   const saveProject = async (input: Record<string, unknown>, projectId?: string) => {
-    const response = await fetch(projectId ? `/api/projects/${encodeURIComponent(projectId)}` : '/api/projects', { method: projectId ? 'PATCH' : 'POST', headers, body: JSON.stringify(input) })
-    const body = await readJson<{ project?: Project }>(response)
-    if (!response.ok || !body.project) { onToast(body.error?.message || '프로젝트를 저장하지 못했습니다.'); return false }
-    onToast(projectId ? '프로젝트 설정을 저장했습니다.' : `‘${body.project.name}’ 프로젝트를 만들었습니다.`)
-    await loadProjects(true)
-    if (projectId) setDetail(body.project); else setSelectedId(body.project.id)
-    setEditorOpen(null)
-    return true
+    try {
+      const response = await fetch(projectId ? `/api/projects/${encodeURIComponent(projectId)}` : '/api/projects', { method: projectId ? 'PATCH' : 'POST', headers, body: JSON.stringify(input) })
+      const body = await readJson<{ project?: Project }>(response)
+      if (!response.ok || !body.project) { onToast(body.error?.message || '프로젝트를 저장하지 못했습니다.'); return false }
+      onToast(projectId ? '프로젝트 설정을 저장했습니다.' : `‘${body.project.name}’ 프로젝트를 만들었습니다.`)
+      await loadProjects(true)
+      if (projectId) setDetail(body.project); else setSelectedId(body.project.id)
+      setEditorOpen(null)
+      return true
+    } catch { onToast('서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); return false }
   }
+
+  /**
+   * 템플릿으로 프로젝트를 만든다. 서버가 프로젝트·업무·채널·반복 규칙을 한 번의 커밋으로 함께 만들고,
+   * 실패하면 아무것도 남기지 않는다. 재시도(clientRequestId 같음)는 200으로 같은 프로젝트를 돌려주므로 성공 경로다.
+   */
+  const instantiateProject = async (templateId: string, input: Record<string, unknown>) => {
+    try {
+      const response = await fetch(`/api/project-templates/${encodeURIComponent(templateId)}/instantiate`, { method: 'POST', headers, body: JSON.stringify(input) })
+      const body = await readJson<{ project?: Project; workItems?: unknown[]; channels?: unknown[]; rules?: unknown[]; replayed?: boolean }>(response)
+      if (!response.ok || !body.project) {
+        // 서버가 어느 역할이 비었는지·어느 역할에서 막혔는지 알려 주므로 그 이름을 그대로 되읽어 준다 — '역할을 정하세요'로 끝내지 않는다.
+        const error = body.error
+        onToast(error?.code === 'TEMPLATE_ROLE_UNMAPPED' && error.roles?.length
+          ? `역할(${error.roles.join(', ')})에 사람을 정해 주세요.`
+          : error?.role
+            ? `역할 ‘${error.role}’ — ${error.message || '사람을 다시 골라 주세요.'}`
+            : error?.message || '템플릿으로 프로젝트를 만들지 못했습니다.')
+        return false
+      }
+      // 재시도 응답(replayed)에는 채널·규칙이 실려 오지 않는다. 실린 것만 말한다 — 있는 것을 0개라고 부르지 않는다.
+      onToast(body.replayed
+        ? `‘${body.project.name}’ 프로젝트는 이미 만들어져 있습니다. 업무 ${body.workItems?.length ?? 0}건`
+        : `‘${body.project.name}’ 프로젝트를 템플릿으로 만들었습니다. 업무 ${body.workItems?.length ?? 0}건 · 채널 ${body.channels?.length ?? 0}개 · 반복 규칙 ${body.rules?.length ?? 0}개`)
+      await loadProjects(true)
+      setSelectedId(body.project.id)
+      setEditorOpen(null)
+      setPresetTemplateId('')
+      return true
+    } catch {
+      // 응답을 받지 못했으면 false를 돌려 편집기를 열어 둔다. 요청 id(clientRequestId)가 그대로라
+      // 다시 눌러도 프로젝트가 둘 생기지 않는다 — 닫아 버리면 이름·역할 매핑을 처음부터 다시 적어야 한다.
+      onToast('템플릿 서버에 연결할 수 없습니다. 잠시 후 ‘프로젝트 만들기’를 다시 눌러 주세요.')
+      return false
+    }
+  }
+
+  /** 드로어에서 '이 템플릿으로' 를 누르면 목록으로 돌아가 만들기 편집기를 연다 — 상세 화면에는 편집기가 없다. */
+  const startFromTemplate = (templateId: string) => {
+    setTemplatesOpen(false)
+    // 처음 열 템플릿 지목은 여기서 쓰고 버린다. 남겨 두면 다음에 '템플릿' 버튼을 눌렀을 때 목록이 아니라 그 템플릿 편집으로 바로 들어간다.
+    setTemplateInitialId(undefined)
+    setPresetTemplateId(templateId)
+    setSelectedId(null)
+    setDetail(null)
+    setEditorOpen('create')
+  }
+  const templateDrawer = templatesOpen ? <TemplateManagerDrawer
+    workspaceScope={workspaceScope}
+    canManage={canManage}
+    initialId={templateInitialId}
+    onToast={onToast}
+    onClose={() => { setTemplatesOpen(false); setTemplateInitialId(undefined) }}
+    onInstantiate={startFromTemplate}
+  /> : null
 
   const deleteProject = async () => {
     if (!detail || !window.confirm(`‘${detail.name}’ 프로젝트를 삭제할까요? 글·댓글 기록이 함께 삭제됩니다. 기록을 남기려면 대신 '보관'을 선택하세요.`)) return
@@ -220,7 +294,7 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
       <header className="page-header project-detail-header">
         <div>
           {!guestMode && <button type="button" className="project-back" onClick={() => { setSelectedId(null); setDetail(null); void loadProjects(true) }}><ArrowLeft size={16} /> 프로젝트 목록</button>}
-          <h1>{detail.name} {detail.category && <StatusBadge className="status-pill" tone="info">{detail.category}</StatusBadge>}{detail.stage && <StatusBadge className="status-pill" dot tone={stageTone(detail.stage)}>{detail.stage}</StatusBadge>}{detail.status === 'archived' && <StatusBadge className="status-pill" tone="neutral">보관됨</StatusBadge>}</h1>
+          <h1>{detail.name} {detail.category && <StatusBadge className="status-pill" tone="info">{detail.category}</StatusBadge>}{detail.stage && <StatusBadge className="status-pill" dot tone={stageTone(detail.stage)}>{detail.stage}</StatusBadge>}{detail.status === 'archived' && <StatusBadge className="status-pill" tone="neutral">보관됨</StatusBadge>}<ProjectOriginBadge origin={detail.origin} /></h1>
           {detail.description && <p>{detail.description}</p>}
           <div className="project-meta">
             <span className="project-members" title={detail.members.map((member) => `${member.name} (${member.kind === 'guest' ? '게스트' : roleLabel[member.role]})`).join(', ')}><Users size={15} /> {detail.members.slice(0, 6).map((member) => <i key={member.id} className={`project-avatar role-${member.role}${member.kind === 'guest' ? ' is-guest' : ''}`}>{member.name.slice(0, 1)}</i>)}{detail.members.length > 6 && <em>+{detail.members.length - 6}</em>} {detail.members.length}명{guestMemberCount > 0 && <> <StatusBadge className="status-pill project-guest-badge" tone="warning">게스트 {guestMemberCount}명</StatusBadge></>}</span>
@@ -228,12 +302,14 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
             {period && <span><CalendarDays size={14} /> {period}</span>}
             {money(detail.amount) && <span><Coins size={14} /> {money(detail.amount)}</span>}
             <span>{detail.visibility === 'company' ? <><Users size={14} /> 회사 전체 열람</> : <><Lock size={14} /> 멤버만</>}</span>
+            {detail.documentCategories?.length ? <span className="project-doc-categories" title="자료 분류"><FolderKanban size={14} /> {detail.documentCategories.join(' · ')}</span> : null}
             {role && <StatusBadge className="status-pill" tone={guestMode ? 'warning' : roleTone[role]}>내 권한 · {guestMode ? '게스트 (보기와 댓글)' : roleLabel[role]}</StatusBadge>}
           </div>
         </div>
         <div className="page-header-actions">
           {detail.link && <ButtonLink tone="secondary" className="project-link-button" href={detail.link} target="_blank" rel="noreferrer noopener"><ExternalLink size={16} /> 프로젝트 링크 열기</ButtonLink>}
           {isOwner && <Button tone="secondary" type="button" onClick={() => setEditorOpen('settings')}><Settings2 size={17} /> 멤버·설정</Button>}
+          {isOwner && canManage && <Button tone="secondary" type="button" onClick={() => setSaveTemplateOpen(true)}><LayoutTemplate size={17} /> 템플릿으로 저장</Button>}
           {isOwner && <Button tone="ghost" className="project-delete" type="button" onClick={() => void deleteProject()}><Trash2 size={16} /> 삭제</Button>}
           {canPost && detail.status !== 'archived' && <Button tone="primary" type="button" onClick={() => { setDetailTab('feed'); setComposerOpen(true) }}><Plus size={18} /> 글 · 파일 올리기</Button>}
         </div>
@@ -255,14 +331,23 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
             </article>)}</div>}
         </section>
         : <>
-          {composerOpen && <PostComposer workspaceScope={workspaceScope} projectName={detail.name} onToast={onToast} onClose={() => setComposerOpen(false)} onSubmit={createPost} />}
+          {composerOpen && <PostComposer workspaceScope={workspaceScope} projectName={detail.name} defaultCategory={detail.documentCategories?.[0] ?? PROJECT_DOCUMENT_CATEGORY} onToast={onToast} onClose={() => setComposerOpen(false)} onSubmit={createPost} />}
           <section className="project-feed">
-            {posts.length === 0 && !composerOpen && <div className="empty-state compact"><FolderKanban size={28} /><h3>아직 올린 글이 없습니다</h3><p>{canPost ? '회의록·자료·진행 상황을 글이나 파일로 올려 멤버와 공유하세요.' : '편집 권한이 있는 멤버가 글을 올리면 여기에 표시됩니다.'}</p>{canPost && <Button tone="primary" type="button" onClick={() => setComposerOpen(true)}><Plus size={17} /> 첫 글 올리기</Button>}</div>}
-            {posts.map((post) => <PostCard key={post.id} post={post} currentUserId={currentUserId} isOwner={isOwner} canComment={Boolean(role)} workspaceScope={workspaceScope} onToast={onToast} onDownload={download} onDelete={() => void deletePost(post)} onPin={() => void togglePin(post)} onUpdate={(input) => updatePost(post, input)} onComment={(input) => addComment(post, input)} onDeleteComment={(comment) => void deleteComment(post, comment)} />)}
+            {/* 빈 상태에는 버튼을 두지 않는다 — 이 화면의 기본 버튼은 헤더의 '글 · 파일 올리기' 하나다(DECISIONS.md:61). */}
+            {posts.length === 0 && !composerOpen && <div className="empty-state compact"><FolderKanban size={28} /><h3>아직 올린 글이 없습니다</h3><p>{canPost && detail.status === 'archived' ? '보관된 프로젝트에는 글을 올릴 수 없습니다.' : canPost ? '위 ‘글 · 파일 올리기’로 회의록·자료·진행 상황을 멤버와 공유하세요.' : '편집 권한이 있는 멤버가 글을 올리면 여기에 표시됩니다.'}</p></div>}
+            {posts.map((post) => <PostCard key={post.id} post={post} currentUserId={currentUserId} isOwner={isOwner} canComment={Boolean(role)} workspaceScope={workspaceScope} defaultCategory={detail.documentCategories?.[0] ?? PROJECT_DOCUMENT_CATEGORY} onToast={onToast} onDownload={download} onDelete={() => void deletePost(post)} onPin={() => void togglePin(post)} onUpdate={(input) => updatePost(post, input)} onComment={(input) => addComment(post, input)} onDeleteComment={(comment) => void deleteComment(post, comment)} />)}
           </section>
         </>}
 
       {editorOpen === 'settings' && <ProjectEditor project={detail} directory={directory} currentUserId={currentUserId} onClose={() => setEditorOpen(null)} onSave={(input) => saveProject(input, detail.id)} onNavigate={onNavigate} />}
+      {saveTemplateOpen && <TemplateSaveDialog
+        project={detail}
+        workspaceScope={workspaceScope}
+        onToast={onToast}
+        onClose={() => setSaveTemplateOpen(false)}
+        onSaved={(templateId) => { setSaveTemplateOpen(false); setTemplateInitialId(templateId); setTemplatesOpen(true) }}
+      />}
+      {templateDrawer}
     </div>
   }
 
@@ -279,7 +364,7 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
   return <div className="content-page project-page">
     <header className="page-header">
       <div><span className="eyebrow">PROJECTS</span><h1>프로젝트</h1><p>프로젝트마다 단계·기간·거래처를 관리하고, 같은 공간에서 글·파일·댓글로 협업합니다. 멤버 권한(소유자·편집·열람)별로 공유됩니다.</p></div>
-      <div className="page-header-actions"><Button tone="primary" type="button" onClick={() => setEditorOpen('create')}><Plus size={18} /> 새 프로젝트</Button></div>
+      <div className="page-header-actions">{canManage && <Button tone="secondary" type="button" onClick={() => { setEditorOpen(null); setTemplatesOpen(true) }}><LayoutTemplate size={17} /> 템플릿</Button>}<Button tone="primary" type="button" onClick={() => { setTemplatesOpen(false); setEditorOpen('create') }}><Plus size={18} /> 새 프로젝트</Button></div>
     </header>
     <div className="project-toolbar">
       <div className="segmented" role="group" aria-label="프로젝트 상태"><button type="button" className={filter === 'active' ? 'active' : ''} aria-pressed={filter === 'active'} onClick={() => setFilter('active')}>진행 중 {projects.filter((p) => p.status !== 'archived').length}</button><button type="button" className={filter === 'archived' ? 'active' : ''} aria-pressed={filter === 'archived'} onClick={() => setFilter('archived')}>보관 {projects.filter((p) => p.status === 'archived').length}</button></div>
@@ -287,21 +372,36 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
       {canManage && <span className="project-toolbar-note">관리자는 모든 프로젝트를 볼 수 있습니다. 직원은 참여 중이거나 회사 전체 공개인 프로젝트만 봅니다.</span>}
     </div>
     {loading ? <div className="empty-state compact"><FolderKanban size={26} /><h3>프로젝트를 불러오는 중</h3></div>
-      : visibleProjects.length === 0 ? <div className="empty-state"><FolderKanban size={30} /><h3>{filter === 'archived' ? '보관된 프로젝트가 없습니다' : '아직 프로젝트가 없습니다'}</h3><p>{industry.examples.projectSpace}</p><Button tone="primary" type="button" onClick={() => setEditorOpen('create')}><Plus size={18} /> 첫 프로젝트 만들기</Button></div>
+      // 빈 상태에는 버튼을 두지 않는다 — 만들기 버튼은 헤더의 '새 프로젝트' 하나뿐이다(화면당 기본 버튼 1개).
+      : visibleProjects.length === 0 ? <div className="empty-state"><FolderKanban size={30} /><h3>{filter === 'archived' ? '보관된 프로젝트가 없습니다' : '아직 프로젝트가 없습니다'}</h3><p>{industry.examples.projectSpace}</p>{canManage && <small className="project-toolbar-note">템플릿을 고르면 업무·하위 업무·채널이 함께 만들어집니다.</small>}</div>
         : <div className="project-grid">
           {visibleProjects.map((project) => <button type="button" className={`project-card${project.status === 'archived' ? ' is-archived' : ''}`} key={project.id} onClick={() => setSelectedId(project.id)}>
-            <div className="project-card-head"><span className="project-card-icon"><FolderKanban size={20} /></span><span className="project-card-badges">{project.category && <StatusBadge className="status-pill" tone="info">{project.category}</StatusBadge>}{project.stage && <StatusBadge className="status-pill" dot tone={stageTone(project.stage)}>{project.stage}</StatusBadge>}{project.role && <StatusBadge className="status-pill" tone={roleTone[project.role]}>{roleLabel[project.role]}</StatusBadge>}</span></div>
+            <div className="project-card-head"><span className="project-card-icon"><FolderKanban size={20} /></span><span className="project-card-badges">{project.category && <StatusBadge className="status-pill" tone="info">{project.category}</StatusBadge>}{project.stage && <StatusBadge className="status-pill" dot tone={stageTone(project.stage)}>{project.stage}</StatusBadge>}{project.role && <StatusBadge className="status-pill" tone={roleTone[project.role]}>{roleLabel[project.role]}</StatusBadge>}<ProjectOriginBadge origin={project.origin} /></span></div>
             <strong>{project.name}</strong>
             <p>{[project.client, project.endDate ? `${formatDateLabel(project.endDate)}까지` : '', money(project.amount)].filter(Boolean).join(' · ') || project.description || '설명 없음'}</p>
             <div className="project-card-meta"><span><Users size={14} /> {project.members.length}명</span><span><MessageCircle size={14} /> 글 {project.postCount}</span><span><Paperclip size={14} /> 파일 {project.fileCount}</span></div>
             <small>{project.visibility === 'company' ? '회사 전체 열람' : '멤버만'} · 최근 {formatDateTime(project.lastActivityAt)}</small>
           </button>)}
         </div>}
-    {editorOpen === 'create' && <ProjectEditor directory={directory} currentUserId={currentUserId} currentUserName={currentUserName} onClose={() => setEditorOpen(null)} onSave={(input) => saveProject(input)} onNavigate={onNavigate} />}
+    {editorOpen === 'create' && <ProjectEditor directory={directory} currentUserId={currentUserId} currentUserName={currentUserName} workspaceScope={workspaceScope} canManage={canManage} initialTemplateId={presetTemplateId || undefined} onInstantiate={instantiateProject} onClose={() => { setEditorOpen(null); setPresetTemplateId('') }} onSave={(input) => saveProject(input)} onNavigate={onNavigate} />}
+    {templateDrawer}
   </div>
 }
 
-function ProjectEditor({ project, directory, currentUserId, currentUserName, onClose, onSave, onNavigate }: { project?: Project; directory: DirectoryEntry[]; currentUserId: string; currentUserName?: string; onClose: () => void; onSave: (input: Record<string, unknown>) => Promise<boolean>; onNavigate?: (page: string) => void }) {
+function ProjectEditor({ project, directory, currentUserId, currentUserName, workspaceScope, canManage, initialTemplateId, onInstantiate, onClose, onSave, onNavigate }: {
+  project?: Project
+  directory: DirectoryEntry[]
+  currentUserId: string
+  currentUserName?: string
+  workspaceScope?: string
+  canManage?: boolean
+  /** 관리 드로어에서 '이 템플릿으로'를 눌러 들어온 경우 미리 골라 둔 템플릿. */
+  initialTemplateId?: string
+  onInstantiate?: (templateId: string, input: Record<string, unknown>) => Promise<boolean>
+  onClose: () => void
+  onSave: (input: Record<string, unknown>) => Promise<boolean>
+  onNavigate?: (page: string) => void
+}) {
   const [name, setName] = useState(project?.name ?? '')
   const [description, setDescription] = useState(project?.description ?? '')
   const [visibility, setVisibility] = useState<'members' | 'company'>(project?.visibility ?? 'members')
@@ -310,12 +410,25 @@ function ProjectEditor({ project, directory, currentUserId, currentUserName, onC
   const [client, setClient] = useState(project?.client ?? '')
   const [link, setLink] = useState(project?.link ?? '')
   const [category, setCategory] = useState(project?.category ?? '')
-  const [startDate, setStartDate] = useState(project?.startDate ?? '')
+  // 템플릿을 미리 고른 채로 열렸으면 시작일도 함께 채운다 — 마감의 기준일이라 말해 놓고 빈 칸을 보여 줄 수는 없다(라디오를 누른 경로와 같은 값).
+  const [startDate, setStartDate] = useState(project?.startDate ?? (initialTemplateId ? seoulDateInputValue() : ''))
   const [endDate, setEndDate] = useState(project?.endDate ?? '')
   const [amount, setAmount] = useState(project?.amount ?? 0)
   const [members, setMembers] = useState<Array<{ id: string; role: ProjectRole }>>(() => (project?.members ?? []).filter((member) => member.role !== 'owner').map((member) => ({ id: member.id, role: member.role })))
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
+  // 템플릿은 새로 만들 때만 고른다(설정 모드에서는 이미 만들어진 프로젝트다). 관리자가 아니면 목록을 아예 부르지 않는다.
+  const { templates, reload: reloadTemplates, error: templatesError } = useProjectTemplates(workspaceScope, !project && Boolean(canManage))
+  const [templateId, setTemplateId] = useState(initialTemplateId ?? '')
+  const [roleMap, setRoleMap] = useState<Record<string, string>>({})
+  // 역할 매핑으로 들어온 사람과 손으로 고른 사람을 갈라 둔다 — 템플릿을 바꾸면 앞의 사람들만 걷어낸다.
+  const roleAddedRef = useRef(new Set<string>())
+  // 같은 편집기에서 여러 번 눌러도 프로젝트가 여러 개 생기지 않게, 만들기 요청 id는 편집기 한 번에 하나다.
+  const clientRequestId = useRef(crypto.randomUUID())
+  const template: ProjectTemplate | null = templates?.find((item) => item.id === templateId) ?? null
+  const mappedCount = template ? template.roles.filter((role) => roleMap[role]).length : 0
+  // 고른 템플릿을 아직 손에 넣지 못한 상태. 이대로 만들면 템플릿 없는 빈 프로젝트가 생기므로 만들기를 미룬다.
+  const templatePending = templateId !== '' && template === null
   const ownerId = project?.ownerId ?? currentUserId
   const ownerName = project?.ownerName ?? currentUserName ?? ''
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey) }, [onClose])
@@ -339,12 +452,74 @@ function ProjectEditor({ project, directory, currentUserId, currentUserName, onC
     .filter((entry) => !normalizedQuery || `${entry.name} ${entry.team} ${entry.jobRole}`.toLowerCase().includes(normalizedQuery))
     .sort((left, right) => Number(Boolean(memberRole(right.id))) - Number(Boolean(memberRole(left.id))) || (left.team || '').localeCompare(right.team || '', 'ko') || left.name.localeCompare(right.name, 'ko'))
   // 게스트는 viewer로만 들어간다. 편집 권한을 줘도 서버가 viewer로 되돌리므로 화면에서 처음부터 그렇게 넣는다.
-  const toggleMember = (id: string) => setMembers((current) => current.some((member) => member.id === id) ? current.filter((member) => member.id !== id) : [...current, { id, role: isGuestEntry(id) ? 'viewer' : 'editor' }])
+  const toggleMember = (id: string) => {
+    // 뺀 사람이 역할 매핑에 남아 있으면 서버가 그 사람을 편집 멤버로 되살린다 — '제외'가 아무 일도 안 한 것처럼 보인다.
+    // 매핑에서도 빼면 역할 한 자리가 비고, 이미 있는 규칙이 만들기를 막으며 그 까닭을 화면이 말한다.
+    if (members.some((member) => member.id === id)) {
+      setRoleMap((current) => Object.fromEntries(Object.entries(current).filter(([, value]) => value !== id)))
+      roleAddedRef.current.delete(id)
+    }
+    setMembers((current) => current.some((member) => member.id === id) ? current.filter((member) => member.id !== id) : [...current, { id, role: isGuestEntry(id) ? 'viewer' : 'editor' }])
+  }
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className="modal-card project-editor" role="dialog" aria-modal="true" aria-labelledby="project-editor-title">
       <header><div><span className="eyebrow">{project ? 'PROJECT SETTINGS' : 'NEW PROJECT'}</span><h2 id="project-editor-title">{project ? '멤버 · 설정' : '새 프로젝트'}</h2><p>{project ? '멤버 권한·관리 정보·공개 범위를 바꿉니다.' : '이름만 정하면 시작됩니다. 멤버·관리 정보는 나중에도 바꿀 수 있습니다.'}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
-      <form onSubmit={async (event: FormEvent) => { event.preventDefault(); if (name.trim().length < 2) return; setBusy(true); const ok = await onSave({ name: name.trim(), description: description.trim(), visibility, members, stage, client: client.trim(), startDate, endDate, amount, link: link.trim(), category: category.trim(), ...(project ? { status } : {}) }); setBusy(false); if (ok) onClose() }}>
+      <form onSubmit={async (event: FormEvent) => {
+        event.preventDefault()
+        if (name.trim().length < 2) return
+        setBusy(true)
+        // 무슨 일이 있어도 busy는 풀린다 — 풀리지 않으면 '저장 중…'과 disabled된 취소만 남아 화면이 굳는다.
+        try {
+          // 템플릿을 골랐으면 프로젝트만 만드는 저장이 아니라 실체화다 — 업무·채널·규칙이 함께 만들어진다.
+          // 비어 있는 관리 정보는 보내지 않는다. 보내면 서버가 정해 둔 시작 단계('준비')를 빈 값으로 덮어쓴다.
+          const ok = template && onInstantiate
+            ? await onInstantiate(template.id, {
+              name: name.trim(), description: description.trim(), visibility, members, client: client.trim(),
+              startDate: startDate || undefined, roleMap, clientRequestId: clientRequestId.current,
+              ...(stage ? { stage } : {}), ...(endDate ? { endDate } : {}), ...(amount ? { amount } : {}),
+              ...(link.trim() ? { link: link.trim() } : {}), ...(category.trim() ? { category: category.trim() } : {}),
+            })
+            : await onSave({ name: name.trim(), description: description.trim(), visibility, members, stage, client: client.trim(), startDate, endDate, amount, link: link.trim(), category: category.trim(), ...(project ? { status } : {}) })
+          if (ok) onClose()
+        } finally { setBusy(false) }
+      }}>
+        {!project && canManage && <TemplatePicker
+          templates={templates}
+          selectedId={templateId}
+          error={templatesError}
+          onRetry={() => void reloadTemplates()}
+          onSelect={(id) => {
+            // 걷어낼 명단을 먼저 손에 쥔다. setMembers의 함수는 지금이 아니라 다음 렌더에서 실행되므로,
+            // ref를 비운 뒤에 읽게 두면 빈 집합을 보고 아무도 걷어내지 못한다.
+            const seeded = roleAddedRef.current
+            roleAddedRef.current = new Set()
+            setTemplateId(id)
+            setRoleMap({})
+            // 앞 템플릿이 채워 넣은 사람은 함께 걷어낸다 — 남겨 두면 고르지도 않은 사람이 새 프로젝트의 편집 멤버가 된다.
+            setMembers((current) => current.filter((member) => !seeded.has(member.id)))
+            if (id && !startDate) setStartDate(seoulDateInputValue())
+          }}
+        />}
+        {/* 만들기가 멈춘 까닭은 세 가지뿐이고, 셋을 한 문장씩 갈라 말한다 — 지워진 템플릿을 '불러오는 중'이라 하지 않는다. */}
+        {templatePending && <p className="project-template-note" id="project-template-pending">{templatesError
+          ? '고른 템플릿을 아직 확인하지 못했습니다. 위에서 템플릿을 다시 불러온 뒤에 만들 수 있습니다.'
+          : templates === null
+            ? '고른 템플릿을 불러오는 중입니다.'
+            : '고른 템플릿이 목록에 없습니다. 위에서 템플릿을 다시 골라 주세요.'}</p>}
         <label className="form-field full"><span>프로젝트 이름 <em>필수</em></span><input value={name} onChange={(event) => setName(event.target.value)} autoFocus required minLength={2} maxLength={80} placeholder="예: 한국도로공사 시뮬레이션" /></label>
+        {template && <TemplateRoleMapper
+          template={template}
+          directory={directory}
+          roleMap={roleMap}
+          onChange={(role, id) => {
+            setRoleMap((current) => ({ ...current, [role]: id }))
+            // 소유자는 멤버 목록에 다시 넣지 않는다. 서버가 걸러 내므로(normalizeProjectMembers), 넣으면 '멤버 N명'만 한 명 부풀고
+            // 그 줄은 로스터(소유자 제외)에 없어 지울 수도 없다. 소유자를 역할에 앉히는 것 자체는 그대로 된다.
+            if (id === ownerId) return
+            roleAddedRef.current.add(id)
+            setMembers((current) => current.some((member) => member.id === id) ? current : [...current, { id, role: 'editor' }])
+          }}
+        />}
         <label className="form-field full"><span>설명 <em>선택</em></span><input value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} placeholder="무엇을 위한 프로젝트인지 한 줄로" /></label>
         <div className="form-grid">
           <label className="form-field"><span>구분</span><input value={category} onChange={(event) => setCategory(event.target.value)} list="project-category-options" maxLength={20} placeholder="예: 웹, 앱, 시스템" /><datalist id="project-category-options"><option>웹</option><option>앱</option><option>시스템</option><option>디자인</option><option>유지보수</option><option>연구개발</option><option>인증</option><option>기타</option></datalist></label>
@@ -355,7 +530,7 @@ function ProjectEditor({ project, directory, currentUserId, currentUserName, onC
           <label className="form-field"><span>프로젝트 링크 <em>선택</em></span><input value={link} onChange={(event) => setLink(event.target.value)} maxLength={300} placeholder="예: https://github.com/..., 피그마·노션 주소" /></label>
         </div>
         <div className="form-grid">
-          <label className="form-field"><span>시작일</span><input type="date" value={startDate} max={endDate || undefined} onChange={(event) => setStartDate(event.target.value)} /></label>
+          <label className="form-field"><span>시작일</span><input type="date" value={startDate} max={endDate || undefined} onChange={(event) => setStartDate(event.target.value)} />{template && <small className="project-template-note">업무 마감의 기준일입니다.</small>}</label>
           <label className="form-field"><span>종료 예정일</span><input type="date" value={endDate} min={startDate || undefined} onChange={(event) => setEndDate(event.target.value)} /></label>
         </div>
         <div className="form-grid">
@@ -383,7 +558,7 @@ function ProjectEditor({ project, directory, currentUserId, currentUserName, onC
           <p className="project-member-hint">편집: 글·파일 올리기 가능 · 열람: 보기와 댓글만 · 회사 전체 공개여도 글쓰기는 멤버만 가능합니다. 게스트는 열람으로 고정됩니다.</p>
           {onNavigate && <div className="project-member-guest-link"><Button tone="quiet" size="sm" type="button" onClick={() => { onClose(); onNavigate('people') }}>외부 게스트 초대는 인사·조직 → 계정·권한에서</Button></div>}
         </div>
-        <footer><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>취소</Button><Button tone="primary" type="submit" disabled={busy || name.trim().length < 2}>{busy ? '저장 중…' : project ? '설정 저장' : '프로젝트 만들기'}</Button></footer>
+        <footer><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>취소</Button><Button tone="primary" type="submit" aria-describedby={templatePending ? 'project-template-pending' : undefined} disabled={busy || name.trim().length < 2 || templatePending || (template !== null && mappedCount < template.roles.length)}>{busy ? '저장 중…' : project ? '설정 저장' : '프로젝트 만들기'}</Button></footer>
       </form>
     </section>
   </div>
@@ -400,8 +575,10 @@ function AttachmentPicker({ attachments, busy, onPick, onRemove, label = '파일
   </div>
 }
 
-function PostForm({ workspaceScope, projectName, initial, submitLabel, busyLabel, onToast, onCancel, onSubmit }: {
+function PostForm({ workspaceScope, projectName, defaultCategory = PROJECT_DOCUMENT_CATEGORY, initial, submitLabel, busyLabel, onToast, onCancel, onSubmit }: {
   workspaceScope?: string; projectName: string
+  /** 템플릿이 정해 준 첫 자료 분류. 없으면 지금까지처럼 '프로젝트'로 올린다. */
+  defaultCategory?: string
   initial?: { title: string; body: string; attachments: StoredDocumentAttachment[] }
   submitLabel: string; busyLabel: string
   onToast: (message: string) => void; onCancel: () => void
@@ -414,7 +591,7 @@ function PostForm({ workspaceScope, projectName, initial, submitLabel, busyLabel
   const [uploading, setUploading] = useState(false)
   const pick = async (files: File[]) => {
     setUploading(true)
-    try { const added = await uploadDocumentAttachments(files, { workspaceScope, category: '프로젝트', summary: `${projectName} 프로젝트 게시글 첨부`, tags: ['프로젝트', projectName] }); setAttachments((current) => [...current, ...added]) }
+    try { const added = await uploadDocumentAttachments(files, { workspaceScope, category: defaultCategory, summary: `${projectName} 프로젝트 게시글 첨부`, tags: [PROJECT_DOCUMENT_CATEGORY, projectName] }); setAttachments((current) => [...current, ...added]) }
     catch (reason) { onToast(reason instanceof Error ? reason.message : '파일을 업로드하지 못했습니다.') }
     finally { setUploading(false) }
   }
@@ -431,15 +608,15 @@ function PostForm({ workspaceScope, projectName, initial, submitLabel, busyLabel
   </form>
 }
 
-function PostComposer(props: { workspaceScope?: string; projectName: string; onToast: (message: string) => void; onClose: () => void; onSubmit: (input: { title: string; body: string; attachments: StoredDocumentAttachment[] }) => Promise<boolean> }) {
+function PostComposer(props: { workspaceScope?: string; projectName: string; defaultCategory?: string; onToast: (message: string) => void; onClose: () => void; onSubmit: (input: { title: string; body: string; attachments: StoredDocumentAttachment[] }) => Promise<boolean> }) {
   return <section className="panel project-composer" aria-label="새 글 작성">
     <div className="project-composer-head"><strong><Pencil size={15} /> 새 글 · 파일</strong><IconButton tone="ghost" type="button" aria-label="닫기" onClick={props.onClose}><X size={17} /></IconButton></div>
-    <PostForm workspaceScope={props.workspaceScope} projectName={props.projectName} submitLabel="올리기" busyLabel="올리는 중…" onToast={props.onToast} onCancel={props.onClose} onSubmit={props.onSubmit} />
+    <PostForm workspaceScope={props.workspaceScope} projectName={props.projectName} defaultCategory={props.defaultCategory} submitLabel="올리기" busyLabel="올리는 중…" onToast={props.onToast} onCancel={props.onClose} onSubmit={props.onSubmit} />
   </section>
 }
 
-function PostCard({ post, currentUserId, isOwner, canComment, workspaceScope, onToast, onDownload, onDelete, onPin, onUpdate, onComment, onDeleteComment }: {
-  post: ProjectPost; currentUserId: string; isOwner: boolean; canComment: boolean; workspaceScope?: string; onToast: (message: string) => void
+function PostCard({ post, currentUserId, isOwner, canComment, workspaceScope, defaultCategory = PROJECT_DOCUMENT_CATEGORY, onToast, onDownload, onDelete, onPin, onUpdate, onComment, onDeleteComment }: {
+  post: ProjectPost; currentUserId: string; isOwner: boolean; canComment: boolean; workspaceScope?: string; defaultCategory?: string; onToast: (message: string) => void
   onDownload: (attachment: StoredDocumentAttachment) => void; onDelete: () => void; onPin: () => void
   onUpdate: (input: { title: string; body: string; attachments: StoredDocumentAttachment[] }) => Promise<boolean>
   onComment: (input: { text: string; attachments: StoredDocumentAttachment[] }) => Promise<boolean>; onDeleteComment: (comment: ProjectComment) => void
@@ -453,14 +630,14 @@ function PostCard({ post, currentUserId, isOwner, canComment, workspaceScope, on
   const mine = post.authorId === currentUserId
   const pick = async (files: File[]) => {
     setUploading(true)
-    try { const added = await uploadDocumentAttachments(files, { workspaceScope, category: '프로젝트', summary: `${post.title} 댓글 첨부`, tags: ['프로젝트', '댓글'] }); setAttachments((current) => [...current, ...added]) }
+    try { const added = await uploadDocumentAttachments(files, { workspaceScope, category: defaultCategory, summary: `${post.title} 댓글 첨부`, tags: [PROJECT_DOCUMENT_CATEGORY, '댓글'] }); setAttachments((current) => [...current, ...added]) }
     catch (reason) { onToast(reason instanceof Error ? reason.message : '파일을 업로드하지 못했습니다.') }
     finally { setUploading(false) }
   }
   if (editing) {
     return <article className="project-post is-editing">
       <div className="project-composer-head"><strong><Pencil size={15} /> 글 수정</strong></div>
-      <PostForm workspaceScope={workspaceScope} projectName={post.title} initial={{ title: post.title, body: post.body, attachments: post.attachments }} submitLabel="수정 저장" busyLabel="저장 중…" onToast={onToast} onCancel={() => setEditing(false)} onSubmit={async (input) => { const ok = await onUpdate(input); if (ok) setEditing(false); return ok }} />
+      <PostForm workspaceScope={workspaceScope} projectName={post.title} defaultCategory={defaultCategory} initial={{ title: post.title, body: post.body, attachments: post.attachments }} submitLabel="수정 저장" busyLabel="저장 중…" onToast={onToast} onCancel={() => setEditing(false)} onSubmit={async (input) => { const ok = await onUpdate(input); if (ok) setEditing(false); return ok }} />
     </article>
   }
   return <article className={`project-post${post.pinned ? ' is-pinned' : ''}`}>

@@ -1,0 +1,57 @@
+/* 프로젝트 템플릿 — 피커·역할 매핑·저장 대화상자·관리 드로어. 배치만 정하고 버튼 모양은 Button.css가 정한다. */
+.project-template-picker { margin-bottom: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.project-template-picker > summary { display: flex; align-items: center; gap: var(--space-8); min-height: 48px; padding: var(--space-12) var(--space-16); font-size: var(--font-15); font-weight: var(--weight-medium); cursor: pointer; }
+.project-template-picker > summary span { color: var(--muted); font-size: var(--font-13); font-weight: var(--weight-regular); }
+.project-template-options { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-0) var(--space-12) var(--space-12); }
+.project-template-option { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--space-12); min-height: 48px; padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); cursor: pointer; }
+.project-template-option.is-selected { border-color: var(--color-primary); background: var(--color-primary-soft); }
+.project-template-option strong { display: flex; align-items: center; gap: var(--space-4); font-size: var(--font-15); }
+.project-template-option small { display: block; overflow: hidden; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
+
+.project-template-roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-12); margin: var(--space-12) var(--space-0); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.project-template-roles > strong, .project-template-roles > small { grid-column: 1 / -1; }
+.project-template-note { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); line-height: 1.6; }
+
+.project-role-map { display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
+.project-role-map li { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(120px, 160px); align-items: center; gap: var(--space-8); min-height: 40px; }
+.project-role-map input { min-height: 36px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--ink); font-size: var(--font-13); }
+/* 오류 옆 '다시 불러오기'가 서는 자리. 피커·저장 대화상자가 같은 모양을 쓴다. */
+.project-template-retry { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-8); margin-top: var(--space-8); }
+
+/* 폭은 기본 클래스(.workflow-drawer 520px·.modal-card 690px)를 이겨야 한다 — 같은 특정도면 나중에 실린 styles.css가 이긴다.
+   드로어 폭이 밀리면 아래 6칸 업무 행이 한 칸당 60px대로 쪼그라들어 역할 select가 읽히지 않는다. */
+.workflow-drawer.project-template-drawer { width: min(720px, 100%); }
+.modal-card.project-template-save { width: min(640px, 100%); }
+.project-template-rows { display: flex; flex-direction: column; gap: var(--space-8); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.project-template-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-12); min-height: 56px; padding: var(--space-8) var(--space-16); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.project-template-row strong { display: block; overflow: hidden; font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
+.project-template-row small { display: block; overflow: hidden; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
+
+.project-template-tree, .project-template-children { display: flex; flex-direction: column; gap: var(--space-8); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.project-template-tree > li { display: flex; flex-direction: column; gap: var(--space-8); }
+.project-template-task-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) 80px minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); }
+.project-template-task-row :is(input, select) { min-height: 36px; min-width: 0; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--ink); font-size: var(--font-13); }
+.project-template-children { margin-left: var(--space-24); padding-left: var(--space-12); border-left: var(--hairline) solid var(--line); }
+/* 자식 행은 칸이 넷(제목·역할·D+n·제외)이다. 상위와 같은 6칸 격자에 넣으면 제외 버튼이 행 한가운데에 선다. */
+.project-template-children .project-template-task-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) 80px auto; }
+.project-template-line { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); }
+/* 입력이 하나뿐인 줄(자료 분류). 두 입력짜리 격자를 그대로 쓰면 제외 버튼이 가운데로 끌려온다. */
+.project-template-line.is-single { grid-template-columns: minmax(0, 1fr) auto; }
+.project-template-line input { min-height: 36px; min-width: 0; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--ink); font-size: var(--font-13); }
+.project-template-chips { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); }
+.project-template-chip { display: inline-flex; align-items: center; gap: var(--space-4); min-height: 28px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--canvas); font-size: var(--font-13); }
+.project-template-rule { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); min-height: 40px; color: var(--muted); font-size: var(--font-13); }
+/* 규칙 한 줄·이력 한 줄도 옆 행들과 같이 한 줄에서 끝난다 — 제목이 길다고 줄이 셋으로 늘면 목록이 목록으로 안 읽힌다. */
+.project-template-rule > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-template-foot { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-8); padding: var(--card-inset); border-top: var(--hairline) solid var(--line); }
+
+.project-template-history > summary { min-height: 36px; display: flex; align-items: center; color: var(--muted); font-size: var(--font-13); cursor: pointer; }
+.project-template-history ol { margin: var(--space-8) var(--space-0) var(--space-0); padding-left: var(--space-16); color: var(--muted); font-size: var(--font-13); }
+.project-template-history ol li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .workflow-drawer.project-template-drawer { width: 100%; }
+  .project-template-task-row, .project-template-children .project-template-task-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .project-template-line { grid-template-columns: minmax(0, 1fr) auto; }
+  .project-role-map li { grid-template-columns: 1fr; }
+}

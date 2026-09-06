@@ -124,3 +124,9 @@ html[data-theme='dark'] .project-roster li.is-member { background: var(--color-p
 /* R9: 프로젝트 링크·구분 */
 .project-link-button { text-decoration: none; }
 a.project-link-button { display: inline-flex; align-items: center; gap: var(--space-4); }
+
+/* R16-B: 프로젝트 템플릿 출처·자료 분류 */
+/* 배지 자체는 inline-flex라 text-overflow가 듣지 않는다 — 말줄임은 글자를 담은 label에 걸어야 한다. */
+.project-origin-badge { max-width: 220px; overflow: hidden; white-space: nowrap; }
+.project-origin-badge .unified-status-badge__label { overflow: hidden; min-width: 0; text-overflow: ellipsis; }
+.project-doc-categories { color: var(--muted); }
