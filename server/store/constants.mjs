@@ -52,6 +52,9 @@ export const WORKSPACE_TABLES = Object.freeze({
   'push-subscriptions': 'push_subscriptions',
   // R15-E: AI 대화 히스토리 (계정 소유·테넌트 격리)
   'ai-conversations': 'ai_conversations',
+  // R16-B: 프로젝트 템플릿. 전용 라우트(/api/project-templates)로만 읽고 쓴다.
+  // 본문에는 역할 문자열과 상대 마감일만 — 실명·계정 id는 저장하지 않는다.
+  'project-templates': 'project_templates',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

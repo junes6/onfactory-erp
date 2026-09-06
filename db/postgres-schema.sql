@@ -481,6 +481,24 @@ CREATE TABLE IF NOT EXISTS project_posts (
   created_by TEXT, PRIMARY KEY (org_id, id)
 );
 
+-- R16-B: 프로젝트 템플릿. 다른 워크스페이스 키와 같은 JSONB 행 모양이다.
+-- 본문에는 역할 이름과 상대 마감일만 들어간다 — 실명·계정 id는 저장하지 않는다.
+CREATE TABLE IF NOT EXISTS project_templates (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
+-- R15-E: AI 대화 히스토리. supabase/migrations/20260905000000_ai_conversations.sql 에만 있고
+-- 이 베이스라인에 빠져 있던 것을 보충한다 — applySchema는 이 파일 하나만 읽는다.
+CREATE TABLE IF NOT EXISTS ai_conversations (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS company_assets (
   id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
   payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
@@ -549,6 +567,13 @@ BEGIN
     $p$, t, t);
   END LOOP;
 END $$;
+
+-- R16-B: 프로젝트 템플릿은 게스트가 읽지 않는다. 게스트 정책을 만들지 않고 서비스 컨텍스트만 통과시킨다 —
+-- 정책이 하나도 없는 채로 RLS만 켜면 앱이 못 읽고, 게스트 정책을 만들면 외부인에게 내부 프로세스명이 열린다.
+ALTER TABLE project_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_templates FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS project_templates_service ON project_templates;
+CREATE POLICY project_templates_service ON project_templates USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
 
 DROP POLICY IF EXISTS project_spaces_guest_read ON project_spaces;
 CREATE POLICY project_spaces_guest_read ON project_spaces FOR SELECT USING (
@@ -676,6 +701,9 @@ CREATE INDEX IF NOT EXISTS idx_messenger_messages_active ON messenger_messages (
 CREATE INDEX IF NOT EXISTS idx_documents_active ON items (org_id, position) WHERE deleted_at IS NULL AND item_type = 'company-document';
 CREATE INDEX IF NOT EXISTS idx_attendance_records_active ON attendance_records (org_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_personal_todos_active ON personal_todos (org_id, (payload->>'ownerId'), position) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_project_templates_active ON project_templates (org_id, (payload ->> 'origin'), position) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS ai_conversations_owner_idx ON ai_conversations (org_id, (payload ->> 'ownerId'), (payload ->> 'updatedAt') DESC);
+CREATE INDEX IF NOT EXISTS ai_conversations_trash_idx ON ai_conversations (org_id, (payload ->> 'deletedAt'));
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON auth_sessions (expires_at) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_outbox_pending ON events (status, available_at, created_at);
 

@@ -28,6 +28,8 @@ const errors = []
 const productFiles = [
   ...walk(path.join(root, 'src'), ['.ts', '.tsx']),
   path.join(root, 'server', 'app.mjs'),
+  // 기본 템플릿은 코드 상수다 — 데모 실명·계정 id가 시드로 굳어지지 않도록 같은 검사를 받는다.
+  path.join(root, 'server', 'project-templates.mjs'),
 ].filter((file) => !file.endsWith('.test.mjs'))
 
 const forbiddenDemoPatterns = [
@@ -95,6 +97,8 @@ const workspaceTables = [
   'document_storage_settings', 'compliance_records', 'sales_shipments', 'performance_settings', 'performance_report_snapshots',
   'it_projects', 'it_deliverables', 'it_contracts', 'proposals', 'automation_policies', 'it_clients', 'it_support_programs', 'project_spaces', 'project_posts', 'company_assets', 'tax_events', 'ip_rights',
   'attendance_records', 'tax_deliveries', 'lenses', 'opportunities', 'opportunity_settings', 'digests',
+  'project_templates', 'ai_conversations',
+  'personal_todos', 'notifications', 'notification_settings', 'push_subscriptions',
 ]
 for (const table of workspaceTables) {
   const definition = schema.match(new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+${table}\\s*\\(([\\s\\S]*?)\\);`, 'i'))?.[1] ?? ''
@@ -161,5 +165,6 @@ if (errors.length) {
   console.error(errors.join('\n'))
   process.exitCode = 1
 } else {
-  console.log('[architecture] 데모 분리·필수 코어 테이블·20개 행 테이블 공통 컬럼 계약을 통과했습니다.')
+  // 건수는 목록에서 세어 적는다 — 손으로 적어 두면 목록이 늘 때마다 문구가 먼저 낡는다.
+  console.log(`[architecture] 데모 분리·필수 코어 테이블·${workspaceTables.length}개 행 테이블 공통 컬럼 계약을 통과했습니다.`)
 }

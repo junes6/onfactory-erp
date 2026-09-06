@@ -84,6 +84,35 @@ const tombstoneMessage = (message, actorId, at) => ({
 
 const stripUndefined = (value) => Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined))
 
+/**
+ * 그룹방 한 개의 리터럴. 라우트 핸들러와 프로젝트 템플릿 실체화가 같은 모양을 만들게 하려고 떼어 뒀다.
+ *
+ * 왜 검증을 여기 넣지 않는가: "누가 만들 수 있고 누구를 부를 수 있는가"는 부르는 쪽의 맥락이다
+ * (핸들러는 프로젝트 역할·게스트 범위를, 템플릿 실체화는 방금 만든 프로젝트의 멤버 목록을 본다).
+ * 여기서는 이미 정해진 참여자로 방 한 개를 조립하기만 한다.
+ * id를 넘기면 그대로 쓴다 — 실체화는 같은 요청을 두 번 받아도 같은 id가 나와야 한다.
+ */
+export function buildGroupConversation({ name, participantIds, creatorId, projectId, icon, createdAt = nowIso(), id = newId('grp') }) {
+  const roster = Array.from(new Set([creatorId, ...(participantIds ?? [])].filter(Boolean)))
+  return {
+    id,
+    type: 'team',
+    kind: 'group',
+    name,
+    subtitle: `${roster.length}명`,
+    unread: 0,
+    lastMessage: '',
+    lastTime: seoulTime(createdAt),
+    messages: [],
+    participantIds: roster,
+    ownerId: creatorId,
+    createdBy: creatorId,
+    createdAt,
+    ...(projectId ? { projectId } : {}),
+    ...(text(icon, MAX_ICON) ? { icon: text(icon, MAX_ICON) } : {}),
+  }
+}
+
 export function registerMessengerRoomRoutes({
   app,
   requireAuth,
@@ -188,25 +217,10 @@ export function registerMessengerRoomRoutes({
       response.status(400).json({ error: GUEST_OUTSIDE_PROJECT })
       return
     }
-    const participantIds = Array.from(new Set([request.auth.id, ...invited]))
-    const createdAt = nowIso()
-    const conversation = {
-      id: newId('grp'),
-      type: 'team',
-      kind: 'group',
-      name,
-      subtitle: `${participantIds.length}명`,
-      unread: 0,
-      lastMessage: '',
-      lastTime: seoulTime(createdAt),
-      messages: [],
-      participantIds,
-      ownerId: request.auth.id,
-      createdBy: request.auth.id,
-      createdAt,
-      ...(projectId ? { projectId } : {}),
-      ...(text(request.body?.icon, MAX_ICON) ? { icon: text(request.body.icon, MAX_ICON) } : {}),
-    }
+    const conversation = buildGroupConversation({
+      name, participantIds: invited, creatorId: request.auth.id, projectId, icon: request.body?.icon, createdAt: nowIso(),
+    })
+    const participantIds = conversation.participantIds
     const conversations = conversationsOf(request.auth.tenantId)
     try {
       await commitConversationData(request.auth.tenantId, [...conversations, conversation], request.auth.id)

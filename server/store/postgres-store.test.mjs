@@ -78,6 +78,15 @@ function fixture() {
       data: [{ id: 'DOC-1', name: '점검표.pdf', mime: 'application/pdf', size: 123, hash: 'sha256-document', storageKey: 'TENANT-HSB/DOC-1' }],
       updatedAt: '2026-08-20T06:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
     },
+    // R16-B: 프로젝트 템플릿. 중첩 배열(tasks > children)까지 payload JSONB로 그대로 왕복해야 한다.
+    'project-templates': {
+      data: [{
+        id: 'PT-1', name: '표준 진행', description: '', industryType: 'food_manufacturing', origin: 'custom', version: 1,
+        roles: ['PM'], tasks: [{ key: 'a', title: '요구 정리', role: 'PM', dueOffsetDays: 7, priority: '높음', category: '제품', children: [{ key: 'a1', title: '인터뷰', role: 'PM', dueOffsetDays: 3, priority: '높음', category: '제품' }] }],
+        channels: [], documentCategories: ['제품·표시사항'], rules: [], history: [], createdAt: '2026-08-20T06:00:00.000Z', updatedAt: '2026-08-20T06:00:00.000Z',
+      }],
+      updatedAt: '2026-08-20T06:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
+    },
   }
   snapshot.tenants['TENANT-POHANG'] = {
     'work-items': { data: [{ id: 'WORK-1', title: '별도 조합 업무', due: '2026-08-22T09:00:00.000Z', status: '업무요청' }], updatedAt: '2026-08-20T01:00:00.000Z' },
@@ -133,6 +142,10 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.equal(workRows.rows.find((row) => row.id === 'WORK-1').raw_due, '오늘 18:00')
     assert.equal(workRows.rows.find((row) => row.id === 'WORK-2').payload.parentId, 'WORK-1', '하위 업무의 parentId는 payload로 왕복한다')
     assert.equal(workRows.rows.find((row) => row.org_id === 'TENANT-POHANG').due_at.toISOString(), '2026-08-22T09:00:00.000Z')
+
+    const templateRows = await pool.query('SELECT id, org_id, payload FROM project_templates')
+    assert.equal(templateRows.rows.length, 1)
+    assert.equal(templateRows.rows[0].payload.tasks[0].children[0].key, 'a1', '템플릿의 하위 업무는 payload 안에 그대로 남는다')
 
     const calendar = await pool.query('SELECT payload, starts_at, ends_at FROM calendar_events')
     assert.equal(calendar.rows[0].payload.date, undefined)
@@ -194,6 +207,7 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.equal(facade.tenants['TENANT-HSB']['messenger-conversations'].data[0].messages[0].time, '14:42')
     assert.equal(facade.tenants['TENANT-HSB']['work-items'].data[0].due, '오늘 18:00')
     assert.equal(facade.tenants['TENANT-HSB']['work-items'].data.find((row) => row.id === 'WORK-2').parentId, 'WORK-1')
+    assert.equal(facade.tenants['TENANT-HSB']['project-templates'].data[0].tasks[0].children[0].title, '인터뷰')
     assert.equal(facade.tenants['TENANT-HSB']['company-documents'].data[0].name, '점검표.pdf')
     assert.equal(facade.tenants['TENANT-HSB']['performance-settings'].data.employeeVisible, false)
     assert.equal(facade.tenants['TENANT-HSB']['performance-reports'].data[0].id, 'PERFS-1')

@@ -42,6 +42,7 @@ import {
   WORK_RULE_MONTHLY_MODES as SCHEDULE_MONTHLY_MODES,
 } from './work-rule-schedule.mjs'
 import { workItemTreeViolation, openSubtaskCount, parentRefsFor, prependWithinCap, registerWorkItemTreeRoutes } from './work-item-tree.mjs'
+import { PROJECT_TEMPLATES_KEY, registerProjectTemplateRoutes } from './project-templates.mjs'
 import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
 import { registerPersonalCoreRoutes } from './personal-core-routes.mjs'
 import { backupSettings, BACKUP_STATUS_KEY, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
@@ -155,7 +156,7 @@ const WORKSPACE_STORE_KEYS = new Set([
   'it-clients', 'it-support-programs', 'project-spaces', 'project-posts',
   'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses', 'opportunities', 'opportunity-settings',
   'attendance-records', 'personal-todos', 'digests',
-  'notifications', 'notification-settings', 'push-subscriptions',
+  'notifications', 'notification-settings', 'push-subscriptions', PROJECT_TEMPLATES_KEY,
 ])
 // 알림·알림설정·푸시구독은 "내 것만" 나가야 하므로 전용 라우트로만 연다.
 const NOTIFICATION_KEYS = new Set(['notifications', 'notification-settings', 'push-subscriptions'])
@@ -6067,7 +6068,8 @@ export function createApp(options = {}) {
     const lastPost = projectPosts.reduce((latest, post) => !latest || String(post.updatedAt ?? post.createdAt).localeCompare(String(latest.updatedAt ?? latest.createdAt)) > 0 ? post : latest, null)
     const view = { ...project, role: projectRoleOf(project, auth), postCount: projectPosts.length, fileCount: projectPosts.reduce((sum, post) => sum + (post.attachments?.length ?? 0), 0), lastActivityAt: lastPost ? (lastPost.updatedAt ?? lastPost.createdAt) : project.updatedAt }
     // 외부인에게 계약 금액·거래처명은 보이지 않는다. 게스트 자신이 그 거래처일 수 있어도 금액은 회사 내부 정보다.
-    if (auth.role === GUEST_ROLE) { delete view.amount; delete view.client }
+    // 템플릿 출처(origin)도 지운다 — 템플릿 이름은 회사의 내부 프로세스 이름이다.
+    if (auth.role === GUEST_ROLE) { delete view.amount; delete view.client; delete view.origin }
     return view
   }
   const projectGuards = [requireAuth, requireMatchingWorkspaceIdentity]
@@ -6967,6 +6969,10 @@ export function createApp(options = {}) {
       response.status(403).json({ error: { code: 'PROJECT_ROUTE_REQUIRED', message: '프로젝트 공간은 /api/projects 로만 조회합니다.' } })
       return
     }
+    if (key === PROJECT_TEMPLATES_KEY) {
+      response.status(403).json({ error: { code: 'PROJECT_TEMPLATE_ROUTE_REQUIRED', message: '프로젝트 템플릿은 /api/project-templates 로만 조회·변경합니다.' } })
+      return
+    }
     if (!request.auth.tenantId) {
       response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } })
       return
@@ -7077,6 +7083,10 @@ export function createApp(options = {}) {
     }
     if (key === 'personal-todos') {
       response.status(403).json({ error: { code: 'PERSONAL_TODO_ROUTE_REQUIRED', message: '개인 할 일은 내 할 일 전용 기능에서만 변경할 수 있습니다.' } })
+      return
+    }
+    if (key === PROJECT_TEMPLATES_KEY) {
+      response.status(403).json({ error: { code: 'PROJECT_TEMPLATE_ROUTE_REQUIRED', message: '프로젝트 템플릿은 /api/project-templates 로만 조회·변경합니다.' } })
       return
     }
     if (key === 'digests') {
@@ -7652,6 +7662,16 @@ export function createApp(options = {}) {
   registerWorkItemTreeRoutes({
     app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, accounts, commitWorkspaceStore, events,
     guestGrantOf, hasWorkItemShape, isMemberWorkItem, workspaceRecordVersion,
+  })
+
+  registerProjectTemplateRoutes({
+    app, requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, workspaceStore, accounts, commitWorkspaceStore, scheduleAuditCommit,
+    tenantIndustryType, operatorAwareAccounts, guestGrantOf, projectSpacesOf, projectMemberIds, publicProject, normalizeProjectMembers, applyProjectInfo, writeProjectData,
+    normalizeAdminWorkItems, normalizeAdminWorkRules, firstRuleDateOnOrAfter, koreaDate, seoulLocalDateTimeToUtcIso,
+    notifyNewAssignments, scheduleSentinel, events, workspaceRecordVersion,
+    priorities: WORK_ITEM_PRIORITIES, frequencies: WORK_RULE_FREQUENCIES, monthlyModes: WORK_RULE_MONTHLY_MODES, holidayPolicies: HOLIDAY_POLICIES,
+    projectStages: PROJECT_STAGES,
+    ...(typeof options.projectTemplateClock === 'function' ? { clock: options.projectTemplateClock } : {}),
   })
 
   registerPersonalCoreRoutes({
