@@ -49,7 +49,8 @@ test('only the immediate types are pushed by default; the rest are opt-in', () =
   assert.deepEqual(settings.push.sort(), ['approval-requested', 'changes-requested', 'mention', 'notice-posted', 'notice-reminder', 'quiet-digest', 'task-assigned'].sort())
   assert.deepEqual(settings.muted, [])
   // R16-J의 스레드 답글도 opt-in이다 — 스레드는 오래 이어져 울릴 일이 많고, 지목은 mention이 따로 한다.
-  for (const type of ['proposal-pending', 'sentinel-warning', 'opportunity-new', 'notice-unconfirmed-summary', 'thread-reply']) {
+  // R16-L의 외부 연동 중지도 opt-in이다 — 관리자가 화면에서 보고 고칠 일이지 사람을 깨울 일이 아니다.
+  for (const type of ['proposal-pending', 'sentinel-warning', 'opportunity-new', 'notice-unconfirmed-summary', 'thread-reply', 'webhook-disabled']) {
     assert.equal(shouldPush(draft({ type, recipientId: 'U1' }), {}), false, `${type}은 사용자가 직접 켜야 한다`)
   }
   assert.equal(shouldPush(draft({ type: 'mention' }), {}), true)

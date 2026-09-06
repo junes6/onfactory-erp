@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   AlertTriangle, CalendarDays, Check, CheckCircle2, ChevronRight, Clock3,
   Copy, FileCheck2, History, KeyRound, Mail, Pencil, Plus, RefreshCw, Send, Settings2,
-  ShieldCheck, Trash2, UserCheck, UserPlus, Users, X, XCircle,
+  ShieldCheck, Trash2, UserCheck, UserPlus, Users, Webhook, X, XCircle,
 } from 'lucide-react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { PerformanceReports } from './PerformanceReports'
@@ -13,6 +13,7 @@ import './PeopleOperations.css'
 import { Button, IconButton } from './ui/Button'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import { OversightPanel } from './OversightPanel'
+import { WebhookSettings } from './WebhookSettings'
 import { BRAND } from '../brand'
 
 
@@ -28,7 +29,9 @@ type PeopleOperationsProps = {
   /** 업무 채널 감독 열람 권한. 관리자가 아니어도 지정받으면 켜진다. */
   canOversee?: boolean
 }
-type PeopleTab = 'members' | 'attendance' | 'leave' | 'leave-admin' | 'accounts' | 'performance' | 'oversight'
+// R16-L: 'integrations'(외부 연동)는 관리자 전용이다. 이 화면이 이미 "누가·무엇이 우리 회사
+// 데이터에 드나드는가"를 다루는 자리라(계정·권한·외부 게스트·대화 열람) 새 최상위 메뉴를 만들지 않는다.
+type PeopleTab = 'members' | 'attendance' | 'leave' | 'leave-admin' | 'accounts' | 'performance' | 'oversight' | 'integrations'
 type LeaveStatus = '결재대기' | '승인' | '반려'
 type AccountStatus = '승인대기' | '활성' | '반려'
 
@@ -342,6 +345,31 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       .catch(() => undefined)
     return () => { active = false }
   }, [canManage])
+
+  /**
+   * 스스로 멈춘 외부 연동의 수. 탭 이름표 옆의 상시 신호다.
+   *
+   * 'webhook-disabled' 알림은 한 번 지나가면 끝이고, 그 한 번을 놓친 관리자는 연동이 멈춘 것을
+   * 탭을 열어 보기 전에는 알 길이 없다. WebhookSettings에서 끌어올리지 않는 이유: 그 컴포넌트는
+   * 이 탭이 열려 있을 때만 붙어 있어, 열기 전에는 셀 사람이 없다.
+   */
+  const [stoppedWebhooks, setStoppedWebhooks] = useState(0)
+  // 탭을 나올 때 다시 센다. 관리자가 방금 고쳐 놓은 연동의 배지가 그대로 남아 있으면,
+  // 그 숫자는 신호가 아니라 소음이 된다.
+  const integrationsOpen = tab === 'integrations'
+  useEffect(() => {
+    if (!canManage) { setStoppedWebhooks(0); return }
+    let active = true
+    fetch('/api/webhooks', { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('webhook-list')
+        return response.json() as Promise<{ endpoints?: { disabledAt: string | null }[] }>
+      })
+      // 못 읽었으면 0이다 — 읽지 못한 것을 '멈춘 것이 없다'로 말하지 않으려면 배지를 안 그리는 쪽이 맞다.
+      .then(({ endpoints }) => { if (active) setStoppedWebhooks((endpoints ?? []).filter((item) => item?.disabledAt).length) })
+      .catch(() => { if (active) setStoppedWebhooks(0) })
+    return () => { active = false }
+  }, [canManage, workspaceScope, integrationsOpen])
 
   useEffect(() => {
     let active = true
@@ -865,6 +893,7 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       {canManage && <button type="button" role="tab" aria-selected={tab === 'leave-admin'} onClick={() => setTab('leave-admin')}><Settings2 size={18} /> 휴가 정책 · 원장</button>}
       {canManage && <button type="button" role="tab" aria-selected={tab === 'accounts'} onClick={() => setTab('accounts')}><KeyRound size={18} /> 계정 · 권한 {pendingAccounts > 0 && <em>{pendingAccounts}</em>}</button>}
       {canOversee && <button type="button" role="tab" aria-selected={tab === 'oversight'} onClick={() => setTab('oversight')}><ShieldCheck size={18} /> 대화 열람</button>}
+      {canManage && <button type="button" role="tab" aria-selected={tab === 'integrations'} onClick={() => setTab('integrations')}><Webhook size={18} /> 외부 연동 {stoppedWebhooks > 0 && <em>{stoppedWebhooks}</em>}</button>}
       <button type="button" role="tab" aria-selected={tab === 'performance'} onClick={() => setTab('performance')}><BarChart3 size={18} /> {canManage ? '직원 성과' : '내 성과'}</button>
     </div>
 
@@ -925,6 +954,8 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
     </section>}
 
     {canOversee && tab === 'oversight' && <section className="people-content-card" role="tabpanel"><OversightPanel canManageGrants={canManage} workspaceScope={workspaceScope} onToast={onToast} /></section>}
+
+    {canManage && tab === 'integrations' && <section className="people-content-card" role="tabpanel"><WebhookSettings workspaceScope={workspaceScope} onToast={onToast} /></section>}
     {tab === 'performance' && <section className="people-content-card people-performance" role="tabpanel"><PerformanceReports workspaceScope={workspaceScope ?? ''} canManage={canManage} onToast={onToast} onOpenTask={(taskId) => onOpenTask?.(taskId)} /></section>}
     {canManage && tab === 'accounts' && <section className="people-content-card" role="tabpanel">
       <header><div><h2>신규 계정 · 접근 권한</h2><p>초대 → 관리자 승인 → 1회용 초기 비밀번호 → 본인 비밀번호 설정 순서로 활성화됩니다.</p></div><Button tone="primary" type="button" onClick={(event) => openModal('invite', event.currentTarget)}><Send size={17} /> 초대 보내기</Button></header>

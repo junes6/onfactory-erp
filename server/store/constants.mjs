@@ -58,6 +58,11 @@ export const WORKSPACE_TABLES = Object.freeze({
   // R16-D: 공지 게시글 + 필독 확인. 채널 안에 살지만 메시지가 아니다 —
   // 장문·확인 명단·리마인더 이력을 방당 5,000건 상한과 4,000자 상한 안에 우겨넣지 않는다.
   'notices': 'notices',
+  // R16-L: 외부 연동. 엔드포인트에는 tokenHash(sha256)와 봉인된 서명키(AES-256-GCM)만 들어간다.
+  // platform 컬렉션이 아니라 테넌트 키에 두는 이유: platform은 PG에서 다섯 개만 동기화되고,
+  // stripSensitivePayload가 token/secret이 든 키를 지워 재기동 후 조용히 사라진다.
+  'webhook-endpoints': 'webhook_endpoints',
+  'webhook-deliveries': 'webhook_deliveries',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

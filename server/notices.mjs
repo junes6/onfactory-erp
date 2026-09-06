@@ -635,7 +635,20 @@ export function registerNoticeRoutes({
     publishChange(tenantId, notice)
     notify(tenantId, targetIds.filter((id) => id !== notice.authorId).map((id) => noticePostedDraft(notice, id)))
     // L절 이후에만 존재한다. 없으면 아무 일도 하지 않는다.
-    emitWebhookEvent?.(tenantId, 'notice.posted', { aggregateId: notice.id, data: { id: notice.id, title: notice.title, scope: notice.scope, mustRead: notice.mustRead } })
+    // fields allowlist가 약속한 여섯 칸을 전부 채운다 — 빠뜨린 칸은 null로 나가므로,
+    // '무엇이 바깥으로 나가는가'를 말해야 할 목록이 없는 값을 있다고 말하게 된다.
+    emitWebhookEvent?.(tenantId, 'notice.posted', {
+      aggregateId: notice.id,
+      actor: notice.authorId,
+      data: {
+        id: notice.id,
+        scope: notice.scope,
+        title: notice.title,
+        mustRead: notice.mustRead,
+        targetCount: notice.targetIds.length,
+        authorId: notice.authorId,
+      },
+    })
     response.status(201).json({ notice: publicNotice(notice, request.auth, depsFor(tenantId)) })
   })
 

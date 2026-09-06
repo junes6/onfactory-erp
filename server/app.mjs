@@ -45,6 +45,11 @@ import {
 import { workItemTreeViolation, openSubtaskCount, parentRefsFor, prependWithinCap, registerWorkItemTreeRoutes } from './work-item-tree.mjs'
 import { PROJECT_TEMPLATES_KEY, registerProjectTemplateRoutes } from './project-templates.mjs'
 import { NOTICES_KEY, registerNoticeRoutes } from './notices.mjs'
+// R16-L: 외부 연동. 봉인 헬퍼·수신 훅과 관리 라우트·발신 적재를 세 파일로 나눠 둔다.
+import { createSecretBox } from './secret-box.mjs'
+import { HOOK_BODY_LIMIT, WEBHOOK_DELIVERIES_KEY, payloadTooLargeMessage, registerWebhookRoutes } from './webhook-routes.mjs'
+import { createWebhookDispatch } from './webhook-dispatch.mjs'
+import { createNotificationDelivery } from './notification-delivery.mjs'
 import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
 import { registerPersonalCoreRoutes } from './personal-core-routes.mjs'
 import { backupSettings, BACKUP_STATUS_KEY, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
@@ -1943,6 +1948,9 @@ export function createApp(options = {}) {
 
   const app = express()
   app.disable('x-powered-by')
+  // R16-L: 무인증 수신 웹훅은 64KB까지만 받는다. 전역 파서(4mb)가 먼저 돌면 이 상한이 의미가 없으므로
+  // 더 좁은 파서를 앞에 둔다 — body-parser는 req._body가 이미 서면 건너뛴다.
+  app.use('/api/hooks', express.json({ limit: HOOK_BODY_LIMIT }))
   // Product thumbnails are compressed and individually capped at 180 KB; the
   // workspace request still needs room for several products in one catalog.
   app.use(express.json({ limit: '4mb' }))
@@ -2902,10 +2910,22 @@ export function createApp(options = {}) {
   const runSentinel = (tenantId, now = new Date()) => {
     const tenantStore = workspaceStore.tenants[tenantId]
     if (!tenantStore) return { created: 0, expired: 0 }
-    const result = evaluateSentinel({ tenantStore, existing: proposalsOf(tenantId), industryType: tenantIndustryType(tenantId), accounts, tenantId, now })
+    const existing = proposalsOf(tenantId)
+    const result = evaluateSentinel({ tenantStore, existing, industryType: tenantIndustryType(tenantId), accounts, tenantId, now })
     if (result.created || result.expired) {
+      const known = new Set(existing.map((item) => item?.id))
       writeProposals(tenantId, result.proposals, 'sentinel')
+      // R16-L: 기존 알림 동작은 손대지 않는다 — 발신만 더한다.
+      // (센티널 경고 알림은 지금도 발생 경로가 없다. 그 결손을 이 절에서 고치지 않는다.)
+      for (const proposal of result.proposals) {
+        if (!proposal?.id || known.has(proposal.id)) continue
+        queueWebhookDeliveries(tenantId, 'sentinel.alert', {
+          aggregateId: proposal.id, actor: null, occurredAt: proposal.createdAt,
+          data: { id: proposal.id, kind: proposal.kind, summary: proposal.summary, severity: proposal.payload?.priority ?? '보통' },
+        })
+      }
       scheduleAuditCommit()
+      webhookDispatch.kick(tenantId)
     }
     return { created: result.created, expired: result.expired }
   }
@@ -3094,9 +3114,23 @@ export function createApp(options = {}) {
     }
     const nextProposals = proposals.map((item, itemIndex) => itemIndex === index ? decided : item)
     writeProposals(tenantId, nextProposals, request.auth.id)
+    // R16-L: 결재 결과와 배송 행은 한 커밋이다(아래 복원 블록에 함께 되돌리는 줄이 있다).
+    const previousDeliveriesRecord = tenantStore[WEBHOOK_DELIVERIES_KEY]
+    queueWebhookDeliveries(tenantId, 'approval.completed', {
+      aggregateId: decided.id, actor: request.auth.id, occurredAt: now,
+      data: { id: decided.id, kind: decided.kind, decision: decided.status, decidedById: request.auth.id, decidedAt: now },
+    })
+    if (resultRef?.type === 'work-item') {
+      const created = (tenantStore['work-items']?.data ?? []).find((item) => item?.id === resultRef.id)
+      queueWebhookDeliveries(tenantId, 'work.created', {
+        aggregateId: resultRef.id, actor: request.auth.id, occurredAt: now,
+        data: { id: resultRef.id, title: created?.title ?? '', status: created?.status ?? '', ownerId: created?.ownerId ?? '', due: created?.due ?? '' },
+      })
+    }
     try {
       await commitWorkspaceStore()
     } catch (error) {
+      if (previousDeliveriesRecord) tenantStore[WEBHOOK_DELIVERIES_KEY] = previousDeliveriesRecord; else delete tenantStore[WEBHOOK_DELIVERIES_KEY]
       if (previousProposalsRecord) tenantStore[PROPOSALS_KEY] = previousProposalsRecord; else delete tenantStore[PROPOSALS_KEY]
       if (previousPoliciesRecord) tenantStore[AUTOMATION_POLICIES_KEY] = previousPoliciesRecord; else delete tenantStore[AUTOMATION_POLICIES_KEY]
       if (effectKey) { if (previousEffectRecord) tenantStore[effectKey] = previousEffectRecord; else delete tenantStore[effectKey] }
@@ -3105,6 +3139,7 @@ export function createApp(options = {}) {
       return
     }
     scheduleSentinel(tenantId)
+    webhookDispatch.kick(tenantId)
     const principleQueued = evaluatePrincipleCandidates(tenantId, request.auth, new Date(now))
     response.json({ proposal: decided, resultRef, principleQueued, stats: approvalStatistics(nextProposals), pendingCount: proposalsOf(tenantId).filter((item) => item.status === 'pending').length })
   })
@@ -3437,6 +3472,10 @@ export function createApp(options = {}) {
     const rows = workspaceStore.tenants[tenantId]?.[PUSH_SUBSCRIPTIONS_KEY]?.data
     return Array.isArray(rows) ? rows : []
   }
+  const notificationsOf = (tenantId) => {
+    const rows = workspaceStore.tenants[tenantId]?.[NOTIFICATIONS_KEY]?.data
+    return Array.isArray(rows) ? rows : []
+  }
 
   /** 만료된 구독은 조용히 지운다. 사라진 기기에 계속 보내면 큐가 막힌다. */
   const dropSubscription = (tenantId, endpoint) => {
@@ -3495,6 +3534,18 @@ export function createApp(options = {}) {
   }
 
   /**
+   * R16-L 외부 연동의 두 조각. 봉인 키가 없으면 secretBox.available이 false이고,
+   * 그 사실이 라우트의 503과 화면의 안내문 한 줄로 그대로 이어진다(평문 폴백은 없다).
+   * 여기 warn을 삼키는 이유: 키 없는 환경(테스트·워커)에서 createApp마다 같은 경고가 반복되면
+   * 진짜 경고가 묻힌다. 서버 부팅의 한 줄은 index.mjs가 자기 콘솔로 낸다.
+   */
+  const secretBox = options.secretBox ?? createSecretBox({ env: options.env ?? process.env, logger: { warn: () => {} } })
+  const notificationDelivery = options.notificationDelivery
+    ?? createNotificationDelivery({ env: options.env ?? process.env, logger: { warn: () => {}, log: () => {} } })
+  /** notify가 부르는 채널 적재. 어댑터가 notify를 알아야 해서 배선이 아래에서 이어진다. */
+  let queueChannelDeliveries = null
+
+  /**
    * 알림 발행. 자기 행동은 자기에게 알리지 않는다(actorId).
    * 저장 실패해도 원래 작업을 되돌리지 않는다 — 알림을 못 보낸 것이 업무를 막을 이유는 없다.
    */
@@ -3514,12 +3565,53 @@ export function createApp(options = {}) {
     tenantStore[NOTIFICATIONS_KEY] = { data: rows, updatedAt: now.toISOString(), updatedBy: 'system:notify' }
     scheduleAuditCommit()
     queuePush(tenantId, accepted)
+    // 카카오 알림톡·메일. 채널이 없으면 아무 일도 하지 않는다.
+    // 배선은 아래에서 이어진다 — 어댑터는 notify를 알아야 하고 notify는 어댑터를 알아야 해서,
+    // 둘 중 하나는 나중에 붙을 수밖에 없다. 붙기 전에 온 알림은 채널 행 없이 지나간다(조용한 실패가 아니라 '아직 없음').
+    queueChannelDeliveries?.(tenantId, accepted)
     for (const item of accepted) {
       events.publish(tenantId, 'notification', { id: item.id, type: item.type, title: item.title, page: item.page, focusId: item.focusId }, { accountId: item.recipientId })
     }
     return accepted
   }
   app.locals.notify = notify
+
+  // 발신 적재·드레인·서명. 적재는 커밋하지 않는다 — 호출부가 자기 커밋 바로 앞에 한 줄을 넣는다.
+  const webhookDispatch = createWebhookDispatch({
+    workspaceStore, accounts, commitWorkspaceStore, notify,
+    notificationSettingsRecord, notificationsOf, secretBox, notificationDelivery,
+    ...(typeof options.webhookFetch === 'function' ? { fetchImpl: options.webhookFetch } : {}),
+    ...(typeof options.webhookLookup === 'function' ? { lookupImpl: options.webhookLookup } : {}),
+    ...(typeof options.webhookClock === 'function' ? { clock: options.webhookClock } : {}),
+  })
+  queueChannelDeliveries = webhookDispatch.queueChannelDeliveries
+  const queueWebhookDeliveries = webhookDispatch.queueWebhookDeliveries
+  const emitWebhookEvent = webhookDispatch.emitWebhookEvent
+  app.locals.webhookDispatch = webhookDispatch
+  app.locals.emitWebhookEvent = emitWebhookEvent
+
+  /**
+   * 이전 목록에 없던 업무를 'work.created'로 적재한다. **커밋하지 않는다** —
+   * 부르는 쪽의 커밋 한 번에 상태 변경과 함께 실리고, 그 커밋이 실패하면 함께 되돌아간다.
+   *
+   * 업무가 생기는 자리는 여섯이다: 승인 큐의 결정, 대화 결론의 승격, 수신 웹훅, 업무 화면의 저장,
+   * 반복 업무 규칙, 프로젝트 템플릿 실체화. 그중 하나라도 빠뜨리면 '업무 생성'을 켠 관리자가
+   * 정작 그 갈래에서만 아무것도 받지 못한다 — 화면의 체크박스가 지키지 못할 약속이 된다.
+   * (상태 변경만 하는 전이 라우트는 여기 없다. 그쪽은 work.updated·work.approved의 몫이다.)
+   *
+   * 새 것을 고르는 비교는 notifyNewAssignments가 쓰는 그 비교다. 같은 뜻의 판정을 두 벌로 두면
+   * 한쪽만 손봤을 때 알림은 갔는데 웹훅은 안 나가는(또는 그 반대) 자리가 생긴다.
+   */
+  const queueCreatedWorkDeliveries = (tenantId, previousData, nextData, actorId, at) => {
+    const known = new Set((Array.isArray(previousData) ? previousData : []).map((item) => item?.id))
+    for (const item of Array.isArray(nextData) ? nextData : []) {
+      if (!item?.id || known.has(item.id)) continue
+      queueWebhookDeliveries(tenantId, 'work.created', {
+        aggregateId: item.id, actor: actorId ?? null, occurredAt: at,
+        data: { id: item.id, title: item.title, status: item.status, ownerId: item.ownerId, due: item.due },
+      })
+    }
+  }
 
   /** 이전 목록에 없던 업무 중 나 아닌 사람에게 배정된 것. 한 번의 저장에서 같은 사람에게 여러 건이 가면 한 건으로 묶는다(상위 업무가 대표). */
   const notifyNewAssignments = (auth, previousData, nextData) => {
@@ -4670,14 +4762,20 @@ export function createApp(options = {}) {
     tenantStore['work-rules'] = { data: rules, updatedAt, updatedBy: actorId }
     tenantStore['work-items'] = { data: tasks, updatedAt, updatedBy: actorId }
     workspaceStore.tenants[tenantId] = tenantStore
+    // R16-L: 반복 규칙이 찍어 낸 업무도 사람이 만든 업무와 같은 사건이다. 한 커밋, 한 복원.
+    const previousDeliveries = tenantStore[WEBHOOK_DELIVERIES_KEY]
+    queueCreatedWorkDeliveries(tenantId, previousTasksRecord?.data, tasks, actorId, updatedAt)
     try {
       await commitWorkspaceStore()
     } catch (error) {
       tenantStore['work-rules'] = previousRulesRecord
       if (previousTasksRecord) tenantStore['work-items'] = previousTasksRecord
       else delete tenantStore['work-items']
+      if (previousDeliveries) tenantStore[WEBHOOK_DELIVERIES_KEY] = previousDeliveries
+      else delete tenantStore[WEBHOOK_DELIVERIES_KEY]
       throw error
     }
+    webhookDispatch.kick(tenantId)
     return { created, rules }
   }
 
@@ -5911,16 +6009,25 @@ export function createApp(options = {}) {
       tenantStore['leave-management'] = { data: nextLeaveManagement, updatedAt: record.updatedAt, updatedBy: request.auth.id }
     }
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
+    // R16-L: 결재 결과와 배송 행은 한 커밋이다(아래 복원 블록이 함께 되돌린다).
+    const previousDeliveriesRecord = tenantStore[WEBHOOK_DELIVERIES_KEY]
+    queueWebhookDeliveries(request.auth.tenantId, 'approval.completed', {
+      aggregateId: request.params.id, actor: request.auth.id, occurredAt: decidedAt,
+      data: { id: request.params.id, kind: 'leave', decision: status, decidedById: request.auth.id, decidedAt },
+    })
     try {
       await commitWorkspaceStore()
     } catch (error) {
       tenantStore['leave-requests'] = previousRecord
+      if (previousDeliveriesRecord) tenantStore[WEBHOOK_DELIVERIES_KEY] = previousDeliveriesRecord
+      else delete tenantStore[WEBHOOK_DELIVERIES_KEY]
       if (previousManagementRecord) tenantStore['leave-management'] = previousManagementRecord
       else delete tenantStore['leave-management']
       console.error('[leave-decision] Failed to persist decision', { message: error?.message })
       response.status(500).json({ error: { code: 'LEAVE_WRITE_FAILED', message: '휴가 결재 상태를 저장하지 못했습니다.' } })
       return
     }
+    webhookDispatch.kick(request.auth.tenantId)
     response.json({
       leave: nextData.find((leave) => leave?.id === request.params.id),
       leaveManagement: nextLeaveManagement,
@@ -6714,14 +6821,23 @@ export function createApp(options = {}) {
     const record = { data: nextData, updatedAt: now, updatedBy: request.auth.id }
     tenantStore['daily-journals'] = record
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
+    // R16-L: 결재 결과와 배송 행은 한 커밋이다(아래 복원 블록이 함께 되돌린다).
+    const previousDeliveriesRecord = tenantStore[WEBHOOK_DELIVERIES_KEY]
+    queueWebhookDeliveries(request.auth.tenantId, 'approval.completed', {
+      aggregateId: next.id, actor: request.auth.id, occurredAt: now,
+      data: { id: next.id, kind: 'journal', decision: status, decidedById: request.auth.id, decidedAt: now },
+    })
     try {
       await commitWorkspaceStore()
     } catch (error) {
       tenantStore['daily-journals'] = previousRecord
+      if (previousDeliveriesRecord) tenantStore[WEBHOOK_DELIVERIES_KEY] = previousDeliveriesRecord
+      else delete tenantStore[WEBHOOK_DELIVERIES_KEY]
       console.error('[journal-review] Failed to persist review', { message: error?.message })
       response.status(500).json({ error: { code: 'JOURNAL_REVIEW_WRITE_FAILED', message: '업무일지 결재 결과를 저장하지 못했습니다.' } })
       return
     }
+    webhookDispatch.kick(request.auth.tenantId)
     response.json({ journal: next, review, updatedAt: now, version: workspaceRecordVersion(record) })
   })
 
@@ -6838,15 +6954,31 @@ export function createApp(options = {}) {
     if (request.auth.role === GUEST_ROLE && action === 'submit') {
       appendPlatformAudit(workspaceStore.platform, { tenantId: request.auth.tenantId, event: '게스트 완료 보고', scope: `${next.title} (${next.id})`, actor: `게스트 ${request.auth.name}`, reference: request.auth.guestScope?.grantId ?? request.auth.id })
     }
+    // R16-L: 상태 변경과 배송 행은 한 커밋이다. 커밋이 실패하면 '일어나지 않은 사건'의 배송 행도 함께 되돌린다 —
+    // 그러지 않으면 외부 시스템에 없던 일이 사실로 나간다.
+    const previousDeliveries = tenantStore[WEBHOOK_DELIVERIES_KEY]
+    queueWebhookDeliveries(request.auth.tenantId, 'work.transitioned', {
+      aggregateId: next.id, actor: request.auth.id, occurredAt: now,
+      data: { id: next.id, title: next.title, beforeState: previous.status, afterState: next.status, ownerId: next.ownerId },
+    })
+    if (next.status === '결재완료') {
+      queueWebhookDeliveries(request.auth.tenantId, 'work.approved', {
+        aggregateId: next.id, actor: request.auth.id, occurredAt: now,
+        data: { id: next.id, title: next.title, ownerId: next.ownerId, requesterId: next.requesterId, approvedAt: now },
+      })
+    }
     try {
       await commitWorkspaceStore()
     } catch (error) {
       tenantStore['work-items'] = previousRecord
       workspaceStore.platform.auditEvents = previousAudits
+      if (previousDeliveries) tenantStore[WEBHOOK_DELIVERIES_KEY] = previousDeliveries
+      else delete tenantStore[WEBHOOK_DELIVERIES_KEY]
       console.error('[work-transition] Failed to persist transition', { message: error?.message })
       response.status(500).json({ error: { code: 'WORK_TRANSITION_WRITE_FAILED', message: '업무 상태를 저장하지 못했습니다.' } })
       return
     }
+    webhookDispatch.kick(request.auth.tenantId)
     scheduleSentinel(request.auth.tenantId)
     events.publish(request.auth.tenantId, 'work', { id: next.id, status: next.status, title: next.title })
     // 결재 흐름의 다음 사람에게 알린다. 승인·반려는 담당자에게, 완료 보고는 지시자에게.
@@ -7405,6 +7537,11 @@ export function createApp(options = {}) {
     }
     tenantStore[key] = record
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
+    // R16-L: 업무 화면에서 만든 업무도 발신 사건이다. 적재는 이 커밋에 함께 실리고 함께 되돌아간다.
+    const previousDeliveries = tenantStore[WEBHOOK_DELIVERIES_KEY]
+    if (key === 'work-items') {
+      queueCreatedWorkDeliveries(request.auth.tenantId, rowsBeforeWrite, record.data, request.auth.id, record.updatedAt)
+    }
     try {
       await commitWorkspaceStore()
     } catch (error) {
@@ -7413,10 +7550,15 @@ export function createApp(options = {}) {
       // requests in this process (or to the Sites worker CAS serializer).
       if (currentRecord) tenantStore[key] = currentRecord
       else delete tenantStore[key]
+      if (key === 'work-items') {
+        if (previousDeliveries) tenantStore[WEBHOOK_DELIVERIES_KEY] = previousDeliveries
+        else delete tenantStore[WEBHOOK_DELIVERIES_KEY]
+      }
       console.error('[workspace-store] Failed to persist data', { message: error?.message })
       response.status(500).json({ error: { code: 'STORE_WRITE_FAILED', message: '공유 데이터를 저장하지 못했습니다.' } })
       return
     }
+    if (key === 'work-items') webhookDispatch.kick(request.auth.tenantId)
     const version = workspaceRecordVersion(record)
     response.set('ETag', `"${version}"`)
     if (SENTINEL_TRIGGER_KEYS.has(key)) scheduleSentinel(request.auth.tenantId)
@@ -7510,12 +7652,21 @@ export function createApp(options = {}) {
     const previous = tenantStore['work-items']
     const current = Array.isArray(previous?.data) ? previous.data : []
     tenantStore['work-items'] = { data: prependWithinCap(current, normalized[0], 1_000), updatedAt: now, updatedBy: auth.id }
+    // R16-L: 업무 생성과 배송 행은 한 커밋이다(복원도 함께).
+    const previousDeliveries = tenantStore[WEBHOOK_DELIVERIES_KEY]
+    queueWebhookDeliveries(auth.tenantId, 'work.created', {
+      aggregateId: normalized[0].id, actor: auth.id, occurredAt: now,
+      data: { id: normalized[0].id, title: normalized[0].title, status: normalized[0].status, ownerId: normalized[0].ownerId, due: normalized[0].due },
+    })
     try {
       await commitWorkspaceStore()
     } catch (error) {
       if (previous) tenantStore['work-items'] = previous
+      if (previousDeliveries) tenantStore[WEBHOOK_DELIVERIES_KEY] = previousDeliveries
+      else delete tenantStore[WEBHOOK_DELIVERIES_KEY]
       throw new Error('업무를 저장하지 못했습니다.')
     }
+    webhookDispatch.kick(auth.tenantId)
     return { id: normalized[0].id, label: normalized[0].title, kind: 'work-item' }
   }
 
@@ -7801,7 +7952,7 @@ export function createApp(options = {}) {
     workspaceStore, accounts, commitWorkspaceStore,
     resolveMessengerAttachments, grantDocumentAccess, guestVisibleRows,
     projectSpacesOf, projectRoleOf, isConversationVisibleToMember, isDeveloperSupportConversation,
-    notify, events,
+    notify, events, emitWebhookEvent,
     ...(typeof options.noticeClock === 'function' ? { clock: options.noticeClock } : {}),
   })
   scheduler.register({
@@ -7816,6 +7967,31 @@ export function createApp(options = {}) {
     },
   })
   app.locals.runNoticeAckWatch = runNoticeAckWatch
+
+  registerWebhookRoutes({
+    app, requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity,
+    workspaceStore, accounts, commitWorkspaceStore, commitConversationData,
+    normalizeAdminWorkItems, prependWithinCap,
+    workItemPriorities: WORK_ITEM_PRIORITIES,
+    notify, events, appendPlatformAudit,
+    secretBox, dispatch: webhookDispatch, notificationDelivery,
+    publicUrlOf: () => String((options.env ?? process.env).APP_PUBLIC_URL ?? '').trim() || null,
+    ...(typeof options.webhookClock === 'function' ? { clock: options.webhookClock } : {}),
+  })
+  scheduler.register({
+    id: 'webhook-retry',
+    label: '외부 연동 재시도',
+    // 이 잡이 실제로 보장하는 것만 적는다. 사다리(1분·5분·…)는 이 잡의 주기가 아니라 '언제부터 다시
+    // 보낼 수 있는가'의 하한이고, 그 사이에 같은 고객사에서 다른 사건이 일어나 즉시 전달이 돌 때만 지켜진다.
+    description: '보내지 못한 발신 웹훅·알림 채널 전달을 매시 한 번 다시 보냅니다. 1분·5분·30분·2시간·6시간의 재시도 간격은 그 사이 같은 고객사에서 다른 사건이 일어나 즉시 전달이 돌 때 지켜집니다.',
+    // 50분은 기존 잡(00·05·10·20·35)과 겹치지 않는다. 분 단위 주기를 새로 만들지 않는다 —
+    // 즉시 드레인이 1차 그물이고 이 쓸기는 2차다.
+    spec: { every: 'hour', minute: 50 },
+    run: async ({ now }) => {
+      const { sent, gaveUp } = await webhookDispatch.sweepDeliveries(now, { limit: 100 })
+      return { detail: sent || gaveUp ? `재시도 ${sent}건 · 포기 ${gaveUp}건` : '보낼 것이 없었습니다.' }
+    },
+  })
 
   registerAttendanceRoutes({
     app,
@@ -7835,6 +8011,8 @@ export function createApp(options = {}) {
     workspaceStore,
     commitWorkspaceStore,
     vapid,
+    // 설정된 채널만 알림 설정 표에 열이 생긴다.
+    notificationDelivery,
   })
 
   registerPersonalTodoRoutes({
@@ -7857,6 +8035,7 @@ export function createApp(options = {}) {
     tenantIndustryType, operatorAwareAccounts, guestGrantOf, projectSpacesOf, projectMemberIds, publicProject, normalizeProjectMembers, applyProjectInfo, writeProjectData,
     normalizeAdminWorkItems, normalizeAdminWorkRules, firstRuleDateOnOrAfter, koreaDate, seoulLocalDateTimeToUtcIso,
     notifyNewAssignments, scheduleSentinel, events, workspaceRecordVersion,
+    queueCreatedWorkDeliveries, kickWebhookDispatch: webhookDispatch.kick,
     priorities: WORK_ITEM_PRIORITIES, frequencies: WORK_RULE_FREQUENCIES, monthlyModes: WORK_RULE_MONTHLY_MODES, holidayPolicies: HOLIDAY_POLICIES,
     projectStages: PROJECT_STAGES,
     ...(typeof options.projectTemplateClock === 'function' ? { clock: options.projectTemplateClock } : {}),
@@ -8172,14 +8351,10 @@ export function createApp(options = {}) {
     // body-parser의 크기 초과는 SyntaxError가 아니라서 그냥 두면 "서버 처리 중 오류"로 나간다.
     // 사용자는 무엇이 잘못됐는지 알 수 없고, 같은 파일을 계속 다시 올리게 된다.
     if (error?.type === 'entity.too.large' || error?.status === 413) {
-      const limitMb = Number.isFinite(error?.limit) ? Math.round(error.limit / (1024 * 1024)) : null
+      // 문장은 webhook-routes.mjs의 한 벌을 그대로 쓴다. 여기서 다시 지으면 같은 요청이
+      // content-type에 따라 두 가지 말로 거절된다(json은 이 핸들러, 그 밖은 수신 라우트).
       response.status(413).json({
-        error: {
-          code: 'PAYLOAD_TOO_LARGE',
-          message: limitMb
-            ? `보내려는 내용이 한 번에 저장할 수 있는 크기(${limitMb}MB)를 넘었습니다. 파일 크기를 줄이거나 나눠서 저장해 주세요.`
-            : '보내려는 내용이 한 번에 저장할 수 있는 크기를 넘었습니다. 파일 크기를 줄이거나 나눠서 저장해 주세요.',
-        },
+        error: { code: 'PAYLOAD_TOO_LARGE', message: payloadTooLargeMessage(error?.limit) },
       })
       return
     }

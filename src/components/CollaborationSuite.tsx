@@ -238,6 +238,8 @@ type ChatMessage = {
   lastReplyAt?: string
   /** [채널에 공유]로 올라온 요약이 어느 스레드에서 왔는지. */
   sharedFromThreadId?: string
+  /** 보낸 사람의 신원 종류. 'system'은 수신 웹훅이 올린 말이다(R16-L). */
+  senderRole?: string
 }
 
 type Conversation = {
@@ -1366,7 +1368,8 @@ export function MessengerDrawer({
       >
         {!mine && <Avatar name={item.senderName} compact />}
         <div>
-          {!mine && <strong>{item.senderName}{senderInactive && <span className="messenger-inactive-tag">비활성</span>}</strong>}
+          {/* R16-L: 수신 웹훅이 올린 말풍선. 사람이 쓴 말과 기계가 보낸 말을 눈으로 갈라 놓는다. */}
+          {!mine && <strong>{item.senderName}{item.senderRole === 'system' && <em className="messenger-system-label">외부</em>}{senderInactive && <span className="messenger-inactive-tag">비활성</span>}</strong>}
           {quoted && <QuotedMessage senderName={quoted.senderName} text={quoted.deletedAt ? '삭제된 메시지' : quoted.text} onJump={quotedInThread ? undefined : () => jumpToMessage(quoted.id)} />}
           <div className="messenger-bubble-row">
             {mine && (

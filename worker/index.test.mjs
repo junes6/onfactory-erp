@@ -589,10 +589,18 @@ test('hosted account recovery is CAS-persisted with session revocation and the s
       ERP_OPERATOR_RECOVERY_PASSWORD: 'Operator-Recover!2026-A',
       ERP_3DMUSE_RECOVERY_PASSWORD: 'Muse-Recover!2026-B',
     }
-    const worker = workerOptions(createSitesWorker, database, bucket, mock, seed, { env: recoveryEnv })
+    // 이 테스트만 잠금 시한을 길게 잡는다. 기본값(leaseMs 500 · heartbeatMs 100)은 전체 스위트가
+    // 함께 도는 동안 하트비트가 제때 못 뛰어 lease가 만료되고, 저장 잠금을 잃은 요청이 409로 끝난다 —
+    // 이 테스트가 재는 것은 CAS 저장과 세션 회수이지 하트비트의 실시간성이 아니다.
+    const worker = workerOptions(createSitesWorker, database, bucket, mock, seed, {
+      env: recoveryEnv,
+      lockOptions: { waitMs: 20_000, leaseMs: 20_000, heartbeatMs: 5_000 },
+    })
 
     const first = await worker.fetch(new Request('https://erp.test/api/test/read'))
-    assert.equal(first.status, 200)
+    // 실패하면 어느 갈래인지 본문이 말해야 한다. 숫자만 보면 CAS 충돌(STATE_CONFLICT)과
+    // 잠금 만료(STATE_LOCK_LOST)가 같은 409 하나로 보인다.
+    assert.equal(first.status, 200, JSON.stringify(await first.clone().json().catch(() => null)))
     assert.equal(database.appState.revision, 8)
     const persisted = database.payload()
     assert.equal(persisted.workspaceStore.platform.accountCredentialRecovery.version, '2026-08-25-v1')
@@ -606,7 +614,7 @@ test('hosted account recovery is CAS-persisted with session revocation and the s
     assert.equal(JSON.stringify(persisted).includes('Muse-Recover!2026-B'), false)
 
     const second = await worker.fetch(new Request('https://erp.test/api/test/read'))
-    assert.equal(second.status, 200)
+    assert.equal(second.status, 200, JSON.stringify(await second.clone().json().catch(() => null)))
     assert.equal(database.appState.revision, 8)
     assert.deepEqual(database.payload(), persisted)
   } finally {

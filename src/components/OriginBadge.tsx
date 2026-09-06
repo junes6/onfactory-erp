@@ -1,4 +1,4 @@
-import { ArrowUpRight, LayoutTemplate, MessagesSquare, Radar, ShieldAlert, Sparkles } from 'lucide-react'
+import { ArrowUpRight, LayoutTemplate, MessagesSquare, Radar, ShieldAlert, Sparkles, Webhook } from 'lucide-react'
 import './OriginBadge.css'
 
 export type WorkOrigin = {
@@ -14,7 +14,8 @@ const kindIcon = (kind: string) => (
     : kind === 'sentinel-task' ? ShieldAlert
       : kind === 'opportunity' ? Radar
         : kind === 'thread' ? MessagesSquare
-          : Sparkles
+          : kind === 'webhook' ? Webhook
+            : Sparkles
 )
 
 /**

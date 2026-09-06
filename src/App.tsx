@@ -1527,7 +1527,9 @@ export default function App() {
   const workspaceScope = account?.tenantId && account.id ? `${account.tenantId}:${account.id}` : undefined
   const [pendingProposals, setPendingProposals] = useState(0)
   const [profileOpen, setProfileOpen] = useState(false)
-  const [peopleInitialTab, setPeopleInitialTab] = useState<'members' | 'accounts' | 'performance'>('members')
+  /** 인사·조직을 어느 탭으로 열라는 '이번 한 번'의 부탁. 값이 남아 있으면 그 세션 내내
+   *  사이드바로 들어와도 그 탭이 먼저 열린다 — PeopleOperationsPage가 마운트마다 다시 적용하기 때문이다. */
+  const [peopleInitialTab, setPeopleInitialTab] = useState<'members' | 'accounts' | 'performance' | 'integrations' | null>(null)
   const isTenantAdmin = account?.role === 'tenant-admin' && Boolean(account.tenantId)
   useEffect(() => {
     if (!isTenantAdmin || !workspaceScope) { setPendingProposals(0); return }
@@ -2023,6 +2025,9 @@ export default function App() {
       setMobileNav(false)
       return
     }
+    // 출처 배지가 지정한 인사·조직 탭은 그 한 번뿐이다. 인사·조직을 떠날 때 지우지 않으면
+    // 그 뒤로는 사이드바로 들어와도 늘 외부 연동이 먼저 열린다.
+    if (nextPage !== 'people') setPeopleInitialTab(null)
     setPage(nextPage)
     setMobileNav(false)
     setQuery('')
@@ -2038,6 +2043,9 @@ export default function App() {
     const focus = originPage === 'messenger' ? parseMessengerFocus(focusId) : null
     if (focus) { setMessengerFocus(focus); setMessengerOpen(true); if (phoneShell) setMobileTab('chat'); return }
     if (originPage === 'projects') { setProjectFocusId(focusId); setWorkFocusId(''); setMobileTab('more') }
+    // R16-L: 외부 연동에서 만들어진 업무의 출처는 인사·조직의 '외부 연동' 탭이다.
+    // 그 탭은 관리자에게만 열리므로(PeopleOperations의 initialTab && canManage), 구성원은 기본 탭을 본다.
+    if (originPage === 'people') setPeopleInitialTab('integrations')
     navigate(originPage as PageId)
   }
   const enterPlatform = () => {
@@ -2333,7 +2341,7 @@ export default function App() {
       case 'inventory': return <InventoryPage onToast={setToast} canManage={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} />
       case 'factory': return <FactoryManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
       case 'sales': return <SalesChannels onToast={setToast} workspaceScope={workspaceScope} companyName={tenantName} canManage={account?.role === 'tenant-admin'} />
-      case 'people': return <PeopleOperationsPage initialTab={peopleInitialTab} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} canManage={account?.role === 'tenant-admin'} canOversee={account?.role === 'tenant-admin' || account?.oversight === true} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
+      case 'people': return <PeopleOperationsPage initialTab={peopleInitialTab ?? undefined} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} canManage={account?.role === 'tenant-admin'} canOversee={account?.role === 'tenant-admin' || account?.oversight === true} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
       case 'judgement': return <PersonalCorePage workspaceScope={workspaceScope} onToast={setToast} />
       case 'approvals': return <ApprovalQueue workspaceScope={workspaceScope} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenEvidence={(page) => navigate(page as PageId)} onPendingChange={setPendingProposals} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} industryType={account?.industryType ?? 'food_manufacturing'} onAskLens={setLensTarget} onToast={setToast} />
@@ -2456,6 +2464,11 @@ export default function App() {
                   const focus = page === 'messenger' ? parseMessengerFocus(focusId) : null
                   if (focus) { setMessengerFocus(focus); setMessengerOpen(true); setNotificationsOpen(false); if (phoneShell) setMobileTab('chat'); return }
                   if (page === 'messenger') { setMessengerOpen(true); setNotificationsOpen(false); if (phoneShell) setMobileTab('chat'); return }
+                  // R16-L: '외부 연동이 중지됐습니다'는 인사·조직의 외부 연동 탭에서만 고칠 수 있다.
+                  // 출처 배지(openWorkOrigin)와 같은 규칙을 쓴다 — 두 입구가 다른 곳에 내려놓으면
+                  // 한쪽은 '주소를 고쳐 주세요'라고 말해 놓고 고칠 수 없는 화면을 연다.
+                  // 엔드포인트 id를 workFocusId에 넣지 않는다: 그 자리는 업무 id만 뜻한다.
+                  if (page === 'people') { setPeopleInitialTab('integrations'); setNotificationsOpen(false); navigate('people'); return }
                   if (focusId) setWorkFocusId(focusId)
                   navigate(page as PageId)
                 }}

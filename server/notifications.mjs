@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto'
 
+import { NOTIFICATION_CHANNEL_IDS } from './notification-delivery.mjs'
+
 /**
  * 알림 센터 — "무슨 일이 나에게 일어났는가"를 한곳에 모은다.
  *
@@ -38,6 +40,9 @@ export const NOTIFICATION_TYPES = Object.freeze({
   // R16-J: 스레드 답글. source.kind가 'message'라 방별 무음이 그대로 적용된다.
   // 기본 푸시는 꺼 둔다 — 스레드는 오래 이어져 울릴 일이 많고, 지목은 mention이 따로 한다.
   'thread-reply': { label: '스레드 답글', pushByDefault: false, page: 'messenger' },
+  // R16-L: 외부 연동이 연속 실패로 자동 중지됐다. 관리자가 주소를 고쳐야 다시 흐른다.
+  // 기본 푸시는 꺼 둔다 — 사람이 지금 당장 할 일이 아니라 관리자가 화면에서 보고 고칠 일이다.
+  'webhook-disabled': { label: '외부 연동 중지', pushByDefault: false, page: 'people' },
 })
 
 export const NOTIFICATION_TYPE_IDS = Object.freeze(Object.keys(NOTIFICATION_TYPES))
@@ -147,6 +152,10 @@ export function defaultNotificationSettings() {
     quietHours: { ...DEFAULT_QUIET_HOURS },
     urgentTypes: [...DEFAULT_URGENT_TYPES],
     rooms: {},
+    // R16-L: 외부 채널은 기본이 꺼짐이다 — 건당 요금이 나가는 통로를 사용자 동의 없이 켜지 않는다.
+    // 목록을 여기 다시 적지 않는다. 어댑터 등록부에 채널이 늘면 그 칸도 함께 생긴다 —
+    // 낱말을 두 벌 적어 두면 새 채널의 설정이 저장될 때마다 조용히 버려진다.
+    ...Object.fromEntries(NOTIFICATION_CHANNEL_IDS.map((channel) => [channel, []])),
   }
 }
 
@@ -161,6 +170,7 @@ export function normalizeNotificationSettings(value) {
     quietHours: normalizeQuietHours(value.quietHours ?? base.quietHours),
     urgentTypes: list(value.urgentTypes, base.urgentTypes),
     rooms: normalizeRoomModes(value.rooms),
+    ...Object.fromEntries(NOTIFICATION_CHANNEL_IDS.map((channel) => [channel, list(value[channel], base[channel])])),
   }
 }
 
@@ -374,6 +384,22 @@ export function pushDecision(notification, settingsRecord, now = new Date()) {
   if (mode === 'off') return 'skip'
   if (mode === 'mention' && notification.type !== 'mention') return 'skip'
 
+  if (!inQuietHours(now, settings.quietHours)) return 'send'
+  return settings.urgentTypes.includes(notification.type) ? 'send' : 'hold'
+}
+
+/**
+ * 외부 채널(알림톡·메일) 발송 판정. 푸시와 같은 규칙을 쓴다 — 밤에는 참았다가 아침 요약이 대신 전한다.
+ *
+ * 방별 무음(pushDecision의 rooms)은 보지 않는다. 그 설정은 '이 기기를 울릴지'를 정하는 것이고,
+ * 외부 채널은 그 사람이 유형별로 따로 켠 통로다 — 두 규칙을 겹치면 켠 사람에게도 안 나가는 날이 생긴다.
+ *
+ * @returns {'send' | 'hold' | 'skip'}
+ */
+export function channelDecision(notification, settingsRecord, channel, now = new Date()) {
+  const settings = settingsFor(settingsRecord, notification.recipientId)
+  if (settings.muted.includes(notification.type)) return 'skip'
+  if (!(settings[channel] ?? []).includes(notification.type)) return 'skip'
   if (!inQuietHours(now, settings.quietHours)) return 'send'
   return settings.urgentTypes.includes(notification.type) ? 'send' : 'hold'
 }

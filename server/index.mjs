@@ -9,6 +9,8 @@ import { performanceMaintenanceErrors, runPerformanceMonthlyMaintenance } from '
 import { initializeRuntimeStore } from './store/index.mjs'
 import { backupSettings } from './backup-mirror.mjs'
 import { createMailDelivery } from './mail-delivery.mjs'
+import { createSecretBox } from './secret-box.mjs'
+import { createNotificationDelivery } from './notification-delivery.mjs'
 
 // .env.local is already covered by the project's *.local gitignore rule.
 config({ path: '.env.local', quiet: true })
@@ -30,6 +32,14 @@ const performanceClient = process.env.ANTHROPIC_API_KEY?.trim()
   : null
 // 메일 어댑터. MAIL_TRANSPORT가 없으면 null이고, 초대·재설정 링크는 화면에서 복사해 전달한다.
 const mailDelivery = createMailDelivery({ env: process.env })
+// R16-L: 봉인 키와 알림 채널 어댑터. 둘 다 없으면 그 기능만 꺼진 채 서버는 그대로 뜬다 —
+// 경고 한 줄은 여기서만 낸다(createApp의 기본값은 조용하다).
+const secretBox = createSecretBox({ env: process.env })
+const notificationDelivery = createNotificationDelivery({ env: process.env })
+if (notificationDelivery.channels.length === 0) {
+  // 채널 이름을 여기 적지 않는다 — 어댑터 등록부가 늘면 이 문장도 함께 틀려진다.
+  console.log('[notification-delivery] 외부 알림 채널이 설정되지 않았습니다 — 알림 설정 표에 채널 열이 생기지 않습니다.')
+}
 const app = createApp({
   initialWorkspaceStore: runtimeStore.workspaceStore,
   sessions: runtimeStore.sessions,
@@ -40,6 +50,8 @@ const app = createApp({
   storeAdapter: runtimeStore.adapter,
   guestInviteDelivery: mailDelivery?.sendGuestInvitation ?? null,
   passwordResetDelivery: mailDelivery?.sendPasswordReset ?? null,
+  secretBox,
+  notificationDelivery,
   seedPlatformFixtures: runtimeStore.adapter.kind === 'json' && !runtimeStore.adapter.readOnly,
   seedDemoAccounts: runtimeStore.adapter.kind === 'json',
   skipStartupMigrations: runtimeStore.adapter.kind === 'postgres',

@@ -1,0 +1,106 @@
+/* 외부 연동 화면. 카드 배경·글자색은 PeopleOperations의 탭 패널에서 상속받는다 —
+   여기서는 이 화면에만 있는 배치(목록 한 줄, 상태 점, 가로 스크롤 표)만 정한다. */
+
+.webhook-settings { display: flex; flex-direction: column; gap: var(--space-24); }
+
+.webhook-head-actions { display: flex; align-items: center; gap: var(--space-8); flex-wrap: wrap; }
+
+.webhook-note {
+  margin: var(--space-0);
+  padding: var(--space-12);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: var(--font-13);
+}
+
+.webhook-filter { display: flex; align-items: center; gap: var(--space-8); flex-wrap: wrap; }
+
+/* 한 줄에 서는 것은 점 · 이름 묶음 · 상태 · 여는 버튼이고, 이름 아래에 대상이 한 줄 더 붙는다.
+   대상을 이름 옆에 나란히 두면 긴 호스트 이름이 이름을 밀어 둘 다 말줄임이 된다 —
+   이름은 사람이 고른 낱말이라 잘리면 안 되고, 대상은 잘려도 열어 보면 되는 값이다. */
+.webhook-list { list-style: none; margin: var(--space-0); padding: var(--space-0); display: flex; flex-direction: column; gap: var(--space-8); }
+
+.webhook-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-12);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+}
+
+.webhook-dot { width: 8px; height: 8px; border-radius: var(--radius-8); }
+.webhook-dot[data-state='on'] { background: var(--forest); }
+.webhook-dot[data-state='failing'] { background: var(--color-danger); }
+.webhook-dot[data-state='off'] { background: var(--muted); }
+
+.webhook-list-copy { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.webhook-list-copy strong { font-size: var(--font-15); font-weight: var(--weight-medium); color: var(--ink); }
+.webhook-list-copy small { font-size: var(--font-13); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.webhook-state { font-size: var(--font-13); color: var(--muted); white-space: nowrap; }
+
+.webhook-delivery-log { display: flex; flex-direction: column; gap: var(--space-12); }
+.webhook-log-filter select { padding: var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--ink); font-size: var(--font-13); }
+
+/* 표가 페이지를 밀지 않게 자기 안에서만 가로로 흐른다. */
+.webhook-log-scroll { overflow-x: auto; }
+.webhook-log-scroll table { width: 100%; border-collapse: collapse; }
+.webhook-log-scroll th,
+.webhook-log-scroll td { padding: var(--space-8); border-bottom: var(--hairline) solid var(--line); text-align: left; font-size: var(--font-13); white-space: nowrap; }
+.webhook-log-scroll th { color: var(--muted); font-weight: var(--weight-medium); }
+.webhook-log-scroll td { color: var(--ink); }
+/* 응답 칸만 줄바꿈을 허용한다 — 코드와 사유가 함께 서는 칸이라 한 줄로 두면 표가 화면 밖으로 나간다. */
+.webhook-log-scroll td.webhook-log-reason { white-space: normal; }
+
+.webhook-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-16);
+  background: var(--color-overlay);
+}
+
+/* 안쪽 여백은 .modal-card form이 준다(footer의 음수 마진이 그 여백을 되물기 때문에 여기서 다시 정하지 않는다).
+   한 번만 보이는 값 창은 form이 아니므로 같은 여백을 스스로 갖는다. */
+.webhook-form { display: flex; flex-direction: column; gap: var(--space-16); }
+.webhook-reveal { display: flex; flex-direction: column; gap: var(--space-16); padding: var(--space-16); }
+.webhook-field { display: flex; flex-direction: column; gap: var(--space-4); font-size: var(--font-13); color: var(--muted); }
+.webhook-field input,
+.webhook-field select {
+  padding: var(--space-8);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--font-15);
+}
+
+.webhook-direction { display: flex; gap: var(--space-16); }
+.webhook-direction label,
+.webhook-toggle,
+.webhook-events label { display: inline-flex; align-items: center; gap: var(--space-8); font-size: var(--font-13); color: var(--ink); }
+
+.webhook-events { display: flex; flex-wrap: wrap; gap: var(--space-12); margin: var(--space-0); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.webhook-events legend { padding: var(--space-0) var(--space-4); font-size: var(--font-13); color: var(--muted); }
+
+.webhook-token { display: flex; flex-direction: column; gap: var(--space-8); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--canvas); }
+.webhook-token p { margin: var(--space-0); font-size: var(--font-13); color: var(--muted); }
+.webhook-token-actions { display: flex; flex-wrap: wrap; gap: var(--space-8); }
+.webhook-sample { color: var(--ink); }
+.webhook-token pre { margin: var(--space-0); padding: var(--space-8); border-radius: var(--radius-8); background: var(--surface); color: var(--ink); font-size: var(--font-13); overflow-x: auto; }
+.webhook-test-result { color: var(--ink); }
+
+.webhook-danger { display: flex; flex-direction: column; gap: var(--space-8); padding: var(--space-12); border: var(--hairline) solid var(--color-danger); border-radius: var(--radius-8); background: var(--color-danger-soft); }
+.webhook-danger p { margin: var(--space-0); font-size: var(--font-13); color: var(--color-danger-ink); }
+
+@media (max-width: 720px) {
+  .webhook-list li { grid-template-columns: minmax(0, 1fr); }
+  .webhook-state { white-space: normal; }
+}

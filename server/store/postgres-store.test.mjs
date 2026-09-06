@@ -109,6 +109,30 @@ function fixture() {
       }],
       updatedAt: '2026-08-20T07:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
     },
+    // R16-L: 외부 연동. tokenHash(sha256)와 signingSecretEnc(봉인문)가 왕복에서 살아남아야 한다 —
+    // platform 컬렉션에 두면 stripSensitivePayload가 이 두 값을 지워 재기동 후 모든 수신 주소가 404가 된다.
+    'webhook-endpoints': {
+      data: [{
+        id: 'WHK-fixture-01', direction: 'outbound', label: '주문 알림', conversationId: null, defaultOwnerId: null,
+        tokenHash: null, tokenIssuedAt: null, url: 'https://hooks.example.com/inbound',
+        events: ['work.transitioned'], signingSecretEnc: 'v1:aaaa:bbbb:cccc', enabled: true,
+        consecutiveFailures: 0, disabledAt: null, createdById: 'USR-HSB-ADMIN',
+        createdAt: '2026-08-20T06:00:00.000Z', updatedAt: '2026-08-20T06:00:00.000Z',
+        lastDeliveredAt: null, lastReceivedAt: null, receivedCount: 0,
+      }],
+      updatedAt: '2026-08-20T06:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
+    },
+    'webhook-deliveries': {
+      data: [{
+        id: 'WHD-fixture-01', endpointId: 'WHK-fixture-01', channel: 'webhook', eventType: 'work.transitioned',
+        eventId: 'work.transitioned:WORK-1:2026-08-20T06:05:00.000Z', aggregateId: 'WORK-1', target: 'hooks.example.com',
+        status: 'failed', attempts: 1, nextAttemptAt: '2026-08-20T06:06:00.000Z', lastStatusCode: 503,
+        lastError: '받는 쪽 응답 503', requestedAt: '2026-08-20T06:05:00.000Z', deliveredAt: null,
+        payload: { id: 'WORK-1', title: '설비 점검', beforeState: '수행중', afterState: '결재대기', ownerId: 'USR-HSB-ADMIN' },
+        actor: 'USR-HSB-ADMIN',
+      }],
+      updatedAt: '2026-08-20T06:05:00.000Z', updatedBy: 'system:webhook',
+    },
   }
   snapshot.tenants['TENANT-POHANG'] = {
     'work-items': { data: [{ id: 'WORK-1', title: '별도 조합 업무', due: '2026-08-22T09:00:00.000Z', status: '업무요청' }], updatedAt: '2026-08-20T01:00:00.000Z' },
@@ -239,6 +263,12 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.equal(roundTrippedNotice.body, '첫 줄\n둘째 줄', '공지 본문의 줄바꿈은 왕복에서 살아 있어야 한다')
     assert.deepEqual(roundTrippedNotice.acknowledgements, [{ accountId: 'USR-TENANT-HSB-GUEST01', at: '2026-08-20T07:00:00.000Z' }])
     assert.deepEqual(roundTrippedNotice.reminders.remindedAt, { 'USR-TENANT-HSB-GUEST01': '2026-08-20T08:00:00.000Z' })
+    const roundTrippedEndpoint = facade.tenants['TENANT-HSB']['webhook-endpoints'].data[0]
+    assert.equal(roundTrippedEndpoint.signingSecretEnc, 'v1:aaaa:bbbb:cccc', '봉인된 서명키는 왕복에서 지워지면 안 된다')
+    assert.deepEqual(roundTrippedEndpoint.events, ['work.transitioned'])
+    const roundTrippedDelivery = facade.tenants['TENANT-HSB']['webhook-deliveries'].data[0]
+    assert.equal(roundTrippedDelivery.status, 'failed')
+    assert.equal(roundTrippedDelivery.payload.afterState, '결재대기', '보낼 내용이 사라지면 재시도가 불가능하다')
     assert.equal(facade.tenants['TENANT-HSB']['company-documents'].data[0].name, '점검표.pdf')
     assert.equal(facade.tenants['TENANT-HSB']['performance-settings'].data.employeeVisible, false)
     assert.equal(facade.tenants['TENANT-HSB']['performance-reports'].data[0].id, 'PERFS-1')
@@ -355,7 +385,7 @@ test('guest scope RLS policies exist in the schema for the six tables plus core_
   // DO 루프 첫 반복에서 'relation does not exist'로 RLS 마이그레이션 전체가 실패하고, 환경별 격리 수준이 갈라진다.
   const migrationsDir = new URL('../../supabase/migrations/', import.meta.url)
   const chain = (await Promise.all((await readdir(migrationsDir)).filter((name) => name.endsWith('.sql')).sort().map((name) => readFile(new URL(name, migrationsDir), 'utf8')))).join('\n')
-  for (const tableName of ['project_spaces', 'project_posts', 'work_items', 'messenger_conversations', 'items', 'guest_grants', 'core_accounts', 'notices']) {
+  for (const tableName of ['project_spaces', 'project_posts', 'work_items', 'messenger_conversations', 'items', 'guest_grants', 'core_accounts', 'notices', 'webhook_endpoints', 'webhook_deliveries']) {
     assert.match(chain, new RegExp(`CREATE TABLE IF NOT EXISTS ${tableName}\\b`), `${tableName}가 supabase/migrations 안에서 만들어져야 한다`)
   }
   // 그리고 RLS 마이그레이션 파일 이름은 테이블 마이그레이션보다 뒤여야 한다(사전순 적용).

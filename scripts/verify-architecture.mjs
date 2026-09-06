@@ -33,6 +33,10 @@ const productFiles = [
   // 공지 문구·리마인더 초안도 코드 상수다 — 데모 실명이 알림 본문으로 굳지 않도록 같은 검사를 받는다.
   path.join(root, 'server', 'notices.mjs'),
   path.join(root, 'server', 'notice-ack-watch.mjs'),
+  // 외부 연동의 라벨·문구도 코드 상수다 — 데모 실명이 웹훅 본문이나 알림으로 굳지 않도록 같은 검사를 받는다.
+  path.join(root, 'server', 'webhook-routes.mjs'),
+  path.join(root, 'server', 'webhook-dispatch.mjs'),
+  path.join(root, 'server', 'notification-delivery.mjs'),
 ].filter((file) => !file.endsWith('.test.mjs'))
 
 const forbiddenDemoPatterns = [
@@ -100,7 +104,7 @@ const workspaceTables = [
   'document_storage_settings', 'compliance_records', 'sales_shipments', 'performance_settings', 'performance_report_snapshots',
   'it_projects', 'it_deliverables', 'it_contracts', 'proposals', 'automation_policies', 'it_clients', 'it_support_programs', 'project_spaces', 'project_posts', 'company_assets', 'tax_events', 'ip_rights',
   'attendance_records', 'tax_deliveries', 'lenses', 'opportunities', 'opportunity_settings', 'digests',
-  'project_templates', 'ai_conversations', 'notices',
+  'project_templates', 'ai_conversations', 'notices', 'webhook_endpoints', 'webhook_deliveries',
   'personal_todos', 'notifications', 'notification_settings', 'push_subscriptions',
 ]
 for (const table of workspaceTables) {

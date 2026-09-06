@@ -1,9 +1,7 @@
--- R16-D: 공지 게시글과 필독 확인. additive · idempotent.
+-- R16-D/L: 공지 게시글과 외부 연동(수신·발신 웹훅, 전달 이력). additive · idempotent.
 -- 이미 적용된 20260906010000_guest_scope_rls.sql은 손대지 않는다 — 그 파일의 DO 루프 목록을
--- 늘리면 이미 배포된 마이그레이션의 내용이 바뀐다. 여기서는 notices 한 테이블에만 정책을 얹는다.
---
--- (R16-L의 webhook_endpoints·webhook_deliveries는 같은 파일에 이어 붙는다. 그 테이블들은
---  게스트 범위가 아니므로 DO 루프가 아니라 service 전용 정책만 갖는다.)
+-- 늘리면 이미 배포된 마이그레이션의 내용이 바뀐다. 여기서는 notices 한 테이블에만 정책을 얹고,
+-- webhook_* 두 테이블은 게스트 범위가 아니므로 service 전용 정책만 갖는다.
 
 CREATE TABLE IF NOT EXISTS notices (
   id TEXT NOT NULL,
@@ -55,3 +53,62 @@ CREATE POLICY notices_guest_read ON notices FOR SELECT USING (
       AND c.payload->'participantIds' ? current_setting('app.current_account_id', TRUE)
   )
 );
+
+-- ── webhook_endpoints ────────────────────────────────────────────────────
+-- tokenHash(sha256)와 signingSecretEnc(AES-256-GCM 봉인문)만 들어간다. 평문은 저장하지 않는다.
+-- 테넌트 workspace 행에는 stripSensitivePayload가 적용되지 않으므로 이 두 값이 재기동을 넘어 살아남는다 —
+-- platform 컬렉션에 두면 같은 값이 조용히 지워져 모든 수신 주소가 404가 된다.
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+  id TEXT NOT NULL,
+  org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  position INTEGER NOT NULL DEFAULT 0,
+  source_updated_at TIMESTAMPTZ,
+  updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted_at TIMESTAMPTZ,
+  created_by TEXT,
+  PRIMARY KEY (org_id, id)
+);
+
+-- 토큰 하나로 고객사를 역조회해야 하므로 org 없이 전역 유니크다.
+CREATE UNIQUE INDEX IF NOT EXISTS webhook_endpoints_token_idx
+  ON webhook_endpoints ((payload ->> 'tokenHash'))
+  WHERE deleted_at IS NULL AND payload ->> 'tokenHash' IS NOT NULL;
+
+ALTER TABLE webhook_endpoints ENABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_endpoints FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS webhook_endpoints_service ON webhook_endpoints;
+CREATE POLICY webhook_endpoints_service ON webhook_endpoints
+  USING (current_setting('app.role', TRUE) = 'service')
+  WITH CHECK (current_setting('app.role', TRUE) = 'service');
+
+-- ── webhook_deliveries ───────────────────────────────────────────────────
+-- 전달 이력. 사건별 fields allowlist를 지난 값만 payload에 실린다(본문·첨부·연락처는 들어가지 않는다).
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id TEXT NOT NULL,
+  org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  position INTEGER NOT NULL DEFAULT 0,
+  source_updated_at TIMESTAMPTZ,
+  updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted_at TIMESTAMPTZ,
+  created_by TEXT,
+  PRIMARY KEY (org_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS webhook_deliveries_pending_idx
+  ON webhook_deliveries (org_id, (payload ->> 'status'), (payload ->> 'nextAttemptAt'))
+  WHERE deleted_at IS NULL;
+
+ALTER TABLE webhook_deliveries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_deliveries FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS webhook_deliveries_service ON webhook_deliveries;
+CREATE POLICY webhook_deliveries_service ON webhook_deliveries
+  USING (current_setting('app.role', TRUE) = 'service')
+  WITH CHECK (current_setting('app.role', TRUE) = 'service');

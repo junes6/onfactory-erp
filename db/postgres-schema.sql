@@ -499,6 +499,22 @@ CREATE TABLE IF NOT EXISTS notices (
   created_by TEXT, PRIMARY KEY (org_id, id)
 );
 
+-- R16-L: 외부 연동. tokenHash(sha256)와 signingSecretEnc(AES-256-GCM 봉인문)만 들어간다 — 평문은 저장하지 않는다.
+-- 게스트 범위가 아니므로 아래 게스트 DO 루프에 넣지 않고 service 전용 정책만 붙인다.
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
 -- R15-E: AI 대화 히스토리. supabase/migrations/20260905000000_ai_conversations.sql 에만 있고
 -- 이 베이스라인에 빠져 있던 것을 보충한다 — applySchema는 이 파일 하나만 읽는다.
 CREATE TABLE IF NOT EXISTS ai_conversations (
@@ -583,6 +599,17 @@ ALTER TABLE project_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_templates FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS project_templates_service ON project_templates;
 CREATE POLICY project_templates_service ON project_templates USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+
+-- R16-L: 외부 연동은 게스트가 읽지 않는다. 게스트 정책을 만들지 않고 서비스 컨텍스트만 통과시킨다 —
+-- 여기에 게스트 SELECT를 만들면 수신 주소의 해시와 봉인문이 외부인 세션에 노출된다.
+ALTER TABLE webhook_endpoints ENABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_endpoints FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS webhook_endpoints_service ON webhook_endpoints;
+CREATE POLICY webhook_endpoints_service ON webhook_endpoints USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+ALTER TABLE webhook_deliveries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_deliveries FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS webhook_deliveries_service ON webhook_deliveries;
+CREATE POLICY webhook_deliveries_service ON webhook_deliveries USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
 
 DROP POLICY IF EXISTS project_spaces_guest_read ON project_spaces;
 CREATE POLICY project_spaces_guest_read ON project_spaces FOR SELECT USING (
@@ -731,6 +758,9 @@ CREATE INDEX IF NOT EXISTS idx_personal_todos_active ON personal_todos (org_id, 
 CREATE INDEX IF NOT EXISTS idx_project_templates_active ON project_templates (org_id, (payload ->> 'origin'), position) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS notices_channel_idx ON notices (org_id, (payload ->> 'conversationId'), (payload ->> 'createdAt') DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS notices_project_idx ON notices (org_id, (payload ->> 'scope'), (payload ->> 'projectId')) WHERE deleted_at IS NULL;
+-- 토큰 하나로 고객사를 역조회해야 하므로 org 없이 전역 유니크다.
+CREATE UNIQUE INDEX IF NOT EXISTS webhook_endpoints_token_idx ON webhook_endpoints ((payload ->> 'tokenHash')) WHERE deleted_at IS NULL AND payload ->> 'tokenHash' IS NOT NULL;
+CREATE INDEX IF NOT EXISTS webhook_deliveries_pending_idx ON webhook_deliveries (org_id, (payload ->> 'status'), (payload ->> 'nextAttemptAt')) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ai_conversations_owner_idx ON ai_conversations (org_id, (payload ->> 'ownerId'), (payload ->> 'updatedAt') DESC);
 CREATE INDEX IF NOT EXISTS ai_conversations_trash_idx ON ai_conversations (org_id, (payload ->> 'deletedAt'));
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON auth_sessions (expires_at) WHERE revoked_at IS NULL;

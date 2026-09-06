@@ -4,6 +4,7 @@ import { GUEST_ROLE, GUEST_SCOPE_FORBIDDEN, guestWorkItemViolation } from './gue
 import { buildGroupConversation } from './messenger-rooms.mjs'
 import { childrenOf, workItemTreeViolation } from './work-item-tree.mjs'
 import { HOLIDAY_POLICIES, WORK_RULE_FREQUENCIES, WORK_RULE_MONTHLY_MODES } from './work-rule-schedule.mjs'
+import { WEBHOOK_DELIVERIES_KEY } from './webhook-routes.mjs'
 
 /**
  * 프로젝트 템플릿 — "지난번처럼"을 한 번에 세우는 틀.
@@ -799,6 +800,10 @@ export function registerProjectTemplateRoutes({
   tenantIndustryType, operatorAwareAccounts, guestGrantOf, projectSpacesOf, projectMemberIds, publicProject, normalizeProjectMembers, applyProjectInfo, writeProjectData,
   normalizeAdminWorkItems, normalizeAdminWorkRules, firstRuleDateOnOrAfter, koreaDate, seoulLocalDateTimeToUtcIso,
   notifyNewAssignments, scheduleSentinel, events, workspaceRecordVersion,
+  // R16-L: 템플릿 실체화는 한 번에 가장 많은 업무를 만드는 갈래다. 배정 알림만 나가고 웹훅이
+  // 빠지면 '업무 생성'을 켠 관리자가 정작 가장 큰 생성에서 아무것도 못 받는다.
+  // 기본값을 빈 함수로 두는 것은 웹훅 없는 배포(키 없음)에서도 라우트가 그대로 돌게 하기 위함이다.
+  queueCreatedWorkDeliveries = () => {}, kickWebhookDispatch = () => {},
   priorities, frequencies, monthlyModes, holidayPolicies, projectStages,
   clock = () => new Date(),
 }) {
@@ -1135,11 +1140,14 @@ export function registerProjectTemplateRoutes({
       'work-items': tenantStore['work-items'],
       'messenger-conversations': tenantStore['messenger-conversations'],
       'work-rules': tenantStore['work-rules'],
+      // 웹훅 적재도 이 커밋에 함께 실린다 — 실패하면 아래 복원 루프가 같이 되돌린다.
+      [WEBHOOK_DELIVERIES_KEY]: tenantStore[WEBHOOK_DELIVERIES_KEY],
     }
     writeProjectData(tenantId, 'project-spaces', [project, ...spaces].slice(0, 500), request.auth.id)
     tenantStore['work-items'] = { data: nextWorkItems, updatedAt: now, updatedBy: request.auth.id }
     if (plan.channels.length) tenantStore['messenger-conversations'] = { data: [...currentConversations, ...plan.channels], updatedAt: now, updatedBy: request.auth.id }
     if (plan.rules.length) tenantStore['work-rules'] = { data: nextRules, updatedAt: now, updatedBy: request.auth.id }
+    queueCreatedWorkDeliveries(tenantId, currentWorkItems, nextWorkItems, request.auth.id, now)
     try {
       await commitWorkspaceStore()
     } catch {
@@ -1152,6 +1160,7 @@ export function registerProjectTemplateRoutes({
     }
 
     scheduleSentinel(tenantId)
+    kickWebhookDispatch(tenantId)
     const workItemsVersion = workspaceRecordVersion(tenantStore['work-items'])
     events.publish(tenantId, 'work', { key: 'work-items', version: workItemsVersion })
     if (plan.channels.length) events.publish(tenantId, 'message', { key: 'messenger-conversations', version: workspaceRecordVersion(tenantStore['messenger-conversations']) })

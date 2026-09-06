@@ -136,6 +136,11 @@ test('allowlist는 메서드+경로 정규식으로 판정하고, 밖은 전부 
   assert.equal(isGuestRouteAllowed('GET', '/api/messenger/conversations/grp-1/messages/m-1/thread'), true)
   assert.equal(isGuestRouteAllowed('POST', '/api/messenger/conversations/grp-1/threads/m-1/share'), false)
   assert.equal(isGuestRouteAllowed('POST', '/api/messenger/conversations/grp-1/threads/m-1/promote'), false)
+  // R16-L: 외부 연동은 게스트에게 통째로 없다. 수신 훅도 목록 밖이라 게스트 쿠키를 단 요청은 게이트가 먼저 막는다.
+  assert.equal(isGuestRouteAllowed('POST', '/api/hooks/X'), false)
+  assert.equal(isGuestRouteAllowed('GET', '/api/webhooks'), false)
+  assert.equal(isGuestRouteAllowed('POST', '/api/webhooks'), false)
+  assert.equal(isGuestRouteAllowed('POST', '/api/webhooks/WHK-1/token'), false)
   assert.ok(GUEST_ROUTE_ALLOWLIST.every(([method, pattern]) => typeof method === 'string' && pattern instanceof RegExp))
 })
 

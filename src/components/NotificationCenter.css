@@ -25,3 +25,7 @@
 .notification-quiet-range { display: flex; align-items: center; gap: var(--space-8); margin-top: var(--space-8); font-size: var(--font-13); color: var(--muted); }
 .notification-quiet-range input { padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); font: inherit; font-size: var(--font-13); }
 .notification-quiet p { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-11); }
+
+/* R16-L: 채널 열이 늘면 표가 패널보다 넓어진다. 자기 안에서만 가로로 흐르게 한다. */
+.notification-settings-table { overflow-x: auto; }
+.notification-settings-table table { min-width: 320px; }

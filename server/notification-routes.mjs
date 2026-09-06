@@ -28,6 +28,8 @@ export function registerNotificationRoutes({
   workspaceStore,
   commitWorkspaceStore,
   vapid,
+  // R16-L: 설정된 외부 채널만 화면에 열이 생긴다. 어댑터가 없으면 켤 수도 끌 수도 없는 빈 체크박스가 된다.
+  notificationDelivery = null,
   clock = () => new Date(),
 }) {
   const guards = [requireAuth, requireMatchingWorkspaceIdentity]
@@ -52,6 +54,9 @@ export function registerNotificationRoutes({
     unread: unreadCount(rows, request.auth.id),
     settings: settingsFor(workspaceStore.tenants[request.auth.tenantId]?.[NOTIFICATION_SETTINGS_KEY]?.data, request.auth.id),
     types: NOTIFICATION_TYPE_IDS.map((id) => ({ id, label: NOTIFICATION_TYPES[id].label, pushByDefault: NOTIFICATION_TYPES[id].pushByDefault })),
+    // 설정된 채널만, 이름표까지 어댑터 등록부에서 온다. 화면은 이 목록을 그대로 돌아 열을 그린다 —
+    // 채널 하나를 늘리는 데 화면 코드가 함께 바뀌지 않아야 그 목록이 진짜 한 벌이다.
+    channels: notificationDelivery?.catalog ?? [],
     push: {
       // 공개키만 내려간다. 개인키는 서버 밖으로 나가지 않는다.
       configured: Boolean(vapid?.configured),
