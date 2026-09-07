@@ -61,7 +61,12 @@ test('6. 게이트 다섯 곳이 모두 이 모듈을 부른다 — 한 곳이 �
   const source = await readFile(new URL('./app.mjs', import.meta.url), 'utf8')
   // 분류 제안·렌즈·항목 판독·채팅 첨부, 그리고 **채팅에 실리는 자료 목록**.
   // 다섯 번째가 빠지면 본문은 막히는데 파일 이름·분류·태그·요약이 매 대화마다 모델로 나간다.
-  assert.equal(source.split('aiPolicyAllows(').length - 1, 5, 'aiPolicyAllows 호출이 다섯 곳이어야 한다')
+  //
+  // R16-H에서 세 개가 늘어 여덟이다. 늘어난 셋은 `resolveChatAttachments`의 **필수 인자** `canUseForAi`로,
+  // 라우트 게이트 뒤에 서는 두 번째 겹이다(주입을 잊으면 그 자리에서 TypeError로 죽는다).
+  // 아래 정규식 셋이 "다섯 곳이 각자 무엇을 지키는가"를 그대로 잡고 있으므로 숫자만 늘린다.
+  assert.equal(source.split('aiPolicyAllows(').length - 1, 8, 'aiPolicyAllows 호출이 여덟 곳이어야 한다')
+  assert.equal(source.split('canUseForAi: (file) => aiPolicyAllows(file,').length - 1, 3, '첨부 해석 호출부 셋이 모두 AI 수준 판정을 주입한다')
   assert.match(source, /aiPolicyAllows\(document, 'indexed'\)[\s\S]{0,400}enqueueProposal/)
   assert.match(source, /const accessibleDocuments = [\s\S]{0,200}aiPolicyAllows\(document, 'indexed'\)[\s\S]{0,80}slice\(0, 100\)/)
   assert.equal(source.split('aiLockedError(').length - 1, 3, '409를 내는 세 라우트가 같은 문장을 쓴다')

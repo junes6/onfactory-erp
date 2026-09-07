@@ -190,7 +190,9 @@ test('막다른 길을 만들지 않는다: 출처 배지는 프로젝트 상세
   assert.match(app, /onFocusHandled=\{\(\) => setProjectFocusId\(undefined\)\}/)
   // 데스크톱·휴대폰이 같은 함수를 쓴다. 휴대폰은 page만 바꾸면 업무 탭에 그대로 남으므로 탭도 함께 옮긴다.
   assert.equal(count(app, /onOpenOrigin=\{openWorkOrigin\}/g), 2, '데스크톱·휴대폰 두 마운트가 같은 통로를 쓴다')
-  assert.match(app, /if \(originPage === 'projects'\) \{ setProjectFocusId\(focusId\); setWorkFocusId\(''\); setMobileTab\('more'\) \}/)
+  assert.match(app, /if \(originPage === 'projects'\) \{ setProjectFocusId\(focusId\);/)
+  // 탭 이동은 갈래마다가 아니라 **갈래 밖 한 자리**에 있다 — 갈래 안에 두면 빠뜨린 갈래가 업무 탭에 남는다.
+  assert.match(app, /setWorkFocusId\(''\)\r?\n\s*if \(phoneShell\) setMobileTab\('more'\)/)
   // 게스트 자식 행도 열리고, 열린 자식의 상세는 상위와 같은 것을 쓴다.
   assert.match(guestWorkspace, /onOpen=\{\(child\) => \{ setOpenTaskId\(openTaskId === child\.id \? null : child\.id\); openChildList\(item\.id\) \}\}/)
   assert.match(guestWorkspace, /\{openChild && taskDetail\(openChild\)\}/)

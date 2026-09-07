@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const read = (relativePath) => readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
-const [app, collaboration, dashboard, business, factory, people, library, compliance, taxAssets, taxWorkspace, ipRights, itServices, apiSmoke, quickLinkSmoke, workspaceHook, serverApp, packageJsonText] = await Promise.all([
+const [app, collaboration, dashboard, business, factory, people, library, compliance, taxAssets, taxWorkspace, ipRights, itServices, wikiPage, apiSmoke, quickLinkSmoke, workspaceHook, serverApp, packageJsonText] = await Promise.all([
   read('src/App.tsx'),
   read('src/components/CollaborationSuite.tsx'),
   read('src/components/DashboardWorkspace.tsx'),
@@ -16,6 +16,7 @@ const [app, collaboration, dashboard, business, factory, people, library, compli
   read('src/components/TaxWorkspace.tsx'),
   read('src/components/IpRights.tsx'),
   read('src/components/ItServices.tsx'),
+  read('src/components/wiki/WikiPage.tsx'),
   read('server/store/menu-write-smoke.test.mjs'),
   read('scripts/quick-links-storage.test.mjs'),
   read('src/hooks/useWorkspaceState.ts'),
@@ -212,6 +213,17 @@ const contracts = [
       [/useIpDialog\(\(\) => \{ void cancel\(\) \}, locked, \(\) => item \? titleInputRef\.current : uploadButtonRef\.current\)/, 'dialog traps focus and restores it on close'],
     ],
   },
+  {
+    screen: '문서', persistenceId: 'wiki-api', source: wikiPage, checks: [
+      [/const response = await fetch\('\/api\/wiki', \{\s*\n?\s*method: 'POST'/, 'create goes through the dedicated wiki route'],
+      [/method: 'PATCH', headers, body: JSON\.stringify\(\{ \.\.\.patch, version \}\)/, 'metadata update sends the version the screen actually holds'],
+      [/method: 'DELETE', headers \}\)/, 'archive wiring'],
+      [/createWikiOpQueue\(\{/, 'body edits go through the op queue, never a whole-array PUT'],
+      [/queueRef\.current\?\.flush\(\)/, 'pending edits are flushed before structural writes'],
+      [/if \(!response\.ok\) throw new Error\(body\.error\?\.message \|\| '문서를 만들지 못했습니다\.'\)/, 'create failure surfaces the server sentence'],
+      [/onToast\(cause instanceof Error \? cause\.message : '문서를 보관하지 못했습니다\.'\)/, 'archive failure handling'],
+    ],
+  },
 ]
 
 for (const contract of contracts) {
@@ -221,7 +233,7 @@ for (const contract of contracts) {
 }
 
 test('all UI contracts stay paired to the same persistence target exercised by lifecycle smoke', () => {
-  assert.equal(contracts.length, 15)
+  assert.equal(contracts.length, 16)
   const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   for (const { screen, persistenceId } of contracts) {
     if (persistenceId.startsWith('localStorage:')) {
@@ -229,13 +241,17 @@ test('all UI contracts stay paired to the same persistence target exercised by l
       assert.match(quickLinkSmoke, new RegExp(escape(persistenceId.slice('localStorage:'.length))), `${screen} localStorage target mismatch`)
       continue
     }
+    // generic 워크스페이스 PUT이 없는 두 화면(자료실·문서)은 전용 라우트로 산다 —
+    // 스모크의 짝도 key가 아니라 그 화면을 가리키는 리터럴이다.
     const pairedCase = persistenceId === 'documents-api'
       ? /const documentCase = \{ screen: '기업 자료실', persistenceId: 'documents-api' \}/
-      : new RegExp(`screen: '${escape(screen)}', key: '${escape(persistenceId)}'`)
+      : persistenceId === 'wiki-api'
+        ? /const wikiCase = \{ screen: '문서', persistenceId: 'wiki-api' \}/
+        : new RegExp(`screen: '${escape(screen)}', key: '${escape(persistenceId)}'`)
     assert.match(apiSmoke, pairedCase, `${screen} UI target ${persistenceId} is not the lifecycle target`)
   }
   for (const marker of ['CREATE', 'RESTART/PERSIST', 'UPDATE', 'RESTART/UPDATE-PERSIST', 'DELETE', 'FINAL RESTART/EMPTY']) {
-    const dynamicCount = '\\$\\{workspaceCases\\.length \\+ 1\\}\\/\\$\\{workspaceCases\\.length \\+ 1\\}'
+    const dynamicCount = '\\$\\{workspaceCases\\.length \\+ 2\\}\\/\\$\\{workspaceCases\\.length \\+ 2\\}'
     assert.match(apiSmoke, new RegExp(`t\\.diagnostic\\(\\\`${marker.replace('/', '\\/')} ${dynamicCount} PASS`), `missing dynamic lifecycle marker: ${marker}`)
   }
   assert.ok((apiSmoke.match(/await withRuntimeApp\(/g) ?? []).length >= 4, 'create/update/delete must each cross isolated app/store restarts')

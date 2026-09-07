@@ -46,9 +46,16 @@ export const OP_ID_RE = /^OP-[A-Za-z0-9_-]{6,40}$/
 /** 첨부는 기업 자료실의 문서 id다 — `chat-attachments.mjs:26`과 같은 형식을 쓴다. */
 export const ATTACHMENT_ID_RE = /^DOC-[A-Za-z0-9_-]{4,160}$/
 
+/**
+ * 시각 부분은 **갈라 주는 힘이 거의 없다**고 보고 난수를 넉넉히 쓴다.
+ * `Date.now()`는 Windows에서 15.6ms 단위로 뛰는 일이 흔해, 한 번에 여러 문서를 만들면 그 전부가
+ * 같은 접두를 갖는다. 그때 남는 것은 난수뿐인데, 문서 id가 겹치면 `documents.find(row => row.id === …)`가
+ * 다른 행을 잡아 **권한 판정이 통째로 뒤집힌다**(부모를 찾다가 남의 프로젝트 문서를 잡는 식이다).
+ * 그래서 문서·블록 id는 8바이트를 쓴다(id 길이는 `*_ID_RE`의 40자 상한 안이다).
+ */
 const base36 = () => Date.now().toString(36).toUpperCase()
-export const newBlockId = () => `BLK-${base36()}-${randomBytes(3).toString('hex').toUpperCase()}`
-export const newDocumentId = () => `WDOC-${base36()}-${randomBytes(2).toString('hex').toUpperCase()}`
+export const newBlockId = () => `BLK-${base36()}-${randomBytes(8).toString('hex').toUpperCase()}`
+export const newDocumentId = () => `WDOC-${base36()}-${randomBytes(8).toString('hex').toUpperCase()}`
 export const newOpId = () => `OP-${base36()}-${randomBytes(3).toString('hex').toUpperCase()}`
 
 // ── 타입 ────────────────────────────────────────────────────────────────────
@@ -70,6 +77,8 @@ export const WIKI_BLOCK_TOO_LONG_FOR_TYPE = 'WIKI_BLOCK_TOO_LONG_FOR_TYPE'
 export const LINK_GONE_LABEL = '삭제된 항목'
 export const LINK_HIDDEN_LABEL = '접근 권한 없음'
 export const LINK_UNTITLED_LABEL = '제목 없음'
+/** 템플릿 복제가 링크 자리에 남기는 중립 낱말. 대상의 이름을 대신한다(`neutralizeLinks`). */
+export const LINK_TEMPLATE_LABEL = '연결된 항목'
 
 /**
  * 타입별 규격 한 벌.
@@ -338,6 +347,21 @@ export function stripLinks(text) {
   const source = typeof text === 'string' ? text : ''
   if (!source.includes('[[')) return source
   return source.replace(linkTokenRe(), (_match, _kind, _id, label) => label)
+}
+
+/**
+ * 토큰을 **이름 없는 자리표시자**로 바꾼다. 템플릿 복제 전용이다.
+ *
+ * 왜 `stripLinks`(라벨만 남기기)가 아닌가: 저장된 라벨은 클라이언트가 보낸 값이 아니라 **서버가 쓰기
+ * 시점에 채워 넣은 대상의 현재 제목**이다(`normalizeLinks`). 토큰만 벗기면 그 제목이 재인가할 근거가
+ * 사라진 평문으로 남아, 볼 수 없는 문서·업무·사람의 이름이 템플릿을 통해 테넌트 전원에게 영구히 열린다.
+ * 렌더 시점 `redactLinks`가 다시 설 수 없는 자리이므로 이름 자체를 남기지 않는다.
+ * 대가는 "템플릿에서는 링크가 자리표시자가 된다"이며, 템플릿은 빈 서식이라 그 편이 맞다.
+ */
+export function neutralizeLinks(text) {
+  const source = typeof text === 'string' ? text : ''
+  if (!source.includes('[[')) return source
+  return source.replace(linkTokenRe(), LINK_TEMPLATE_LABEL)
 }
 
 /**

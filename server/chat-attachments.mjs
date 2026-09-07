@@ -32,13 +32,25 @@ export function normalizeChatAttachmentRequest(value) {
   return result
 }
 
+/**
+ * 첨부 문서의 본문을 모델 입력으로 만든다.
+ *
+ * `canUseForAi`는 **필수 인자**다. 기본값(`() => true`)을 두면 주입을 잊은 호출부가 조용히 열린다 —
+ * 그 자리가 곧 'AI 처리 수준'이라는 약속이 거짓말이 되는 자리이고, 어떤 테스트도 잡지 못한다.
+ * 요구 수준은 호출부마다 다르므로(렌즈·판독은 '정리', 채팅 첨부는 '활용') 여기서 정하지 않고 받는다.
+ * 라우트 층에도 같은 게이트가 있다 — 이것은 그 뒤에 서는 두 번째 겹이다.
+ */
 export async function resolveChatAttachments({
   requested,
   documents,
   account,
   canReadDocument,
+  canUseForAi,
   storage,
 }) {
+  if (typeof canUseForAi !== 'function') {
+    throw new TypeError('resolveChatAttachments: canUseForAi는 필수 인자입니다(AI 처리 수준 판정).')
+  }
   const normalized = normalizeChatAttachmentRequest(requested)
   if (!normalized.length) return { documents: [], blocks: [], contentDocuments: 0 }
   if (!account?.tenantId || !storage) {
@@ -49,6 +61,10 @@ export async function resolveChatAttachments({
     const document = byId.get(documentId)
     if (!document || !canReadDocument(document, account)) {
       throw new ChatAttachmentError('CHAT_ATTACHMENT_FORBIDDEN', '첨부파일을 찾을 수 없거나 열람 권한이 없습니다.', 403)
+    }
+    // 열람 권한과 갈라 답한다 — 볼 수는 있지만 AI가 열 수 없는 자료이므로 '권한 없음'은 거짓이다.
+    if (!canUseForAi(document, account)) {
+      throw new ChatAttachmentError('CHAT_ATTACHMENT_AI_LOCKED', 'AI 처리 수준이 낮아 이 자료의 본문을 AI가 읽을 수 없습니다.', 403)
     }
     return document
   })

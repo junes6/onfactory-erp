@@ -42,8 +42,10 @@ import {
   WORK_RULE_FREQUENCIES as SCHEDULE_FREQUENCIES,
   WORK_RULE_MONTHLY_MODES as SCHEDULE_MONTHLY_MODES,
 } from './work-rule-schedule.mjs'
-import { workItemTreeViolation, openSubtaskCount, parentRefsFor, prependWithinCap, registerWorkItemTreeRoutes } from './work-item-tree.mjs'
+import { workItemTreeViolation, openSubtaskCount, parentRefsFor, prependWithinCap, newWorkItemId, registerWorkItemTreeRoutes } from './work-item-tree.mjs'
 import { isScheduleInstant, scheduleArrayViolation, registerWorkItemScheduleRoutes } from './work-item-schedule.mjs'
+// R16-H: 문서(위키). 라우트·권한·병합·이력이 이 모듈 한 벌 안에 있다 — app.mjs에는 라우트를 새로 쓰지 않는다.
+import { registerWikiRoutes } from './wiki.mjs'
 import { CUSTOM_FIELD_KEY, customFieldViolation, hasWorkFieldValuesShape, registerCustomFieldRoutes } from './custom-fields.mjs'
 import { registerSavedViewRoutes } from './saved-views.mjs'
 import { PROJECT_TEMPLATES_KEY, registerProjectTemplateRoutes } from './project-templates.mjs'
@@ -310,8 +312,18 @@ function workOriginFromProposal(proposal) {
     : proposal?.kind === 'task-from-message' ? '메신저에서 승격'
       : proposal?.kind === 'opportunity' ? `외부 기회(${String(proposal.payload?.source ?? '외부').slice(0, 20)})`
         : proposal?.kind === 'lens-task' ? '문서 렌즈에서 추출'
-          : 'AI 제안에서 생성'
-  return { kind: String(proposal?.kind ?? 'proposal'), label, detail, page: 'approvals', focusId: String(proposal?.id ?? '') }
+          : proposal?.kind === 'wiki-task' ? '문서에서 승격'
+            : 'AI 제안에서 생성'
+  // R16-H: 문서에서 올라온 제안은 승인된 뒤에도 **문서로** 되짚어야 한다.
+  // page를 'approvals'로 고정해 두면 그 업무의 출처 배지가 이미 결정된 제안 카드로 되돌아가는 막다른 길이 된다.
+  const fromWiki = proposal?.kind === 'wiki-task' && Boolean(proposal.payload?.documentId)
+  return {
+    kind: String(proposal?.kind ?? 'proposal'),
+    label,
+    detail,
+    page: fromWiki ? 'wiki' : 'approvals',
+    focusId: fromWiki ? String(proposal.payload.documentId) : String(proposal?.id ?? ''),
+  }
 }
 
 function hasWorkItemShape(value) {
@@ -2224,6 +2236,8 @@ export function createApp(options = {}) {
         : []) : []),
       ...(Array.isArray(item?.completion?.evidence) ? item.completion.evidence.map((attachment) => attachment?.id) : []),
       ...(Array.isArray(item?.comments) ? item.comments.flatMap((comment) => Array.isArray(comment?.attachments) ? comment.attachments.map((attachment) => attachment?.id) : []) : []),
+      // R16-H: 문서(위키) 본문의 그림·파일. 빠뜨리면 문서 속 그림이 자료실에서 그냥 지워진다.
+      ...(Array.isArray(item?.blocks) ? item.blocks.map((block) => block?.attachmentId) : []),
       item?.evidenceId,
       item?.drawingDocumentId,
       item?.backgroundDocumentId,
@@ -2278,7 +2292,7 @@ export function createApp(options = {}) {
       .filter((notice) => !notice?.archivedAt)
     return isFactoryDrawingDocument(document)
       || linkedDocumentIds(activeNotices).includes(id)
-      || ['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations', 'project-posts', 'it-contracts', 'it-deliverables', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights']
+      || ['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations', 'project-posts', 'it-contracts', 'it-deliverables', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'wiki-documents']
         .some((key) => linkedDocumentIds(tenantStore[key]?.data).includes(id))
   }
   const safeDownloadName = (value) => String(value || 'document').replace(/[\r\n"]/g, '_').slice(0, 180)
@@ -2620,6 +2634,8 @@ export function createApp(options = {}) {
         documents,
         account: request.auth,
         canReadDocument,
+        // 항목 판독도 '정리' 이상이면 연다. 위 라우트 게이트와 같은 술어를 그대로 넘긴다.
+        canUseForAi: (file) => aiPolicyAllows(file, 'indexed'),
         storage: documentStorage,
       })
       if (attachmentResult.contentDocuments !== 1) {
@@ -3053,14 +3069,26 @@ export function createApp(options = {}) {
     writeProposals(tenantId, next, 'system:ai-policy')
     return true
   }
-  const enqueueProposal = (tenantId, proposal) => {
+  /**
+   * 제안 한 건이 큐에 올랐다고 바깥에 말한다(관리자 알림 + SSE). **되돌릴 수 없는 절반**이다.
+   * 되돌릴 수 있는 절반(제안 행)과 갈라 둔 이유는 아래 `enqueueProposal`의 `announce`에 적었다.
+   */
+  const announceProposal = (tenantId, proposal) => {
+    notifyProposal(tenantId, proposal)
+    events.publish(tenantId, 'proposal', { pending: proposalsOf(tenantId).filter((item) => item?.status === 'pending').length, added: proposal.id })
+  }
+  /**
+   * `announce:false`면 저장소에만 넣고 알리지 않는다 — 커밋이 실패하면 제안 행은 되돌아가지만
+   * 알림 행과 SSE 이벤트는 되돌아가지 않아, 존재하지 않는 제안을 가리키는 알림이 관리자에게 남는다.
+   * 커밋이 뒤따르는 호출부(문서 → 업무 승격)는 성공을 확인한 뒤 `announceProposal`을 직접 부른다.
+   */
+  const enqueueProposal = (tenantId, proposal, { announce = true } = {}) => {
     if (!proposal || !tenantId) return false
     const existing = proposalsOf(tenantId)
     if (existing.some((item) => item?.sourceKey === proposal.sourceKey && item.status === 'pending')) return false
     writeProposals(tenantId, [proposal, ...existing], proposal.createdBy)
     scheduleAuditCommit()
-    notifyProposal(tenantId, proposal)
-    events.publish(tenantId, 'proposal', { pending: proposalsOf(tenantId).filter((item) => item?.status === 'pending').length, added: proposal.id })
+    if (announce) announceProposal(tenantId, proposal)
     return true
   }
   const runSentinel = (tenantId, now = new Date()) => {
@@ -3212,7 +3240,7 @@ export function createApp(options = {}) {
         const ownerAccount = owner ?? { id: request.auth.id, name: request.auth.name }
         const dueIso = Number.isFinite(Date.parse(finalPayload.due)) ? new Date(Date.parse(finalPayload.due)).toISOString() : new Date(Date.now() + 2 * 24 * 60 * 60 * 1_000).toISOString()
         const workItem = {
-          id: `WK-${Date.now().toString().slice(-8)}`,
+          id: newWorkItemId(Array.isArray(tenantStore['work-items']?.data) ? tenantStore['work-items'].data : []),
           title: String(finalPayload.title ?? proposal.summary).trim().slice(0, 120) || '승인된 제안 업무',
           description: String(finalPayload.description ?? proposal.evidence ?? '').trim().slice(0, 2_000),
           owner: ownerAccount.name,
@@ -3232,6 +3260,11 @@ export function createApp(options = {}) {
           response.status(400).json({ error: { code: 'INVALID_PROPOSAL_TASK', message: '담당자 또는 업무 정보를 확인해 주세요.' } })
           return
         }
+        // 배열 저장 문(PUT /api/workspace/work-items)이 정규화 뒤에 거는 것과 같은 한 벌이다 —
+        // 승인 한 번으로 그 문이 거절하는 행(외부 게스트 담당 + 프로젝트 귀속 없음)이 들어오면,
+        // 업무 화면은 그 뒤로 **읽은 그대로 되쓰기조차** 400으로 막힌다.
+        const guestViolation = guestWorkItemViolation(normalized, accounts, guestGrantOf)
+        if (guestViolation) { response.status(400).json({ error: guestViolation }); return }
         previousEffectRecord = tenantStore['work-items']
         const current = Array.isArray(tenantStore['work-items']?.data) ? tenantStore['work-items'].data : []
         tenantStore['work-items'] = { data: prependWithinCap(current, normalized[0], 1_000), updatedAt: now, updatedBy: request.auth.id }
@@ -3341,19 +3374,34 @@ export function createApp(options = {}) {
     const lensId = String(request.body?.lensId ?? '')
     const lens = tenantLenses(request.auth.tenantId).find((item) => item.id === lensId && item.enabled !== false)
     if (!lens) { response.status(404).json({ error: { code: 'LENS_NOT_FOUND', message: '사용할 수 있는 렌즈를 찾을 수 없습니다.' } }); return }
+    // R16-H: 문서(위키)도 같은 라우트로 읽는다. 새 라우트를 만들면 청구 예약·사용량 원장·조정 큐·
+    // 지식 공백 100줄이 두 벌이 되고, 두 벌은 언젠가 한쪽만 고쳐진다.
+    const isWiki = String(request.params.id).startsWith('WDOC-')
+    const wikiSource = isWiki ? wiki.wikiLensSourceOf(request.auth, request.params.id) : null
+    if (isWiki && !wikiSource) {
+      // 자료와 **같은 404**로 답한다 — 위키 전용 코드를 내면 그 자체가 "그런 문서가 있다"는 신호가 된다.
+      response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없거나 열람 권한이 없습니다.' } })
+      return
+    }
+    if (isWiki && wikiSource.blocked) {
+      response.status(403).json({ error: { code: 'WIKI_AI_LEVEL_BLOCKED', message: 'AI 처리 수준이 ‘보관만’인 문서입니다. 문서 설정에서 수준을 올린 뒤 다시 시도해 주세요.' } })
+      return
+    }
     const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : []
-    const document = documents.find((item) => item.id === request.params.id)
-    if (!document || !canReadDocument(document, request.auth)) {
+    const document = isWiki
+      ? { id: request.params.id, name: wikiSource.name, mime: 'text/markdown' }
+      : documents.find((item) => item.id === request.params.id)
+    if (!isWiki && (!document || !canReadDocument(document, request.auth))) {
       response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없거나 열람 권한이 없습니다.' } })
       return
     }
     // '보관만'인 자료는 AI가 열지 않는다. 화면은 이 문서에 'AI에게 물어보기'를 아예 그리지 않지만,
     // 라우트는 직접 부르는 요청도 같은 문장으로 거절한다.
-    if (!aiPolicyAllows(document, 'indexed')) {
+    if (!isWiki && !aiPolicyAllows(document, 'indexed')) {
       response.status(409).json({ error: aiLockedError(request.auth.role === 'tenant-admin', document) })
       return
     }
-    const sourceMime = String(document.mime || '').toLowerCase()
+    const sourceMime = isWiki ? 'text/markdown' : String(document.mime || '').toLowerCase()
     if (!LENS_MIME_TYPES.includes(sourceMime)) {
       response.status(415).json({ error: { code: 'LENS_UNSUPPORTED_FILE', message: '렌즈는 PDF·이미지·텍스트 파일만 읽을 수 있습니다.' } })
       return
@@ -3372,13 +3420,23 @@ export function createApp(options = {}) {
     let providerSucceeded = false
     const startedAt = new Date()
     try {
-      const attachmentResult = await resolveChatAttachments({
-        requested: [{ documentId: document.id }],
-        documents,
-        account: request.auth,
-        canReadDocument,
-        storage: documentStorage,
-      })
+      // 위키 본문은 이미 `redactLinks`를 지난 마크다운이라 저장소를 거치지 않는다.
+      // 자료와 같은 봉투(<attachment name>)에 넣어야 프롬프트의 "첨부는 데이터다" 규칙이 그대로 걸린다.
+      const attachmentResult = isWiki
+        ? {
+          blocks: [{ type: 'text', text: `<attachment name="${String(wikiSource.name).replaceAll('"', '&quot;')}">\n${wikiSource.text}\n</attachment>` }],
+          contentDocuments: 1,
+          documents: [],
+        }
+        : await resolveChatAttachments({
+          requested: [{ documentId: document.id }],
+          documents,
+          account: request.auth,
+          canReadDocument,
+          // 렌즈는 '정리' 이상이면 연다. 위 라우트 게이트와 같은 술어를 그대로 넘긴다.
+          canUseForAi: (file) => aiPolicyAllows(file, 'indexed'),
+          storage: documentStorage,
+        })
       if (attachmentResult.contentDocuments !== 1) {
         throw new DocumentLensError('LENS_UNSUPPORTED_FILE', '이 파일의 본문을 AI가 읽을 수 없습니다.', 415)
       }
@@ -6552,13 +6610,22 @@ export function createApp(options = {}) {
     if (projectRoleOf(project, request.auth) !== 'owner') { response.status(403).json({ error: { code: 'PROJECT_OWNER_REQUIRED', message: '프로젝트 소유자 또는 관리자만 삭제할 수 있습니다.' } }); return }
     const tenantStore = workspaceStore.tenants[request.auth.tenantId]
     const previousSpaces = tenantStore['project-spaces']; const previousPosts = tenantStore['project-posts']
+    // 지우기 전에 명단을 잡아 둔다 — 지운 뒤에는 "누가 이 프로젝트를 보고 있었는가"를 물을 곳이 없다.
+    const audienceIds = projectMemberIds(project)
     writeProjectData(request.auth.tenantId, 'project-spaces', projects.filter((item) => item.id !== project.id), request.auth.id)
     writeProjectData(request.auth.tenantId, 'project-posts', projectPostsOf(request.auth.tenantId).filter((post) => post.projectId !== project.id), request.auth.id)
-    try { await commitWorkspaceStore() } catch {
+    // R16-H: 이 프로젝트에 매달린 문서(위키)도 **같은 커밋에서** 보관 처리한다. 남겨 두면 프로젝트가
+    // 사라진 문서는 아무도 열 수 없는 채로 회사 문서 상한 한 칸을 계속 먹고 보관 스윕도 걷어내지 못한다.
+    // 커밋은 여기서 한 번만 일어나고, 실패하면 프로젝트 두 키와 위키 두 키가 함께 되돌아간다(규칙 9).
+    const wikiArchived = await wiki.archiveProjectWikiDocuments(request.auth.tenantId, project.id, request.auth, {
+      audienceIds,
+      commit: async () => { try { await commitWorkspaceStore(); return true } catch { return false } },
+    })
+    if (!wikiArchived) {
       if (previousSpaces) tenantStore['project-spaces'] = previousSpaces; if (previousPosts) tenantStore['project-posts'] = previousPosts
       response.status(500).json({ error: { code: 'PROJECT_WRITE_FAILED', message: '프로젝트를 삭제하지 못했습니다.' } }); return
     }
-    response.json({ ok: true })
+    response.json({ ok: true, archivedWikiIds: wikiArchived.archivedIds })
   })
   app.get('/api/projects/:id', ...projectGuards, async (request, response) => {
     if (!requireTenant(request, response)) return
@@ -7812,7 +7879,7 @@ export function createApp(options = {}) {
   const createTaskFromConclusion = async ({ auth, conversation, message, title, origin = conclusionOrigin(conversation) }) => {
     const now = new Date().toISOString()
     const workItem = {
-      id: `WK-${Date.now().toString().slice(-8)}`,
+      id: newWorkItemId(Array.isArray(workspaceStore.tenants[auth.tenantId]?.['work-items']?.data) ? workspaceStore.tenants[auth.tenantId]['work-items'].data : []),
       title: (title || autoTitle(message.content)).slice(0, 120),
       description: String(message.content).slice(0, 2_000),
       owner: auth.name,
@@ -8016,6 +8083,9 @@ export function createApp(options = {}) {
     workspaceStore,
     accounts,
     canReadDocument,
+    // 문서(위키) 인가도 판정하는 쪽(wiki.mjs) 한 벌을 그대로 받는다. `registerWikiRoutes`는 아래에서 부르지만
+    // 이 화살표의 본문은 요청 시점에 실행되므로 TDZ가 아니다(렌즈 라우트가 wikiLensSourceOf를 쓰는 것과 같은 관행).
+    canReadWikiDocument: (document, auth) => wiki.canReadWikiDocument(document, auth),
     isConversationVisibleToMember,
     // 공지 가시성은 notices.mjs 한 곳에서 판정한다. 여기서 규칙을 다시 쓰면 목록과 검색이 어긋난다.
     projectRoleOf,
@@ -8213,6 +8283,50 @@ export function createApp(options = {}) {
   registerWorkItemScheduleRoutes({
     app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, commitWorkspaceStore, events,
     hasWorkItemShape, workspaceRecordVersion, scheduleSentinel,
+  })
+
+  // R16-H: 문서(위키). wiki-documents·wiki-revisions도 WORKSPACE_STORE_KEYS에 없다 —
+  // generic GET/PUT은 404 STORE_KEY_NOT_FOUND로 끝나고 이 라우트들만 문이 된다.
+  // 열어 두면 누구든 PUT 한 번으로 병합·이력·링크 인가를 통째로 우회한다.
+  const wiki = registerWikiRoutes({
+    app, requireAuth, requireMatchingWorkspaceIdentity,
+    workspaceStore, accounts, commitWorkspaceStore, events,
+    documentStorage, documentRecord, getTenantDocument, canReadDocument, grantDocumentAccess,
+    projectSpacesOf, projectRoleOf, projectMemberIds,
+    normalizeAdminWorkItems, operatorAwareAccounts, prependWithinCap, newWorkItemId, isMemberWorkItem,
+    // 담당자 이름 판정과 게스트 제약은 업무 배열 저장 문(PUT /api/workspace/work-items)이 쓰는 것과
+    // **같은 한 벌**을 넘긴다 — 문마다 따로 적으면 같은 이름이 문마다 다른 사람에게 간다.
+    uniqueTenantAccountByName: (tenantId, name) => uniqueTenantAccountByName(accounts, tenantId, name),
+    guestGrantOf,
+    enqueueProposal, announceProposal, newProposalId, proposalsOf, writeProposals,
+    ...(typeof options.wikiClock === 'function' ? { clock: options.wikiClock } : {}),
+  })
+
+  // 스케줄러 잡이 부르는 러너를 시험이 시각을 주입해 직접 돌릴 수 있게 남긴다
+  // (스케줄러의 now는 벽시계라, 보관 만료를 그 시계로 재면 그 시험은 날짜가 지나야만 통과한다).
+  app.locals.sweepWikiArchive = wiki.sweepWikiArchive
+  app.locals.sweepWikiRevisions = wiki.sweepWikiRevisions
+
+  scheduler.register({
+    id: 'wiki-archive-sweep',
+    label: '보관한 문서 비우기',
+    description: '보관한 지 30일이 지난 문서와 그 이력을 완전히 없앱니다.',
+    spec: { every: 'day', hour: 4, minute: 20 },
+    run: async ({ now }) => {
+      const { removed } = await wiki.sweepWikiArchive(now)
+      return { detail: removed ? `${removed}건을 완전히 지웠습니다.` : '지울 것이 없었습니다.' }
+    },
+  })
+
+  scheduler.register({
+    id: 'wiki-revision-sweep',
+    label: '문서 버전 이력 정리',
+    description: '1년이 지났거나 회사 상한을 넘은 버전 이력을 오래된 것부터 정리합니다.',
+    spec: { every: 'day', hour: 4, minute: 30 },
+    run: async ({ now }) => {
+      const { removed } = await wiki.sweepWikiRevisions(now)
+      return { detail: removed ? `${removed}건을 정리했습니다.` : '정리할 것이 없었습니다.' }
+    },
   })
 
   // R16-E: 구글 캘린더. calendar-connections·calendar-sync-links도 WORKSPACE_STORE_KEYS에 없다 —
@@ -8427,10 +8541,17 @@ export function createApp(options = {}) {
       response.status(409).json({ error: aiLockedError(request.auth.role === 'tenant-admin', lockedAttachment) })
       return
     }
+    /**
+     * R16-H: 문서(위키)는 **별도 필드**로 간다. `accessibleDocuments`에 섞으면 모델이 `WDOC-` id로
+     * 첨부를 제안하는데 `normalizeChatAttachmentRequest`가 `DOC-`만 받아 400이 난다.
+     * 여기에도 제목·요약만 실린다 — 본문은 명시 첨부로만 모델에 간다는 선은 자료와 같다.
+     */
+    const accessibleWikiDocuments = wiki.wikiAiContext(request.auth)
     const chatContext = {
       tenant: request.auth.tenantName,
       data: request.body?.context,
       accessibleDocuments,
+      accessibleWikiDocuments,
     }
 
     /** 답을 대화에 적고, 화면이 바로 반영할 수 있게 대화 상태를 함께 돌려준다. */
@@ -8481,6 +8602,8 @@ export function createApp(options = {}) {
         documents: tenantDocuments,
         account: request.auth,
         canReadDocument,
+        // 채팅 첨부는 본문을 통째로 모델에 보낸다 — 렌즈·판독('정리')보다 한 칸 높은 '활용'을 요구한다.
+        canUseForAi: (file) => aiPolicyAllows(file, 'active'),
         storage: documentStorage,
       })
       const claudeMessages = attachBlocksToLatestUserMessage(messages, attachmentResult.blocks)

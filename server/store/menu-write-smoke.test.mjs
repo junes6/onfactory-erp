@@ -113,6 +113,8 @@ const workspaceCases = [
   { screen: '계약·거래처', key: 'it-contracts', created: [itContract], updated: [{ ...itContract, title: '스모크 계약 수정', number: '2099-CT-002' }], empty: [] },
 ]
 const documentCase = { screen: '기업 자료실', persistenceId: 'documents-api' }
+// 문서(위키)는 generic 워크스페이스 PUT이 없다(병합을 우회할 수 없게 막았다) — 자료실처럼 전용 라우트로 산다.
+const wikiCase = { screen: '문서', persistenceId: 'wiki-api' }
 
 function emptyStore() {
   return {
@@ -181,6 +183,8 @@ test('all tenant write surfaces create, survive a store/app restart, update, and
   const storeFile = path.join(directory, 'workspace-state.json')
   const documentDirectory = path.join(directory, 'documents')
   let documentId = ''
+  let wikiId = ''
+  let wikiBlockId = ''
   try {
     await writeFile(storeFile, JSON.stringify(emptyStore()), 'utf8')
 
@@ -195,7 +199,15 @@ test('all tenant write surfaces create, survive a store/app restart, update, and
       const body = await upload.json()
       assert.equal(upload.status, 201, JSON.stringify(body))
       documentId = body.document.id
-      t.diagnostic(`CREATE ${workspaceCases.length + 1}/${workspaceCases.length + 1} PASS · ${workspaceCases.map((item) => item.screen).join(', ')}, 기업 자료실`)
+      const wikiCreate = await fetch(`${origin}/api/wiki`, {
+        method: 'POST', headers: authHeaders(cookie),
+        body: JSON.stringify({ title: '스모크 문서', clientRequestId: 'WNEW-smoke-1' }),
+      })
+      const wikiBody = await wikiCreate.json()
+      assert.equal(wikiCreate.status, 201, JSON.stringify(wikiBody))
+      wikiId = wikiBody.document.id
+      wikiBlockId = wikiBody.document.blocks[0].id
+      t.diagnostic(`CREATE ${workspaceCases.length + 2}/${workspaceCases.length + 2} PASS · ${workspaceCases.map((item) => item.screen).join(', ')}, 기업 자료실, ${wikiCase.screen}`)
     })
 
     await withRuntimeApp(storeFile, documentDirectory, async (origin) => {
@@ -208,14 +220,29 @@ test('all tenant write surfaces create, survive a store/app restart, update, and
       const download = await fetch(`${origin}/api/documents/${encodeURIComponent(documentId)}/download`, { headers: authHeaders(cookie, false) })
       assert.equal(download.status, 200)
       assert.equal(await download.text(), 'onfactory menu smoke')
-      t.diagnostic(`RESTART/PERSIST ${workspaceCases.length + 1}/${workspaceCases.length + 1} PASS · 생성 데이터와 자료 원본 유지`)
+      const wikiRead = await fetch(`${origin}/api/wiki/${encodeURIComponent(wikiId)}`, { headers: authHeaders(cookie, false) })
+      const wikiReadBody = await wikiRead.json()
+      assert.equal(wikiRead.status, 200, JSON.stringify(wikiReadBody))
+      assert.equal(wikiReadBody.document.title, '스모크 문서')
+      t.diagnostic(`RESTART/PERSIST ${workspaceCases.length + 2}/${workspaceCases.length + 2} PASS · 생성 데이터와 자료 원본 유지`)
 
       for (const item of workspaceCases) await putWorkspace(origin, cookie, item, item.updated)
       const updateDocument = await fetch(`${origin}/api/documents/${encodeURIComponent(documentId)}`, {
         method: 'PATCH', headers: authHeaders(cookie), body: JSON.stringify({ name: '스모크 자료 수정.txt', summary: '수정 단계' }),
       })
       assert.equal(updateDocument.status, 200, await updateDocument.text())
-      t.diagnostic(`UPDATE ${workspaceCases.length + 1}/${workspaceCases.length + 1} PASS · 공장 토큰색 블록 및 창고 정보 포함`)
+      // 문서는 PUT이 아니라 조각(op)으로 고친다. 저장 경로가 다르니 라이프사이클도 그 문으로 지난다.
+      const wikiOps = await fetch(`${origin}/api/wiki/${encodeURIComponent(wikiId)}/ops`, {
+        method: 'POST', headers: authHeaders(cookie),
+        body: JSON.stringify({
+          baseVersion: 1, clientId: 'WCL-SMOKE',
+          ops: [{ opId: 'OP-SMOKE-000001', kind: 'update', blockId: wikiBlockId, baseSeq: 1, block: { type: 'text', text: '스모크 문단 수정' } }],
+        }),
+      })
+      const wikiOpsBody = await wikiOps.json()
+      assert.equal(wikiOps.status, 200, JSON.stringify(wikiOpsBody))
+      assert.deepEqual(wikiOpsBody.applied, ['OP-SMOKE-000001'])
+      t.diagnostic(`UPDATE ${workspaceCases.length + 2}/${workspaceCases.length + 2} PASS · 공장 토큰색 블록 및 창고 정보 포함`)
     })
 
     await withRuntimeApp(storeFile, documentDirectory, async (origin) => {
@@ -223,14 +250,22 @@ test('all tenant write surfaces create, survive a store/app restart, update, and
       for (const item of workspaceCases) verifyWorkspace(item, await readWorkspace(origin, cookie, item), item.updated)
       const documents = (await (await fetch(`${origin}/api/documents`, { headers: authHeaders(cookie, false) })).json()).documents
       assert.equal(documents.find((item) => item.id === documentId)?.name, '스모크 자료 수정.txt')
-      t.diagnostic(`RESTART/UPDATE-PERSIST ${workspaceCases.length + 1}/${workspaceCases.length + 1} PASS`)
+      const wikiAfterUpdate = await (await fetch(`${origin}/api/wiki/${encodeURIComponent(wikiId)}`, { headers: authHeaders(cookie, false) })).json()
+      assert.equal(wikiAfterUpdate.document.blocks[0].text, '스모크 문단 수정')
+      assert.equal(wikiAfterUpdate.document.version, 2)
+      t.diagnostic(`RESTART/UPDATE-PERSIST ${workspaceCases.length + 2}/${workspaceCases.length + 2} PASS`)
 
       for (const item of workspaceCases) await putWorkspace(origin, cookie, item, item.empty)
       const removeDocument = await fetch(`${origin}/api/documents/${encodeURIComponent(documentId)}`, {
         method: 'DELETE', headers: authHeaders(cookie, false),
       })
       assert.equal(removeDocument.status, 200, await removeDocument.text())
-      t.diagnostic(`DELETE ${workspaceCases.length + 1}/${workspaceCases.length + 1} PASS · 본인 임시저장 일지 및 자료 원본 포함`)
+      // 문서는 보관 뒤에만 완전히 지울 수 있다 — 두 문을 모두 지나야 라이프사이클이 끝난다.
+      const wikiArchive = await fetch(`${origin}/api/wiki/${encodeURIComponent(wikiId)}`, { method: 'DELETE', headers: authHeaders(cookie, false) })
+      assert.equal(wikiArchive.status, 200, await wikiArchive.text())
+      const wikiPurge = await fetch(`${origin}/api/wiki/${encodeURIComponent(wikiId)}?purge=1`, { method: 'DELETE', headers: authHeaders(cookie, false) })
+      assert.equal(wikiPurge.status, 200, await wikiPurge.text())
+      t.diagnostic(`DELETE ${workspaceCases.length + 2}/${workspaceCases.length + 2} PASS · 본인 임시저장 일지 및 자료 원본 포함`)
     })
 
     await withRuntimeApp(storeFile, documentDirectory, async (origin) => {
@@ -238,7 +273,11 @@ test('all tenant write surfaces create, survive a store/app restart, update, and
       for (const item of workspaceCases) verifyWorkspace(item, await readWorkspace(origin, cookie, item), item.empty)
       const documents = (await (await fetch(`${origin}/api/documents`, { headers: authHeaders(cookie, false) })).json()).documents
       assert.equal(documents.length, 0)
-      t.diagnostic(`FINAL RESTART/EMPTY ${workspaceCases.length + 1}/${workspaceCases.length + 1} PASS · 삭제 후 재등장 없음`)
+      const wikiList = await (await fetch(`${origin}/api/wiki`, { headers: authHeaders(cookie, false) })).json()
+      assert.equal(wikiList.documents.length, 0, '완전히 지운 문서는 재기동해도 돌아오지 않는다')
+      const wikiGone = await fetch(`${origin}/api/wiki/${encodeURIComponent(wikiId)}`, { headers: authHeaders(cookie, false) })
+      assert.equal(wikiGone.status, 404)
+      t.diagnostic(`FINAL RESTART/EMPTY ${workspaceCases.length + 2}/${workspaceCases.length + 2} PASS · 삭제 후 재등장 없음`)
     })
   } finally {
     await rm(directory, { recursive: true, force: true })

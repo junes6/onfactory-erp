@@ -19,6 +19,7 @@ import { IpRightsPage } from './components/IpRights'
 import { ProductManagement, SalesChannels } from './components/BusinessPages'
 import { BillingDashboard } from './components/BillingDashboard'
 import { CompanyLibrary } from './components/CompanyLibrary'
+import { WikiPage } from './components/wiki/WikiPage'
 import { DailyJournalPage, MessengerDrawer, parseMessengerFocus, SchedulePage, type MessengerFocus } from './components/CollaborationSuite'
 import { CALENDAR_CALLBACK_MESSAGES } from './components/CalendarConnection'
 import { ComplianceCenter } from './components/ComplianceCenter'
@@ -35,7 +36,7 @@ import { SupportProgramsWidget } from './components/SupportProgramsWidget'
 import { PersonalTodoWidget } from './components/PersonalTodoWidget'
 import { IndustryProvider } from './modules/IndustryContext'
 import { NotificationCenter, type NotificationFeed } from './components/NotificationCenter'
-import { useEventStream } from './hooks/useEventStream'
+import { useEventStream, type StreamEvent } from './hooks/useEventStream'
 import { ActivityFeed } from './components/ActivityFeed'
 import { OriginBadge } from './components/OriginBadge'
 import { ParentChip, SubtaskProgressBar, SubtaskRows } from './components/SubtaskList'
@@ -71,7 +72,7 @@ import { DailyDigest } from './components/DailyDigest'
 import { PersonalCorePage } from './components/PersonalCorePage'
 import { BRAND } from './brand'
 
-type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'finance' | 'ip' | 'judgement' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
+type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'finance' | 'ip' | 'judgement' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'wiki' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
 type PageId = TenantPage | PlatformSection | 'billing'
 type AppMode = 'tenant' | 'platform'
 type NavItem = { id: PageId; label: string; icon: typeof Sparkles; badge?: number }
@@ -84,7 +85,7 @@ type PlatformTicketSummary = { id: string; tenantId: string; tenant: string; tit
 type PlatformDirectoryState = { tenants: Tenant[]; supportTickets: PlatformTicketSummary[] }
 type SupportSessionRequest = { tenantId: string; ticketId: string; scope: string; duration: string; reason: string }
 
-const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'projects', 'finance', 'ip', 'products', 'inventory', 'factory', 'people', 'documents', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
+const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'projects', 'finance', 'ip', 'products', 'inventory', 'factory', 'people', 'wiki', 'documents', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
 const AUTH_SYNC_KEY = 'onfactory-auth-sync'
 const emptyWorkItems: WorkItem[] = []
 const emptyWorkRules: WorkRule[] = []
@@ -1438,8 +1439,8 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
               <StatusBadge className="status-pill" dot tone={drawerItem.priority === '긴급' ? 'danger' : drawerItem.priority === '높음' ? 'warning' : 'neutral'}>{drawerItem.priority}</StatusBadge>
               <span>{drawerItem.category}</span>
               {drawerItem.ruleId && <span><Repeat2 size={13} /> 반복</span>}
-              {/* 메신저 출처는 서랍이 그 자리에서 열린다 — 어디로 가라는 안내가 필요 없고, 하면 거짓말이 된다. */}
-              <OriginBadge origin={drawerItem.origin} onOpen={(page, focusId) => { setDrawerId(null); if (page === 'projects') onToast('프로젝트에서 출처를 확인하세요.'); else if (page !== 'messenger') onToast('승인 큐에서 원인을 확인하세요.'); onOpenOrigin?.(page, focusId) }} />
+              {/* 어디로 가는지 아는 곳(openWorkOrigin)이 안내 문장까지 고른다 — 여기서 따로 고르면 두 벌이 된다. */}
+              <OriginBadge origin={drawerItem.origin} onOpen={(page, focusId) => { setDrawerId(null); onOpenOrigin?.(page, focusId) }} />
               {isSubtask(drawerItem) && <ParentChip title={parentTitleOf(drawerItem, items, parentRefs)} onOpen={items.some((candidate) => candidate.id === drawerItem.parentId) ? () => setDrawerId(drawerItem.parentId) : undefined} />}
             </div>
             <h2 id="workflow-drawer-title">{drawerItem.title}</h2>
@@ -1869,7 +1870,10 @@ function TaskModal({ initialText, initialDescription = '', initialParentId, item
       const attachments: WorkEvidence[] = uploaded.map((file, index) => ({ ...file, type: pendingFiles[index]?.type || 'application/octet-stream' }))
       uploadedIds = attachments.map((file) => file.id)
       const saved = await onSave({
-        id: 'WK-' + new Date().getTime().toString().slice(-8),
+        // 벽시계 뒷자리만 쓰면 같은 밀리초에 두 번 눌린 지시가 같은 id를 받고, 그 순간부터 업무 배열
+        // 저장이 통째로 400(중복 id)이 되어 사람이 화면에서 되돌릴 방법이 없다. 난수를 섞는다.
+        // (crypto.randomUUID는 보안 컨텍스트에만 있다 — 사내 http 주소에서는 없다.)
+        id: `WK-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
         title: title.trim(),
         description: description.trim(),
         owner: owner.name,
@@ -2043,6 +2047,16 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   // 렌즈 패널: 어느 화면의 파일 카드에서 열든 같은 오른쪽 패널을 쓴다.
   const [lensTarget, setLensTarget] = useState<LensTarget | null>(null)
+  /** 전역 검색·출처 배지가 지목한 문서. WikiPage가 한 번 열고 나면 비운다. */
+  const [wikiFocusId, setWikiFocusId] = useState<string>()
+  /** 프로젝트 상세의 ‘문서 N건’이 지목한 프로젝트. 문서 화면이 그 프로젝트로 목록을 좁혀 연다. */
+  const [wikiProjectId, setWikiProjectId] = useState<string>()
+  /**
+   * 문서 화면의 스트림 수신구. WikiPage가 마운트될 때 자기 핸들러를 여기에 꽂는다.
+   * 이 한 칸이 있어야 세 번째 EventSource를 열지 않고도 문서가 실시간으로 갱신된다 —
+   * 계정당 연결이 이미 둘이라, 하나를 더 열면 다른 화면의 실시간 갱신이 먼저 죽는다.
+   */
+  const wikiStreamRef = useRef<((event: StreamEvent) => void) | null>(null)
   const [navEditorOpen, setNavEditorOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   // 벨 배지는 실제 알림에서만 온다. 고정 슬롯을 세던 시절에는 아무 할 일이 없어도 빨간 숫자가 남았다.
@@ -2069,6 +2083,9 @@ export default function App() {
     // 그대로 0건이었다(전체 새로고침을 해야 1건). 사이드바 배지도 같은 배열에서 나오므로
     // 목록과 배지가 함께 낡아, 지시를 받은 직원이 새로고침 전까지 그 지시를 보지 못했다.
     if (event.kind === 'work' || event.kind === 'resync') setWorkReload((current) => current + 1)
+    // 문서 프레임은 열려 있는 문서 화면만 쓴다. 화면이 없으면 아무 일도 하지 않는다 —
+    // 본문·제목이 실려 오지 않는 재조회 신호라, 흘려보내도 잃는 것이 없다.
+    if (event.kind === 'wiki' || event.kind === 'resync') wikiStreamRef.current?.(event)
   })
   useEffect(() => {
     // 푸시 알림을 눌렀을 때 이미 열려 있는 앱이 새로고침 없이 해당 화면으로 이동한다.
@@ -2547,17 +2564,28 @@ export default function App() {
   }
   /**
    * 업무 상세의 출처 배지에서 건너가기. 데스크톱·휴대폰이 같은 함수를 쓴다.
-   * 휴대폰은 아래 네 칸이 화면을 정하므로 page만 바꾸면 업무 탭에 그대로 남는다 — 탭도 함께 옮겨야 실제로 도착한다.
+   *
+   * 어디로 가는지 아는 곳이 여기뿐이므로 **안내 문장도 여기서 고른다** — 배지 쪽에서 따로 고르면
+   * 같은 클릭이 두 개의 다른 목적지를 말한다(문서로 가면서 "승인 큐에서 확인하세요"라고 하는 식이다).
    */
   const openWorkOrigin = (originPage: string, focusId: string) => {
     // 스레드에서 승격한 업무의 출처는 메신저다. navigate('messenger')는 industryRoutes에 없어
     // '이 회사의 업종 모듈에 없는 메뉴입니다'로 끝나므로, 알림과 같은 규약으로 서랍을 그 자리에 연다.
+    // 서랍은 그 자리에서 열리므로 어디로 가라는 안내가 필요 없고, 하면 거짓말이 된다.
     const focus = originPage === 'messenger' ? parseMessengerFocus(focusId) : null
     if (focus) { setMessengerFocus(focus); setMessengerOpen(true); if (phoneShell) setMobileTab('chat'); return }
-    if (originPage === 'projects') { setProjectFocusId(focusId); setWorkFocusId(''); setMobileTab('more') }
+    if (originPage === 'projects') { setProjectFocusId(focusId); setToast('프로젝트에서 출처를 확인하세요.') }
     // R16-L: 외부 연동에서 만들어진 업무의 출처는 인사·조직의 '외부 연동' 탭이다.
     // 그 탭은 관리자에게만 열리므로(PeopleOperations의 initialTab && canManage), 구성원은 기본 탭을 본다.
-    if (originPage === 'people') setPeopleInitialTab('integrations')
+    // 이 갈래의 문장은 R16-L이 쓰던 것을 그대로 둔다 — 여기서 고치면 이 절이 재지 않은 화면을 말하게 된다.
+    else if (originPage === 'people') { setPeopleInitialTab('integrations'); setToast('승인 큐에서 원인을 확인하세요.') }
+    // R16-H: 문서에서 승격한 업무의 출처는 그 문서다. page만 바꾸면 목록 첫 화면이 열려 근거에 닿지 못한다.
+    else if (originPage === 'wiki') { setWikiFocusId(focusId); setToast('원본 문서를 엽니다.') }
+    else setToast('승인 큐에서 원인을 확인하세요.')
+    // 휴대폰은 아래 네 칸이 화면을 정한다 — page만 바꾸고 탭을 두면 업무 상세가 그대로 남아
+    // 어느 갈래도 실제로는 도착하지 못한다. 'more' 시트가 이 화면들로 가는 유일한 휴대폰 입구다.
+    setWorkFocusId('')
+    if (phoneShell) setMobileTab('more')
     navigate(originPage as PageId)
   }
   const enterPlatform = () => {
@@ -2902,7 +2930,7 @@ export default function App() {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} calendarCallbackFlag={calendarCallbackFlag} onCalendarCallbackHandled={() => setCalendarCallbackFlag('')} />
       case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onSchedule={scheduleTask} onSaveFields={saveTaskFields} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
-      case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} focusProjectId={projectFocusId} onFocusHandled={() => setProjectFocusId(undefined)} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onNavigate={(target) => { if (target === 'people') setPeopleInitialTab('accounts'); navigate(target as PageId) }} />
+      case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} focusProjectId={projectFocusId} onFocusHandled={() => setProjectFocusId(undefined)} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onOpenWiki={(projectId) => { setWikiProjectId(projectId); setWikiFocusId(undefined); navigate('wiki') }} onNavigate={(target) => { if (target === 'people') setPeopleInitialTab('accounts'); navigate(target as PageId) }} />
       case 'finance': return <TaxAssetsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} industryType={account?.industryType ?? 'food_manufacturing'} onToast={setToast} />
       case 'ip': return <IpRightsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} onAskLens={setLensTarget} onToast={setToast} />
       case 'products': return <ProductManagement onToast={setToast} canManage={account?.role === 'tenant-admin'} companyName={tenantName} workspaceScope={workspaceScope} />
@@ -2912,6 +2940,7 @@ export default function App() {
       case 'people': return <PeopleOperationsPage initialTab={peopleInitialTab ?? undefined} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} canManage={account?.role === 'tenant-admin'} canOversee={account?.role === 'tenant-admin' || account?.oversight === true} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
       case 'judgement': return <PersonalCorePage workspaceScope={workspaceScope} onToast={setToast} />
       case 'approvals': return <ApprovalQueue workspaceScope={workspaceScope} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenEvidence={(page) => navigate(page as PageId)} onPendingChange={setPendingProposals} />
+      case 'wiki': return <WikiPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} focusDocumentId={wikiFocusId} focusProjectId={wikiProjectId} onFocusHandled={() => { setWikiFocusId(undefined); setWikiProjectId(undefined) }} streamRef={wikiStreamRef} onAskLens={setLensTarget} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} industryType={account?.industryType ?? 'food_manufacturing'} onAskLens={setLensTarget} onToast={setToast} />
       case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} companyName={tenantName} onAskLens={setLensTarget} onToast={setToast} />
       case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onNavigate={(target) => { if (target === 'people') setPeopleInitialTab('accounts'); navigate(target as PageId) }} />
@@ -3003,6 +3032,7 @@ export default function App() {
                     if (focus) { setMessengerFocus(focus); setMessengerOpen(true); return }
                   }
                   if (hit.kind === 'task') setWorkFocusId(hit.focusId)
+                  else if (hit.kind === 'wiki') setWikiFocusId(hit.focusId)
                   else if (hit.kind === 'message' || hit.kind === 'conversation') { setMessengerOpen(hit.kind === 'message'); if (hit.kind === 'message') return }
                   else setPlatformFocusId(hit.focusId)
                   navigate(hit.page as PageId)

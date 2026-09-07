@@ -11,6 +11,7 @@
  */
 
 import { NOTICES_KEY, noticeFocusId, noticeVisibleTo, readNotices } from './notices.mjs'
+import { MAX_SEARCH_SCAN_DOCUMENTS, removeLinks } from './wiki-blocks.mjs'
 
 /** 유형 하나에서 가져오는 최대 건수. 한 유형이 목록을 다 차지하지 않게 한다. */
 export const PER_TYPE_LIMIT = 5
@@ -18,7 +19,11 @@ export const MIN_QUERY_LENGTH = 2
 
 export const SEARCH_TYPES = Object.freeze([
   { id: 'task', label: '업무', page: 'tasks' },
-  { id: 'document', label: '문서', page: 'documents' },
+  // R16-H: 문서(위키). id에 하이픈을 쓰지 않는다 — 아래 KIND_LABEL 동치 테스트의 파서가 `/^\s*([a-zA-Z_]+):/`라
+  // `wiki-doc` 같은 id는 화면 사전에서 조용히 탈락한다.
+  { id: 'wiki', label: '문서', page: 'wiki' },
+  // 위키 배지와 나란히 서면 '문서' 두 개로는 갈래가 구별되지 않는다. 자료실 화면은 이미 전부 '자료'라고 쓴다.
+  { id: 'document', label: '자료', page: 'documents' },
   { id: 'journal', label: '일지', page: 'journal' },
   { id: 'message', label: '메신저', page: 'ai' },
   { id: 'conversation', label: 'AI 대화', page: 'ai' },
@@ -75,7 +80,9 @@ function hit({ kind, id, title, meta, owner, page, focusId, snippet }) {
  * 권한 판정 함수는 호출하는 쪽(app.mjs)에서 그대로 받는다. 여기서 다시 만들면
  * 규칙이 두 벌이 된다.
  */
-export function searchTenant({ query, auth, tenantStore, accounts, canReadDocument, isConversationVisibleToMember, projectRoleOf }) {
+export function searchTenant({ query, auth, tenantStore, accounts, canReadDocument, canReadWikiDocument, isConversationVisibleToMember, projectRoleOf }) {
+  // 위키 인가는 기본값을 두지 않는다 — `() => true`로 두면 주입을 잊은 배포에서 검색만 조용히 열린다.
+  if (typeof canReadWikiDocument !== 'function') throw new TypeError('searchTenant: canReadWikiDocument 판정을 주입해야 합니다.')
   const words = terms(query)
   if (words.length === 0 || query.trim().length < MIN_QUERY_LENGTH) return { groups: [], total: 0 }
   // 외부 게스트는 전역 검색이 없다. 사람 검색 한 갈래만으로도 직원 명단이 열거되기 때문이다. 게이트가 먼저 막지만 여기서도 끊는다.
@@ -103,7 +110,34 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
     }))
   }
 
-  // 문서 — 공개 범위를 그대로 따른다.
+  // 문서(위키) — 본문을 색인하는 첫 갈래다. 매 질의마다 500문서 × 200KB를 훑지 않으려고 저장해 둔
+  // 파생값 `searchText`를 읽고, 최근 수정순 상한(300)으로 한 질의의 최악 비용을 묶는다.
+  // 스니펫은 색인값을 그대로 쓰지 않고 `removeLinks`를 한 번 더 지난다 — 색인을 만드는 자리(buildSearchText)가
+  // 이미 토큰을 지우지만, 옛 형식으로 저장된 행 하나가 링크 라벨을 스니펫으로 흘리는 갈래를 여기서 닫는다.
+  //
+  // **권한 필터가 스캔 상한보다 앞에 온다.** 뒤에 두면 내가 못 보는 문서가 더 최근이라는 이유만으로
+  // 상한 300칸을 다 먹고, 같은 질의가 문서 목록(`GET /api/wiki?q=`)에서는 걸리는데 전역 검색에서만
+  // 통째로 사라진다. 권한 판정은 프로젝트 조회 한 번이라 본문(`searchText`) 스캔보다 훨씬 싸므로
+  // 최악 비용은 그대로고, 상한이 "내가 볼 수 있는 최근 300건"을 뜻하게 된다.
+  const wikiDocuments = rows('wiki-documents')
+    .filter((document) => document && !document.archivedAt && !document.isTemplate && canReadWikiDocument(document, auth))
+    .sort((left, right) => String(right.lastEditedAt ?? '').localeCompare(String(left.lastEditedAt ?? '')))
+    .slice(0, MAX_SEARCH_SCAN_DOCUMENTS)
+  for (const document of wikiDocuments) {
+    const indexed = removeLinks(document.searchText ?? '')
+    // 요약도 색인과 같은 문을 지난다. 여기만 날 것으로 두면 프로젝트 문서를 전사로 옮기는 순간
+    // 요약에 남은 라벨(볼 수 없는 대상의 제목)이 매칭 오라클이 되고 스니펫으로도 그대로 나간다.
+    const summary = removeLinks(document.summary ?? '')
+    if (!matches(`${document.title ?? ''} ${summary} ${indexed}`, words)) continue
+    push('wiki', hit({
+      kind: 'wiki', id: document.id, title: document.title || '제목 없는 문서',
+      meta: `${(document.blocks ?? []).length}개 문단${document.lastEditedAt ? ` · ${String(document.lastEditedAt).slice(0, 10)}` : ''}`,
+      owner: document.lastEditedByName, page: 'wiki', focusId: document.id,
+      snippet: excerpt(summary ? `${summary} ${indexed}` : indexed, first),
+    }))
+  }
+
+  // 자료 — 공개 범위를 그대로 따른다.
   for (const document of rows('company-documents')) {
     if (!canReadDocument(document, auth)) continue
     if (!matches(`${document.name} ${document.category} ${(document.tags ?? []).join(' ')} ${document.summary}`, words)) continue
@@ -216,7 +250,7 @@ export function searchTenant({ query, auth, tenantStore, accounts, canReadDocume
   return { groups, total: groups.reduce((sum, group) => sum + group.items.length, 0) }
 }
 
-export function registerGlobalSearchRoute({ app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, accounts, canReadDocument, isConversationVisibleToMember, projectRoleOf }) {
+export function registerGlobalSearchRoute({ app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, accounts, canReadDocument, canReadWikiDocument, isConversationVisibleToMember, projectRoleOf }) {
   app.get('/api/search', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
     if (!request.auth.tenantId) { response.json({ groups: [], total: 0 }); return }
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
@@ -226,6 +260,7 @@ export function registerGlobalSearchRoute({ app, requireAuth, requireMatchingWor
       tenantStore,
       accounts,
       canReadDocument,
+      canReadWikiDocument,
       isConversationVisibleToMember,
       projectRoleOf,
     })

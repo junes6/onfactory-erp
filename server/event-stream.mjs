@@ -22,6 +22,9 @@ export const EVENT_KINDS = Object.freeze([
   // R16-E: 구글 캘린더 동기화가 일정 배열을 갈아 끼웠다. 아래 제한 분기의 허용 목록에는 넣지 않는다 —
   // 가져온 일정은 개인 범위라 외부 게스트에게 갈 이유가 없다.
   'calendar',          // 일정 배열이 서버 쪽에서 바뀜
+  // R16-H: 문서 블록 변경·메타 변경·프레즌스. 프레즌스는 publishEphemeral로 나가 버퍼에 쌓이지 않는다.
+  // 아래 제한 분기의 허용 목록에는 넣지 않는다 — 이번 절에서 게스트에게 문서를 열지 않는다.
+  'wiki',              // 문서 블록 변경·프레즌스
   'resync',            // 놓친 구간이 커서 전체 재조회가 필요함
 ])
 
@@ -41,6 +44,10 @@ export function createEventStream({ clock = () => new Date(), logger = console }
   const write = (client, event) => {
     // 받는 사람이 지정된 이벤트는 그 사람에게만 간다.
     if (event.accountId && event.accountId !== client.accountId) return
+    // 수신자 명단이 붙은 이벤트는 그 명단 안에서만 간다. 테넌트 전원이 읽을 수 없는 것(프로젝트
+    // 문서 같은)의 신호는 id·이름만으로도 존재를 말하므로, 발행하는 쪽이 명단을 함께 준다.
+    // 버퍼에 그대로 남으므로 재연결 재생에도 같은 걸음으로 걸린다.
+    if (event.accountIds && !event.accountIds.includes(client.accountId)) return
     // 제한 클라이언트(외부 게스트): 본인 앞으로 온 것이 아니면 message·work 두 종류만, 내용은 key·version만 받는다.
     // 테넌트 전체에 뿌리는 work 이벤트에는 업무 제목이 실리는데, 그 제목은 게스트가 볼 수 없는 업무의 것일 수 있다.
     // resync는 "전부 다시 읽어라"라는 신호일 뿐 테넌트 데이터가 없으므로 그대로 보낸다 — 막으면 오래 끊긴 게스트 화면이 재조회 신호를 못 받는다.
@@ -57,18 +64,36 @@ export function createEventStream({ clock = () => new Date(), logger = console }
   }
 
   /**
-   * 이벤트 발행. accountId를 주면 그 사람에게만 간다.
+   * 이벤트 발행. accountId를 주면 그 사람에게만, accountIds를 주면 그 명단에게만 간다
+   * (명단이 빈 배열이면 아무에게도 가지 않는다 — '지금 이것을 읽을 수 있는 사람이 없다'는 뜻이다).
    * 발행은 절대 던지지 않는다 — 알림을 못 보낸 것이 업무를 막을 이유는 없다.
    */
-  const publish = (tenantId, kind, data, { accountId = null } = {}) => {
+  const publish = (tenantId, kind, data, { accountId = null, accountIds = null } = {}) => {
     if (!tenantId || !EVENT_KINDS.includes(kind)) return null
     const buffer = bufferOf(tenantId)
-    const event = { id: buffer.nextId, kind, accountId, data, at: clock().toISOString() }
+    const event = { id: buffer.nextId, kind, accountId, accountIds, data, at: clock().toISOString() }
     buffer.nextId += 1
     buffer.events.push(event)
     if (buffer.events.length > EVENT_BUFFER_PER_TENANT) buffer.events.splice(0, buffer.events.length - EVENT_BUFFER_PER_TENANT)
     for (const client of clientsByTenant.get(tenantId) ?? []) write(client, event)
     return event.id
+  }
+
+  /**
+   * 버퍼에 남기지 않고 지금 붙어 있는 사람에게만 보낸다.
+   * 프레즌스처럼 '지난 것은 뜻이 없는' 신호 전용이다.
+   *
+   * 이것을 publish로 보내면 테넌트당 200칸 링버퍼가 몇 분 만에 밀려, 잠깐 끊겼던 다른 화면 전부가
+   * resync를 받아 전체 재조회를 한다 — 업무·알림 신호가 편집 신호에 밀려나는 셈이다.
+   *
+   * id는 마지막 실제 이벤트 번호를 그대로 쓴다(connect의 resync 발행과 같은 관행) —
+   * 번호를 앞당기면 재연결 커서가 진짜 이벤트를 건너뛴다.
+   */
+  const publishEphemeral = (tenantId, kind, data, { accountId = null, accountIds = null } = {}) => {
+    if (!tenantId || !EVENT_KINDS.includes(kind)) return false
+    const event = { id: bufferOf(tenantId).nextId - 1, kind, accountId, accountIds, data, at: clock().toISOString() }
+    for (const client of clientsByTenant.get(tenantId) ?? []) write(client, event)
+    return true
   }
 
   /**
@@ -144,6 +169,7 @@ export function createEventStream({ clock = () => new Date(), logger = console }
 
   return {
     publish,
+    publishEphemeral,
     connect,
     missedSince,
     start,

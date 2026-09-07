@@ -22,6 +22,39 @@ const STORE = {
     { id: 'WK-1', title: '냉장창고 온도 점검', description: '매일 09시 확인', owner: '박지현', ownerId: 'U-PARK', requesterId: 'U-ADMIN', status: '수행중', category: '품질', due: '2026-09-10' },
     { id: 'WK-2', title: '냉장창고 전등 교체', description: '', owner: '오태식', ownerId: 'U-OH', requesterId: 'U-OH', status: '업무요청', category: '설비', due: '2026-09-12' },
   ] },
+  'wiki-documents': { data: [
+    {
+      id: 'WDOC-SRCH-1', tenantId: 'T1', title: '냉장창고 운영 기준', summary: '', projectId: null, isTemplate: false, archivedAt: null,
+      blocks: [{ id: 'BLK-SRCH-0001', type: 'text', text: '' }, { id: 'BLK-SRCH-0002', type: 'text', text: '' }],
+      searchText: '냉장창고 온도는 매일 09시에 적는다', version: 3,
+      lastEditedAt: '2026-09-05T00:00:00.000Z', lastEditedByName: '김서원',
+    },
+    {
+      // 프로젝트 문서. 오태식은 PRJ-A 멤버가 아니라 이 문서를 검색으로도 만나면 안 된다.
+      id: 'WDOC-SRCH-2', tenantId: 'T1', title: '냉장창고 개선 회의 기록', summary: '', projectId: 'PRJ-A', isTemplate: false, archivedAt: null,
+      blocks: [{ id: 'BLK-SRCH-0003', type: 'text', text: '' }],
+      searchText: '냉장창고 문틀 교체를 검토했다', version: 2,
+      lastEditedAt: '2026-09-04T00:00:00.000Z', lastEditedByName: '박지현',
+    },
+    {
+      // 보관한 문서와 템플릿은 목록에도 검색에도 나오지 않는다.
+      id: 'WDOC-SRCH-3', tenantId: 'T1', title: '냉장창고 옛 기준', summary: '', projectId: null, isTemplate: false,
+      archivedAt: '2026-08-01T00:00:00.000Z', blocks: [], searchText: '냉장창고 옛 기준입니다', version: 1,
+      lastEditedAt: '2026-08-01T00:00:00.000Z', lastEditedByName: '김서원',
+    },
+    {
+      id: 'WDOC-TPL-SRCH', tenantId: 'T1', title: '냉장창고 점검 템플릿', summary: '', projectId: null, isTemplate: true, archivedAt: null,
+      blocks: [], searchText: '냉장창고 점검 항목', version: 1,
+      lastEditedAt: '2026-08-02T00:00:00.000Z', lastEditedByName: '김서원',
+    },
+    {
+      // 링크 토큰이 색인에 남은 옛 행. 스니펫에 라벨이 새면 볼 수 없는 업무 제목을 떠보는 오라클이 된다.
+      id: 'WDOC-SRCH-4', tenantId: 'T1', title: '냉장창고 연결 메모', summary: '', projectId: null, isTemplate: false, archivedAt: null,
+      blocks: [{ id: 'BLK-SRCH-0004', type: 'text', text: '' }],
+      searchText: '냉장창고 [[task:WK-2|냉장창고 전등 교체]] 참고', version: 1,
+      lastEditedAt: '2026-09-03T00:00:00.000Z', lastEditedByName: '김서원',
+    },
+  ] },
   'company-documents': { data: [
     { id: 'DOC-1', name: '냉장창고 관리 지침.pdf', category: '품질', tags: [], summary: '온도 기록 주기와 이상 대응', visibility: 'all', uploadedById: 'U-ADMIN', uploadedByName: '김서원', uploadedAt: '2026-08-01T00:00:00.000Z' },
     { id: 'DOC-2', name: '냉장창고 임대 계약.pdf', category: '계약', tags: [], summary: '경영팀만 봅니다', visibility: 'department', departments: ['경영'], uploadedById: 'U-ADMIN', uploadedByName: '김서원', uploadedAt: '2026-08-02T00:00:00.000Z' },
@@ -75,6 +108,16 @@ const STORE = {
   ] },
 }
 
+// 문서(위키) 인가. 서버 wiki.mjs의 canReadWikiDocument와 같은 세 축을 본다 —
+// 스텁이 느슨하면 "검색이 공개 범위를 뚫지 않는다"는 아래 단언이 아무것도 지키지 못한다.
+const canReadWikiDocument = (document, auth) => {
+  if (!document || !auth) return false
+  if (document.tenantId !== auth.tenantId) return false
+  if (auth.role === 'tenant-guest') return false
+  if (document.projectId) return projectRoleOf(projectById(document.projectId), auth) !== null
+  return true
+}
+
 // 공지 갈래는 프로젝트 역할 판정을 그대로 받는다 — 검색이 자기 규칙을 새로 짜면 목록과 어긋난다.
 const projectRoleOf = (project, auth) => {
   if (!project) return null
@@ -82,7 +125,8 @@ const projectRoleOf = (project, auth) => {
   return (project.members ?? []).find((member) => member.id === auth.id)?.role ?? null
 }
 
-const search = (query, auth) => searchTenant({ query, auth, tenantStore: STORE, accounts: ACCOUNTS, canReadDocument, isConversationVisibleToMember, projectRoleOf })
+const projectById = (id) => (STORE['project-spaces'].data.find((row) => row.id === id) ?? null)
+const search = (query, auth) => searchTenant({ query, auth, tenantStore: STORE, accounts: ACCOUNTS, canReadDocument, canReadWikiDocument, isConversationVisibleToMember, projectRoleOf })
 const typeItems = (result, type) => result.groups.find((group) => group.type === type)?.items ?? []
 
 test('낱말은 모두 들어 있어야 걸린다', () => {
@@ -96,10 +140,10 @@ test('짧은 검색어로는 목록을 쏟지 않는다', () => {
   assert.ok(search('냉장창고', ADMIN).total > 0)
 })
 
-test('한 검색어로 여덟 갈래를 함께 찾는다', () => {
+test('한 검색어로 아홉 갈래를 함께 찾는다', () => {
   const result = search('냉장창고', ADMIN)
   const kinds = result.groups.map((group) => group.type)
-  for (const expected of ['task', 'document', 'journal', 'message', 'opportunity', 'notice']) {
+  for (const expected of ['task', 'wiki', 'document', 'journal', 'message', 'opportunity', 'notice']) {
     assert.ok(kinds.includes(expected), `${expected}가 결과에 없다`)
   }
 })
@@ -167,7 +211,7 @@ test('사람은 이름·팀·직무로 찾는다', () => {
 
 test('한 갈래가 목록을 다 차지하지 않는다', () => {
   const many = { ...STORE, 'work-items': { data: Array.from({ length: 20 }, (_, index) => ({ id: `WK-${index}`, title: '냉장창고 점검', description: '', owner: '김서원', ownerId: 'U-ADMIN', requesterId: 'U-ADMIN', status: '수행중', category: '품질', due: '' })) } }
-  const result = searchTenant({ query: '냉장창고', auth: ADMIN, tenantStore: many, accounts: ACCOUNTS, canReadDocument, isConversationVisibleToMember, projectRoleOf })
+  const result = searchTenant({ query: '냉장창고', auth: ADMIN, tenantStore: many, accounts: ACCOUNTS, canReadDocument, canReadWikiDocument, isConversationVisibleToMember, projectRoleOf })
   assert.equal(result.groups.find((group) => group.type === 'task').items.length, PER_TYPE_LIMIT)
 })
 
@@ -179,8 +223,8 @@ test('걸린 자리를 잘라 보여 준다', () => {
 })
 
 test('모든 항목과 그룹에 kind가 채워져 있고 SEARCH_TYPES 안의 값이다', () => {
-  // 사람까지 여덟 갈래가 전부 걸리도록 두 검색어를 합친다.
-  // 관리자는 AI 대화를 못 보고, 사람은 이름으로만 걸린다. 셋을 합쳐야 여덟 갈래가 모두 나온다.
+  // 사람까지 아홉 갈래가 전부 걸리도록 두 검색어를 합친다.
+  // 관리자는 AI 대화를 못 보고, 사람은 이름으로만 걸린다. 셋을 합쳐야 아홉 갈래가 모두 나온다.
   const results = [search('냉장창고', ADMIN), search('냉장창고', MEMBER), search('박지현', MEMBER)]
   const seen = new Set()
   for (const result of results) {
@@ -198,7 +242,23 @@ test('모든 항목과 그룹에 kind가 채워져 있고 SEARCH_TYPES 안의 �
     }
   }
   // 어느 한 갈래가 kind를 빼먹으면 위 단언에서 걸리지만, 갈래 자체가 결과에 안 나와 검사를 피하는 일도 막는다.
-  assert.deepEqual([...seen].sort(), [...SEARCH_KINDS].sort(), '여덟 갈래가 모두 검사를 거쳐야 한다')
+  assert.deepEqual([...seen].sort(), [...SEARCH_KINDS].sort(), '아홉 갈래가 모두 검사를 거쳐야 한다')
+})
+
+test('문서(위키)는 프로젝트 권한을 그대로 따르고, 보관·템플릿은 검색에 나오지 않는다', () => {
+  const admin = typeItems(search('냉장창고', ADMIN), 'wiki').map((item) => item.id)
+  assert.deepEqual(admin.sort(), ['WDOC-SRCH-1', 'WDOC-SRCH-2', 'WDOC-SRCH-4'], '보관한 문서와 템플릿은 갈래에 들어오지 않는다')
+  assert.deepEqual(typeItems(search('냉장창고', MEMBER), 'wiki').map((item) => item.id).sort(), ['WDOC-SRCH-1', 'WDOC-SRCH-2', 'WDOC-SRCH-4'])
+  // 오태식은 PRJ-A 멤버가 아니다. 프로젝트 문서는 제목도 스니펫도 그에게 가지 않는다.
+  assert.deepEqual(typeItems(search('냉장창고', OTHER), 'wiki').map((item) => item.id).sort(), ['WDOC-SRCH-1', 'WDOC-SRCH-4'])
+})
+
+test('문서 본문으로도 찾히지만, 링크 토큰은 스니펫으로 새지 않는다', () => {
+  const byBody = typeItems(search('문틀 교체', ADMIN), 'wiki').map((item) => item.id)
+  assert.deepEqual(byBody, ['WDOC-SRCH-2'], '제목에 없는 낱말도 본문 색인으로 걸린다')
+  const linked = typeItems(search('냉장창고', ADMIN), 'wiki').find((item) => item.id === 'WDOC-SRCH-4')
+  assert.doesNotMatch(linked.snippet, /\[\[|WK-2|전등 교체/, '링크 토큰과 그 라벨은 스니펫에 남지 않는다')
+  assert.match(linked.meta, /문단/, '몇 문단짜리 문서인지 함께 말한다')
 })
 
 test('SEARCH_KINDS 와 클라이언트 KIND_LABEL 사전의 키가 같다', async () => {

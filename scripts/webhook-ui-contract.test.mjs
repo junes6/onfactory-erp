@@ -151,7 +151,7 @@ test('알림 설정 표의 열은 서버가 준 채널 목록에서 나온다 �
 })
 
 test('출처 배지를 누르면 관리자만 외부 연동 탭으로 가고, 그 한 번으로 끝난다', () => {
-  assert.match(app, /if \(originPage === 'people'\) setPeopleInitialTab\('integrations'\)/)
+  assert.match(app, /originPage === 'people'\) \{ setPeopleInitialTab\('integrations'\)/)
   assert.match(app, /useState<'members' \| 'accounts' \| 'performance' \| 'integrations' \| null>\(null\)/)
   // 지우지 않으면 그 뒤로는 사이드바로 들어와도 늘 외부 연동이 먼저 열린다.
   assert.match(app, /if \(nextPage !== 'people'\) setPeopleInitialTab\(null\)/)

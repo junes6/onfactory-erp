@@ -40,6 +40,9 @@ const productFiles = [
   // 벌크 이관의 안내 문구·AI 처리 수준 라벨도 코드 상수다 — 데모 실명이 보고서 문장으로 굳지 않도록 같은 검사를 받는다.
   path.join(root, 'server', 'bulk-import.mjs'),
   path.join(root, 'server', 'document-ai-policy.mjs'),
+  // 문서(위키)의 라우트 문구와 기본 템플릿도 코드 상수다 — 데모 실명이 문서 본문 시드로 굳지 않도록 같은 검사를 받는다.
+  path.join(root, 'server', 'wiki.mjs'),
+  path.join(root, 'server', 'wiki-templates.mjs'),
 ].filter((file) => !file.endsWith('.test.mjs'))
 
 const forbiddenDemoPatterns = [
@@ -112,6 +115,7 @@ const workspaceTables = [
   'saved_views', 'custom_fields',
   'calendar_connections', 'calendar_sync_links',
   'bulk_imports', 'bulk_import_rules',
+  'wiki_documents', 'wiki_revisions',
 ]
 for (const table of workspaceTables) {
   const definition = schema.match(new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+${table}\\s*\\(([\\s\\S]*?)\\);`, 'i'))?.[1] ?? ''

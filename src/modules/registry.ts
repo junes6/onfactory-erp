@@ -1,5 +1,5 @@
 import {
-  Award, Boxes, CalendarDays, ClipboardCheck, Factory, FileSignature, FileStack, FileText,
+  Award, BookOpen, Boxes, CalendarDays, ClipboardCheck, Factory, FileSignature, FileStack, FileText,
   FolderKanban, Landmark, ListChecks, NotebookPen, Package, ShieldCheck, Sparkles, Store, Users,
   type LucideIcon,
 } from 'lucide-react'
@@ -15,6 +15,7 @@ export type TenantRouteId =
   | 'people'
   | 'finance'
   | 'ip'
+  | 'wiki'
   | 'documents'
   // food_manufacturing 모듈
   | 'products'
@@ -62,6 +63,7 @@ const routeNavigation: Readonly<Record<TenantRouteId, NavigationModuleItem>> = {
   people: { id: 'people', label: '인사 · 조직', icon: Users },
   finance: { id: 'finance', label: '세무 · 자산', icon: Landmark },
   ip: { id: 'ip', label: '지식재산 · 인증', icon: Award },
+  wiki: { id: 'wiki', label: '문서', icon: BookOpen },
   documents: { id: 'documents', label: '기업 자료실', icon: FileText },
   products: { id: 'products', label: '제품관리', icon: Package },
   inventory: { id: 'inventory', label: '재고 · LOT', icon: Boxes },
@@ -119,8 +121,8 @@ export const serviceModules: readonly ServiceModule[] = [
     name: `${BRAND.name} 코어 플랫폼`,
     version: '1.1.0',
     industry: 'all',
-    routes: ['ai', 'schedule', 'tasks', 'approvals', 'journal', 'projects', 'people', 'finance', 'ip', 'documents'],
-    capabilities: ['ai-hub', 'calendar', 'workflow', 'approval-queue', 'journal', 'project-spaces', 'people', 'performance', 'documents', 'messenger'],
+    routes: ['ai', 'schedule', 'tasks', 'approvals', 'journal', 'projects', 'people', 'finance', 'ip', 'wiki', 'documents'],
+    capabilities: ['ai-hub', 'calendar', 'workflow', 'approval-queue', 'journal', 'project-spaces', 'people', 'performance', 'wiki', 'documents', 'messenger'],
   },
   {
     id: 'food-manufacturing',

@@ -7,7 +7,7 @@ import {
   BLOCK_TYPES, CODE_LANGUAGES, LINK_HIDDEN_LABEL, LINK_GONE_LABEL, MAX_ANY_BLOCK_TEXT, MAX_BLOCK_TEXT, MAX_CAPTION,
   MAX_CODE_TEXT, MAX_SEARCH_TEXT, MAX_TITLE,
   TEXTUAL_TYPES, WIKI_BLOCK_TOO_LONG_FOR_TYPE, WIKI_BLOCK_TYPE_CHANGE_FORBIDDEN,
-  applyPatch, blockPreview, buildSearchText, linkTokenRe, linkTokensIn, redactLinks, stripLinks, validateNewBlock,
+  applyPatch, blockPreview, buildSearchText, linkTokenRe, linkTokensIn, neutralizeLinks, redactLinks, stripLinks, validateNewBlock,
   wikiPlainText,
 } from './wiki-blocks.mjs'
 import { WIKI_TEMPLATES } from './wiki-templates.mjs'
@@ -177,9 +177,14 @@ test('9. redactLinks는 저장 라벨을 믿지 않는다 — 보이면 현재 �
   )
 })
 
-test('10. stripLinks는 토큰을 라벨만 남긴다', () => {
+test('10. stripLinks는 토큰을 라벨만 남기고, neutralizeLinks는 이름조차 남기지 않는다', () => {
+  // stripLinks는 **재인가를 이미 마친 뒤**에만 선다(`wikiPlainText`) — 그 자리에서 라벨은 안전한 값이다.
   assert.equal(stripLinks('앞 [[doc:WDOC-1|계약 검토]] 뒤'), '앞 계약 검토 뒤')
   assert.equal(stripLinks('링크 없음'), '링크 없음')
+  // 템플릿 복제는 재인가할 근거(토큰)를 버리는 자리라, 라벨을 남기면 그 이름이 영구히 평문이 된다.
+  assert.equal(neutralizeLinks('앞 [[doc:WDOC-1|계약 검토]] 뒤'), '앞 연결된 항목 뒤')
+  assert.equal(neutralizeLinks('셋 [[task:WK-1|급여 인상안]]·[[person:USR-1|박지현]]'), '셋 연결된 항목·연결된 항목')
+  assert.equal(neutralizeLinks('링크 없음'), '링크 없음')
 })
 
 test('11. buildSearchText는 링크 토큰을 라벨까지 통째로 지운다(존재 오라클 차단)', () => {

@@ -83,6 +83,12 @@ export const WORKSPACE_TABLES = Object.freeze({
   // 직원 하나가 남의 이관 상태를 통째로 덮어쓸 수 있다. 전용 라우트만 문이 된다.
   'bulk-imports': 'bulk_imports',
   'bulk-import-rules': 'bulk_import_rules',
+  // R16-H: 문서(위키). 본문·블록은 wiki_documents, 버전 이력은 wiki_revisions에 나눠 둔다.
+  // 한 배열에 합치면 문서 한 건을 읽을 때마다 그 문서의 이력 전체가 함께 딸려 온다.
+  // WORKSPACE_STORE_KEYS(server/app.mjs)에는 넣지 않는다 — generic GET/PUT은 404 STORE_KEY_NOT_FOUND로
+  // 끝나고 전용 라우트만 문이 된다. 열어 두면 누구든 PUT 한 번으로 병합·이력·링크 인가를 통째로 우회한다.
+  'wiki-documents': 'wiki_documents',
+  'wiki-revisions': 'wiki_revisions',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

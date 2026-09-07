@@ -499,6 +499,24 @@ CREATE TABLE IF NOT EXISTS notices (
   created_by TEXT, PRIMARY KEY (org_id, id)
 );
 
+-- R16-H: 문서(위키). payload에 blocks 배열이 통째로 들어간다.
+-- 마이그레이션 사슬(supabase/migrations/20260911000000_wiki_documents.sql)과 **같은 본문**이다 —
+-- ai_conversations가 체인에만 있어 베이스라인으로 세운 데이터베이스에서만 없던 결함을 반복하지 않는다.
+CREATE TABLE IF NOT EXISTS wiki_documents (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
+-- R16-H: 문서 버전 이력. 되돌리기의 원본이며, 병합에서 밀린 문장이 남는 유일한 자리다.
+CREATE TABLE IF NOT EXISTS wiki_revisions (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
 -- R16-L: 외부 연동. tokenHash(sha256)와 signingSecretEnc(AES-256-GCM 봉인문)만 들어간다 — 평문은 저장하지 않는다.
 -- 게스트 범위가 아니므로 아래 게스트 DO 루프에 넣지 않고 service 전용 정책만 붙인다.
 CREATE TABLE IF NOT EXISTS webhook_endpoints (
@@ -723,6 +741,18 @@ ALTER TABLE bulk_import_rules FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS bulk_import_rules_service ON bulk_import_rules;
 CREATE POLICY bulk_import_rules_service ON bulk_import_rules USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
 
+-- R16-H: 문서(위키)도 서비스 컨텍스트만 통과한다. 게스트 정책은 만들지 않는다 —
+-- 이 저장소는 게스트 격리를 앱 필터 + PG RLS 두 겹으로 지키는데, 한 겹만으로 외부 거래처에
+-- 사내 문서 본문을 여는 것은 기준 미달이다. 여는 날에는 위 게스트 DO 루프 ARRAY와 함께 고친다.
+ALTER TABLE wiki_documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wiki_documents FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS wiki_documents_service ON wiki_documents;
+CREATE POLICY wiki_documents_service ON wiki_documents USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+ALTER TABLE wiki_revisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wiki_revisions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS wiki_revisions_service ON wiki_revisions;
+CREATE POLICY wiki_revisions_service ON wiki_revisions USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+
 DROP POLICY IF EXISTS project_spaces_guest_read ON project_spaces;
 CREATE POLICY project_spaces_guest_read ON project_spaces FOR SELECT USING (
   current_setting('app.role', TRUE) = 'tenant-guest'
@@ -887,6 +917,9 @@ CREATE INDEX IF NOT EXISTS idx_calendar_sync_links_active ON calendar_sync_links
 -- 이관은 언제나 '이 세션의 행'을 통째로 읽는다(세션 1 + 청크 N). 규칙은 이름으로 찾는다.
 CREATE INDEX IF NOT EXISTS idx_bulk_imports_active ON bulk_imports (org_id, (payload ->> 'sessionId'), position) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_bulk_import_rules_active ON bulk_import_rules (org_id, (payload ->> 'name')) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS wiki_documents_tree_idx ON wiki_documents (org_id, (payload ->> 'parentId')) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS wiki_documents_project_idx ON wiki_documents (org_id, (payload ->> 'projectId')) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS wiki_revisions_document_idx ON wiki_revisions (org_id, (payload ->> 'documentId'), (payload ->> 'version') DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ai_conversations_owner_idx ON ai_conversations (org_id, (payload ->> 'ownerId'), (payload ->> 'updatedAt') DESC);
 CREATE INDEX IF NOT EXISTS ai_conversations_trash_idx ON ai_conversations (org_id, (payload ->> 'deletedAt'));
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON auth_sessions (expires_at) WHERE revoked_at IS NULL;

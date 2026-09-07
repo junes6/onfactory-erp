@@ -1,4 +1,4 @@
-import { ArrowUpRight, LayoutTemplate, MessagesSquare, Radar, ShieldAlert, Sparkles, Webhook } from 'lucide-react'
+import { ArrowUpRight, BookOpen, LayoutTemplate, MessagesSquare, Radar, ShieldAlert, Sparkles, Webhook } from 'lucide-react'
 import './OriginBadge.css'
 
 export type WorkOrigin = {
@@ -10,12 +10,15 @@ export type WorkOrigin = {
 }
 
 const kindIcon = (kind: string) => (
-  kind === 'template' ? LayoutTemplate
-    : kind === 'sentinel-task' ? ShieldAlert
-      : kind === 'opportunity' ? Radar
-        : kind === 'thread' ? MessagesSquare
-          : kind === 'webhook' ? Webhook
-            : Sparkles
+  // 문서에서 온 업무는 문이 둘이다: 관리자의 즉시 승격은 'wiki', 직원이 승인 큐를 지나면 'wiki-task'다
+  // (출처 kind는 제안 kind를 그대로 쓴다). 한쪽만 알면 대다수 사용자가 보는 배지에 'AI 제안' 아이콘이 붙는다.
+  kind === 'wiki' || kind === 'wiki-task' ? BookOpen
+    : kind === 'template' ? LayoutTemplate
+      : kind === 'sentinel-task' ? ShieldAlert
+        : kind === 'opportunity' ? Radar
+          : kind === 'thread' ? MessagesSquare
+            : kind === 'webhook' ? Webhook
+              : Sparkles
 )
 
 /**

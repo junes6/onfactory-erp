@@ -157,6 +157,40 @@ function fixture() {
       }],
       updatedAt: '2026-08-20T06:00:00.000Z', updatedBy: 'USR-HSB-ADMIN',
     },
+    // R16-H: 문서(위키). 블록 배열·표 셀(중첩 배열)·역패치가 payload JSONB로 그대로 왕복해야 한다 —
+    // inverse 한 줄이 왕복에서 무너지면 그 버전 아래로 되돌릴 길이 재기동마다 사라진다.
+    'wiki-documents': {
+      data: [{
+        id: 'WDOC-fixture-01', tenantId: 'TENANT-HSB', title: '품질 점검 표준', icon: '📗',
+        parentId: null, projectId: null, spaceId: null,
+        blocks: [
+          { id: 'BLK-fixture-0001', type: 'heading', text: '목적', level: 2, seq: 1, editedById: 'USR-HSB-ADMIN', editedAt: '2026-08-20T06:00:00.000Z' },
+          { id: 'BLK-fixture-0002', type: 'table', rows: [['항목', '기준'], ['온도', '4도 이하']], seq: 2, editedById: 'USR-HSB-ADMIN', editedAt: '2026-08-20T06:00:00.000Z' },
+        ],
+        version: 2, blockSeq: 2, tombstones: [{ id: 'BLK-fixture-0003', after: 'BLK-fixture-0001', at: '2026-08-20T06:00:00.000Z' }],
+        recentOpIds: ['OP-fixture-01'], recentLostOpIds: [], searchText: '목적\n항목 기준 온도 4도 이하',
+        aiLevel: 'indexed', summary: '', summarySource: 'manual', writeScope: 'author',
+        isTemplate: false, templateId: null, origin: null, clientRequestId: null,
+        createdById: 'USR-HSB-ADMIN', createdByName: 'HSB 관리자', createdAt: '2026-08-20T06:00:00.000Z',
+        lastEditedById: 'USR-HSB-ADMIN', lastEditedByName: 'HSB 관리자', lastEditedAt: '2026-08-20T06:10:00.000Z',
+        archivedAt: null,
+      }],
+      updatedAt: '2026-08-20T06:10:00.000Z', updatedBy: 'USR-HSB-ADMIN',
+    },
+    'wiki-revisions': {
+      data: [{
+        id: 'WREV-fixture-01-2', tenantId: 'TENANT-HSB', documentId: 'WDOC-fixture-01', version: 2,
+        at: '2026-08-20T06:10:00.000Z', byId: 'USR-HSB-ADMIN', byName: 'HSB 관리자',
+        title: '품질 점검 표준', icon: '📗', kind: 'patch',
+        changed: { inserted: [], updated: ['BLK-fixture-0001'], deleted: [], moved: [] },
+        summary: '문단 1개를 고쳤습니다',
+        inverse: [{ kind: 'update', blockId: 'BLK-fixture-0001', block: { id: 'BLK-fixture-0001', type: 'heading', text: '옛 제목', level: 2, seq: 1 } }],
+        snapshot: null,
+        overwrites: [{ blockId: 'BLK-fixture-0001', previousText: '밀린 문장', previousBy: 'USR-HSB-ADMIN', previousByName: 'HSB 관리자', previousSeq: 1 }],
+        lostEdits: [], restoredFrom: null, meta: null,
+      }],
+      updatedAt: '2026-08-20T06:10:00.000Z', updatedBy: 'USR-HSB-ADMIN',
+    },
   }
   snapshot.tenants['TENANT-POHANG'] = {
     'work-items': { data: [{ id: 'WORK-1', title: '별도 조합 업무', due: '2026-08-22T09:00:00.000Z', status: '업무요청' }], updatedAt: '2026-08-20T01:00:00.000Z' },
@@ -294,6 +328,13 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.deepEqual(roundTrippedView.columns, ['owner', 'cf:vendor'])
     assert.deepEqual(facade.tenants['TENANT-HSB']['custom-fields'].data[0].options, ['A', 'B'])
     assert.equal(facade.tenants['TENANT-HSB']['project-templates'].data[0].tasks[0].children[0].title, '인터뷰')
+    const roundTrippedWiki = facade.tenants['TENANT-HSB']['wiki-documents'].data[0]
+    assert.deepEqual(roundTrippedWiki.blocks[1].rows, [['항목', '기준'], ['온도', '4도 이하']], '표 셀(중첩 배열)이 왕복에서 살아 있어야 한다')
+    assert.deepEqual(roundTrippedWiki.tombstones, [{ id: 'BLK-fixture-0003', after: 'BLK-fixture-0001', at: '2026-08-20T06:00:00.000Z' }], '툼스톤이 사라지면 지워진 앵커 뒤 삽입이 문서 끝으로 순간이동한다')
+    assert.deepEqual(roundTrippedWiki.recentOpIds, ['OP-fixture-01'], '멱등 창이 사라지면 재기동 뒤 재전송이 같은 편집을 두 번 적용한다')
+    const roundTrippedRevision = facade.tenants['TENANT-HSB']['wiki-revisions'].data[0]
+    assert.equal(roundTrippedRevision.inverse[0].block.text, '옛 제목', '역패치가 사라지면 그 버전 아래로 되돌릴 길이 없다')
+    assert.equal(roundTrippedRevision.overwrites[0].previousText, '밀린 문장', '밀린 문장은 이 한 줄이 유일한 보관처다')
     const roundTrippedNotice = facade.tenants['TENANT-HSB'].notices.data[0]
     assert.equal(roundTrippedNotice.body, '첫 줄\n둘째 줄', '공지 본문의 줄바꿈은 왕복에서 살아 있어야 한다')
     assert.deepEqual(roundTrippedNotice.acknowledgements, [{ accountId: 'USR-TENANT-HSB-GUEST01', at: '2026-08-20T07:00:00.000Z' }])

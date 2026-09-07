@@ -6,7 +6,7 @@ import './ApprovalQueue.css'
 import { Button, IconButton } from './ui/Button'
 import { OpportunityWatch } from './OpportunityWatch'
 
-type ProposalKind = 'document-classification' | 'task-from-message' | 'sentinel-task' | 'lens-task' | 'opportunity' | 'principle' | 'thread-conclusion'
+type ProposalKind = 'document-classification' | 'task-from-message' | 'sentinel-task' | 'lens-task' | 'opportunity' | 'principle' | 'thread-conclusion' | 'wiki-task'
 type ProposalStatus = 'pending' | 'approved' | 'edited' | 'rejected' | 'expired'
 
 type Proposal = {
@@ -42,6 +42,8 @@ const kindMeta: Record<ProposalKind, KindMeta> = {
   principle: { label: '규범 제안', tone: 'info', icon: BookOpen },
   // R16-J: 스레드에서 결정으로 올린 것. 라벨이 없으면 목록에 영문 슬러그가 그대로 뜬다.
   'thread-conclusion': { label: '스레드 결론', tone: 'success', icon: MessagesSquare },
+  // R16-H: 문서의 체크 항목에서 올라온 업무. 근거 링크는 아래 evidenceTarget이 그 문서로 보낸다.
+  'wiki-task': { label: '문서에서 승격', tone: 'info', icon: BookOpen },
 }
 
 /**
@@ -66,6 +68,7 @@ function evidenceTarget(proposal: Proposal): { page: string; focusId: string; la
   if (proposal.kind === 'lens-task' && payload?.documentId) return { page: 'documents', focusId: payload.documentId, label: '분석한 파일 열기' }
   if (proposal.kind === 'task-from-message' && payload?.conversationId) return { page: 'messenger', focusId: payload.conversationId, label: '원본 대화 열기' }
   if (proposal.kind === 'sentinel-task' && payload?.complianceId) return { page: 'compliance', focusId: payload.complianceId, label: '인증 대장 열기' }
+  if (proposal.kind === 'wiki-task' && payload?.documentId) return { page: 'wiki', focusId: payload.documentId, label: '원본 문서 열기' }
   return null
 }
 

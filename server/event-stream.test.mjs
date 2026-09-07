@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createEventStream, EVENT_BUFFER_PER_TENANT } from './event-stream.mjs'
+import { createEventStream, EVENT_BUFFER_PER_TENANT, EVENT_KINDS } from './event-stream.mjs'
 
 /** 실제 응답 대신 쓰기 내용을 모으는 가짜 소켓. */
 function fakeClient() {
@@ -114,6 +114,29 @@ test('the buffer is bounded and unknown event kinds are refused', () => {
   assert.equal(stream.publish('', 'work', {}), null)
   // R16-E: 구글 캘린더 동기화가 일정 배열을 갈아 끼웠다는 신호. 종류가 없으면 publish가 조용히 null을 돌려준다.
   assert.ok(stream.publish('T1', 'calendar', { key: 'calendar-events', version: 3 }))
+  // R16-H: 문서 편집 신호. 미지 kind로 남아 있으면 화면이 addEventListener를 걸지 않아 프레임이 조용히 버려진다.
+  assert.ok(EVENT_KINDS.includes('wiki'))
+  assert.ok(stream.publish('T1', 'wiki', { change: 'ops', documentId: 'WDOC-1', version: 2 }))
+})
+
+test('ephemeral events reach live clients without spending a buffer slot', () => {
+  const stream = createEventStream()
+  const client = connectClient(stream)
+  const before = stream.missedSince('T1', 1)
+  // 프레즌스는 '지난 것은 뜻이 없는' 신호다. 버퍼에 쌓으면 200칸이 몇 분 만에 밀려,
+  // 잠깐 끊겼던 다른 화면 전부가 resync를 받아 전체 재조회를 한다.
+  for (let index = 0; index < EVENT_BUFFER_PER_TENANT + 100; index += 1) {
+    stream.publishEphemeral('T1', 'wiki', { change: 'presence', documentId: 'WDOC-1', roster: [] })
+  }
+  const after = stream.missedSince('T1', 1)
+  assert.equal(after.resync, before.resync, '에페메랄 발행은 재연결 커서를 밀어내지 않는다')
+  assert.equal(after.events.length, before.events.length, '버퍼에 한 칸도 쌓지 않는다')
+  assert.equal(client.frames().filter((frame) => frame.kind === 'wiki').length, EVENT_BUFFER_PER_TENANT + 100, '붙어 있는 클라이언트에는 그대로 간다')
+  assert.equal(stream.publishEphemeral('T1', 'unknown-kind', {}), false)
+
+  // 다음 진짜 이벤트의 번호가 앞당겨지지 않는다 — 앞당기면 재연결 커서가 진짜 이벤트를 건너뛴다.
+  const id = stream.publish('T1', 'work', { key: 'work-items' })
+  assert.equal(id, 1)
 })
 
 test('closing a connection stops delivery and frees the tenant entry', () => {

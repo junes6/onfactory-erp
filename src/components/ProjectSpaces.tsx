@@ -73,7 +73,7 @@ async function readJson<T>(response: Response): Promise<T & { error?: ApiError }
   try { return JSON.parse(text) } catch { return { error: { message: text } } as T & { error?: ApiError } }
 }
 
-export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserName, canManage, onToast, onNavigate, guestMode = false, focusProjectId, onFocusHandled }: {
+export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserName, canManage, onToast, onNavigate, onOpenWiki, guestMode = false, focusProjectId, onFocusHandled }: {
   workspaceScope?: string
   currentUserId: string
   currentUserName: string
@@ -86,6 +86,8 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
    * focusProjectId가 가리키는 프로젝트 상세로 바로 들어간다(목록 화면 없음).
    */
   guestMode?: boolean
+  /** 이 프로젝트의 문서를 문서 화면에서 연다. 넘겨받지 않으면 칩 자체를 그리지 않는다. */
+  onOpenWiki?: (projectId: string) => void
   focusProjectId?: string
   /**
    * 지목된 프로젝트를 한 번 열었다고 알린다. 부모가 여기서 focusProjectId를 지운다 —
@@ -105,6 +107,8 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
   const [composerOpen, setComposerOpen] = useState(false)
   const [filter, setFilter] = useState<'active' | 'archived'>('active')
   const [detailTab, setDetailTab] = useState<'feed' | 'files'>('feed')
+  /** 이 프로젝트에 달린 문서 수. 세어 보기 전에는 null이라 칩을 그리지 않는다. */
+  const [wikiCount, setWikiCount] = useState<number | null>(null)
   // 템플릿 드로어와 프로젝트 편집기는 같은 화면의 기본 버튼을 각각 하나씩 가진다. 그래서 둘은 동시에 열리지 않는다.
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [templateInitialId, setTemplateInitialId] = useState<string>()
@@ -220,6 +224,21 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
     onInstantiate={startFromTemplate}
   /> : null
 
+  // 상세를 열 때 그 프로젝트의 문서 수를 센다. 문서 화면과 같은 목록 라우트를 쓰므로 권한 판정이 한 벌이다.
+  useEffect(() => {
+    if (!selectedId || guestMode) { setWikiCount(null); return }
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await fetch(`/api/wiki?projectId=${encodeURIComponent(selectedId)}`, { headers })
+        if (!response.ok) { if (!cancelled) setWikiCount(null); return }
+        const body = await readJson<{ documents?: unknown[] }>(response)
+        if (!cancelled) setWikiCount((body.documents ?? []).length)
+      } catch { if (!cancelled) setWikiCount(null) }
+    })()
+    return () => { cancelled = true }
+  }, [guestMode, headers, selectedId])
+
   const deleteProject = async () => {
     if (!detail || !window.confirm(`‘${detail.name}’ 프로젝트를 삭제할까요? 글·댓글 기록이 함께 삭제됩니다. 기록을 남기려면 대신 '보관'을 선택하세요.`)) return
     const response = await fetch(`/api/projects/${encodeURIComponent(detail.id)}`, { method: 'DELETE', headers })
@@ -304,6 +323,10 @@ export function ProjectSpacesPage({ workspaceScope, currentUserId, currentUserNa
             <span>{detail.visibility === 'company' ? <><Users size={14} /> 회사 전체 열람</> : <><Lock size={14} /> 멤버만</>}</span>
             {detail.documentCategories?.length ? <span className="project-doc-categories" title="자료 분류"><FolderKanban size={14} /> {detail.documentCategories.join(' · ')}</span> : null}
             {role && <StatusBadge className="status-pill" tone={guestMode ? 'warning' : roleTone[role]}>내 권한 · {guestMode ? '게스트 (보기와 댓글)' : roleLabel[role]}</StatusBadge>}
+            {/* R16-H: 문서는 세 번째 탭을 만들지 않는다 — 이 화면의 기본 버튼은 헤더의 하나뿐이어야 한다. */}
+            {!guestMode && onOpenWiki && wikiCount !== null && wikiCount > 0 && (
+              <Button tone="quiet" size="sm" type="button" onClick={() => onOpenWiki(detail.id)}>문서 {wikiCount}건</Button>
+            )}
           </div>
         </div>
         <div className="page-header-actions">

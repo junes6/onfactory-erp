@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto'
+
 import { GUEST_ROLE, GUEST_SCOPE_FORBIDDEN, guestWorkItemViolation } from './guest-access.mjs'
 
 /**
@@ -32,6 +34,25 @@ export const isSubtask = (item) => typeof item?.parentId === 'string' && item.pa
 export const childrenOf = (items, parentId) => items.filter((item) => item?.parentId === parentId)
 /** 자식 "완료"의 정의는 status === '결재완료' 하나. 결재대기는 아직 끝난 것이 아니다. */
 export const openSubtaskCount = (items, parentId) => childrenOf(items, parentId).filter((child) => child?.status !== '결재완료').length
+
+/**
+ * 새 업무 id 한 개. **벽시계에서 뽑지 않는다.**
+ *
+ * `WK-${Date.now().toString().slice(-8)}` 같은 관용구는 같은 밀리초에 두 번 발급되면 같은 id를 준다.
+ * 업무 배열은 통째로 PUT되고 그 문(`normalizeAdminWorkItems`)이 중복 id를 만나면 배열 전체를 400으로
+ * 거절하므로, 한 번 겹치는 순간 그 회사는 **읽은 그대로 되쓰는 것조차** 못 하게 된다. 사람이 고칠
+ * 방법이 화면에 없다. 그래서 난수 접미를 붙이고, 그 위에 값싼 겹침 검사를 한 번 더 둔다
+ * (`freshDocumentId`와 같은 모양이다 — 배열에서 행을 찾는 술어가 전부 `find`(첫 행)라
+ * 겹치는 순간 두 번째 행은 아무도 손댈 수 없는 유령이 된다).
+ *
+ * @param existing 지금 이 회사의 업무 행들. 겹치면 다시 뽑는다.
+ */
+export function newWorkItemId(existing = []) {
+  const mint = () => `WK-${Date.now().toString(36).toUpperCase()}-${randomBytes(3).toString('hex').toUpperCase()}`
+  let id = mint()
+  for (let attempt = 1; existing.some((row) => row?.id === id); attempt += 1) id = `${mint()}${attempt}`
+  return id
+}
 
 /**
  * 상한을 지키며 새 업무 한 건을 목록 앞에 붙인다.
