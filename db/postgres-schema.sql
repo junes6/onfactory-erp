@@ -645,6 +645,33 @@ BEGIN
   END LOOP;
 END $$;
 
+-- R11-D 개인 지식 코어. 소유자 격리는 애플리케이션 권한 검사와 별개로 DB에서도 강제한다 —
+-- app.current_account_id 를 설정한 커넥션만 자기 행을 본다.
+-- supabase/migrations/20260831020000_personal_core.sql 에 있던 이 블록이 베이스라인에는 없었다.
+-- 그래서 이 파일 하나로 세운 데이터베이스에서는 개인 노트·원칙·교정 이력·지식 공백 네 테이블이
+-- 행 수준 보안 없이 떴다. 마이그레이션 사슬로 만든 데이터베이스와 모양이 달랐고, 어느 시험도
+-- 그 사실을 보지 않았다(scripts/verify-schema-parity.mjs 가 이제 본다).
+ALTER TABLE principles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE personal_notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE correction_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_gaps ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE
+  target TEXT;
+BEGIN
+  FOREACH target IN ARRAY ARRAY['principles', 'personal_notes', 'correction_log', 'knowledge_gaps'] LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I_owner_only ON %I', target, target);
+    EXECUTE format($policy$
+      CREATE POLICY %I_owner_only ON %I
+      USING (owner_account_id = current_setting('app.current_account_id', true))
+      WITH CHECK (owner_account_id = current_setting('app.current_account_id', true))
+    $policy$, target, target);
+    -- 서비스 롤(서버 프로세스)만 우회할 수 있다.
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', target);
+  END LOOP;
+END $$;
+
 -- R16-B: 프로젝트 템플릿은 게스트가 읽지 않는다. 게스트 정책을 만들지 않고 서비스 컨텍스트만 통과시킨다 —
 -- 정책이 하나도 없는 채로 RLS만 켜면 앱이 못 읽고, 게스트 정책을 만들면 외부인에게 내부 프로세스명이 열린다.
 ALTER TABLE project_templates ENABLE ROW LEVEL SECURITY;
@@ -840,6 +867,11 @@ CREATE INDEX IF NOT EXISTS idx_messenger_messages_active ON messenger_messages (
 CREATE INDEX IF NOT EXISTS idx_documents_active ON items (org_id, position) WHERE deleted_at IS NULL AND item_type = 'company-document';
 CREATE INDEX IF NOT EXISTS idx_attendance_records_active ON attendance_records (org_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_personal_todos_active ON personal_todos (org_id, (payload->>'ownerId'), position) WHERE deleted_at IS NULL;
+-- R11-D 개인 지식 코어. supabase/migrations/20260831020000_personal_core.sql 과 같은 네 줄이다.
+CREATE INDEX IF NOT EXISTS idx_principles_owner ON principles (owner_account_id, status) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_personal_notes_owner ON personal_notes (owner_account_id, created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_correction_log_owner ON correction_log (owner_account_id, created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_knowledge_gaps_owner ON knowledge_gaps (owner_account_id, status) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_project_templates_active ON project_templates (org_id, (payload ->> 'origin'), position) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS notices_channel_idx ON notices (org_id, (payload ->> 'conversationId'), (payload ->> 'createdAt') DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS notices_project_idx ON notices (org_id, (payload ->> 'scope'), (payload ->> 'projectId')) WHERE deleted_at IS NULL;
