@@ -5,6 +5,8 @@ import path from 'node:path'
 import test from 'node:test'
 
 import {
+  BACKUP_SET_MARKER,
+  assertBackupSetSource,
   backupGenerationName,
   backupSettings,
   millisecondsUntilNextRun,
@@ -64,9 +66,11 @@ test('one cycle leaves the dump on NAS and mirrors the same dump to the cloud bu
     assert.equal(result.cloud.ok, true)
     assert.ok(result.cloud.objects >= 3, '워크스페이스 덤프 · 문서 원본 · 매니페스트가 모두 미러된다')
 
-    // NAS 쪽 실물 확인
-    const generations = await readdir(nas)
-    assert.deepEqual(generations, [result.generation])
+    // NAS 쪽 실물 확인. 세트 표식 파일 하나와 세대 폴더 하나가 있어야 한다 —
+    // 표식을 세대로 세면 보관 정리가 한 세대를 덜 남긴다.
+    const entries = await readdir(nas)
+    assert.deepEqual(entries.filter((name) => name.startsWith('inthefield_')), [result.generation])
+    assert.ok(entries.includes(BACKUP_SET_MARKER), '첫 백업이 이 세트의 원본을 표식에 적는다')
     const info = JSON.parse(await readFile(path.join(nas, result.generation, 'BACKUP_INFO.json'), 'utf8'))
     assert.equal(info.generation, result.generation)
     assert.equal(info.schemaVersion, 2)
@@ -147,4 +151,93 @@ test('generation names sort chronologically so pruning removes the oldest', () =
   const second = backupGenerationName(new Date('2026-08-31T18:00:00.000Z'))
   assert.ok(first < second)
   assert.match(first, /^inthefield_\d{4}-\d{2}-\d{2}_/)
+})
+
+/**
+ * 이 저장소에서 실제로 일어난 일이다: 검증 에이전트가 ONFACTORY_DATA_DIRECTORY만 임시 폴더로
+ * 바꿔 두고 .env.local의 BACKUP_ENABLED=1 · BACKUP_NAS_DIRECTORY는 그대로 물려받아,
+ * 14KB짜리 빈 덤프 두 세대가 1.7MB짜리 진짜 세대들 위에 쌓였다. 보관 세대 수를 넘겼다면
+ * 그 자리에서 가장 오래된 진짜 백업이 지워졌을 것이다.
+ */
+test('a run from a different data directory is refused before it can evict a real generation', async () => {
+  const real = await seedDataDirectory()
+  const stranger = await mkdtemp(path.join(os.tmpdir(), 'inthefield-backup-stranger-'))
+  await writeFile(path.join(stranger, 'workspace-state.json'), JSON.stringify({ version: 2, tenants: {} }))
+  const nas = await mkdtemp(path.join(os.tmpdir(), 'inthefield-backup-guard-'))
+  try {
+    const settings = { nasDirectory: nas, cloudBucket: '', cloudPrefix: 'inthefield-backup', retention: 1 }
+    const first = await runBackupCycle({ dataDirectory: real, settings, now: new Date('2026-09-01T18:00:00.000Z') })
+    assert.equal(first.ok, true)
+
+    const intruder = await runBackupCycle({ dataDirectory: stranger, settings, now: new Date('2026-09-02T18:00:00.000Z') })
+    assert.equal(intruder.ok, false)
+    assert.match(intruder.error, /다른 데이터 디렉터리/)
+    assert.match(intruder.error, /BACKUP_SET\.json/)
+
+    // 보관 세대 수가 1이므로, 막지 못했다면 진짜 백업은 이미 사라졌을 자리다.
+    const entries = await readdir(nas)
+    assert.deepEqual(entries.filter((name) => name.startsWith('inthefield_')), [first.generation])
+    assert.equal(intruder.pruned.length, 0, '거절된 실행은 아무것도 지우지 않는다')
+    const kept = JSON.parse(await readFile(path.join(nas, first.generation, 'BACKUP_INFO.json'), 'utf8'))
+    assert.equal(path.resolve(kept.source), path.resolve(real))
+
+    // 실패는 상태에 남고, 마지막 성공 시각은 진짜 백업의 것을 지킨다.
+    const status = nextBackupStatus(nextBackupStatus({}, first), intruder)
+    assert.equal(status.lastGeneration, first.generation)
+    assert.equal(status.consecutiveFailures, 1)
+    assert.match(status.warning, /백업 실패/)
+  } finally {
+    for (const directory of [real, stranger, nas]) await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('the same data directory keeps writing to its own set, whatever the path is spelled like', async () => {
+  const source = await seedDataDirectory()
+  const nas = await mkdtemp(path.join(os.tmpdir(), 'inthefield-backup-same-'))
+  try {
+    const settings = { nasDirectory: nas, cloudBucket: '', cloudPrefix: 'inthefield-backup', retention: 5 }
+    const first = await runBackupCycle({ dataDirectory: source, settings, now: new Date('2026-09-01T18:00:00.000Z') })
+    // 같은 폴더를 슬래시 방향과 뒤 슬래시만 달리 적어도 같은 세트다(윈도 NAS 마운트에서 흔하다).
+    const spelled = `${source.split(path.sep).join('/')}/`
+    const second = await runBackupCycle({ dataDirectory: spelled, settings, now: new Date('2026-09-02T18:00:00.000Z') })
+    assert.equal(first.ok, true)
+    assert.equal(second.ok, true, second.error)
+    const entries = await readdir(nas)
+    assert.equal(entries.filter((name) => name.startsWith('inthefield_')).length, 2)
+  } finally {
+    await rm(source, { recursive: true, force: true })
+    await rm(nas, { recursive: true, force: true })
+  }
+})
+
+test('an existing backup set with no marker adopts the directory that is backing it up', async () => {
+  const source = await seedDataDirectory()
+  const nas = await mkdtemp(path.join(os.tmpdir(), 'inthefield-backup-legacy-'))
+  try {
+    // 이 기능 이전에 만들어진 세트. 표식이 없다고 해서 백업을 멈추면, 고치자마자 백업이 끊긴다.
+    await mkdir(path.join(nas, 'inthefield_2026-08-30_18-00-00-000'), { recursive: true })
+    const settings = { nasDirectory: nas, cloudBucket: '', cloudPrefix: 'inthefield-backup', retention: 5 }
+    const result = await runBackupCycle({ dataDirectory: source, settings, now: new Date('2026-09-01T18:00:00.000Z') })
+    assert.equal(result.ok, true, result.error)
+    const marker = JSON.parse(await readFile(path.join(nas, BACKUP_SET_MARKER), 'utf8'))
+    assert.equal(path.resolve(marker.dataDirectory), path.resolve(source))
+  } finally {
+    await rm(source, { recursive: true, force: true })
+    await rm(nas, { recursive: true, force: true })
+  }
+})
+
+test('a broken marker is not a way around the guard', async () => {
+  const source = await seedDataDirectory()
+  const nas = await mkdtemp(path.join(os.tmpdir(), 'inthefield-backup-broken-'))
+  try {
+    await writeFile(path.join(nas, BACKUP_SET_MARKER), '{ 이건 JSON이 아니다')
+    assert.throws(
+      () => assertBackupSetSource(nas, source),
+      (error) => error.code === 'BACKUP_SET_MARKER_UNREADABLE',
+    )
+  } finally {
+    await rm(source, { recursive: true, force: true })
+    await rm(nas, { recursive: true, force: true })
+  }
 })

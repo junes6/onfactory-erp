@@ -15,6 +15,16 @@ import path from 'node:path'
 export const BACKUP_STATUS_KEY = 'backupStatus'
 const DEFAULT_RETENTION = 14
 const DEFAULT_HOUR = 3
+/**
+ * 백업 세트가 **어느 데이터 디렉터리의 것인지** 적어 두는 표식. NAS 디렉터리 바로 아래에 둔다.
+ *
+ * 왜 필요한가: 개발·시험 실행이 ONFACTORY_DATA_DIRECTORY만 임시 폴더로 바꿔 놓고 .env의
+ * BACKUP_ENABLED=1 · BACKUP_NAS_DIRECTORY는 그대로 물려받으면, **빈 임시 폴더의 덤프가 실제
+ * 백업 세트에 세대로 들어가고** 보관 세대 수를 넘긴 진짜 백업이 그 자리에서 지워진다.
+ * 실제로 이 저장소에서 14KB짜리 세대 두 개가 1.7MB짜리 진짜 세대들 위에 쌓였다.
+ * 세대 안의 BACKUP_INFO.json에도 source가 적히지만 그것은 **쓰고 난 뒤의 기록**이라 아무것도 막지 못한다.
+ */
+export const BACKUP_SET_MARKER = 'BACKUP_SET.json'
 
 export class BackupError extends Error {
   constructor(code, message, cause) {
@@ -62,6 +72,48 @@ function listFiles(root, base = root) {
   return files
 }
 
+/** 경로 비교용 정규화. 대소문자와 슬래시 방향, 뒤 슬래시가 달라도 같은 폴더는 같게 본다(윈도 NAS 마운트). */
+const samePath = (left, right) => {
+  const normalize = (value) => path.resolve(String(value ?? '')).replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase()
+  return normalize(left) === normalize(right)
+}
+
+/**
+ * 이 백업 세트가 받아들이는 데이터 디렉터리를 정한다.
+ *
+ * - 표식이 없으면(첫 백업이거나 이 기능 이전의 세트) 지금 원본으로 세트를 연다.
+ * - 표식이 있고 원본이 같으면 통과.
+ * - 다르면 **아무것도 쓰지 않고 거절한다.** 여기서 통과시키면 진짜 백업이 보관 정리에 밀려 사라진다.
+ *
+ * 데이터 디렉터리를 정말로 옮겼다면 표식 파일을 지우거나 dataDirectory를 고쳐 다시 열면 된다 —
+ * 오류 문구가 그 두 경로와 표식 파일 위치를 그대로 말해 준다.
+ */
+export function assertBackupSetSource(nasDirectory, dataDirectory, { now = new Date() } = {}) {
+  const markerPath = path.join(nasDirectory, BACKUP_SET_MARKER)
+  if (existsSync(markerPath)) {
+    let recorded = null
+    try { recorded = JSON.parse(readFileSync(markerPath, 'utf8')) } catch { recorded = null }
+    const source = String(recorded?.dataDirectory ?? '').trim()
+    // 읽지 못한 표식은 없는 것으로 보지 않는다 — 그렇게 하면 표식을 깨뜨리는 것이 곧 우회가 된다.
+    if (!source) throw new BackupError('BACKUP_SET_MARKER_UNREADABLE', `백업 세트 표식을 읽지 못했습니다: ${markerPath}. 파일을 고치거나 지운 뒤 다시 실행해 주세요.`)
+    if (!samePath(source, dataDirectory)) {
+      throw new BackupError(
+        'BACKUP_SET_SOURCE_MISMATCH',
+        `이 백업 세트는 다른 데이터 디렉터리의 것입니다. 세트=${source} · 이번 실행=${path.resolve(dataDirectory)}. `
+        + `시험용 데이터로 실제 백업을 덮어쓰지 않도록 중단했습니다. 정말 옮겼다면 ${markerPath} 를 지우고 다시 실행해 주세요.`,
+      )
+    }
+    return { markerPath, opened: false }
+  }
+  mkdirSync(nasDirectory, { recursive: true })
+  writeFileSync(markerPath, JSON.stringify({
+    dataDirectory: path.resolve(dataDirectory),
+    openedAt: now.toISOString(),
+    note: '이 백업 세트는 위 데이터 디렉터리의 것입니다. 다른 원본의 백업은 거절됩니다.',
+  }, null, 2))
+  return { markerPath, opened: true }
+}
+
 /** 보관 세대 수를 넘긴 오래된 백업을 지운다. 지운 목록을 돌려준다. */
 export function pruneGenerations(nasDirectory, retention) {
   if (!existsSync(nasDirectory)) return []
@@ -99,6 +151,8 @@ export async function runBackupCycle({
   try {
     if (!settings?.nasDirectory) throw new BackupError('BACKUP_NAS_NOT_CONFIGURED', 'BACKUP_NAS_DIRECTORY가 설정되지 않았습니다.')
     if (!dataDirectory || !existsSync(dataDirectory)) throw new BackupError('BACKUP_SOURCE_MISSING', `업무 데이터 디렉터리를 찾을 수 없습니다: ${dataDirectory}`)
+    // 한 바이트도 쓰기 전에 본다. 세대 폴더를 만든 뒤에 걸리면 빈 세대가 남고 그것도 보관 정리에 센다.
+    assertBackupSetSource(settings.nasDirectory, dataDirectory, { now })
 
     // 1차: 업무 데이터 덤프 → NAS
     const destination = path.join(settings.nasDirectory, result.generation)
