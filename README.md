@@ -186,11 +186,12 @@ BACKUP_INTERVAL_HOURS=24               # 반복 주기
    pnpm backup:data
    ~~~
 3. **어느 세대로 되돌릴지 고릅니다.** NAS의 `BACKUP_NAS_DIRECTORY`에서 `inthefield_YYYY-MM-DD_HH-MM-SS-mmm` 폴더를 확인하고, 각 폴더의 `BACKUP_INFO.json`에서 생성 시각과 스키마 버전을 봅니다.
-4. **NAS가 살아 있으면 NAS에서 복원합니다.**
+4. **NAS가 살아 있으면 NAS에서 복원합니다.** `--from=`에는 `BACKUP_NAS_DIRECTORY` 아래의 세대 폴더 하나를 지목합니다(뿌리 폴더가 아니라 세대 폴더입니다).
    ~~~powershell
    $env:CONFIRM_RESTORE='YES'
    pnpm restore:data -- --from=/mnt/nas/inthefield-backup/inthefield_2026-08-31_03-00-00-000
    ~~~
+   복원 소스로 받는 곳은 두 군데뿐입니다 — `server/backups`(로컬 `backup:data` 사본)와 `BACKUP_NAS_DIRECTORY`(야간 배치가 쌓는 세대). 그 밖의 경로, 그리고 `workspace-state.json`이 없는 폴더는 거절하고 무엇을 고르면 되는지 함께 알려 줍니다.
 5. **NAS가 소실됐으면 클라우드 버킷에서 같은 세대를 내려받아 같은 명령으로 복원합니다.** 버킷의 객체 키는 `<BACKUP_CLOUD_PREFIX>/<세대>/<원본 상대경로>` 형태이므로, 세대 폴더 하나를 통째로 받아 로컬 경로로 지정하면 됩니다.
 6. **서버를 다시 켜고** 로그인 → 업무 목록 → 파일 다운로드까지 한 번씩 확인합니다.
 7. **콘솔에서 다음 백업이 성공하는지 확인합니다.** 연속 실패 횟수가 0으로 돌아와야 복구가 끝난 것입니다.
