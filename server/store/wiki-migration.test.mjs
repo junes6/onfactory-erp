@@ -59,5 +59,11 @@ test('the baseline schema carries the same two tables as the migration chain', a
 
 test('the wiki migration sorts after every migration that came before it', async () => {
   const files = (await readdir(migrationDirectory)).filter((name) => name.endsWith('.sql')).sort()
-  assert.equal(files.at(-1), migrationName, '사전순 마지막이어야 사슬이 순서대로 적용된다')
+  // '마지막이어야 한다'로 적으면 다음 절이 마이그레이션을 하나 더할 때마다 깨진다(R16-I2에서 실제로 깨졌다).
+  // 잠글 것은 순서다. 다만 `before.every((name) => name < migrationName)` 은 적으면 안 된다 —
+  // before 가 정렬된 배열의 앞부분이라 정의상 항상 참이고, 어떤 입력에서도 빨개지지 않는 죽은 단언이다.
+  // 앞선 마이그레이션이 '실제로 있고 앞에 온다'를 묻는 아래 한 줄만이 순서를 잰다.
+  assert.ok(files.includes(migrationName), '위키 마이그레이션이 사슬 안에 있어야 한다')
+  const before = files.slice(0, files.indexOf(migrationName))
+  assert.ok(before.includes('20260910010000_bulk_imports.sql'), '앞선 마이그레이션이 실제로 앞에 있어야 한다')
 })

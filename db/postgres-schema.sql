@@ -517,6 +517,23 @@ CREATE TABLE IF NOT EXISTS wiki_revisions (
   created_by TEXT, PRIMARY KEY (org_id, id)
 );
 
+-- R16-I: 양식형 전자결재 — 관리자가 만든 양식과 대결자 설정(recordType으로 갈린다)
+-- 마이그레이션 사슬(supabase/migrations/20260913000000_approval_forms.sql)과 **같은 본문**이다.
+CREATE TABLE IF NOT EXISTS approval_forms (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
+-- R16-I: 기안된 결재 문서. 결재선·이력·게시 결과가 payload 안에 통째로 들어간다.
+CREATE TABLE IF NOT EXISTS approval_documents (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
 -- R16-L: 외부 연동. tokenHash(sha256)와 signingSecretEnc(AES-256-GCM 봉인문)만 들어간다 — 평문은 저장하지 않는다.
 -- 게스트 범위가 아니므로 아래 게스트 DO 루프에 넣지 않고 service 전용 정책만 붙인다.
 CREATE TABLE IF NOT EXISTS webhook_endpoints (
@@ -753,6 +770,18 @@ ALTER TABLE wiki_revisions FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS wiki_revisions_service ON wiki_revisions;
 CREATE POLICY wiki_revisions_service ON wiki_revisions USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
 
+-- R16-I: 양식 결재도 서비스 컨텍스트만 통과한다. 게스트 정책은 만들지 않는다 — 결재 문서에는
+-- 급여·단가·거래처가 들어가고, 외부 거래처 세션에 그것을 여는 것은 앱 필터 한 겹으로 감당할 일이 아니다.
+-- 여는 날에는 위 게스트 DO 루프 ARRAY와 함께 고친다.
+ALTER TABLE approval_forms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE approval_forms FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS approval_forms_service ON approval_forms;
+CREATE POLICY approval_forms_service ON approval_forms USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+ALTER TABLE approval_documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE approval_documents FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS approval_documents_service ON approval_documents;
+CREATE POLICY approval_documents_service ON approval_documents USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+
 DROP POLICY IF EXISTS project_spaces_guest_read ON project_spaces;
 CREATE POLICY project_spaces_guest_read ON project_spaces FOR SELECT USING (
   current_setting('app.role', TRUE) = 'tenant-guest'
@@ -920,6 +949,9 @@ CREATE INDEX IF NOT EXISTS idx_bulk_import_rules_active ON bulk_import_rules (or
 CREATE INDEX IF NOT EXISTS wiki_documents_tree_idx ON wiki_documents (org_id, (payload ->> 'parentId')) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS wiki_documents_project_idx ON wiki_documents (org_id, (payload ->> 'projectId')) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS wiki_revisions_document_idx ON wiki_revisions (org_id, (payload ->> 'documentId'), (payload ->> 'version') DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS approval_documents_status_idx ON approval_documents (org_id, (payload ->> 'status')) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS approval_documents_drafter_idx ON approval_documents (org_id, (payload ->> 'drafterId')) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS approval_documents_month_idx ON approval_documents (org_id, (payload -> 'posting' ->> 'month')) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ai_conversations_owner_idx ON ai_conversations (org_id, (payload ->> 'ownerId'), (payload ->> 'updatedAt') DESC);
 CREATE INDEX IF NOT EXISTS ai_conversations_trash_idx ON ai_conversations (org_id, (payload ->> 'deletedAt'));
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON auth_sessions (expires_at) WHERE revoked_at IS NULL;

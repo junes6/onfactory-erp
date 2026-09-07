@@ -89,6 +89,10 @@ export const WORKSPACE_TABLES = Object.freeze({
   // 끝나고 전용 라우트만 문이 된다. 열어 두면 누구든 PUT 한 번으로 병합·이력·링크 인가를 통째로 우회한다.
   'wiki-documents': 'wiki_documents',
   'wiki-revisions': 'wiki_revisions',
+  // R16-I: 양식형 전자결재. 양식 정의(+대결자 설정)와 결재 문서를 나눠 둔다.
+  // 한 배열에 합치면 양식 한 장을 읽을 때마다 그 회사의 결재 문서 전체가 딸려 온다.
+  'approval-forms': 'approval_forms',
+  'approval-documents': 'approval_documents',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

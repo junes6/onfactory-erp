@@ -191,6 +191,46 @@ function fixture() {
       }],
       updatedAt: '2026-08-20T06:10:00.000Z', updatedBy: 'USR-HSB-ADMIN',
     },
+    // R16-I: 양식 결재. 한 배열에 recordType 두 갈래(양식·대결자)가 산다 —
+    // 대결자 행이 왕복에서 사라지면 휴가 간 결재자 자리에서 결재가 영영 멈춘다.
+    'approval-forms': {
+      data: [{
+        recordType: 'form', id: 'AFM-FIXTURE-01', name: '지출결의서', kind: '지출결의', description: '경비 지출 결재',
+        fields: [
+          { key: 'amount', label: '금액', type: 'money', required: true, options: [], help: '', position: 0 },
+          { key: 'purpose', label: '사용처', type: 'select', required: true, options: ['식대', '교통비'], help: '', position: 1 },
+        ],
+        defaultLine: [{ step: 1, mode: 'sequential', approverIds: ['USR-HSB-ADMIN'] }],
+        ccIds: [], amountFieldKey: 'amount', evidenceCategory: '경비', active: true, version: 2,
+        createdById: 'USR-HSB-ADMIN', createdByName: 'HSB 관리자',
+        createdAt: '2026-08-20T06:00:00.000Z', updatedAt: '2026-08-20T06:20:00.000Z', updatedById: 'USR-HSB-ADMIN',
+      }, {
+        recordType: 'delegate', id: 'ADG-USR-HSB-ADMIN', accountId: 'USR-HSB-ADMIN',
+        delegateId: 'USR-HSB-STAFF', delegateName: 'HSB 직원',
+        from: '2026-08-21', to: '2026-08-25', note: '휴가', updatedAt: '2026-08-20T06:20:00.000Z', updatedById: 'USR-HSB-ADMIN',
+      }],
+      updatedAt: '2026-08-20T06:20:00.000Z', updatedBy: 'USR-HSB-ADMIN',
+    },
+    // R16-I: 결재 문서. 결재선의 자리마다 「누가 실제로 눌렀는가」(decidedById)와 대결 표시(delegateOf)가 붙는다 —
+    // 그 두 필드가 왕복에서 떨어지면 인쇄물의 「대결」 표기와 대결자의 열람 권한이 함께 죽는다.
+    'approval-documents': {
+      data: [{
+        id: 'APD-FIXTURE-01', formId: 'AFM-FIXTURE-01', formName: '지출결의서', formVersion: 2, kind: '지출결의',
+        title: '8월 회식비', values: { amount: 250000, purpose: '식대' }, attachments: ['DOC-1'],
+        line: [
+          { step: 1, mode: 'sequential', approvers: [{ accountId: 'USR-HSB-ADMIN', name: 'HSB 관리자', decision: 'approved', decidedAt: '2026-08-20T06:30:00.000Z', decidedById: 'USR-HSB-STAFF', comment: '확인했습니다', delegateOf: 'USR-HSB-ADMIN' }] },
+          { step: 2, mode: 'parallel', approvers: [{ accountId: 'USR-HSB-STAFF', name: 'HSB 직원', decision: 'pending', decidedAt: null, decidedById: null, comment: '', delegateOf: null }] },
+        ],
+        ccIds: [], drafterId: 'USR-HSB-STAFF', drafterName: 'HSB 직원', status: '결재중', currentStep: 2,
+        rejectionReason: '', evidenceId: null,
+        posting: { month: '2026-08', amount: 250000, currency: 'KRW', fieldKey: 'amount', kind: '지출결의', postedAt: '2026-08-20T06:30:00.000Z' },
+        history: [{ at: '2026-08-20T06:30:00.000Z', actorId: 'USR-HSB-STAFF', actorName: 'HSB 직원', action: '승인', comment: '확인했습니다', delegateOf: 'USR-HSB-ADMIN' }],
+        version: 2, clientRequestId: null,
+        createdAt: '2026-08-20T06:25:00.000Z', updatedAt: '2026-08-20T06:30:00.000Z',
+        submittedAt: '2026-08-20T06:26:00.000Z', completedAt: null,
+      }],
+      updatedAt: '2026-08-20T06:30:00.000Z', updatedBy: 'USR-HSB-STAFF',
+    },
   }
   snapshot.tenants['TENANT-POHANG'] = {
     'work-items': { data: [{ id: 'WORK-1', title: '별도 조합 업무', due: '2026-08-22T09:00:00.000Z', status: '업무요청' }], updatedAt: '2026-08-20T01:00:00.000Z' },
@@ -335,6 +375,13 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     const roundTrippedRevision = facade.tenants['TENANT-HSB']['wiki-revisions'].data[0]
     assert.equal(roundTrippedRevision.inverse[0].block.text, '옛 제목', '역패치가 사라지면 그 버전 아래로 되돌릴 길이 없다')
     assert.equal(roundTrippedRevision.overwrites[0].previousText, '밀린 문장', '밀린 문장은 이 한 줄이 유일한 보관처다')
+    const roundTrippedDelegate = facade.tenants['TENANT-HSB']['approval-forms'].data.find((row) => row.recordType === 'delegate')
+    assert.equal(roundTrippedDelegate.delegateId, 'USR-HSB-STAFF', '대결자 행이 사라지면 휴가 간 결재자 자리에서 결재가 멈춘다')
+    assert.deepEqual(facade.tenants['TENANT-HSB']['approval-forms'].data[0].fields.map((field) => field.key), ['amount', 'purpose'])
+    const roundTrippedApproval = facade.tenants['TENANT-HSB']['approval-documents'].data[0]
+    assert.equal(roundTrippedApproval.line[0].approvers[0].decidedById, 'USR-HSB-STAFF', '누가 실제로 눌렀는지가 사라지면 「대결」 표기와 대결자 열람이 함께 죽는다')
+    assert.equal(roundTrippedApproval.line[0].approvers[0].delegateOf, 'USR-HSB-ADMIN')
+    assert.equal(roundTrippedApproval.posting.amount, 250000, '게시 금액이 사라지면 「승인된 지출」 집계가 조용히 0이 된다')
     const roundTrippedNotice = facade.tenants['TENANT-HSB'].notices.data[0]
     assert.equal(roundTrippedNotice.body, '첫 줄\n둘째 줄', '공지 본문의 줄바꿈은 왕복에서 살아 있어야 한다')
     assert.deepEqual(roundTrippedNotice.acknowledgements, [{ accountId: 'USR-TENANT-HSB-GUEST01', at: '2026-08-20T07:00:00.000Z' }])

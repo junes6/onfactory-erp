@@ -2228,21 +2228,37 @@ export function createApp(options = {}) {
       throw error
     }
   }
-  const linkedDocumentIds = (data) => Array.isArray(data)
-    ? [...new Set(data.flatMap((item) => [
-      ...(Array.isArray(item?.attachments) ? item.attachments.map((attachment) => attachment?.id) : []),
-      ...(Array.isArray(item?.messages) ? item.messages.flatMap((message) => Array.isArray(message?.attachments)
-        ? message.attachments.map((attachment) => attachment?.id)
-        : []) : []),
-      ...(Array.isArray(item?.completion?.evidence) ? item.completion.evidence.map((attachment) => attachment?.id) : []),
-      ...(Array.isArray(item?.comments) ? item.comments.flatMap((comment) => Array.isArray(comment?.attachments) ? comment.attachments.map((attachment) => attachment?.id) : []) : []),
-      // R16-H: 문서(위키) 본문의 그림·파일. 빠뜨리면 문서 속 그림이 자료실에서 그냥 지워진다.
-      ...(Array.isArray(item?.blocks) ? item.blocks.map((block) => block?.attachmentId) : []),
-      item?.evidenceId,
-      item?.drawingDocumentId,
-      item?.backgroundDocumentId,
-    ]).map((id) => String(id ?? '')).filter((id) => id.startsWith('DOC-')))]
-    : []
+  /**
+   * 어떤 데이터가 붙잡고 있는 자료실 id를 모은다.
+   *
+   * 첨부 한 칸의 모양은 저장소마다 다르다 — 메신저·업무·자산은 `{ id, name, size }` 객체이고,
+   * 결재 문서만 `DOC-` **문자열** 배열이다(R16-I 설계 §1.3 ATTACHMENT_ID_RE).
+   * 그래서 문자열 갈래는 부르는 쪽이 `stringAttachments`로 켤 때만 열린다. 이 helper는 삭제를 막는
+   * `documentIsReferenced`와 generic PUT의 수용을 판정하는 `canReferenceDocuments` 둘이 함께 쓰는데,
+   * 문자열 갈래를 helper 전체에 켜 두면 결재와 무관한 12개 키의 수용 계약까지 같이 좁아진다:
+   * 예전에 문자열로 저장된 행을 GET 한 그대로 다시 PUT 할 수 없게 되고(규칙 1), 객체 첨부만 쓰는
+   * 그 키에 문자열 한 줄을 심어 남의 자료를 삭제 불가로 묶는 길도 함께 열린다.
+   */
+  const linkedDocumentIds = (data, { stringAttachments = false } = {}) => {
+    const idOf = (attachment) => (typeof attachment === 'string'
+      ? (stringAttachments ? attachment : undefined)
+      : attachment?.id)
+    return Array.isArray(data)
+      ? [...new Set(data.flatMap((item) => [
+        ...(Array.isArray(item?.attachments) ? item.attachments.map(idOf) : []),
+        ...(Array.isArray(item?.messages) ? item.messages.flatMap((message) => Array.isArray(message?.attachments)
+          ? message.attachments.map(idOf)
+          : []) : []),
+        ...(Array.isArray(item?.completion?.evidence) ? item.completion.evidence.map(idOf) : []),
+        ...(Array.isArray(item?.comments) ? item.comments.flatMap((comment) => Array.isArray(comment?.attachments) ? comment.attachments.map(idOf) : []) : []),
+        // R16-H: 문서(위키) 본문의 그림·파일. 빠뜨리면 문서 속 그림이 자료실에서 그냥 지워진다.
+        ...(Array.isArray(item?.blocks) ? item.blocks.map((block) => block?.attachmentId) : []),
+        item?.evidenceId,
+        item?.drawingDocumentId,
+        item?.backgroundDocumentId,
+      ]).map((id) => String(id ?? '')).filter((id) => id.startsWith('DOC-')))]
+      : []
+  }
   const canReferenceDocuments = async (data, account) => {
     const ids = linkedDocumentIds(data)
     if (!ids.length) return true
@@ -2292,8 +2308,11 @@ export function createApp(options = {}) {
       .filter((notice) => !notice?.archivedAt)
     return isFactoryDrawingDocument(document)
       || linkedDocumentIds(activeNotices).includes(id)
-      || ['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations', 'project-posts', 'it-contracts', 'it-deliverables', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'wiki-documents']
-        .some((key) => linkedDocumentIds(tenantStore[key]?.data).includes(id))
+      // 결재 문서는 첨부(`attachments[]` **문자열** 배열)와 증빙(`evidenceId`)으로 자료를 붙잡는다.
+      // 빠뜨리면 결재가 도는 중에 근거 파일이 자료실에서 사라진다. 문자열 갈래는 그 키에서만 켠다 —
+      // 다른 키는 객체 첨부만 쓰고, 거기까지 켜면 generic PUT의 수용 계약이 함께 좁아진다.
+      || ['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations', 'project-posts', 'it-contracts', 'it-deliverables', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'wiki-documents', 'approval-documents']
+        .some((key) => linkedDocumentIds(tenantStore[key]?.data, { stringAttachments: key === 'approval-documents' }).includes(id))
   }
   const safeDownloadName = (value) => String(value || 'document').replace(/[\r\n"]/g, '_').slice(0, 180)
   /**
@@ -2834,7 +2853,10 @@ export function createApp(options = {}) {
     if (!document) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } }); return }
     if (isFactoryDrawingDocument(document) && request.auth.role !== 'tenant-admin') { response.status(403).json({ error: { code: 'FACTORY_DRAWING_WRITE_FORBIDDEN', message: '공장 배경 도면은 회사 관리자만 삭제할 수 있습니다.' } }); return }
     if (request.auth.role !== 'tenant-admin' && document.uploadedById !== request.auth.id) { response.status(403).json({ error: { code: 'DOCUMENT_DELETE_FORBIDDEN', message: '본인이 업로드한 자료만 삭제할 수 있습니다.' } }); return }
-    if (documentIsReferenced(request.auth.tenantId, document.id)) { response.status(409).json({ error: { code: 'DOCUMENT_IN_USE', message: '업무·일지·인증·재고·공장 또는 메신저에서 사용 중인 자료입니다. 해당 화면에서 먼저 연결을 해제해 주세요.' } }); return }
+    // 문장은 `documentIsReferenced` 가 실제로 훑는 범위와 같아야 한다(규칙 11). 그 판정은 공지·도면과
+    // 저장소 키 열다섯 개를 본다 — 화면 이름을 나열하면 그 목록은 키가 늘 때마다 조용히 거짓이 되고,
+    // 사용자는 그 자료를 붙잡고 있지도 않은 화면에 가서 연결을 풀라는 말을 듣는다. 그래서 범위로 적는다.
+    if (documentIsReferenced(request.auth.tenantId, document.id)) { response.status(409).json({ error: { code: 'DOCUMENT_IN_USE', message: '다른 화면에서 사용 중인 자료입니다. 해당 화면에서 먼저 연결을 해제한 뒤 삭제해 주세요.' } }); return }
     let originalBytes = null
     let removedFile = false
     try {
