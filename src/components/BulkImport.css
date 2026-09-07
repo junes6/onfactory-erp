@@ -1,0 +1,57 @@
+.bulk-import-backdrop { position: fixed; z-index: 189; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: var(--space-16); background: var(--color-overlay); backdrop-filter: blur(5px); }
+.bulk-import-drawer { width: min(880px,100%); max-height: calc(100vh - 40px); overflow-y: auto; border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); box-shadow: var(--shadow-none); }
+.bulk-import-drawer > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-12); padding: var(--card-inset); border-bottom: var(--hairline) solid var(--line); }
+.bulk-import-drawer > header span { color: var(--forest); font-size: var(--font-13); font-weight: var(--weight-medium); letter-spacing: .09em; }
+.bulk-import-drawer > header h2 { margin: var(--space-4) var(--space-0) var(--space-0); font-size: var(--font-22); }
+.bulk-import-drawer > header p { margin: var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.bulk-import-drawer > section { padding: var(--space-0) var(--card-inset) var(--space-16); }
+.bulk-import-drawer > footer { display: flex; justify-content: flex-end; gap: var(--space-8); padding: var(--card-inset); border-top: var(--hairline) solid var(--line); }
+
+.bulk-import-steps { display: flex; gap: var(--space-8); margin: var(--space-0); padding: var(--space-16) var(--card-inset) var(--space-8); list-style: none; }
+.bulk-import-steps li { padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--muted); font-size: var(--font-13); }
+.bulk-import-steps li[aria-current='step'] { border-color: var(--forest); color: var(--forest); font-weight: var(--weight-medium); }
+
+.bulk-import-notice { margin: var(--space-0) var(--space-0) var(--space-8); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--color-blue-soft); border-radius: var(--radius-8); color: var(--color-blue-deep); background: var(--color-blue-soft); font-size: var(--font-13); }
+.bulk-import-problem { margin: var(--space-0) var(--space-0) var(--space-8); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--color-danger); border-radius: var(--radius-8); color: var(--color-danger-ink); background: var(--color-danger-soft); font-size: var(--font-13); }
+.bulk-import-messages > p:last-child { margin-bottom: var(--space-0); }
+
+.bulk-import-dropzone { display: flex; align-items: center; gap: var(--space-12); padding: var(--card-inset); border: var(--hairline) dashed var(--color-blue-deep); border-radius: var(--radius-8); color: var(--forest); background: var(--surface); }
+.bulk-import-dropzone > div { min-width: 0; flex: 1; }
+.bulk-import-dropzone strong, .bulk-import-dropzone span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bulk-import-dropzone span { color: var(--muted); font-size: var(--font-13); }
+.bulk-import-oversize { margin-top: var(--space-8); color: var(--muted); font-size: var(--font-13); }
+.bulk-import-oversize ul, .bulk-import-failures ul { margin: var(--space-4) var(--space-0) var(--space-0); padding-left: var(--space-16); }
+
+.bulk-import-progress p { margin: var(--space-0) var(--space-0) var(--space-4); font-size: var(--font-15); }
+.bulk-import-progress-bar { height: 4px; overflow: hidden; border-radius: var(--radius-8); background: var(--line); }
+.bulk-import-progress-bar > span { display: block; block-size: 4px; border-radius: var(--radius-8); background: var(--forest); }
+.bulk-import-current { min-height: 20px; overflow: hidden; margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
+.bulk-import-progress > div { display: flex; gap: var(--space-8); margin-top: var(--space-8); }
+
+.bulk-import-hint { margin: var(--space-0) var(--space-0) var(--space-8); color: var(--muted); font-size: var(--font-13); }
+.bulk-import-mapping table, .bulk-import-report table { width: 100%; border-collapse: collapse; font-size: var(--font-13); }
+.bulk-import-mapping th, .bulk-import-mapping td, .bulk-import-report th, .bulk-import-report td { padding: var(--space-8) var(--space-4); border-bottom: var(--hairline) solid var(--line); text-align: left; vertical-align: middle; }
+.bulk-import-mapping thead th, .bulk-import-report thead th { color: var(--muted); font-weight: var(--weight-medium); }
+.bulk-import-mapping tbody th, .bulk-import-report tbody th { overflow: hidden; max-width: 180px; font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+/* 폴더 칸은 이름 한 줄 + '하위 폴더로 나누기' 한 줄이다. 이름은 그대로 한 줄로 줄인다. */
+.bulk-import-mapping tbody th { max-width: 220px; }
+.bulk-import-split { display: block; margin-top: var(--space-4); }
+.bulk-import-split select { min-height: 30px; font-size: var(--font-13); }
+.bulk-import-mapping select, .bulk-import-mapping input, .bulk-import-rules select, .bulk-import-rules input { width: 100%; min-width: 0; min-height: 37px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); }
+.bulk-import-mapping > small { display: block; margin-top: var(--space-8); color: var(--muted); font-size: var(--font-13); }
+.bulk-import-rules { display: flex; align-items: center; gap: var(--space-8); margin-top: var(--space-12); }
+.bulk-import-rules label { min-width: 0; flex: 1; }
+
+.bulk-import-report p { margin: var(--space-0) var(--space-0) var(--space-8); font-size: var(--font-15); font-weight: var(--weight-medium); }
+.bulk-import-report td .ui-button { margin-left: var(--space-8); }
+.bulk-import-failures { margin-top: var(--space-12); color: var(--color-danger-ink); font-size: var(--font-13); }
+
+@media (max-width: 600px) {
+  .bulk-import-backdrop { align-items: end; padding: var(--space-0); }
+  .bulk-import-drawer { max-height: 94vh; }
+  .bulk-import-dropzone { align-items: stretch; flex-direction: column; }
+  .bulk-import-rules { align-items: stretch; flex-direction: column; }
+  .bulk-import-mapping table, .bulk-import-report table { display: block; overflow-x: auto; }
+  .bulk-import-drawer > footer { flex-direction: column-reverse; }
+  .bulk-import-drawer > footer .ui-button { width: 100%; }
+}

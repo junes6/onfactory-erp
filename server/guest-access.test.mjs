@@ -141,7 +141,30 @@ test('allowlist는 메서드+경로 정규식으로 판정하고, 밖은 전부 
   assert.equal(isGuestRouteAllowed('GET', '/api/webhooks'), false)
   assert.equal(isGuestRouteAllowed('POST', '/api/webhooks'), false)
   assert.equal(isGuestRouteAllowed('POST', '/api/webhooks/WHK-1/token'), false)
+  // R16-E: 구글 캘린더도 게스트에게 통째로 없다. /api 여덟 개는 목록 밖이라 게이트가 먼저 막는다.
+  assert.equal(isGuestRouteAllowed('GET', '/api/integrations/google/calendar'), false)
+  assert.equal(isGuestRouteAllowed('GET', '/api/integrations/google/calendar/authorize'), false)
+  assert.equal(isGuestRouteAllowed('POST', '/api/integrations/google/calendar/sync'), false)
+  assert.equal(isGuestRouteAllowed('GET', '/api/calendar/events/EV-1/overwrites'), false)
   assert.ok(GUEST_ROUTE_ALLOWLIST.every(([method, pattern]) => typeof method === 'string' && pattern instanceof RegExp))
+})
+
+/**
+ * R16-E: OAuth 콜백은 고정 결정에 따라 non-/api 경로다. 게이트도 no-store 미들웨어도 타지 않고
+ * 전수 스윕(/api만 훑는다)도 이 문을 못 본다 — 그래서 손으로 잠근다.
+ */
+test('#8-보완 게스트는 /oauth/google/callback을 탈 수 없고 store는 그대로다', async () => {
+  const store = seedStore()
+  await withServer(buildApp(store), async (origin) => {
+    const guest = await login(origin, GUEST.email, GUEST.password)
+    const before = JSON.stringify(store.tenants[TENANT])
+    const response = await fetch(`${origin}/oauth/google/callback?state=${'a'.repeat(43)}&code=C`, {
+      headers: { cookie: guest.headers.cookie }, redirect: 'manual',
+    })
+    assert.equal(response.status, 302)
+    assert.match(response.headers.get('location') ?? '', /calendar=error&reason=forbidden/)
+    assert.equal(JSON.stringify(store.tenants[TENANT]), before, '게스트 요청이 연결 행을 만들면 안 된다')
+  })
 })
 
 test('게스트 업무 판정과 관리자 저장 제약은 프로젝트 귀속을 본다', () => {

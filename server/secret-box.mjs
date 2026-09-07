@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto'
 
 /**
  * 서버에 보관해야 하는 외부 비밀값을 봉인한다.
@@ -21,6 +21,22 @@ export const SECRET_BOX_UNAVAILABLE = Object.freeze({
 /** 봉투 형식. shape 게이트가 '평문이 들어갈 수 없는 형태'로 이 정규식을 그대로 쓴다. */
 export const SEALED_PATTERN = /^v1:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$/
 
+/**
+ * 운영자가 키를 만들 때 쓰는 한 줄. .env.example 주석이 이 함수를 가리킨다.
+ * 값은 화면에도 로그에도 나오지 않는다 — 운영자가 한 번 실행해 .env.local에 붙여 넣는 용도다.
+ */
+export function generateSecretBoxKey() {
+  return randomBytes(SECRET_BOX_KEY_BYTES).toString('base64')
+}
+
+/**
+ * 키 자체가 아니라 '지금 어떤 키를 쓰고 있는가'를 가리키는 8자리.
+ * R16-E 관리자 개관이 이 값 하나로 "키가 바뀌었는가"를 본다. HMAC이라 지문에서 키를 되돌릴 수 없다.
+ */
+function fingerprintOf(key) {
+  return createHmac('sha256', key).update('inthefield:secret-box:fingerprint').digest('hex').slice(0, 8)
+}
+
 export function createSecretBox({ env = process.env, logger = console } = {}) {
   const raw = String(env.SECRET_BOX_KEY ?? '').trim()
   let key = null
@@ -37,6 +53,8 @@ export function createSecretBox({ env = process.env, logger = console } = {}) {
   return {
     available: Boolean(key),
     unavailable: SECRET_BOX_UNAVAILABLE,
+    /** 키가 없으면 빈 문자열. 가짜 0이나 '—'을 만들지 않는다. */
+    fingerprint: key ? fingerprintOf(key) : '',
 
     /**
      * 봉투에 엔드포인트 id를 AAD로 묶는다. 저장소를 만질 수 있는 상대가 A 엔드포인트의

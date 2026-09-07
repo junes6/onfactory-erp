@@ -69,6 +69,9 @@ test('4. 게스트 RLS 루프의 테이블 목록은 한 글자도 바뀌지 않
 test('5. 새 마이그레이션은 기존 체인 뒤에 온다 (사전순 적용 전제)', async () => {
   const files = (await readdir(new URL('../../supabase/migrations/', import.meta.url))).filter((name) => name.endsWith('.sql')).sort()
   const mine = '20260909000000_saved_views_custom_fields.sql'
+  const previous = '20260908000000_notices_webhooks.sql'
   assert.ok(files.includes(mine))
-  assert.equal(files[files.length - 1], mine, '이 파일이 사전순 마지막이어야 뒤따르는 절이 앞자리를 다투지 않는다')
+  // '마지막이어야 한다'로 적으면 다음 절이 마이그레이션을 하나 더할 때마다 이 시험이 깨진다.
+  // 잠글 것은 순서지 마지막 자리가 아니다 — 이 파일이 자기 앞 체인 뒤에만 오면 된다.
+  assert.ok(files.indexOf(mine) > files.indexOf(previous), `${mine}이 ${previous}보다 앞에 있으면 안 된다`)
 })

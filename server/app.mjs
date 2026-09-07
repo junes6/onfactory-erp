@@ -25,7 +25,7 @@ import { registerOversightRoutes } from './oversight-routes.mjs'
 import { registerGlobalSearchRoute } from './global-search.mjs'
 import {
   GUEST_ROLE, GUEST_READ_KEYS, createGuestActivityRecorder, createGuestRouteGate, guestScopeOf, guestWorkItemViolation,
-  isGuestWorkItem, registerGuestRoutes, usageMetadataFor,
+  isGuestWorkItem, maskEmail, registerGuestRoutes, usageMetadataFor,
 } from './guest-access.mjs'
 import { registerAiConversationRoutes, CONVERSATIONS_KEY as AI_CONVERSATIONS_KEY, autoTitle, buildContext, messagesToFold, extractiveSummary, MAX_MESSAGE_LENGTH as AI_MAX_MESSAGE_LENGTH } from './ai-conversations.mjs'
 import {
@@ -53,6 +53,13 @@ import { createSecretBox } from './secret-box.mjs'
 import { HOOK_BODY_LIMIT, WEBHOOK_DELIVERIES_KEY, payloadTooLargeMessage, registerWebhookRoutes } from './webhook-routes.mjs'
 import { createWebhookDispatch } from './webhook-dispatch.mjs'
 import { createNotificationDelivery } from './notification-delivery.mjs'
+// R16-E: 구글 캘린더 양방향 동기화. 전송 어댑터와 규칙·라우트를 두 파일로 나눠 둔다 —
+// 어댑터만 가짜로 갈아 끼우면 실계정 없이 전 경로를 시험할 수 있다.
+import { createGoogleCalendarClient } from './google-calendar.mjs'
+import { CALENDAR_SYNC_LINKS_KEY, registerCalendarSyncRoutes, stampCalendarLinkChanges } from './calendar-sync.mjs'
+// R16-G: Flow 파일함 벌크 이관과, 'AI 처리 수준' 3단을 실제로 켜는 한 곳.
+import { BULK_IMPORT_ERRORS, documentOpensToProject, normalizeImportPath, registerBulkImportRoutes } from './bulk-import.mjs'
+import { DEFAULT_BULK_AI_POLICY, aiLockedError, aiPolicyAllows, documentAiPolicy, normalizeAiPolicy } from './document-ai-policy.mjs'
 import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
 import { registerPersonalCoreRoutes } from './personal-core-routes.mjs'
 import { backupSettings, BACKUP_STATUS_KEY, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
@@ -1835,6 +1842,12 @@ export function createApp(options = {}) {
       temporaryPasswordExpiresAt: new Date(Date.now() + 72 * 60 * 60 * 1_000).toISOString(),
     } : {}),
   })
+  /**
+   * R16-E: 캘린더 동기화가 쓰는 시계는 하나여야 한다.
+   * 링크의 localUpdatedAt(generic PUT 꼬리가 찍는다)과 러너의 판정이 서로 다른 시간축에 있으면
+   * '마지막 수정 우선'이 뜻 없이 뒤집히고, 시험은 오늘 날짜에 따라 통과했다 실패했다 한다.
+   */
+  const calendarClock = typeof options.calendarSyncClock === 'function' ? options.calendarSyncClock : () => new Date()
   const workspaceStoreFile = options.workspaceStoreFile || null
   const documentUploadDirectory = options.documentUploadDirectory
     || (workspaceStoreFile ? path.join(path.dirname(workspaceStoreFile), 'documents') : null)
@@ -2298,12 +2311,25 @@ export function createApp(options = {}) {
     return changed
   }
   const isFactoryDrawingDocument = (document) => document?.category === '공장도면' || document?.tags?.includes('factory-drawing')
+  /**
+   * R16-G: 벌크 이관 모듈은 프로젝트 헬퍼가 정의된 뒤에야 등록할 수 있는데,
+   * POST /api/documents는 그보다 먼저 선언된다. 요청 시점에는 언제나 채워져 있다.
+   */
+  let bulkImports = null
 
   app.get('/api/documents', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     if (!request.auth.tenantId) { response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } }); return }
     const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : []
     const visible = await guestVisibleRows(request.auth, 'items', documents.filter((document) => canReadDocument(document, request.auth)))
-    response.json({ documents: visible.map(({ tenantId: _tenantId, ...document }) => document) })
+    // 사내 폴더 구조와 이관 세션 귀속은 회사 정보다 — 외부 게스트에게는 키 자체를 주지 않는다.
+    const isGuest = request.auth.role === GUEST_ROLE
+    response.json({
+      documents: visible.map(({ tenantId: _tenantId, ...document }) => {
+        if (!isGuest) return document
+        const { sourcePath: _sourcePath, importId: _importId, ...safe } = document
+        return safe
+      }),
+    })
   })
 
   app.post('/api/documents', requireAuth, requireMatchingWorkspaceIdentity, express.raw({ type: '*/*', limit: '10mb' }), async (request, response) => {
@@ -2348,8 +2374,48 @@ export function createApp(options = {}) {
       departments = []
       allowedUserIds = [...new Set([request.auth.id, ...allowedUserIds.filter((id) => scopeMemberIds.has(id))])]
     }
+
+    // R16-G: 벌크 이관. 세션이 지정되면 분류·태그·열람 범위·AI 수준을 세션 매핑에서 **서버가** 정한다 —
+    // 클라이언트가 200개 파일마다 같은 값을 다시 보내면 하나만 어긋나도 묶음이 갈라진다.
+    // 게스트는 이 두 값을 못 쓴다: POST /api/documents가 게스트 allowlist에 있어 이 핸들러를 통째로
+    // 지나가므로, 여기서 명시적으로 버린다(게스트 업로드의 AI 수준은 언제나 '보관만'이다).
+    const isGuestUpload = request.auth.role === GUEST_ROLE
+    const rawSourcePath = isGuestUpload ? '' : String(request.query.sourcePath ?? '').trim()
+    const sourcePath = rawSourcePath ? normalizeImportPath(rawSourcePath) : ''
+    if (sourcePath === null) {
+      response.status(BULK_IMPORT_ERRORS.PATH_INVALID.status).json({ error: { code: BULK_IMPORT_ERRORS.PATH_INVALID.code, message: BULK_IMPORT_ERRORS.PATH_INVALID.message } })
+      return
+    }
+    const importId = isGuestUpload ? '' : String(request.query.importId ?? '').trim().slice(0, 60)
+    let bulk = null
+    if (importId) {
+      bulk = bulkImports.resolveUpload({ auth: request.auth, importId, sourcePath })
+      if (bulk.error) { response.status(bulk.error.status).json({ error: { code: bulk.error.code, message: bulk.error.message } }); return }
+    }
+    // 클라이언트가 주장한 해시는 서버가 계산하기 전까지 권위가 없다. 다르면 저장소에도 문서 배열에도 아무것도 남지 않는다.
+    const wantsDedupe = !isGuestUpload && String(request.query.dedupe ?? '') === '1'
+    const bodyHash = bulk || wantsDedupe ? createHash('sha256').update(request.body).digest('hex') : ''
+    if (bulk?.entry?.sha256 && bodyHash !== bulk.entry.sha256) {
+      response.status(BULK_IMPORT_ERRORS.HASH_MISMATCH.status).json({ error: { code: BULK_IMPORT_ERRORS.HASH_MISMATCH.code, message: BULK_IMPORT_ERRORS.HASH_MISMATCH.message } })
+      return
+    }
+    if (wantsDedupe) {
+      // 브라우저에 crypto.subtle이 없을 때의 서버 백스톱. 저장 **전에** 대조하고, 일치하면 바이트를 쓰지 않는다.
+      // canReadDocument를 통과한 문서만 본다 — 볼 수 없는 문서와 같은 해시라는 사실은 그 문서의 존재를 알린다.
+      // 응답에 문서 객체를 싣지 않는 이유도 같다(메타데이터 오라클 차단).
+      const known = (Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : [])
+        .find((candidate) => candidate?.checksum === bodyHash && canReadDocument(candidate, request.auth))
+      /**
+       * 대상 프로젝트가 있는 이관에서는 **그 프로젝트에서 열리지 않는 자료**를 '이미 있다'고 닫지 않는다 —
+       * 매니페스트의 중복 판정과 같은 술어다(bulk.allowedUserIds가 곧 그 프로젝트의 구성원이다).
+       * 닫아 버리면 이관한 폴더가 멤버에게는 구멍 난 채로 남고, 화면도 보고서도 그 사실을 말하지 못한다.
+       */
+      if (known && (!bulk?.projectId || documentOpensToProject(known, bulk.allowedUserIds))) { response.json({ duplicateOf: known.id }); return }
+    }
+
     const id = `DOC-${Date.now()}-${randomBytes(4).toString('hex')}`
     let storedFile = null
+    let bulkEntryWrite = null
     const document = {
       id,
       tenantId: request.auth.tenantId,
@@ -2369,6 +2435,19 @@ export function createApp(options = {}) {
       // 누가 올렸는지의 신원 종류. 화면이 게스트 첨부에 배지를 붙일 근거다.
       uploadedByRole: request.auth.role,
       storage: documentStorage.backend,
+      // 게스트가 넣은 파일은 언제나 '보관만'이다. 주석만 있고 코드가 없으면 그 약속은 거짓말이 된다 —
+      // aiPolicy 칸이 없는 문서의 실효 수준은 '활용'이라 렌즈·판독·채팅 첨부가 전부 열린다.
+      ...(isGuestUpload ? { aiPolicy: DEFAULT_BULK_AI_POLICY } : {}),
+      // 벌크 이관분만 매핑이 정한 값으로 덮인다. importId 없는 업로드에는 이 세 키가 아예 생기지 않는다 —
+      // 기존 호출부 네 곳의 응답이 바이트 단위로 그대로여야 한다.
+      ...(bulk
+        ? {
+          category: bulk.category, visibility: bulk.visibility, departments: [],
+          allowedUserIds: bulk.allowedUserIds, tags: bulk.tags, aiPolicy: bulk.aiPolicy,
+          sourcePath, importId,
+          ...(bulk.projectId ? { projectId: bulk.projectId } : {}),
+        }
+        : (sourcePath ? { sourcePath } : {})),
     }
     try {
       storedFile = await putTenantDocument(documentStorage, {
@@ -2383,11 +2462,21 @@ export function createApp(options = {}) {
       if (request.auth.role === GUEST_ROLE) {
         appendPlatformAudit(workspaceStore.platform, { tenantId: request.auth.tenantId, event: '게스트 첨부 업로드', scope: `${document.name} · ${displayDocumentSize(document.size)}`, actor: `게스트 ${request.auth.name}`, reference: request.auth.guestScope?.grantId ?? request.auth.id })
       }
+      // 엔트리 상태와 문서 배열은 한 커밋에 함께 탄다. 실패하면 함께 되돌린다 —
+      // persistDocumentList의 스냅샷은 테넌트 store '참조'를 되돌릴 뿐이라 이 키의 변경은 살아남는다.
+      // 그 창이 열려 있으면 '문서는 없는데 uploaded'가 되어 재개가 그 파일을 영원히 건너뛴다.
+      if (bulk) bulkEntryWrite = bulkImports.markUploaded(bulk, id, request.body.length)
       await persistDocumentList(request.auth.tenantId, documents, request.auth.id)
-      try { enqueueProposal(request.auth.tenantId, proposeDocumentClassification(document, { industryType: tenantIndustryType(request.auth.tenantId) })) } catch { /* 제안 실패가 업로드를 막지 않는다 */ }
+      bulkEntryWrite = null
+      // '보관만'인 자료는 AI가 열지 않는다 — 분류 제안도 AI가 파일을 읽는 행위다.
+      // (200건 벌크가 승인 큐에 200개 제안을 쏟는 것도 이 한 줄이 함께 막는다.)
+      if (aiPolicyAllows(document, 'indexed')) {
+        try { enqueueProposal(request.auth.tenantId, proposeDocumentClassification(document, { industryType: tenantIndustryType(request.auth.tenantId) })) } catch { /* 제안 실패가 업로드를 막지 않는다 */ }
+      }
       const { tenantId: _tenantId, ...safeDocument } = document
       response.status(201).json({ document: safeDocument })
     } catch (error) {
+      if (bulkEntryWrite) { bulkEntryWrite.restore(); bulkEntryWrite = null }
       if (storedFile) {
         try { await deleteTenantDocument(documentStorage, document, request.auth.tenantId) } catch { /* best-effort cleanup */ }
       }
@@ -2411,6 +2500,19 @@ export function createApp(options = {}) {
       tags: Array.isArray(request.body?.tags) ? request.body.tags.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 20) : previous.tags,
       summary: String(request.body?.summary ?? previous.summary).trim().slice(0, 2_000),
     }
+    // R16-G: 원본 경로와 AI 처리 수준은 고칠 수 있다. importId는 아니다 — 출처는 사실이지 설정이 아니다.
+    if (request.body?.sourcePath !== undefined) {
+      const nextPath = String(request.body.sourcePath ?? '').trim()
+      const normalized = nextPath ? normalizeImportPath(nextPath) : ''
+      if (normalized === null) { response.status(BULK_IMPORT_ERRORS.PATH_INVALID.status).json({ error: { code: BULK_IMPORT_ERRORS.PATH_INVALID.code, message: BULK_IMPORT_ERRORS.PATH_INVALID.message } }); return }
+      if (normalized) updatedDocument.sourcePath = normalized
+      else delete updatedDocument.sourcePath
+    }
+    if (request.body?.aiPolicy !== undefined) {
+      const level = normalizeAiPolicy(request.body.aiPolicy)
+      if (!level) { response.status(BULK_IMPORT_ERRORS.AI_LEVEL_INVALID.status).json({ error: { code: BULK_IMPORT_ERRORS.AI_LEVEL_INVALID.code, message: BULK_IMPORT_ERRORS.AI_LEVEL_INVALID.message } }); return }
+      updatedDocument.aiPolicy = level
+    }
     if (isFactoryDrawingDocument(updatedDocument)) {
       const validFactoryMime = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf'].includes(updatedDocument.mime)
       const hasFactoryTag = updatedDocument.tags?.some((tag) => /^factory:[A-Za-z0-9_-]{2,120}$/.test(tag))
@@ -2420,8 +2522,32 @@ export function createApp(options = {}) {
       }
     }
     documents[index] = updatedDocument
+    // 수준을 '보관만'으로 내리면 그 문서에서 나온 AI 파생물을 파기한다. 문서에 저장되는 파생물은
+    // 승인 큐의 분류 제안(sourceKey `doc:<id>`) 하나뿐이다 — summary는 사람이 쓴 값일 수 있어 건드리지 않는다.
+    /**
+     * 제안 삭제는 이 쓰기에 딸린 부수 효과다. writeProposals는 테넌트 store를 **제자리에서** 고치는데,
+     * persistDocumentList의 스냅샷은 테넌트 store '참조'만 되돌리므로 커밋이 실패하면 문서 변경은
+     * 되돌아가고 제안 삭제만 살아남는다 — 그리고 다음에 성공하는 아무 쓰기가 그것을 조용히 확정한다.
+     * 한 쓰기에 속한 변경은 함께 살거나 함께 죽는다(벌크 이관의 commitRows(onRollback)와 같은 모양).
+     */
+    const tenantStoreBefore = workspaceStore.tenants[request.auth.tenantId]
+    const previousProposals = tenantStoreBefore?.[PROPOSALS_KEY]
+    const previousPolicies = tenantStoreBefore?.[AUTOMATION_POLICIES_KEY]
+    let droppedProposal = false
+    if (documentAiPolicy(updatedDocument) === 'locked' && documentAiPolicy(previous) !== 'locked') {
+      droppedProposal = dropPendingClassification(request.auth.tenantId, updatedDocument.id)
+    }
     try { await persistDocumentList(request.auth.tenantId, documents, request.auth.id); const { tenantId: _tenantId, ...safeDocument } = documents[index]; response.json({ document: safeDocument }) }
-    catch { response.status(500).json({ error: { code: 'DOCUMENT_UPDATE_FAILED', message: '자료 정보를 저장하지 못했습니다.' } }) }
+    catch {
+      if (droppedProposal) {
+        const current = workspaceStore.tenants[request.auth.tenantId]
+        if (current) {
+          if (previousProposals) current[PROPOSALS_KEY] = previousProposals; else delete current[PROPOSALS_KEY]
+          if (previousPolicies) current[AUTOMATION_POLICIES_KEY] = previousPolicies; else delete current[AUTOMATION_POLICIES_KEY]
+        }
+      }
+      response.status(500).json({ error: { code: 'DOCUMENT_UPDATE_FAILED', message: '자료 정보를 저장하지 못했습니다.' } })
+    }
   })
 
   app.get('/api/documents/:id/download', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
@@ -2467,6 +2593,11 @@ export function createApp(options = {}) {
     const document = documents.find((item) => item.id === request.params.id)
     if (!document || !canReadDocument(document, request.auth)) {
       response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } })
+      return
+    }
+    // '보관만'인 자료는 AI가 열지 않는다. 이 게이트가 없으면 '보관만'은 거짓말이다.
+    if (!aiPolicyAllows(document, 'indexed')) {
+      response.status(409).json({ error: aiLockedError(request.auth.role === 'tenant-admin', document) })
       return
     }
     const sourceMime = String(document.mime || '').toLowerCase()
@@ -2909,6 +3040,19 @@ export function createApp(options = {}) {
     tenantStore[PROPOSALS_KEY] = { data: proposals.slice(0, 2_000), updatedAt: now, updatedBy: actorId }
     tenantStore[AUTOMATION_POLICIES_KEY] = { data: approvalStatistics(proposals), updatedAt: now, updatedBy: actorId }
   }
+  /**
+   * R16-G: 이 문서에서 나온 pending 분류 제안을 걷어낸다(AI 처리 수준을 '보관만'으로 내릴 때).
+   * function 선언인 이유: PATCH /api/documents/:id가 이 줄보다 위에 있어 요청 시점에 필요한데,
+   * const 화살표로 두면 그 자리에서 이름을 찾지 못한다.
+   */
+  function dropPendingClassification(tenantId, documentId) {
+    const existing = proposalsOf(tenantId)
+    const sourceKey = `doc:${documentId}`
+    const next = existing.filter((item) => !(item?.sourceKey === sourceKey && item.kind === 'document-classification' && item.status === 'pending'))
+    if (next.length === existing.length) return false
+    writeProposals(tenantId, next, 'system:ai-policy')
+    return true
+  }
   const enqueueProposal = (tenantId, proposal) => {
     if (!proposal || !tenantId) return false
     const existing = proposalsOf(tenantId)
@@ -3201,6 +3345,12 @@ export function createApp(options = {}) {
     const document = documents.find((item) => item.id === request.params.id)
     if (!document || !canReadDocument(document, request.auth)) {
       response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없거나 열람 권한이 없습니다.' } })
+      return
+    }
+    // '보관만'인 자료는 AI가 열지 않는다. 화면은 이 문서에 'AI에게 물어보기'를 아예 그리지 않지만,
+    // 라우트는 직접 부르는 요청도 같은 문장으로 거절한다.
+    if (!aiPolicyAllows(document, 'indexed')) {
+      response.status(409).json({ error: aiLockedError(request.auth.role === 'tenant-admin', document) })
       return
     }
     const sourceMime = String(document.mime || '').toLowerCase()
@@ -7556,6 +7706,11 @@ export function createApp(options = {}) {
     }
     tenantStore[key] = record
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
+    // R16-E: 일정 레코드에는 수정 시각이 없다. 링크 행이 대신 기억하면 hasCalendarShape도
+    // mergeMemberCalendarEvents도 건드리지 않고 '마지막 수정 우선'을 지킬 수 있다.
+    // 이 한 줄이 툼스톤도 함께 찍는다 — 없으면 사람이 지운 일정이 다음 동기화에서 되살아난다.
+    const previousLinkRecord = tenantStore[CALENDAR_SYNC_LINKS_KEY]
+    if (key === 'calendar-events') stampCalendarLinkChanges(tenantStore, rowsBeforeWrite, record.data, calendarClock())
     // R16-L: 업무 화면에서 만든 업무도 발신 사건이다. 적재는 이 커밋에 함께 실리고 함께 되돌아간다.
     const previousDeliveries = tenantStore[WEBHOOK_DELIVERIES_KEY]
     if (key === 'work-items') {
@@ -7572,6 +7727,12 @@ export function createApp(options = {}) {
       if (key === 'work-items') {
         if (previousDeliveries) tenantStore[WEBHOOK_DELIVERIES_KEY] = previousDeliveries
         else delete tenantStore[WEBHOOK_DELIVERIES_KEY]
+      }
+      // R16-E: 일정 쓰기는 링크 레코드도 함께 바꿨다. 한쪽만 되돌리면 툼스톤이 메모리에 남아
+      // 다음 동기화 통과가 멀쩡한 일정을 지운다.
+      if (key === 'calendar-events') {
+        if (previousLinkRecord) tenantStore[CALENDAR_SYNC_LINKS_KEY] = previousLinkRecord
+        else delete tenantStore[CALENDAR_SYNC_LINKS_KEY]
       }
       console.error('[workspace-store] Failed to persist data', { message: error?.message })
       response.status(500).json({ error: { code: 'STORE_WRITE_FAILED', message: '공유 데이터를 저장하지 못했습니다.' } })
@@ -8054,6 +8215,68 @@ export function createApp(options = {}) {
     hasWorkItemShape, workspaceRecordVersion, scheduleSentinel,
   })
 
+  // R16-E: 구글 캘린더. calendar-connections·calendar-sync-links도 WORKSPACE_STORE_KEYS에 없다 —
+  // generic GET/PUT은 404 STORE_KEY_NOT_FOUND로 끝나고, 이 라우트들만 문이 된다.
+  // 콜백은 /api 밖이라 no-store와 게스트 차단을 모듈이 직접 붙인다.
+  const calendarSync = registerCalendarSyncRoutes({
+    app, requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity,
+    workspaceStore, accounts, commitWorkspaceStore, secretBox, notify, events, maskEmail, workspaceRecordVersion,
+    // 잠긴 판정을 그대로 넘긴다. 가져온 행은 저장 직전에 이것을 한 번 더 통과해야 한다 —
+    // 어긋난 행 하나가 mergeMemberCalendarEvents에서 전 직원의 일정 쓰기를 403으로 막는다.
+    hasCalendarShape,
+    // 콜백은 미들웨어를 타지 않으므로 세션을 직접 푼다. requireAuth와 같은 규칙을 쓴다.
+    resolveAuth: (request) => {
+      const account = authenticatedAccount(request)
+      if (!account || account.mustChangePassword) return null
+      return effectiveAuth(account, authenticatedContext(request).session)
+    },
+    google: options.googleCalendarTransport
+      ?? createGoogleCalendarClient({
+        env: options.env ?? process.env,
+        ...(typeof options.googleCalendarFetch === 'function' ? { fetchImpl: options.googleCalendarFetch } : {}),
+      }),
+    publicUrlOf: () => String((options.env ?? process.env).APP_PUBLIC_URL ?? '').trim() || null,
+    // generic PUT 꼬리(stampCalendarLinkChanges)와 같은 시계여야 한다.
+    clock: calendarClock,
+  })
+  // 스케줄러 잡이 부르는 러너를 시험이 직접 돌릴 수 있게 남긴다.
+  // (server/calendar-sync-routes.test.mjs의 '스케줄러 잡'·'비활성 계정' 시험이 이 자리를 읽는다 —
+  //  주입 옵션 googleCalendarTransport·calendarSyncClock으로는 runAll을 부를 손잡이가 없다.)
+  app.locals.calendarSync = calendarSync
+  scheduler.register({
+    id: 'google-calendar-sync',
+    label: '구글 캘린더 동기화',
+    description: `연결된 계정의 구글 캘린더와 ${BRAND.name} 일정·업무 마감을 한 시간마다 맞춥니다.`,
+    // 55분은 기존 잡(00·05·10·20·35·50)과 겹치지 않는다. tick이 순차 실행이라 네트워크 대기가 있는
+    // 이 잡을 그 무리에 붙이면 브리핑·백업·청구가 밀린다.
+    spec: { every: 'hour', minute: 55 },
+    run: async ({ now }) => {
+      const summary = await calendarSync.runAll({ now })
+      if (summary.skipped) return { detail: summary.skipped }
+      // 비활성 계정 때문에 끊은 연결은 따로 적는다 — 조용히 사라지면 관리자가 이유를 찾을 수 없다.
+      const retired = summary.retired ? ` · 비활성 계정 해제 ${summary.retired}` : ''
+      return {
+        detail: summary.connections
+          ? `연결 ${summary.connections}건 · 가져옴 ${summary.pulled} · 내보냄 ${summary.pushed} · 덮어쓴 내역 ${summary.conflicts} · 재연결 필요 ${summary.needsReauth}${retired}`
+          : `연결된 계정이 없었습니다.${retired}`,
+      }
+    },
+  })
+
+  // R16-G: 벌크 이관. bulk-imports·bulk-import-rules도 WORKSPACE_STORE_KEYS에 없다 —
+  // generic GET/PUT은 404 STORE_KEY_NOT_FOUND로 끝나고, 이 라우트들만 문이 된다.
+  // POST /api/documents가 요청 시점에 resolveUpload를 부르므로 여기서 위쪽 let에 채워 넣는다.
+  bulkImports = registerBulkImportRoutes({
+    app, requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity,
+    workspaceStore, commitWorkspaceStore,
+    documentsOf: (tenantId) => (Array.isArray(documentRecord(tenantId)?.data) ? documentRecord(tenantId).data : []),
+    // 잠긴 판정을 그대로 넘긴다 — 중복 인덱스가 '볼 수 없는 문서'를 담으면 그 문서의 존재가 새어 나간다.
+    canReadDocument,
+    persistDocuments: persistDocumentList,
+    projectSpacesOf, projectRoleOf, projectMemberIds, grantDocumentAccess,
+    ...(typeof options.bulkImportClock === 'function' ? { clock: options.bulkImportClock } : {}),
+  })
+
   // 저장된 보기·커스텀 필드는 WORKSPACE_STORE_KEYS에 없다 — generic GET/PUT은 404로 끝나고 이 라우트들만 문이 된다.
   registerSavedViewRoutes({
     app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, commitWorkspaceStore, workspaceRecordVersion,
@@ -8176,13 +8399,32 @@ export function createApp(options = {}) {
       ? documentRecord(request.auth.tenantId).data
       : []
     const readableDocuments = tenantDocuments.filter((document) => canReadDocument(document, request.auth))
+    /**
+     * '보관만'인 자료는 목록에서도 빠진다. 이 배열은 시스템 프롬프트에 통째로 실려 모델에 가고,
+     * 데모 모드는 그 이름을 답에 그대로 적는다 — 첨부 게이트만 걸어 두면 파일 이름·태그·요약이
+     * 매 대화마다 모델로 나가면서 화면은 'AI가 열지 않습니다'라고 적혀 있게 된다.
+     * 게이트 네 곳과 **같은 술어**를 쓴다(네 곳이 각자 적으면 언젠가 한 곳만 빠진다).
+     */
     const accessibleDocuments = request.auth.tenantId
       ? readableDocuments
+        .filter((document) => aiPolicyAllows(document, 'indexed'))
         .slice(0, 100)
         .map(({ id, name, category, tags, summary, uploadedAt, uploadedByName }) => ({ id, name, category, tags, summary, uploadedAt, uploadedByName }))
       : []
     if (requestedAttachments.some(({ documentId }) => !readableDocuments.some((document) => document.id === documentId))) {
       response.status(403).json({ error: { code: 'CHAT_ATTACHMENT_FORBIDDEN', message: '첨부파일을 찾을 수 없거나 열람 권한이 없습니다.' } })
+      return
+    }
+    // 채팅 첨부는 본문을 통째로 모델에 보내는 행위라 '활용'을 요구한다 —
+    // 렌즈·판독('정리')보다 한 칸 높다. 이 게이트가 없으면 벌크로 올린 계약서를
+    // 누구든 'AI에게 물어보기' 한 번으로 모델에 보낼 수 있다.
+    // 거절 문장에는 **그 자료의 지금 수준**을 적는다 — '정리'인 자료에 '보관만'이라고 답하면
+    // 라우트가 스스로 거짓을 말하고, 사람은 화면에서 본 배지와 다른 이유를 듣는다.
+    const lockedAttachment = requestedAttachments
+      .map(({ documentId }) => readableDocuments.find((document) => document.id === documentId))
+      .find((document) => !aiPolicyAllows(document, 'active'))
+    if (lockedAttachment) {
+      response.status(409).json({ error: aiLockedError(request.auth.role === 'tenant-admin', lockedAttachment) })
       return
     }
     const chatContext = {

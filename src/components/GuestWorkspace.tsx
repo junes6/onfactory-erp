@@ -52,6 +52,10 @@ type GuestDocument = {
   uploadedByName?: string
   uploadedByRole?: string
   projectId?: string
+  // R16-G: 게스트 응답에서는 서버가 이 두 키를 지운다(사내 폴더 구조·이관 귀속은 회사 정보다).
+  // 타입에 남겨 두는 이유는 '왜 안 그리는가'가 코드로 보이게 하기 위해서다 — 화면은 절대 읽지 않는다.
+  sourcePath?: never
+  importId?: never
 }
 
 type GuestTab = 'tasks' | 'channels' | 'files' | 'board'

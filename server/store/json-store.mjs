@@ -41,6 +41,9 @@ function readJsonWithBackup(file) {
   try {
     return parseStore(file)
   } catch (primaryError) {
+    // 백업으로 넘어가는 것은 한 세대를 되감는 일이다. 왜 넘어갔는지 한 줄도 남기지 않으면
+    // 파일 잠금·중단된 쓰기·손상 중 무엇이었는지 다음에도 알 수 없다.
+    console.warn('[json-store] 기본 파일을 읽지 못해 백업으로 되감습니다.', { file, message: primaryError?.message })
     if (!existsSync(backupFile)) throw primaryError
     try {
       return parseStore(backupFile)

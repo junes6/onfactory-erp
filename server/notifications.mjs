@@ -43,6 +43,9 @@ export const NOTIFICATION_TYPES = Object.freeze({
   // R16-L: 외부 연동이 연속 실패로 자동 중지됐다. 관리자가 주소를 고쳐야 다시 흐른다.
   // 기본 푸시는 꺼 둔다 — 사람이 지금 당장 할 일이 아니라 관리자가 화면에서 보고 고칠 일이다.
   'webhook-disabled': { label: '외부 연동 중지', pushByDefault: false, page: 'people' },
+  // R16-E: 구글 캘린더 연결이 끊겼다. 사람이 직접 다시 연결해야 하므로 기본 푸시를 켜 둔다.
+  // DEFAULT_URGENT_TYPES에는 넣지 않는다 — 새벽에 울릴 일이 아니다.
+  'calendar-reauth': { label: '캘린더 재연결', pushByDefault: true, page: 'schedule' },
 })
 
 export const NOTIFICATION_TYPE_IDS = Object.freeze(Object.keys(NOTIFICATION_TYPES))

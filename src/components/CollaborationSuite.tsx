@@ -66,6 +66,8 @@ import {
   NoticeAckDialog, NoticeBoard, NoticeComposerDialog, NoticeStrip, parseMessengerFocus, useNotices,
   type MessengerFocus, type Notice, type NoticeAckList, type NoticeDraft,
 } from './NoticeCenter'
+import { BRAND } from '../brand'
+import { CalendarConnectionCard, OverwriteHistoryDetails, type OverwriteHistory } from './CalendarConnection'
 import { canJudgeMissingNotice } from '../utils/noticeFocus'
 import { useIndustrySurface } from '../modules/IndustryContext'
 import { useEventStream } from '../hooks/useEventStream'
@@ -2090,8 +2092,18 @@ function sameDepartment(left: string, right: string) {
   return normalize(left) === normalize(right)
 }
 
-export function SchedulePage({ onToast, currentUserId, currentUserName, currentUserTeam, canManage, workspaceScope }: PageProps) {
-  const [events, setEvents] = useWorkspaceState<CalendarEvent[]>('calendar-events', [], { scope: workspaceScope, seedWhenEmpty: false })
+export function SchedulePage({ onToast, currentUserId, currentUserName, currentUserTeam, canManage, workspaceScope, calendarCallbackFlag = '', onCalendarCallbackHandled }: PageProps & { calendarCallbackFlag?: string; onCalendarCallbackHandled?: () => void }) {
+  // R16-E: 동기화가 끝나면 서버가 일정 배열을 통째로 갈아 끼운다. 화면이 그 사실을 모르면
+  // 다음 저장이 409로 튕겨 사용자가 방금 쓴 내용이 사라진다 — 그래서 다시 읽는다.
+  const [calendarReload, setCalendarReload] = useState(0)
+  // 내가 누른 동기화만이 아니라 스케줄러·다른 기기가 갈아 끼운 경우에도 같은 토큰을 올린다.
+  // 이 구독이 없으면 서버가 보내는 'calendar' 프레임은 아무도 받지 않는 죽은 배선이 된다.
+  useEventStream(true, (event) => {
+    if (event.kind === 'calendar' || event.kind === 'resync') setCalendarReload((current) => current + 1)
+  })
+  const [externalEventIds, setExternalEventIds] = useState<string[]>([])
+  const externalIdSet = useMemo(() => new Set(externalEventIds), [externalEventIds])
+  const [events, setEvents] = useWorkspaceState<CalendarEvent[]>('calendar-events', [], { scope: workspaceScope, seedWhenEmpty: false, reloadToken: calendarReload })
   const [departments, setDepartments] = useWorkspaceState<string[]>('calendar-departments', [], { scope: workspaceScope, seedWhenEmpty: false })
   const [leaveEvents, setLeaveEvents] = useState<CalendarEvent[]>([])
   const [viewMonth, setViewMonth] = useState(() => {
@@ -2229,6 +2241,19 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
         description="전사 행사, 부서 일정과 개인 업무를 한 달 흐름에서 함께 확인합니다. 날짜를 고른 뒤 달력 옆 버튼으로 바로 등록하세요."
       />
 
+      <CalendarConnectionCard
+        workspaceScope={workspaceScope}
+        canManage={canManage}
+        justConnected={calendarCallbackFlag === 'connected'}
+        onToast={onToast}
+        onExternalIds={setExternalEventIds}
+        onSynced={() => setCalendarReload((current) => current + 1)}
+        onCallbackHandled={onCalendarCallbackHandled}
+        // 일정 배열을 다시 읽게 만든 그 신호로 연결 카드도 다시 읽는다 — 스케줄러가 돌린 통과 뒤에도
+        // 새 일정에 연결 표식이 붙고 마지막 동기화 시각이 따라간다.
+        reloadToken={calendarReload}
+      />
+
       <section className="schedule-toolbar" aria-label="일정 보기 설정">
         <div className="schedule-month-nav">
           <button type="button" aria-label="이전 달" onClick={() => moveMonth(-1)}><ChevronLeft size={21} /></button>
@@ -2289,8 +2314,9 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
                   {holiday && <span className="calendar-holiday-name" title={holiday}>{holiday}</span>}
                   <div className="calendar-day-events">
                     {cellEvents.slice(0, 3).map((event) => (
-                      <button className={'calendar-event ' + (event.source === 'leave' ? 'leave' : event.scope)} type="button" onClick={() => openEdit(event)} key={event.id}>
+                      <button className={'calendar-event ' + (event.source === 'leave' ? 'leave' : event.scope) + (externalIdSet.has(event.id) ? ' external' : '')} type="button" onClick={() => openEdit(event)} key={event.id}>
                         <span>{event.source === 'leave' ? '휴가' : event.start}</span> {event.title}
+                        {externalIdSet.has(event.id) && <span className="sr-only"> (구글 캘린더와 연결된 일정)</span>}
                       </button>
                     ))}
                     {cellEvents.length > 3 && <button className="calendar-more" type="button" onClick={() => setSelectedDate(key)}>+{cellEvents.length - 3}개 더보기</button>}
@@ -2312,10 +2338,10 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
           </div>
           <div className="schedule-day-list">
             {selectedEvents.map((event) => (
-              <button className={'schedule-agenda-item ' + (event.source === 'leave' ? 'leave' : event.scope)} type="button" onClick={() => openEdit(event)} key={event.id}>
+              <button className={'schedule-agenda-item ' + (event.source === 'leave' ? 'leave' : event.scope) + (externalIdSet.has(event.id) ? ' external' : '')} type="button" onClick={() => openEdit(event)} key={event.id} title={externalIdSet.has(event.id) ? '구글 캘린더와 연결된 일정' : undefined}>
                 <span className="schedule-agenda-time">{event.source === 'leave' ? '휴가' : event.start}<i />{event.source === 'leave' ? '종일' : event.end}</span>
                 <span className="schedule-agenda-copy">
-                  <strong>{event.title}</strong>
+                  <strong>{event.title}{externalIdSet.has(event.id) && <span className="sr-only"> (구글 캘린더와 연결된 일정)</span>}</strong>
                   <span>{event.location || '장소 미정'} · {event.owner}</span>
                   <StatusChip tone={event.source === 'leave' ? 'amber' : event.scope === 'company' ? 'green' : event.scope === 'department' ? 'blue' : 'amber'}>{event.source === 'leave' ? '승인 휴가' : scopeCopy[event.scope].label}</StatusChip>
                 </span>
@@ -2342,6 +2368,8 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
         <ScheduleEventDialog
           draft={eventDraft}
           editing={Boolean(editingId)}
+          eventId={editingId}
+          workspaceScope={workspaceScope}
           canEdit={eventDraft.source !== 'leave' && (!editingId || canManage || isEventOwner(eventDraft))}
           canShareCompany={canManage}
           availableDepartments={canManage ? Array.from(new Set(['전사', currentUserTeam, ...departments, ...events.map((event) => event.department)])) : [currentUserTeam]}
@@ -2360,6 +2388,8 @@ export function SchedulePage({ onToast, currentUserId, currentUserName, currentU
 function ScheduleEventDialog({
   draft,
   editing,
+  eventId,
+  workspaceScope,
   canEdit,
   canShareCompany,
   availableDepartments,
@@ -2372,6 +2402,8 @@ function ScheduleEventDialog({
 }: {
   draft: CalendarEventDraft
   editing: boolean
+  eventId: string | null
+  workspaceScope?: string
   canEdit: boolean
   canShareCompany: boolean
   availableDepartments: string[]
@@ -2388,6 +2420,21 @@ function ScheduleEventDialog({
   const [newDepartment, setNewDepartment] = useState('')
   const [addingDepartment, setAddingDepartment] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  // R16-E: 덮어쓴 내역은 편집 모드에서만, 다이얼로그가 열릴 때만 읽는다.
+  // 목록 응답에 실으면 GET /api/workspace/calendar-events의 payload와 version 계산이 바뀐다.
+  const [overwrites, setOverwrites] = useState<OverwriteHistory | null>(null)
+  useEffect(() => {
+    if (!editing || !eventId) { setOverwrites(null); return }
+    let active = true
+    fetch(`/api/calendar/events/${encodeURIComponent(eventId)}/overwrites`, {
+      headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined,
+    })
+      .then(async (response) => (response.ok ? response.json() as Promise<OverwriteHistory> : null))
+      .then((body) => { if (active) setOverwrites(body) })
+      // 연결되지 않은 일정은 404다 — 정상이고, 아무것도 그리지 않는다.
+      .catch(() => { if (active) setOverwrites(null) })
+    return () => { active = false }
+  }, [editing, eventId, workspaceScope])
   const update = <Key extends keyof CalendarEventDraft>(key: Key, value: CalendarEventDraft[Key]) => {
     onChange({ ...draft, [key]: value })
   }
@@ -2460,6 +2507,28 @@ function ScheduleEventDialog({
             <label className="collab-field"><span>장소</span><input value={draft.location} disabled={!canEdit} onChange={(event) => update('location', event.target.value)} placeholder="회의실 또는 온라인" /></label>
             <label className="collab-field wide"><span>메모</span><textarea rows={3} value={draft.note} disabled={!canEdit} onChange={(event) => update('note', event.target.value)} placeholder="참석자가 알아야 할 내용을 입력하세요." /></label>
           </div>
+          {/* 손실 안내 다섯 갈래. **전부 같은 한 마디로 끝난다** — 삭제 버튼이 이 문장 바로 아래에 있고,
+              서버는 이 링크들에 대해 수정도 삭제도 구글로 내보내지 않는다. '고친 내용'만 적으면
+              사람은 하루짜리로 보이는 줄을 지우고 구글의 사흘짜리 원본이 남는 것을 예상하지 못한다. */}
+          {overwrites?.truncated === 'multi-day' && (
+            <p className="schedule-sync-note" role="status">여러 날에 걸친 구글 일정입니다. {BRAND.name}에서는 첫날만 보이고, 여기서 고치거나 지운 내용은 구글로 보내지 않습니다.</p>
+          )}
+          {overwrites?.readOnly && (
+            <p className="schedule-sync-note" role="status">구글의 반복 일정입니다. 여기서 고치거나 지운 내용은 구글로 보내지 않습니다. 반복 규칙은 구글에서 수정해 주세요.</p>
+          )}
+          {overwrites?.sourceBlocked === 'read-only' && (
+            <p className="schedule-sync-note" role="status">읽기 전용 구글 캘린더에서 가져온 일정입니다. 여기서 고치거나 지운 내용은 구글로 보내지 않습니다.</p>
+          )}
+          {overwrites?.sourceBlocked === 'unselected' && (
+            <p className="schedule-sync-note" role="status">동기화 대상에서 뺀 구글 캘린더의 일정입니다. 여기서 고치거나 지운 내용은 구글로 보내지 않습니다.</p>
+          )}
+          {overwrites?.sourceBlocked === 'unknown' && (
+            <p className="schedule-sync-note" role="status">구글 계정에서 사라진 캘린더의 일정입니다. 여기서 고치거나 지운 내용은 구글로 보내지 않습니다.</p>
+          )}
+          <OverwriteHistoryDetails
+            history={overwrites}
+            current={{ title: draft.title, date: draft.date, start: draft.start, end: draft.end, location: draft.location, note: draft.note }}
+          />
           <footer className="collab-dialog-footer">
             {editing && canEdit ? <Button tone="danger" type="button" disabled={submitting} onClick={() => { if (submitting) return; setSubmitting(true); void onDelete().finally(() => setSubmitting(false)) }}><Trash2 size={17} /> 삭제</Button> : <span />}
             <div><Button tone="ghost" type="button" onClick={onClose} disabled={submitting}>{canEdit ? '취소' : '닫기'}</Button>{canEdit && <Button tone="primary" type="submit" disabled={submitting}><Check size={18} /> {submitting ? '저장 중…' : editing ? '수정 저장' : '일정 등록'}</Button>}</div>

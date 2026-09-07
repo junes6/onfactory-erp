@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { SEALED_PATTERN, createSecretBox } from './secret-box.mjs'
+import { SEALED_PATTERN, createSecretBox, generateSecretBoxKey } from './secret-box.mjs'
 
 /**
  * 봉인 헬퍼 — "복원 가능하지만 저장소만으로는 못 읽는" 한 단계.
@@ -90,4 +91,23 @@ test('봉인 결과에 평문 조각이 남지 않는다', () => {
   for (const chunk of ['SUPER', 'SECRET', 'SIGNING', '0123456789']) {
     assert.ok(!sealed.includes(chunk), `봉투에 '${chunk}'가 보이면 안 된다`)
   }
+})
+
+test('generateSecretBoxKey는 .env.example이 시키는 그대로 쓸 수 있는 키를 만든다', () => {
+  // .env.example의 '키 생성' 줄이 이 함수를 가리킨다. 가리키는 곳이 실제로 쓸 수 있는 값을
+  // 내놓는지 재지 않으면, 운영자가 그 한 줄을 복사해 붙인 뒤에야 서버가 KEY_INVALID로 닫힌다.
+  const generated = generateSecretBoxKey()
+  assert.equal(Buffer.from(generated, 'base64').length, 32)
+  // 부를 때마다 달라야 한다 — 상수를 돌려주는 '생성기'는 모든 설치가 같은 키를 쓰게 만든다.
+  assert.notEqual(generated, generateSecretBoxKey())
+  // 그리고 그 값으로 만든 상자는 실제로 열린다.
+  const box = createSecretBox({ env: { SECRET_BOX_KEY: generated }, logger: { warn: () => {} } })
+  assert.equal(box.available, true)
+  assert.equal(box.open(box.seal('열려라', { aad: 'WHK-1' }), { aad: 'WHK-1' }), '열려라')
+})
+
+test('.env.example의 키 생성 한 줄이 실제 함수 이름을 가리킨다', () => {
+  // 주석이 가리키는 곳이 없으면 그 주석은 다음 사람을 잘못된 길로 보낸다.
+  const example = readFileSync(new URL('../.env.example', import.meta.url), 'utf8')
+  assert.match(example, /generateSecretBoxKey/)
 })

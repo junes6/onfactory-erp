@@ -69,6 +69,20 @@ export const WORKSPACE_TABLES = Object.freeze({
   // R16-K: 업무 커스텀 필드 '정의'만 산다. 값은 work-items payload의 fields 안에 있다 —
   // 정의를 바꿔도 값은 그 자리에 남고, 대조는 저장 직전 배열 후검증(customFieldViolation)에서 한 번 한다.
   'custom-fields': 'custom_fields',
+  // R16-E: 구글 캘린더 연결(계정 소유·토큰 암호문)과 항목별 동기화 링크(외부 id·해시·덮어쓴 내역).
+  // 링크를 calendar-events 행에 얹지 않는 이유: hasCalendarShape(server/app.mjs)가 CALENDAR_FIELDS 밖 키를
+  // 전부 거절해 전 직원의 일정 쓰기가 403이 된다.
+  // WORKSPACE_STORE_KEYS(server/app.mjs)에는 **일부러 넣지 않는다** — 미등록 키는 generic GET/PUT이
+  // 테넌트 검사보다 먼저 404 STORE_KEY_NOT_FOUND를 낸다. 403 ..._ROUTE_REQUIRED는 "그런 키가 있다"는
+  // 존재 오라클이고, 토큰 암호문을 담는 키에는 그것을 만들지 않는다(ai-conversations 선례).
+  'calendar-connections': 'calendar_connections',
+  'calendar-sync-links': 'calendar_sync_links',
+  // R16-G: Flow 파일함 벌크 이관. 세션 행과 청크 행이 같은 키에 산다 —
+  // 엔트리를 세션 행에 인라인하면 파일 하나 올릴 때마다 5,000엔트리짜리 payload를 다시 쓴다.
+  // WORKSPACE_STORE_KEYS에는 넣지 않는다: generic PUT에는 '이 세션은 누구 것인가'가 없어
+  // 직원 하나가 남의 이관 상태를 통째로 덮어쓸 수 있다. 전용 라우트만 문이 된다.
+  'bulk-imports': 'bulk_imports',
+  'bulk-import-rules': 'bulk_import_rules',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 
-export type StreamEventKind = 'notification' | 'proposal' | 'work' | 'message' | 'activity' | 'resync'
+/** 서버 EVENT_KINDS(server/event-stream.mjs)와 같은 목록이어야 한다 — 모르는 종류는 아예 구독되지 않는다. */
+export type StreamEventKind = 'notification' | 'proposal' | 'work' | 'message' | 'activity' | 'calendar' | 'resync'
 export type StreamEvent = { kind: StreamEventKind; data: Record<string, unknown> }
 
 /**
@@ -21,7 +22,7 @@ export function useEventStream(enabled: boolean, onEvent: (event: StreamEvent) =
     let source: EventSource | null = null
     let closed = false
 
-    const kinds: StreamEventKind[] = ['notification', 'proposal', 'work', 'message', 'activity', 'resync']
+    const kinds: StreamEventKind[] = ['notification', 'proposal', 'work', 'message', 'activity', 'calendar', 'resync']
     const open = () => {
       if (closed) return
       // withCredentials로 세션 쿠키를 함께 보낸다.

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import pg from 'pg'
 
+import { AI_POLICIES } from '../document-ai-policy.mjs'
 import { COMPANY_DOCUMENTS_KEY, emptyWorkspaceStore, GUEST_SCOPE_TABLES, WORKSPACE_KEY_SET, WORKSPACE_KEYS } from './constants.mjs'
 import { StoreVerificationError } from './errors.mjs'
 import { PersistentSessionMap } from './persistent-session-map.mjs'
@@ -244,7 +245,11 @@ async function softDeleteMissing(client, table, currentIds, { idColumn = 'id', t
   }
 }
 
-function documentColumns(payload) {
+/**
+ * payload → items 테이블의 조회용 열. **진실은 payload**이고 이 열들은 인덱스·조회 사본이다.
+ * R16-G에서 aiPolicy가 실제로 쓰이기 시작했다 — 시험이 그 투영을 직접 부를 수 있게 export한다.
+ */
+export function documentColumns(payload) {
   return {
     storageKey: payload?.storageKey ?? payload?.storage?.key ?? null,
     contentType: payload?.mime ?? payload?.type ?? payload?.contentType ?? null,
@@ -252,7 +257,9 @@ function documentColumns(payload) {
       ? payload.size
       : Number.isSafeInteger(payload?.sizeBytes) ? payload.sizeBytes : null,
     checksum: payload?.hash ?? payload?.checksum ?? null,
-    aiPolicy: ['locked', 'indexed', 'active'].includes(payload?.aiPolicy) ? payload.aiPolicy : 'active',
+    // 닫힌 집합의 출처는 document-ai-policy.mjs 하나다 — 여기에 값을 다시 적으면 수준이 하나
+    // 늘었을 때 payload는 받아 주고 컬럼만 조용히 'active'로 내려앉는다(조회가 거짓말을 한다).
+    aiPolicy: AI_POLICIES.includes(payload?.aiPolicy) ? payload.aiPolicy : 'active',
     versionGroupId: payload?.versionGroupId ?? payload?.id ?? null,
     versionNo: Number.isSafeInteger(payload?.versionNo) && payload.versionNo > 0 ? payload.versionNo : 1,
     summary: typeof payload?.summary === 'string' ? payload.summary : null,

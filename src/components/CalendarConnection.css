@@ -1,0 +1,265 @@
+/* R16-E 구글 캘린더 연결 — 일정 화면 안의 한 블록. 새 화면을 만들지 않는다. */
+
+.calendar-connection {
+  border: var(--hairline) solid var(--color-card-line);
+  border-radius: var(--radius-8);
+  background: var(--color-surface);
+  padding: var(--space-12) var(--space-16);
+  margin-bottom: var(--space-16);
+}
+
+.calendar-connection.is-flat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  font-size: var(--font-13);
+  color: var(--color-gray-600);
+}
+
+.calendar-connection > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  cursor: pointer;
+  font-size: var(--font-13);
+  font-weight: var(--weight-medium);
+  color: var(--color-ink);
+  list-style: none;
+}
+
+.calendar-connection > summary::-webkit-details-marker { display: none; }
+
+.calendar-connection-chip {
+  margin-inline-start: auto;
+  padding: var(--space-0) var(--space-8);
+  border-radius: var(--radius-8);
+  font-size: var(--font-11);
+  font-weight: var(--weight-medium);
+  line-height: 22px;
+  background: var(--color-gray-50);
+  color: var(--color-gray-600);
+}
+
+.calendar-connection-chip.green { background: var(--color-success-soft); color: var(--color-success-ink); }
+.calendar-connection-chip.amber { background: var(--color-warning-soft); color: var(--color-warning-ink); }
+
+.calendar-connection-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding-top: var(--space-12);
+  margin-top: var(--space-12);
+  border-top: var(--hairline) solid var(--color-card-line);
+}
+
+.calendar-connection-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+}
+
+.calendar-connection-row p,
+.calendar-connection-note {
+  margin: var(--space-0);
+  font-size: var(--font-13);
+  color: var(--color-gray-600);
+}
+
+.calendar-connection-error {
+  margin: var(--space-0);
+  font-size: var(--font-13);
+  color: var(--color-warning-ink);
+}
+
+.calendar-connection-actions {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.calendar-select {
+  display: flex;
+  flex-direction: column;
+  /* 항목을 늘리지 않는다 — '선택 적용' 버튼이 fieldset 폭만큼 늘어나면 화면의 주 행동처럼 보인다. */
+  align-items: flex-start;
+  gap: var(--space-8);
+  border: var(--hairline) solid var(--color-card-line);
+  border-radius: var(--radius-8);
+  padding: var(--space-12);
+  margin: var(--space-0);
+}
+
+.calendar-select legend {
+  padding: var(--space-0) var(--space-4);
+  font-size: var(--font-11);
+  font-weight: var(--weight-medium);
+  color: var(--color-gray-600);
+}
+
+.calendar-select label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--font-13);
+  color: var(--color-ink);
+}
+
+.calendar-select em,
+.calendar-connection-overview li span {
+  font-size: var(--font-11);
+  font-style: normal;
+  color: var(--color-gray-600);
+}
+
+.calendar-select em {
+  padding: var(--space-0) var(--space-8);
+  border-radius: var(--radius-8);
+  background: var(--color-gray-50);
+}
+
+.calendar-select small,
+.calendar-connection-overview p {
+  font-size: var(--font-11);
+  color: var(--color-gray-600);
+  margin: var(--space-0);
+}
+
+.calendar-connection-field,
+.calendar-connection-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--font-13);
+  color: var(--color-ink);
+}
+
+.calendar-connection-field select {
+  flex: 1;
+  min-width: 0;
+  border: var(--hairline) solid var(--color-card-line);
+  border-radius: var(--radius-8);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: var(--font-13);
+  padding: var(--space-8) var(--space-12);
+}
+
+.calendar-connection-overview ul {
+  list-style: none;
+  margin: var(--space-8) var(--space-0) var(--space-0);
+  padding: var(--space-0);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.calendar-connection-overview li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  align-items: baseline;
+  font-size: var(--font-13);
+  color: var(--color-ink);
+}
+
+.calendar-connection-overview summary {
+  cursor: pointer;
+  font-size: var(--font-13);
+  color: var(--color-gray-600);
+}
+
+/* 재연결 배너 — 토스트는 사라지고, 재연결은 사람이 마음먹어야 하는 일이다. */
+.schedule-reauth-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+  border: var(--hairline) solid var(--color-warning);
+  border-radius: var(--radius-8);
+  background: var(--color-warning-soft);
+  color: var(--color-warning-ink);
+  font-size: var(--font-13);
+  padding: var(--space-12) var(--space-16);
+  margin-bottom: var(--space-16);
+}
+
+.schedule-reauth-banner span { flex: 1; min-width: 0; }
+
+/* 덮어쓴 내역 — 0건이면 렌더하지 않으므로 빈 상태 규칙이 없다. */
+.schedule-overwrite-history {
+  border-top: var(--hairline) solid var(--color-card-line);
+  padding-top: var(--space-12);
+  margin-top: var(--space-12);
+}
+
+.schedule-overwrite-history > summary {
+  cursor: pointer;
+  font-size: var(--font-13);
+  color: var(--color-gray-600);
+}
+
+.schedule-overwrite-history ol {
+  list-style: none;
+  margin: var(--space-12) var(--space-0) var(--space-0);
+  padding: var(--space-0);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.schedule-overwrite-entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  font-size: var(--font-13);
+  color: var(--color-ink);
+}
+
+.schedule-overwrite-when { color: var(--color-gray-600); font-size: var(--font-11); }
+
+.schedule-overwrite-entry dl {
+  margin: var(--space-0);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.schedule-overwrite-entry dl > div {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.schedule-overwrite-entry dt {
+  min-width: 48px;
+  color: var(--color-gray-600);
+  font-size: var(--font-11);
+}
+
+.schedule-overwrite-entry dd { margin: var(--space-0); font-size: var(--font-13); }
+.schedule-overwrite-entry s { color: var(--color-gray-400); }
+
+/*
+ * 구글과 연결된 일정임을 왼쪽 악센트로만 알린다 — 칩을 하나 더 붙이면 한 줄 원칙이 깨진다.
+ * 테두리 대신 의사요소를 쓰는 이유: 테두리는 hairline(0.5px) 하나만 허용되는데,
+ * 그 굵기로는 색만으로 구분하는 표식이 되어 색각 이상에서 사라진다. 옆에 sr-only 문장도 함께 둔다.
+ */
+.calendar-event.external,
+.schedule-agenda-item.external { position: relative; }
+
+.calendar-event.external::before,
+.schedule-agenda-item.external::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: var(--space-4);
+  border-start-start-radius: var(--radius-8);
+  border-end-start-radius: var(--radius-8);
+  background: var(--color-teal);
+}
+
+@media (max-width: 720px) {
+  .calendar-connection-row { flex-direction: column; align-items: stretch; }
+  .calendar-connection-actions { flex-wrap: wrap; }
+}

@@ -1,4 +1,5 @@
-const KOREA_OFFSET = '+09:00'
+/** 한국 표준시 오프셋의 단일 출처. 두 벌로 두면 한쪽만 고쳐져 시각이 조용히 아홉 시간 어긋난다. */
+export const KOREA_OFFSET = '+09:00'
 
 function validDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? ''))

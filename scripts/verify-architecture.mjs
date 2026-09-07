@@ -37,6 +37,9 @@ const productFiles = [
   path.join(root, 'server', 'webhook-routes.mjs'),
   path.join(root, 'server', 'webhook-dispatch.mjs'),
   path.join(root, 'server', 'notification-delivery.mjs'),
+  // 벌크 이관의 안내 문구·AI 처리 수준 라벨도 코드 상수다 — 데모 실명이 보고서 문장으로 굳지 않도록 같은 검사를 받는다.
+  path.join(root, 'server', 'bulk-import.mjs'),
+  path.join(root, 'server', 'document-ai-policy.mjs'),
 ].filter((file) => !file.endsWith('.test.mjs'))
 
 const forbiddenDemoPatterns = [
@@ -107,6 +110,8 @@ const workspaceTables = [
   'project_templates', 'ai_conversations', 'notices', 'webhook_endpoints', 'webhook_deliveries',
   'personal_todos', 'notifications', 'notification_settings', 'push_subscriptions',
   'saved_views', 'custom_fields',
+  'calendar_connections', 'calendar_sync_links',
+  'bulk_imports', 'bulk_import_rules',
 ]
 for (const table of workspaceTables) {
   const definition = schema.match(new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+${table}\\s*\\(([\\s\\S]*?)\\);`, 'i'))?.[1] ?? ''
@@ -138,6 +143,15 @@ const requiredArtifacts = [
   'server/personal-core.mjs',
   'server/personal-core-routes.mjs',
   'supabase/migrations/20260831020000_personal_core.sql',
+  // R16-E: 토큰을 평문으로 두지 않는 한 곳과, 구글 캘린더 양방향 동기화의 세 조각.
+  'server/secret-box.mjs',
+  'server/google-calendar.mjs',
+  'server/calendar-sync.mjs',
+  'supabase/migrations/20260910000000_calendar_sync.sql',
+  // R16-G: 벌크 이관의 두 조각과, 'AI 처리 수준'을 실제로 켜는 한 곳.
+  'server/bulk-import.mjs',
+  'server/document-ai-policy.mjs',
+  'supabase/migrations/20260910010000_bulk_imports.sql',
 ]
 for (const artifact of requiredArtifacts) {
   try { statSync(path.join(root, artifact)) }

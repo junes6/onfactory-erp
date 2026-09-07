@@ -46,7 +46,8 @@ test('only the immediate types are pushed by default; the rest are opt-in', () =
   // 이것까지 꺼져 있으면 방해 금지 시간에 온 알림을 영영 모르게 된다.
   // R16-D의 공지 두 종류가 더해졌다. 공지는 못 보고 지나가면 그게 사고인 종류라 기본으로 켠다 —
   // 미확인 명단 요약은 작성자 한 사람에게만 가는 집계라 그대로 opt-in이다.
-  assert.deepEqual(settings.push.sort(), ['approval-requested', 'changes-requested', 'mention', 'notice-posted', 'notice-reminder', 'quiet-digest', 'task-assigned'].sort())
+  // R16-E의 캘린더 재연결도 기본으로 켠다 — 끊긴 채 두면 일정이 조용히 어긋나고, 다시 잇는 것은 사람만 할 수 있다.
+  assert.deepEqual(settings.push.sort(), ['approval-requested', 'calendar-reauth', 'changes-requested', 'mention', 'notice-posted', 'notice-reminder', 'quiet-digest', 'task-assigned'].sort())
   assert.deepEqual(settings.muted, [])
   // R16-J의 스레드 답글도 opt-in이다 — 스레드는 오래 이어져 울릴 일이 많고, 지목은 mention이 따로 한다.
   // R16-L의 외부 연동 중지도 opt-in이다 — 관리자가 화면에서 보고 고칠 일이지 사람을 깨울 일이 아니다.

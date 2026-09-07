@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, BellOff, BellRing, CheckCircle2, ClipboardCheck, ListChecks, Megaphone, MessageCircle, MessagesSquare, Moon, Radar, Settings2, ShieldAlert, Smartphone, Sparkles, Webhook } from 'lucide-react'
+import { AlertTriangle, BellOff, BellRing, CalendarClock, CheckCircle2, ClipboardCheck, ListChecks, Megaphone, MessageCircle, MessagesSquare, Moon, Radar, Settings2, ShieldAlert, Smartphone, Sparkles, Webhook } from 'lucide-react'
 import { formatDateTime, formatListDateTime } from '../utils/dateTime'
 import { Button, IconButton } from './ui/Button'
 import './NotificationCenter.css'
@@ -13,6 +13,8 @@ export type NotificationType =
   | 'thread-reply'
   // R16-L: 외부 연동이 연속 실패로 자동 중지됐다. 관리자가 주소를 고쳐야 다시 흐른다.
   | 'webhook-disabled'
+  // R16-E: 구글 캘린더 연결이 끊겼다. 다시 잇는 것은 사람만 할 수 있어 기본으로 울린다.
+  | 'calendar-reauth'
 
 export type AppNotification = {
   id: string
@@ -74,6 +76,7 @@ const typeIcon: Record<NotificationType, typeof ListChecks> = {
   'notice-unconfirmed-summary': ListChecks,
   'thread-reply': MessagesSquare,
   'webhook-disabled': Webhook,
+  'calendar-reauth': CalendarClock,
 }
 
 const typeTone: Record<NotificationType, string> = {
@@ -90,6 +93,7 @@ const typeTone: Record<NotificationType, string> = {
   'notice-unconfirmed-summary': 'blue',
   'thread-reply': 'violet',
   'webhook-disabled': 'red',
+  'calendar-reauth': 'amber',
 }
 
 /** base64url 공개키 → Uint8Array. 브라우저 구독 API가 요구하는 형식이다. */

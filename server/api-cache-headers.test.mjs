@@ -55,3 +55,16 @@ test('모든 /api 응답은 no-store 다 — 인증 전·후·목록·오류 가
     expectNoStore(missing, '없는 주소')
   })
 })
+
+/**
+ * R16-E: 구글 OAuth 콜백은 고정 결정에 따라 /api 밖이다. 그래서 위 미들웨어를 타지 않는다 —
+ * 핸들러가 직접 붙이지 않으면 이 응답만 캐시된다. 리다이렉트 한 건이라 별것 아닌 것 같지만
+ * 그 Location에는 계정별 결과(connected/error)가 실린다.
+ */
+test('non-/api 콜백도 no-store 다 — 미들웨어 밖이라 손으로 붙인 헤더가 유일한 방어다', async () => {
+  await withApp(async (origin) => {
+    const response = await fetch(`${origin}/oauth/google/callback?state=x`, { redirect: 'manual' })
+    assert.equal(response.status, 302)
+    expectNoStore(response, 'OAuth 콜백')
+  })
+})

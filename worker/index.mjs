@@ -546,7 +546,9 @@ export function createSitesWorker(dependencies = {}) {
     async fetch(request, workerEnv, ctx) {
       const runtimeEnv = resolveRuntimeEnv(workerEnv)
       const pathname = new URL(request.url).pathname
-      if (!pathname.startsWith('/api/')) {
+      // R16-E: 구글 OAuth 콜백은 고정 결정에 따라 non-/api 경로다. 이 예외 한 줄이 없으면
+      // 로컬에서는 되고 배포에서만 404가 된다 — 정적 자산으로 넘어가 버리기 때문이다.
+      if (!pathname.startsWith('/api/') && pathname !== '/oauth/google/callback') {
         if (runtimeEnv.ASSETS?.fetch) return runtimeEnv.ASSETS.fetch(request)
         return new Response('Not found', { status: 404 })
       }

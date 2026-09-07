@@ -541,6 +541,41 @@ CREATE TABLE IF NOT EXISTS custom_fields (
   created_by TEXT, PRIMARY KEY (org_id, id)
 );
 
+-- R16-E: 구글 캘린더 연결. 토큰은 secret-box.mjs가 봉한 암호문(v1:iv:tag:ct)으로만 들어온다.
+-- calendar_events 옆에 두지 않는 이유: 그쪽에는 starts_at/ends_at 전용 컬럼이 붙어 있어 나란히 두면
+-- 같은 모양으로 오해된다.
+CREATE TABLE IF NOT EXISTS calendar_connections (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
+-- R16-E: 항목별 동기화 링크. 외부 id·etag·내용 해시·덮어쓴 내역과 삭제 툼스톤이 여기 산다.
+CREATE TABLE IF NOT EXISTS calendar_sync_links (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
+-- R16-G: Flow 파일함 벌크 이관 세션과 청크. 세션 행은 상태·매핑·집계만 들고,
+-- 파일 엔트리는 500개씩 끊은 청크 행에 산다 — 파일 하나 올릴 때마다 다시 쓰는 payload를 고정하기 위해서다.
+CREATE TABLE IF NOT EXISTS bulk_imports (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
+-- R16-G: 저장해 두고 다시 쓰는 매핑 규칙(폴더 접두 → 프로젝트·태그·AI 처리 수준).
+CREATE TABLE IF NOT EXISTS bulk_import_rules (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS company_assets (
   id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
   payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
@@ -638,6 +673,28 @@ ALTER TABLE custom_fields ENABLE ROW LEVEL SECURITY;
 ALTER TABLE custom_fields FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS custom_fields_service ON custom_fields;
 CREATE POLICY custom_fields_service ON custom_fields USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+
+-- R16-E: 구글 캘린더 연결·링크는 서비스 컨텍스트만 통과한다. tenant_admin 정책은 두지 않는다 —
+-- 관리자도 토큰 암호문 행에 직접 SELECT할 이유가 없다(상태는 /overview가 가려서 준다).
+ALTER TABLE calendar_connections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE calendar_connections FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS calendar_connections_service ON calendar_connections;
+CREATE POLICY calendar_connections_service ON calendar_connections USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+ALTER TABLE calendar_sync_links ENABLE ROW LEVEL SECURITY;
+ALTER TABLE calendar_sync_links FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS calendar_sync_links_service ON calendar_sync_links;
+CREATE POLICY calendar_sync_links_service ON calendar_sync_links USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+
+-- R16-G: 벌크 이관 세션·규칙도 서비스 컨텍스트만 통과한다. 게스트 정책은 두지 않는다 —
+-- 게스트에게는 이 테이블의 존재 자체가 없어야 한다(업로드는 되지만 이관 세션은 직원의 것이다).
+ALTER TABLE bulk_imports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bulk_imports FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS bulk_imports_service ON bulk_imports;
+CREATE POLICY bulk_imports_service ON bulk_imports USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+ALTER TABLE bulk_import_rules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bulk_import_rules FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS bulk_import_rules_service ON bulk_import_rules;
+CREATE POLICY bulk_import_rules_service ON bulk_import_rules USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
 
 DROP POLICY IF EXISTS project_spaces_guest_read ON project_spaces;
 CREATE POLICY project_spaces_guest_read ON project_spaces FOR SELECT USING (
@@ -792,6 +849,12 @@ CREATE INDEX IF NOT EXISTS webhook_deliveries_pending_idx ON webhook_deliveries 
 -- 보기 목록은 언제나 '내 것 + 전사 공유'라 소유자로 먼저 좁힌다. 필드 정의는 표면(work…)별로 한 번에 읽는다.
 CREATE INDEX IF NOT EXISTS idx_saved_views_active ON saved_views (org_id, (payload ->> 'ownerId'), position) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_custom_fields_active ON custom_fields (org_id, (payload ->> 'surface'), position) WHERE deleted_at IS NULL;
+-- 연결은 언제나 '이 계정의 것' 하나를 찾고, 링크는 '이 계정의 이 일정'을 찾는다.
+CREATE INDEX IF NOT EXISTS idx_calendar_connections_active ON calendar_connections (org_id, (payload ->> 'accountId')) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_calendar_sync_links_active ON calendar_sync_links (org_id, (payload ->> 'accountId'), (payload ->> 'eventId')) WHERE deleted_at IS NULL;
+-- 이관은 언제나 '이 세션의 행'을 통째로 읽는다(세션 1 + 청크 N). 규칙은 이름으로 찾는다.
+CREATE INDEX IF NOT EXISTS idx_bulk_imports_active ON bulk_imports (org_id, (payload ->> 'sessionId'), position) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_bulk_import_rules_active ON bulk_import_rules (org_id, (payload ->> 'name')) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ai_conversations_owner_idx ON ai_conversations (org_id, (payload ->> 'ownerId'), (payload ->> 'updatedAt') DESC);
 CREATE INDEX IF NOT EXISTS ai_conversations_trash_idx ON ai_conversations (org_id, (payload ->> 'deletedAt'));
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON auth_sessions (expires_at) WHERE revoked_at IS NULL;

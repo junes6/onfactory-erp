@@ -20,6 +20,7 @@ import { ProductManagement, SalesChannels } from './components/BusinessPages'
 import { BillingDashboard } from './components/BillingDashboard'
 import { CompanyLibrary } from './components/CompanyLibrary'
 import { DailyJournalPage, MessengerDrawer, parseMessengerFocus, SchedulePage, type MessengerFocus } from './components/CollaborationSuite'
+import { CALENDAR_CALLBACK_MESSAGES } from './components/CalendarConnection'
 import { ComplianceCenter } from './components/ComplianceCenter'
 import {
   DashboardLayoutButton, FrequentFilesWidget, QuickLinksWidget, defaultDashboardWidgets,
@@ -2150,6 +2151,11 @@ export default function App() {
   const [platformRefreshToken, setPlatformRefreshToken] = useState(0)
   const [toastMessage, setToastMessage] = useState<ToastMessage | null>(null)
   /**
+   * R16-E: 구글 동의 화면에서 막 돌아왔는가. 'connected'면 일정 화면이 첫 동기화를 한 번 돌린다.
+   * 일정 화면이 쓰고 나면 곧바로 비운다 — 남겨 두면 화면을 드나들 때마다 자동 동기화가 다시 돈다.
+   */
+  const [calendarCallbackFlag, setCalendarCallbackFlag] = useState('')
+  /**
    * 알림을 낸다. 문자열이면 그대로, 객체면 되돌리기까지 함께 받는다.
    * 빈 문자열은 예전부터 "닫기"라는 뜻으로 쓰여 왔으므로 그대로 둔다.
    */
@@ -2213,6 +2219,21 @@ export default function App() {
     window.addEventListener('storage', handleSessionChange)
     return () => window.removeEventListener('storage', handleSessionChange)
   }, [authStatus, currentSessionIdentity])
+
+  // R16-E: OAuth 콜백은 non-/api 경로라 화면을 거치지 않는다. 결과 플래그만 받아 일정 화면으로 보내고
+  // 주소창을 정리한다 — 새로 고침할 때마다 같은 토스트가 다시 뜨지 않게.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const flag = params.get('calendar')
+    if (!flag) return
+    setCalendarCallbackFlag(flag)
+    setPage('schedule')
+    setToast(flag === 'connected'
+      ? '구글 캘린더를 연결했습니다. 첫 동기화를 시작합니다.'
+      : flag === 'cancelled' ? '구글 계정 연결을 취소했습니다.'
+        : CALENDAR_CALLBACK_MESSAGES[params.get('reason') ?? ''] ?? '구글 캘린더를 연결하지 못했습니다. 다시 시도해 주세요.')
+    window.history.replaceState(null, '', window.location.pathname)
+  }, [])
 
   useEffect(() => {
     const handleWorkspaceError = (event: Event) => {
@@ -2869,7 +2890,7 @@ export default function App() {
       return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} itProjects={dashboardItProjects} itContracts={dashboardItContracts} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
     switch (page) {
-      case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
+      case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} calendarCallbackFlag={calendarCallbackFlag} onCalendarCallbackHandled={() => setCalendarCallbackFlag('')} />
       case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onSchedule={scheduleTask} onSaveFields={saveTaskFields} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} focusProjectId={projectFocusId} onFocusHandled={() => setProjectFocusId(undefined)} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onNavigate={(target) => { if (target === 'people') setPeopleInitialTab('accounts'); navigate(target as PageId) }} />

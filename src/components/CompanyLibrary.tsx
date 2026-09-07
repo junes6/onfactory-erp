@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Bot, CheckCircle2, Cloud, Database, Download, FileArchive, FileText, FolderSearch, HardDrive, LockKeyhole, Pencil, Plus, Search, Server, Sparkles, Trash2, Upload, Users, X } from 'lucide-react'
+import { Bot, CheckCircle2, Cloud, Database, Download, FileArchive, FileText, FolderSearch, FolderUp, HardDrive, LockKeyhole, Pencil, Plus, Search, Server, Sparkles, Trash2, Upload, Users, X } from 'lucide-react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
+import { BulkImportDialog } from './BulkImport'
+import { AI_POLICY_LABELS, AI_POLICY_ORDER, type BulkAiLevel } from '../utils/bulkImport'
 import { librarySearchPlaceholderForIndustry } from '../modules/registry'
 import './CompanyLibrary.css'
 import { Button } from './ui/Button'
@@ -25,7 +27,16 @@ type CompanyDocument = {
   uploadedById: string
   uploadedByName: string
   storage: 'local' | 'nas'
+  /** R16-G: 벌크 이관으로 들어온 자료만 갖는다 — 원본 폴더 경로와 AI 처리 수준. */
+  sourcePath?: string
+  aiPolicy?: BulkAiLevel
 }
+/** 이 값이 생기기 전에 올라간 문서는 aiPolicy 칸이 없다 — 그때의 실효값은 '활용'이다. */
+const aiLevelOf = (document: Pick<CompanyDocument, 'aiPolicy'>): BulkAiLevel => (
+  document.aiPolicy && AI_POLICY_ORDER.includes(document.aiPolicy) ? document.aiPolicy : 'active'
+)
+type BulkSessionSummary = { id: string; name: string; status: string; totals: { uploaded: number; failed: number; skippedDuplicate: number } }
+const BULK_STATUS_LABEL: Record<string, string> = { draft: '준비 중', mapping: '매핑 중', uploading: '올리는 중', paused: '중단됨', done: '완료', failed: '실패' }
 type NasSettings = {
   provider: 'webdav' | 'smb' | 's3'
   endpoint: string
@@ -88,6 +99,8 @@ function DocumentModal({ document, workspaceScope, onClose, onSaved }: { documen
           allowedUserIds: String(form.get('allowedUserIds')).split(',').map((item) => item.trim()).filter(Boolean),
           tags: String(form.get('tags')).split(',').map((item) => item.trim()).filter(Boolean), summary: String(form.get('summary')).trim(),
           storage: String(form.get('storage')),
+          // R16-G: 수준은 자료 정보에서만 내릴 수 있다(폴더 단위로 내리면 사람이 올려 둔 문서까지 잠긴다).
+          ...(document ? { aiPolicy: String(form.get('aiPolicy')) } : {}),
         }
         setBusy(true)
         try {
@@ -113,6 +126,7 @@ function DocumentModal({ document, workspaceScope, onClose, onSaved }: { documen
           <label><span>열람 권한</span><select name="visibility" defaultValue={document?.visibility ?? 'all'}><option value="all">전 직원</option><option value="department">지정 부서</option><option value="restricted">지정 계정</option></select></label>
           <label><span>허용 부서 · 쉼표 구분</span><input name="departments" defaultValue={document?.departments.join(', ')} placeholder={industry.examples.departments} /></label>
           <label className="full"><span>허용 계정 ID · 제한자료일 때</span><input name="allowedUserIds" defaultValue={document?.allowedUserIds.join(', ')} placeholder="예: 회사 구성원 계정 ID" /></label>
+          {document && <label><span>AI 처리 수준</span><select name="aiPolicy" defaultValue={aiLevelOf(document)}>{AI_POLICY_ORDER.map((level) => <option key={level} value={level}>{AI_POLICY_LABELS[level]}</option>)}</select></label>}
           <label className="full"><span>AI 검색 태그 · 쉼표 구분</span><input name="tags" defaultValue={document?.tags.join(', ')} placeholder={industry.examples.libraryTags} /></label>
           <label className="full"><span>자료 요약</span><textarea name="summary" rows={4} defaultValue={document?.summary} placeholder="AI가 파일을 찾고 설명할 때 사용할 핵심 내용을 적어 주세요." required /></label>
         </div>
@@ -142,6 +156,57 @@ export function CompanyLibrary({ workspaceScope, canManage, currentUserId, compa
   const [aiQuery, setAiQuery] = useState('')
   const [aiAnswer, setAiAnswer] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
+  const [bulkOpen, setBulkOpen] = useState(false)
+  /**
+   * 드로어를 여는 문이 둘이라 무엇을 열지도 둘이다.
+   * '폴더 통째로 올리기'는 **새 이관**(null), 지난 이관 줄의 버튼은 **그 세션**을 연다.
+   * 하나로 묶어 언제나 마지막 세션을 넘기면, 이관을 한 번 끝낸 워크스페이스에서는
+   * 새 이관을 영영 시작할 수 없다 — 드로어가 끝난 보고서를 펼친 채 열리기 때문이다.
+   */
+  const [bulkResumeId, setBulkResumeId] = useState<string | null>(null)
+  const [bulkSessions, setBulkSessions] = useState<BulkSessionSummary[]>([])
+  // 마지막 이관 한 줄. 끝나지 않은 이관이 있으면 '이어서 올리기'로 들어가는 문이 된다.
+  const lastImport = bulkSessions[0] ?? null
+  /**
+   * 그 앞의 이관들은 접어 둔다. 접힌 채로라도 **목록에 있어야** 한다 —
+   * 폴더 단위 '정리' 승격은 보고서 화면에만 있어서, 마지막 이관만 열 수 있으면 두 번째 이관이
+   * 끝나는 순간 첫 이관의 폴더는 다시 올릴 길이 없다(자료 하나씩 PATCH만 남는다). 그리고
+   * '끝난 이관 기록을 지워 주세요'라는 상한 문구는 맨 위가 아직 올리는 중인 테넌트에서 막다른 길이 된다.
+   */
+  const olderImports = bulkSessions.slice(1)
+  const openBulk = (resumeId: string | null) => { setBulkResumeId(resumeId); setBulkOpen(true) }
+  const loadImports = async () => {
+    try {
+      const response = await libraryFetch('/api/bulk-imports', workspaceScope)
+      if (!response.ok) { setBulkSessions([]); return }
+      const body = await response.json() as { sessions?: BulkSessionSummary[] }
+      setBulkSessions(body.sessions ?? [])
+    } catch { setBulkSessions([]) }
+  }
+  /**
+   * 끝난 이관 기록을 지우는 문. 서버는 상한에 닿으면 '끝난 이관 기록을 지워 주세요'라고 답하는데,
+   * 그 일을 할 수 있는 곳이 화면 어디에도 없으면 그 문장은 막다른 길이다.
+   * 자료는 지우지 않는다 — 그 사실도 서버가 돌려주는 문장이 말한다.
+   */
+  const removeImport = async (session: BulkSessionSummary) => {
+    if (!window.confirm(`‘${session.name}’ 이관 기록을 지울까요? 올라간 자료는 자료실에 그대로 있습니다.`)) return
+    try {
+      const response = await libraryFetch(`/api/bulk-imports/${encodeURIComponent(session.id)}`, workspaceScope, { method: 'DELETE' })
+      const body = await response.json() as { message?: string; error?: { message?: string } }
+      if (!response.ok) { onToast(body.error?.message || '이관 기록을 지우지 못했습니다.'); return }
+      await loadImports()
+      onToast(body.message || '이관 기록을 지웠습니다.')
+    } catch { onToast('이관 기록을 지우지 못했습니다.') }
+  }
+  /**
+   * 이관 한 줄. 목록의 **어느 줄이든 같은 두 문**을 갖는다 — 보고서(폴더 단위 승격이 있는 유일한 화면)와,
+   * 끝난 기록이면 기록 지우기. 끝난 이관도 id를 넘긴다: 드로어가 그 보고서를 다시 펼친다
+   * ('보고서 열기'가 빈 화면을 여는 것이 이 화면의 가장 쉬운 거짓말이다).
+   */
+  const importRow = (session: BulkSessionSummary) => {
+    const unfinished = session.status !== 'done' && session.status !== 'failed'
+    return <>{session.name} · {BULK_STATUS_LABEL[session.status] ?? session.status} · 올림 {session.totals.uploaded} · 건너뜀 {session.totals.skippedDuplicate} · 실패 {session.totals.failed}<Button tone="quiet" size="sm" type="button" onClick={() => openBulk(session.id)}>{unfinished ? '이어서 올리기' : '보고서 열기'}</Button>{!unfinished && <Button tone="quiet" size="sm" type="button" onClick={() => { void removeImport(session) }}>이관 기록 지우기</Button>}</>
+  }
   const load = async () => {
     setLoading(true)
     try { const response = await libraryFetch('/api/documents', workspaceScope); const body = await response.json() as { documents?: CompanyDocument[]; error?: { message?: string } }; if (!response.ok) throw new Error(body.error?.message); setDocuments(body.documents ?? []) }
@@ -149,6 +214,8 @@ export function CompanyLibrary({ workspaceScope, canManage, currentUserId, compa
     finally { setLoading(false) }
   }
   useEffect(() => { if (workspaceScope) void load() }, [workspaceScope]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 이관 기록은 따로 읽는다 — 자료 목록의 재조회 계약(menu-ui-write-contract)을 건드리지 않기 위해서다.
+  useEffect(() => { if (workspaceScope) void loadImports() }, [workspaceScope]) // eslint-disable-line react-hooks/exhaustive-deps
   const categories = ['전체', ...new Set(documents.map((item) => item.category))]
   const visible = useMemo(() => documents.filter((document) => (category === '전체' || document.category === category) && `${document.name} ${document.summary} ${document.tags.join(' ')}`.toLowerCase().includes(query.toLowerCase().trim())), [category, documents, query])
   /**
@@ -175,16 +242,25 @@ export function CompanyLibrary({ workspaceScope, canManage, currentUserId, compa
     if (!response.ok) { onToast(body.error?.message || '자료를 삭제하지 못했습니다.'); return }
     await load(); onToast(`${document.name} 파일을 삭제했습니다.`)
   }
+  /**
+   * '보관만'인 자료는 목록에서도 뺀다 — 이 배열은 모델에게 그대로 전달되는 후보 목록이고,
+   * 이름·태그·요약만으로도 계약 상대와 금액이 드러난다. 서버도 같은 술어로 한 번 더 거른다.
+   */
   const askAi = async (event: FormEvent) => {
     event.preventDefault(); if (!aiQuery.trim()) return; setAiBusy(true); setAiAnswer('')
-    try { const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json', ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}) }, body: JSON.stringify({ feature: 'document-search', messages: [{ role: 'user', content: `기업 자료실에서 다음 요청에 맞는 자료를 찾아 주세요: ${aiQuery.trim()}` }], context: { company: companyName, accessibleDocuments: documents.map(({ id, name, category: documentCategory, tags, summary, uploadedAt }) => ({ id, name, category: documentCategory, tags, summary, uploadedAt })) } }) }); const body = await response.json() as { text?: string; error?: { message?: string } }; if (!response.ok || !body.text) throw new Error(body.error?.message || 'AI 검색에 실패했습니다.'); setAiAnswer(body.text) } catch (error) { setAiAnswer(error instanceof Error ? error.message : 'AI 검색에 실패했습니다.') } finally { setAiBusy(false) }
+    try { const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json', ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}) }, body: JSON.stringify({ feature: 'document-search', messages: [{ role: 'user', content: `기업 자료실에서 다음 요청에 맞는 자료를 찾아 주세요: ${aiQuery.trim()}` }], context: { company: companyName, accessibleDocuments: documents.filter((item) => aiLevelOf(item) !== 'locked').map(({ id, name, category: documentCategory, tags, summary, uploadedAt }) => ({ id, name, category: documentCategory, tags, summary, uploadedAt })) } }) }); const body = await response.json() as { text?: string; error?: { message?: string } }; if (!response.ok || !body.text) throw new Error(body.error?.message || 'AI 검색에 실패했습니다.'); setAiAnswer(body.text) } catch (error) { setAiAnswer(error instanceof Error ? error.message : 'AI 검색에 실패했습니다.') } finally { setAiBusy(false) }
   }
-  return <div className="library-page"><header className="library-page-head"><div><span>COMPANY KNOWLEDGE</span><h1>기업 자료실</h1><p>권한에 맞는 회사 자료를 안전하게 보관하고, AI에게 필요한 문서를 바로 찾도록 요청하세요.</p></div><div>{canManage && <Button tone="secondary" type="button" onClick={() => setNasOpen(true)}><Database size={18} /> NAS 설정</Button>}<Button tone="primary" type="button" onClick={() => setEditing('new')}><Upload size={18} /> 자료 업로드</Button></div></header>
+  return <div className="library-page"><header className="library-page-head"><div><span>COMPANY KNOWLEDGE</span><h1>기업 자료실</h1><p>권한에 맞는 회사 자료를 안전하게 보관하고, AI에게 필요한 문서를 바로 찾도록 요청하세요.</p></div><div>{canManage && <Button tone="secondary" type="button" onClick={() => setNasOpen(true)}><Database size={18} /> NAS 설정</Button>}<Button tone="secondary" type="button" onClick={() => openBulk(null)}><FolderUp size={18} /> 폴더 통째로 올리기</Button><Button tone="primary" type="button" onClick={() => setEditing('new')}><Upload size={18} /> 자료 업로드</Button></div></header>
+    {lastImport && <div className="library-import-strip"><p className="library-import-row">지난 이관: {importRow(lastImport)}</p>
+      {olderImports.length > 0 && <details className="library-import-history"><summary>그 앞의 이관 {olderImports.length}개</summary><ul>{olderImports.map((session) => <li key={session.id} className="library-import-row">{importRow(session)}</li>)}</ul></details>}
+    </div>}
     <section className="library-ai-search"><span><Bot size={24} /></span><form onSubmit={askAi}><label htmlFor="library-ai-query">AI 자료 찾기</label><div><input id="library-ai-query" value={aiQuery} onChange={(event) => setAiQuery(event.target.value)} placeholder={librarySearchPlaceholderForIndustry(industryType)} /><button type="submit" disabled={aiBusy || !aiQuery.trim()}>{aiBusy ? '찾는 중…' : 'AI에게 찾기'}</button></div></form>{aiAnswer && <div className="library-ai-answer"><strong>검색 결과</strong><p>{aiAnswer}</p><button type="button" aria-label="검색 결과 닫기" onClick={() => setAiAnswer('')}><X size={16} /></button></div>}</section>
     <section className="library-storage-strip"><div><HardDrive size={19} /><span>{BRAND.storageLabel}</span><strong>{documents.filter((item) => item.storage === 'local').length}개</strong></div><div><Cloud size={19} /><span>NAS 연결</span><strong>{nas.status}</strong></div><div><Users size={19} /><span>내 열람 가능</span><strong>{documents.length}개</strong></div><div><FileArchive size={19} /><span>총 용량</span><strong>{humanSize(documents.reduce((sum, item) => sum + item.size, 0))}</strong></div></section>
     <section className="library-toolbar"><label><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="자료명·설명·태그 검색" /></label><div>{categories.map((item) => <button type="button" className={category === item ? 'active' : ''} key={item} onClick={() => setCategory(item)}>{item}</button>)}</div><label className="library-sort"><span className="sr-only">자료 정렬</span><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="recent">최근 업로드</option><option value="name">이름</option><option value="size">크기</option><option value="category">분류</option></select></label></section>
-    <section className="library-list" aria-busy={loading}>{loading ? <div className="library-empty"><FolderSearch size={32} /><h2>권한에 맞는 자료를 불러오고 있습니다</h2></div> : sorted.map((document) => <article key={document.id}><span className="library-file-icon"><FileText size={22} /></span><div className="library-file-main"><span>{document.category}</span><h2>{document.name}</h2><p>{document.summary}</p><div>{document.tags.map((tag) => <small key={tag}>#{tag}</small>)}</div></div><dl><div><dt>업로드</dt><dd>{document.uploadedByName}</dd></div><div><dt>날짜</dt><dd>{document.uploadedAt.slice(0, 10)}</dd></div><div><dt>크기</dt><dd>{humanSize(document.size)}</dd></div></dl><span className="library-permission"><LockKeyhole size={14} /> {document.visibility === 'all' ? '전 직원' : document.visibility === 'department' ? '부서 제한' : '계정 제한'}</span><div className="library-file-actions">{onAskLens && canRunLensOn(document.mime) && <button type="button" onClick={() => onAskLens({ id: document.id, name: document.name, mime: document.mime, context: `기업 자료실 · ${document.category}` })}><Sparkles size={16} /> AI에게 물어보기</button>}<button type="button" onClick={() => download(document)}><Download size={16} /> 다운로드</button>{canManage && <button type="button" onClick={() => setEditing(document)}><Pencil size={16} /> 권한</button>}{(canManage || document.uploadedById === currentUserId) && <button className="danger" type="button" onClick={() => remove(document)}><Trash2 size={16} /> 삭제</button>}</div></article>)}{!loading && visible.length === 0 && <div className="library-empty"><FolderSearch size={32} /><h2>조건에 맞는 자료가 없습니다</h2><p>첫 자료를 업로드하거나 다른 검색어를 입력해 보세요.</p></div>}</section>
+    <section className="library-list" aria-busy={loading}>{loading ? <div className="library-empty"><FolderSearch size={32} /><h2>권한에 맞는 자료를 불러오고 있습니다</h2></div> : sorted.map((document) => <article key={document.id}><span className="library-file-icon"><FileText size={22} /></span><div className="library-file-main"><span>{document.category}</span><h2>{document.name}</h2>{document.sourcePath && <small className="library-source-path" title={document.sourcePath}>{document.sourcePath}</small>}<p>{document.summary}</p><div>{document.tags.map((tag) => <small key={tag}>#{tag}</small>)}{aiLevelOf(document) === 'locked' && <small className="library-ai-locked">{AI_POLICY_LABELS.locked}</small>}</div></div><dl><div><dt>업로드</dt><dd>{document.uploadedByName}</dd></div><div><dt>날짜</dt><dd>{document.uploadedAt.slice(0, 10)}</dd></div><div><dt>크기</dt><dd>{humanSize(document.size)}</dd></div></dl><span className="library-permission"><LockKeyhole size={14} /> {document.visibility === 'all' ? '전 직원' : document.visibility === 'department' ? '부서 제한' : '계정 제한'}</span><div className="library-file-actions">{/* '보관만'인 자료에는 버튼을 그리지 않는다 — 눌렀다가 409를 받는 대신 애초에 없다. */}
+      {onAskLens && canRunLensOn(document.mime) && aiLevelOf(document) !== 'locked' && <button type="button" onClick={() => onAskLens({ id: document.id, name: document.name, mime: document.mime, context: `기업 자료실 · ${document.category}` })}><Sparkles size={16} /> AI에게 물어보기</button>}<button type="button" onClick={() => download(document)}><Download size={16} /> 다운로드</button>{canManage && <button type="button" onClick={() => setEditing(document)}><Pencil size={16} /> 권한</button>}{(canManage || document.uploadedById === currentUserId) && <button className="danger" type="button" onClick={() => remove(document)}><Trash2 size={16} /> 삭제</button>}</div></article>)}{!loading && visible.length === 0 && <div className="library-empty"><FolderSearch size={32} /><h2>조건에 맞는 자료가 없습니다</h2><p>첫 자료를 업로드하거나 다른 검색어를 입력해 보세요.</p></div>}</section>
     {editing && <DocumentModal document={editing === 'new' ? undefined : editing} workspaceScope={workspaceScope} onClose={() => setEditing(null)} onSaved={async () => { await load(); onToast(editing === 'new' ? '기업 자료를 업로드했습니다.' : '자료 정보와 권한을 저장했습니다.') }} />}
+    {bulkOpen && <BulkImportDialog workspaceScope={workspaceScope} canChooseLibrary={canManage} resumeSessionId={bulkResumeId} onClose={() => { setBulkOpen(false); setBulkResumeId(null); void loadImports() }} onFinished={async () => { await load(); await loadImports() }} onToast={onToast} />}
     {nasOpen && <NasModal settings={nas} onClose={() => setNasOpen(false)} onSave={async (next) => { const result = await setNas(next); if (result.ok) onToast('NAS 연결 설정을 안전하게 저장했습니다. 자격증명을 연결하면 동기화를 시작할 수 있습니다.'); return result.ok }} />}
   </div>
 }

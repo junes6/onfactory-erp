@@ -2172,3 +2172,10 @@ html[data-theme='dark'] :is(.journal-file-block,.journal-comment-composer textar
   border-radius: var(--radius-8); background: var(--color-surface); color: var(--ink); font: inherit; font-size: var(--font-11); cursor: pointer;
 }
 .messenger-room-alert button.is-active { color: var(--forest-dark); background: var(--lime); border-color: transparent; }
+
+/* R16-E: 구글 동기화가 알려 주는 한 줄. 저장을 막지 않는다 — 막으면 첫날 정보를 고칠 방법이 사라진다. */
+.schedule-sync-note {
+  margin: var(--space-0) var(--space-0) var(--space-12);
+  font-size: var(--font-13);
+  color: var(--color-warning-ink);
+}

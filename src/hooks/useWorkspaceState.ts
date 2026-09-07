@@ -12,6 +12,12 @@ type WorkspaceStateOptions<T> = {
    * work-items GET의 `parents`처럼 배열이 아니라 응답에만 붙는 파생값을 화면이 받는 자리다.
    */
   onEnvelope?: (body: Record<string, unknown>) => void
+  /**
+   * 값을 하나 올리면 서버에서 다시 읽는다.
+   * R16-E: 구글 캘린더 동기화는 서버가 배열을 통째로 갈아 끼운다 — 화면이 그 사실을 모르면
+   * 다음 저장이 409로 튕기고 사용자가 방금 쓴 내용이 사라진다. 동기화가 끝난 직후 여기를 올린다.
+   */
+  reloadToken?: number
 }
 
 type ScopedValue<T> = {
@@ -125,12 +131,12 @@ export function useWorkspaceState<T>(
   initialValue: T,
   options: WorkspaceStateOptions<T> = {},
 ): [T, WorkspaceStateSetter<T>] {
-  const { enabled = true, seedWhenEmpty = true, scope, validate } = options
+  const { enabled = true, seedWhenEmpty = true, scope, validate, reloadToken = 0 } = options
   const normalizedScope = scope?.trim() || null
   const cacheKey = normalizedScope ? `onfactory-workspace:${normalizedScope}:${key}` : null
   const identity = useMemo(
-    () => JSON.stringify([enabled, seedWhenEmpty, normalizedScope, key]),
-    [enabled, key, normalizedScope, seedWhenEmpty],
+    () => JSON.stringify([enabled, seedWhenEmpty, normalizedScope, key, reloadToken]),
+    [enabled, key, normalizedScope, reloadToken, seedWhenEmpty],
   )
   const [scopedValue, setScopedValue] = useState<ScopedValue<T>>(() => ({
     identity,

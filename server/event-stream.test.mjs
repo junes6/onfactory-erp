@@ -112,6 +112,8 @@ test('the buffer is bounded and unknown event kinds are refused', () => {
   assert.equal(missed.resync, true)
   assert.equal(stream.publish('T1', 'unknown-kind', {}), null)
   assert.equal(stream.publish('', 'work', {}), null)
+  // R16-E: 구글 캘린더 동기화가 일정 배열을 갈아 끼웠다는 신호. 종류가 없으면 publish가 조용히 null을 돌려준다.
+  assert.ok(stream.publish('T1', 'calendar', { key: 'calendar-events', version: 3 }))
 })
 
 test('closing a connection stops delivery and frees the tenant entry', () => {
@@ -136,6 +138,8 @@ test('a restricted (guest) client gets only message/work kinds, stripped to key/
   stream.publish('T1', 'proposal', { pending: 3 })
   stream.publish('T1', 'activity', { title: '누군가 무엇을 했다' })
   stream.publish('T1', 'notification', { title: '게스트 본인 알림' }, { accountId: 'G1' })
+  // R16-E: 가져온 구글 일정은 개인 범위다. 게스트에게 갈 이유가 없어 허용 목록에 넣지 않았다.
+  stream.publish('T1', 'calendar', { key: 'calendar-events', version: 12 })
 
   const kinds = guest.frames().map((frame) => frame.kind)
   assert.deepEqual(kinds.filter((kind) => kind !== 'ready'), ['work', 'message', 'notification'], '제안·활동은 게스트에게 가지 않는다')
