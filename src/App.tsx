@@ -2047,6 +2047,8 @@ export default function App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   // 벨 배지는 실제 알림에서만 온다. 고정 슬롯을 세던 시절에는 아무 할 일이 없어도 빨간 숫자가 남았다.
   const [notificationFeed, setNotificationFeed] = useState<NotificationFeed | null>(null)
+  /** 'work' 이벤트가 올리는 값. 아래 useWorkspaceState('work-items')가 이 값이 바뀔 때 다시 읽는다. */
+  const [workReload, setWorkReload] = useState(0)
   const unread = notificationFeed?.unread ?? 0
   const loadNotifications = useCallback(async () => {
     if (mode !== 'tenant' || authStatus !== 'signed-in') { setNotificationFeed(null); return }
@@ -2062,6 +2064,11 @@ export default function App() {
   useEventStream(authStatus === 'signed-in' && mode === 'tenant' && account?.role !== 'tenant-guest', (event) => {
     if (event.kind === 'notification' || event.kind === 'resync') void loadNotifications()
     if (event.kind === 'proposal' && typeof event.data.pending === 'number') setPendingProposals(event.data.pending)
+    // 남이 만들거나 상태를 바꾼 업무는 여기서 다시 읽는다. 이 줄이 없을 때 실측한 결과:
+    // 서버는 그 업무를 이 사람에게 주는데 열려 있는 화면은 0건이었고, 다른 메뉴에 갔다 돌아와도
+    // 그대로 0건이었다(전체 새로고침을 해야 1건). 사이드바 배지도 같은 배열에서 나오므로
+    // 목록과 배지가 함께 낡아, 지시를 받은 직원이 새로고침 전까지 그 지시를 보지 못했다.
+    if (event.kind === 'work' || event.kind === 'resync') setWorkReload((current) => current + 1)
   })
   useEffect(() => {
     // 푸시 알림을 눌렀을 때 이미 열려 있는 앱이 새로고침 없이 해당 화면으로 이동한다.
@@ -2103,6 +2110,8 @@ export default function App() {
     enabled: tenantDataEnabled,
     scope: workspaceScope,
     seedWhenEmpty: false,
+    // 'work' 이벤트가 이 값을 올린다. 공유 일정이 calendarReload로 하는 것과 같은 배선이다.
+    reloadToken: workReload,
     onEnvelope: (body) => setWorkParentRefs((body.parents as Record<string, ParentRef> | undefined) ?? {}),
   })
   const [workRules, setWorkRules] = useWorkspaceState<WorkRule[]>('work-rules', emptyWorkRules, {
