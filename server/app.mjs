@@ -63,6 +63,7 @@ import { CALENDAR_SYNC_LINKS_KEY, registerCalendarSyncRoutes, stampCalendarLinkC
 import { BULK_IMPORT_ERRORS, documentOpensToProject, normalizeImportPath, registerBulkImportRoutes } from './bulk-import.mjs'
 import { DEFAULT_BULK_AI_POLICY, aiLockedError, aiPolicyAllows, documentAiPolicy, normalizeAiPolicy } from './document-ai-policy.mjs'
 import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
+import { registerApprovalRoutes } from './approval-forms.mjs'
 import { registerPersonalCoreRoutes } from './personal-core-routes.mjs'
 import { backupSettings, BACKUP_STATUS_KEY, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
 import { createScheduler, SCHEDULER_RUNS_KEY, SCHEDULER_STATE_KEY } from './scheduler.mjs'
@@ -176,6 +177,9 @@ const WORKSPACE_STORE_KEYS = new Set([
   'company-assets', 'tax-events', 'ip-rights', 'tax-deliveries', 'document-lenses', 'opportunities', 'opportunity-settings',
   'attendance-records', 'personal-todos', 'digests',
   'notifications', 'notification-settings', 'push-subscriptions', PROJECT_TEMPLATES_KEY,
+  // R16-I: 양식형 전자결재. **등록해 두고 403으로 닫는다** — 키를 아예 빼면 404 STORE_KEY_NOT_FOUND라
+  // '없는 영역'과 '전용 라우트가 있는 영역'이 같은 답을 받고, 화면은 어디로 가야 하는지 알 수 없다.
+  'approval-forms', 'approval-documents',
 ])
 // 알림·알림설정·푸시구독은 "내 것만" 나가야 하므로 전용 라우트로만 연다.
 const NOTIFICATION_KEYS = new Set(['notifications', 'notification-settings', 'push-subscriptions'])
@@ -185,6 +189,8 @@ const PROJECT_ROLES = new Set(['owner', 'editor', 'viewer'])
 const PROJECT_STAGES = new Set(['준비', '수주 검토', '수주 확정', '진행 중', '검수', '완료', '보류'])
 // 승인 큐·자동화 정책은 전용 라우트로만 바뀐다 (결정 diff가 원료이므로 generic PUT 금지).
 const PROPOSAL_ONLY_KEYS = new Set(['ai-proposals', 'automation-policies', 'project-spaces', 'project-posts'])
+// 양식 결재는 결재선·이력이 원료이므로 generic PUT 금지. 전용 라우트로만 바뀐다.
+const APPROVAL_ONLY_KEYS = new Set(['approval-forms', 'approval-documents'])
 // 이 키가 바뀌면 생존 센티널을 즉시 재평가한다.
 // 센티널 재평가를 부르는 키. 업종 모듈 키를 빠뜨리면 그 업종은 규칙이 있어도 평가가 돌지 않는다.
 const SENTINEL_TRIGGER_KEYS = new Set([
@@ -2214,20 +2220,45 @@ export function createApp(options = {}) {
     return document.visibility === 'restricted' && Array.isArray(document.allowedUserIds) && document.allowedUserIds.includes(account.id)
   }
   const listParameter = (value, limit = 20) => String(value ?? '').split(',').map((item) => item.trim()).filter(Boolean).slice(0, limit)
-  const persistDocumentList = async (tenantId, documents, accountId) => {
-    const previousTenantStore = workspaceStore.tenants[tenantId]
-    workspaceStore.tenants[tenantId] = {
-      ...(previousTenantStore ?? {}),
-      'company-documents': { data: documents, updatedAt: new Date().toISOString(), updatedBy: accountId },
-    }
-    try {
-      await commitWorkspaceStore()
-    } catch (error) {
-      if (previousTenantStore) workspaceStore.tenants[tenantId] = previousTenantStore
-      else delete workspaceStore.tenants[tenantId]
-      throw error
+  /**
+   * R16-I: 자료 목록을 tenantStore에 얹기만 하고 커밋은 부르는 쪽에 맡긴다.
+   * 되돌리기는 테넌트 객체 전체가 아니라 이 키 하나만 되돌린다 — 같은 커밋에 다른 키를 함께 쓰는
+   * 라우트가 있기 때문이다(결재 승인이 approval-documents와 company-documents를 한 번에 쓴다).
+   * 객체 참조를 통째로 되돌리면 그 다른 키의 변경까지 함께 사라지거나, 반대로 이미 오염된
+   * 스냅샷을 되돌려 아무것도 되돌리지 못한다.
+   */
+  const stageDocumentList = (tenantId, documents, accountId) => {
+    const hadTenant = Object.prototype.hasOwnProperty.call(workspaceStore.tenants, tenantId)
+    const tenantStore = workspaceStore.tenants[tenantId] ??= {}
+    const previous = tenantStore['company-documents']
+    tenantStore['company-documents'] = { data: documents, updatedAt: new Date().toISOString(), updatedBy: accountId }
+    return () => {
+      if (previous === undefined) delete tenantStore['company-documents']
+      else tenantStore['company-documents'] = previous
+      if (!hadTenant && Object.keys(tenantStore).length === 0) delete workspaceStore.tenants[tenantId]
     }
   }
+  const persistDocumentList = async (tenantId, documents, accountId) => {
+    const rollback = stageDocumentList(tenantId, documents, accountId)
+    try { await commitWorkspaceStore() } catch (error) { rollback(); throw error }
+  }
+  /**
+   * R16: 회의 녹음인가. 분류 하나 또는 태그 하나로 판정하고, 그 판정은 이 한 줄에만 있다.
+   */
+  const isMeetingRecordingUpload = (category, tags) => category === '회의녹음'
+    || (Array.isArray(tags) && tags.includes('meeting-recording'))
+  /**
+   * 업로드 문서의 AI 처리 수준은 **서버가** 정한다. 회의 녹음은 사람의 목소리가 든 개인정보라
+   * 기본이 '보관만'이고, 그 밖은 오늘과 같은 '활용'이다.
+   * 클라이언트가 보내는 값에 기대면 값을 잊은 화면 하나가 회의 음성을 AI에 통째로 연다 —
+   * 화면이 잊어도 안전한 쪽으로 떨어져야 한다.
+   *
+   * 그 밖의 업로드에는 칸을 **만들지 않는다**. `documentAiPolicy`가 칸 없는 문서를 이미 '활용'으로
+   * 읽으므로(document-ai-policy.mjs) 'active'를 적어 넣어도 판정은 한 글자도 달라지지 않는데,
+   * 응답에 없던 키가 생겨 기존 호출부 넷의 계약(bulk-import-routes.test.mjs 시험 12)이 깨진다.
+   * 값이 아니라 뜻이 같아야 하고, 뜻이 같으면 모양을 바꾸지 않는다.
+   */
+  const defaultAiPolicyPatch = (category, tags) => (isMeetingRecordingUpload(category, tags) ? { aiPolicy: 'locked' } : {})
   /**
    * 어떤 데이터가 붙잡고 있는 자료실 id를 모은다.
    *
@@ -2253,6 +2284,12 @@ export function createApp(options = {}) {
         ...(Array.isArray(item?.comments) ? item.comments.flatMap((comment) => Array.isArray(comment?.attachments) ? comment.attachments.map(idOf) : []) : []),
         // R16-H: 문서(위키) 본문의 그림·파일. 빠뜨리면 문서 속 그림이 자료실에서 그냥 지워진다.
         ...(Array.isArray(item?.blocks) ? item.blocks.map((block) => block?.attachmentId) : []),
+        // R16-I: 결재 양식의 `attachment` 항목 값(`values.<key>`에 든 `DOC-…`). 첨부 배열과 같은
+        // 자료를 같은 무게로 붙잡는다 — 여기를 세지 않으면 「영수증」 칸에 넣은 파일만 결재가 도는
+        // 중에 자료실에서 지워진다. 문자열 갈래와 같은 스위치로 열어 결재 키에서만 켜진다.
+        ...(stringAttachments && item?.values && typeof item.values === 'object' && !Array.isArray(item.values)
+          ? Object.values(item.values)
+          : []),
         item?.evidenceId,
         item?.drawingDocumentId,
         item?.backgroundDocumentId,
@@ -2467,6 +2504,9 @@ export function createApp(options = {}) {
       uploadedByName: request.auth.name,
       // 누가 올렸는지의 신원 종류. 화면이 게스트 첨부에 배지를 붙일 근거다.
       uploadedByRole: request.auth.role,
+      // 서버가 정하는 AI 처리 수준. 회의 녹음만 칸이 생기고 '보관만'으로 잠긴다.
+      // 아래 게스트·벌크 갈래가 이 값을 덮어쓸 수 있다(그 둘도 '보관만'이라 더 열리지 않는다).
+      ...defaultAiPolicyPatch(category, tags),
       storage: documentStorage.backend,
       // 게스트가 넣은 파일은 언제나 '보관만'이다. 주석만 있고 코드가 없으면 그 약속은 거짓말이 된다 —
       // aiPolicy 칸이 없는 문서의 실효 수준은 '활용'이라 렌즈·판독·채팅 첨부가 전부 열린다.
@@ -2503,7 +2543,9 @@ export function createApp(options = {}) {
       bulkEntryWrite = null
       // '보관만'인 자료는 AI가 열지 않는다 — 분류 제안도 AI가 파일을 읽는 행위다.
       // (200건 벌크가 승인 큐에 200개 제안을 쏟는 것도 이 한 줄이 함께 막는다.)
-      if (aiPolicyAllows(document, 'indexed')) {
+      // 회의 녹음은 분류 제안을 만들지 않는다. 회의 하나에 분류 제안과 할 일 제안이 겹쳐 쌓이면
+      // 승인 큐가 시끄러워지고, 사람은 둘 중 무엇을 봐야 하는지 알 수 없다.
+      if (aiPolicyAllows(document, 'indexed') && !isMeetingRecordingUpload(document.category, document.tags)) {
         try { enqueueProposal(request.auth.tenantId, proposeDocumentClassification(document, { industryType: tenantIndustryType(request.auth.tenantId) })) } catch { /* 제안 실패가 업로드를 막지 않는다 */ }
       }
       const { tenantId: _tenantId, ...safeDocument } = document
@@ -7504,6 +7546,10 @@ export function createApp(options = {}) {
       response.status(403).json({ error: { code: 'PERSONAL_TODO_ROUTE_REQUIRED', message: '개인 할 일은 내 할 일 전용 기능에서만 조회할 수 있습니다.' } })
       return
     }
+    if (APPROVAL_ONLY_KEYS.has(key)) {
+      response.status(403).json({ error: { code: 'APPROVAL_ROUTE_REQUIRED', message: '전자결재 양식과 문서는 결재 화면에서만 조회할 수 있습니다.' } })
+      return
+    }
     if (request.auth.role === 'tenant-member' && !TENANT_MEMBER_READ_KEYS.has(key)) {
       response.status(403).json({ error: { code: 'STORE_READ_FORBIDDEN', message: '현재 직무 권한으로 이 데이터를 볼 수 없습니다.' } })
       return
@@ -7594,6 +7640,10 @@ export function createApp(options = {}) {
     }
     if (key === 'personal-todos') {
       response.status(403).json({ error: { code: 'PERSONAL_TODO_ROUTE_REQUIRED', message: '개인 할 일은 내 할 일 전용 기능에서만 변경할 수 있습니다.' } })
+      return
+    }
+    if (APPROVAL_ONLY_KEYS.has(key)) {
+      response.status(403).json({ error: { code: 'APPROVAL_ROUTE_REQUIRED', message: '전자결재 양식과 문서는 결재 화면에서만 변경할 수 있습니다.' } })
       return
     }
     if (key === PROJECT_TEMPLATES_KEY) {
@@ -8305,6 +8355,17 @@ export function createApp(options = {}) {
   registerWorkItemScheduleRoutes({
     app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, commitWorkspaceStore, events,
     hasWorkItemShape, workspaceRecordVersion, scheduleSentinel,
+  })
+
+  // R16-I: 양식형 전자결재. 두 키는 WORKSPACE_STORE_KEYS에 등록돼 있지만 generic GET/PUT은
+  // 403 APPROVAL_ROUTE_REQUIRED로 닫혀 있고(APPROVAL_ONLY_KEYS), 이 라우트들만 문이 된다.
+  // 업무(work-items) 결재 상태머신과는 코드도 저장소도 만나지 않는 별개 엔티티다.
+  registerApprovalRoutes({
+    app, requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity,
+    workspaceStore, accounts, commitWorkspaceStore, notify,
+    documentStorage, documentRecord, stageDocumentList, putTenantDocument, deleteTenantDocument,
+    canReadDocument, workspaceRecordVersion, operatorAwareAccounts,
+    ...(typeof options.approvalClock === 'function' ? { clock: options.approvalClock } : {}),
   })
 
   // R16-H: 문서(위키). wiki-documents·wiki-revisions도 WORKSPACE_STORE_KEYS에 없다 —

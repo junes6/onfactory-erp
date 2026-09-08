@@ -814,6 +814,41 @@ test("12. 수준을 '보관만'으로 내리면 그 문서의 pending 분류 제
   })
 })
 
+/**
+ * R16: 회의 녹음의 AI 처리 수준은 **서버가** 정한다.
+ *
+ * 회의 음성은 사람의 목소리가 든 개인정보다. 클라이언트가 `aiPolicy=locked`를 실어 보내는 설계면,
+ * 그 한 줄을 잊은 화면 하나가 회사의 모든 회의 녹음을 렌즈·판독·채팅 첨부에 통째로 연다.
+ * 그래서 분류('회의녹음')나 태그('meeting-recording') 하나만 보고 서버가 잠근다.
+ *
+ * 짝이 되는 사실도 함께 잠근다: 그 업로드는 **분류 제안을 만들지 않는다.** 회의 하나에
+ * 분류 제안과 (M3의) 할 일 제안이 겹쳐 쌓이면 승인 큐가 시끄러워지고 사람은 무엇을 봐야 할지 모른다.
+ */
+test('12-2. 회의 녹음 업로드는 쿼리에 아무 말이 없어도 서버가 ‘보관만’으로 잠그고 분류 제안을 만들지 않는다', async () => {
+  const store = freshStore()
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const call = api(origin, admin)
+
+    const recording = await upload(origin, admin)({ path: '9월 주간회의.webm', body: '녹음 바이트' }, { extra: '&tags=meeting-recording' })
+    assert.equal(recording.status, 201, JSON.stringify(recording.body))
+    assert.equal(recording.body.document.aiPolicy, 'locked', '녹음이 잠기지 않으면 「보관만」이라는 약속이 거짓이 된다')
+    const byCategory = await upload(origin, admin)({ path: '10월 정기회의.webm', body: '녹음 바이트2' }, { extra: `&category=${encodeURIComponent('회의녹음')}` })
+    assert.equal(byCategory.body.document.aiPolicy, 'locked', '분류 하나로도 같은 결론이어야 한다')
+
+    const proposals = await call('GET', '/api/proposals')
+    for (const id of [recording.body.document.id, byCategory.body.document.id]) {
+      assert.equal(proposals.body.proposals.filter((item) => item.sourceKey === `doc:${id}`).length, 0, `녹음 ${id} 에 분류 제안이 생겼다`)
+    }
+
+    // 대조군. 회의가 아닌 업로드는 오늘과 똑같다 — 칸이 생기지 않고 분류 제안은 그대로 쌓인다.
+    const plain = await upload(origin, admin)({ path: '견적서_2026.pdf', body: '견적 본문' })
+    assert.equal('aiPolicy' in plain.body.document, false)
+    const after = await call('GET', '/api/proposals')
+    assert.ok(after.body.proposals.some((item) => item.sourceKey === `doc:${plain.body.document.id}`), '보통 업로드의 분류 제안까지 함께 막혔다')
+  })
+})
+
 test('13. 권한: editor는 자기 프로젝트만, viewer·프로젝트 없음은 403, 이관 중 멤버 제외도 잡힌다', async () => {
   const store = freshStore()
   await withServer(buildApp(store), async (origin) => {
