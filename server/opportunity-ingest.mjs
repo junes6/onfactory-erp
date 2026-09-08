@@ -361,7 +361,7 @@ export function opportunityRecord(item, settings, receivedAt) {
  * 워커에게 돌려줄 건별 처리 결과 한 줄. 큐에 오르지 못한 이유를 스스로 알 수 있어야
  * 판정 프롬프트를 고칠 수 있으므로 정규화 결과와 임계값 비교를 모두 담는다.
  */
-export function ingestResultLine(item, { outcome, settings = null, reason = '' }) {
+export function ingestResultLine(item, { outcome, settings = null, reason = '', draftUpload = null }) {
   const verdict = settings ? opportunityVerdict(item, settings) : null
   return {
     tenantId: item.tenantId,
@@ -378,6 +378,12 @@ export function ingestResultLine(item, { outcome, settings = null, reason = '' }
     minAmount: verdict ? verdict.minAmount : null,
     amountMet: verdict ? verdict.amountMet : null,
     reason: reason || (verdict ? verdict.reason : ''),
+    /**
+     * 이 건의 초안을 올릴 자리. 저장된 건 중 **초안을 예고했고 아직 문서가 붙지 않은** 건에만 붙는다
+     * (opportunity-draft.mjs의 draftUploadSlot이 판정한다). 그 밖에는 언제나 null이다 —
+     * 중복·없는 고객사처럼 아무것도 저장되지 않은 건에는 초안을 묶을 대상이 없다.
+     */
+    draftUpload: draftUpload ?? null,
   }
 }
 

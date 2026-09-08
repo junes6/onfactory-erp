@@ -137,6 +137,14 @@ import {
   OPPORTUNITY_SETTINGS_KEY,
   MAX_OPPORTUNITIES,
 } from './opportunity-ingest.mjs'
+import {
+  draftDocumentFields,
+  draftDocumentName,
+  draftUploadSlot,
+  verifyDraftTicket,
+  DRAFT_MIME,
+  MAX_DRAFT_BYTES,
+} from './opportunity-draft.mjs'
 import { buildDigest, DIGESTS_KEY, editionFor, findDigest, seoulDateKey as digestDateKey, upsertDigest } from './daily-digest.mjs'
 import {
   assemblePersonalContext,
@@ -4428,7 +4436,16 @@ export function createApp(options = {}) {
         result.results.push(ingestResultLine(item, { outcome: 'duplicate', settings, reason: '같은 출처·공고번호가 이미 등록돼 있습니다.' }))
         continue
       }
-      result.results.push(ingestResultLine(item, { outcome: record.status, settings }))
+      result.results.push(ingestResultLine(item, {
+        outcome: record.status,
+        settings,
+        /**
+         * 방금 저장한 이 한 건에만 딸리는 초안 자리. 워커는 이것으로 초안을 올린다 — 사람 세션은 필요 없다.
+         * 자리는 record를 보고 정해진다(초안을 예고했는가 · 아직 문서가 안 붙었는가). 중복·없는 고객사로
+         * 여기까지 오지 못한 건은 위에서 이미 continue했으므로 자리를 받지 않는다.
+         */
+        draftUpload: draftUploadSlot({ secret: opportunityIngestToken, tenantId: item.tenantId, record, now: Date.parse(now) }),
+      }))
       tenantStore[OPPORTUNITIES_KEY] = {
         data: [record, ...existing].slice(0, MAX_OPPORTUNITIES),
         updatedAt: now,
@@ -4456,6 +4473,130 @@ export function createApp(options = {}) {
       return
     }
     response.status(201).json(result)
+  })
+
+  /**
+   * 초안 업로드 — 인제스트가 방금 돌려준 **자리표 한 장**으로만 연다. 사람의 로그인 세션은 쓰지 않는다.
+   *
+   * 왜 자리표인가: 인제스트 토큰에 자료실 업로드 권한을 얹으면, 토큰 하나로 아무 고객사의 자료실에나
+   * 아무 파일을 넣을 수 있게 된다. 자리표는 서명된 (테넌트 · 기회 · 만료) 셋뿐이라 이 라우트가 여는
+   * 것은 언제나 **초안 하나, 그 기회에 묶인 것** 하나다.
+   *
+   * 요청이 싣는 것은 바이트뿐이다. 이름·분류·태그·열람 범위는 전부 서버가 자기 기록에서 꺼낸다
+   * (R16-G 벌크 이관의 documentFieldsFor와 같은 규율). 쿼리로 무엇을 보내도 읽지 않는다 —
+   * 읽는 순간 워커가 자료실의 분류와 열람 범위를 정하는 쪽이 된다.
+   *
+   * 테넌트 격리: 조회도 쓰기도 자리표가 지목한 tenantId 하나로만 한다. 주소의 기회 id가 자리표와
+   * 다르면 그 자리에서 끝난다 — 워커가 보낸 값으로 테넌트를 고를 길이 없다.
+   */
+  app.post('/api/opportunities/:id/draft', express.raw({ type: '*/*', limit: MAX_DRAFT_BYTES }), async (request, response) => {
+    const header = String(request.get('authorization') ?? '')
+    const ticket = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : String(request.get('x-draft-ticket') ?? '').trim()
+    const opened = verifyDraftTicket({ secret: opportunityIngestToken, ticket })
+    if (!opened.ok) { response.status(opened.status).json({ error: { code: opened.code, message: opened.message } }); return }
+    if (opened.opportunityId !== String(request.params.id)) {
+      response.status(403).json({ error: { code: 'DRAFT_TICKET_MISMATCH', message: '이 자리표는 다른 기회의 것입니다.' } })
+      return
+    }
+    if (!documentStorage) { response.status(503).json({ error: { code: 'DOCUMENT_STORAGE_UNAVAILABLE', message: '파일 저장소가 설정되지 않았습니다.' } }); return }
+
+    const { tenantId, opportunityId } = opened
+    const opportunities = opportunitiesOf(tenantId)
+    const index = opportunities.findIndex((entry) => entry?.id === opportunityId)
+    if (index < 0) { response.status(404).json({ error: { code: 'OPPORTUNITY_NOT_FOUND', message: '기회를 찾을 수 없습니다. 인제스트를 다시 보내 주세요.' } }); return }
+    const record = opportunities[index]
+    if (!record.draft) {
+      response.status(409).json({ error: { code: 'DRAFT_NOT_ANNOUNCED', message: '이 기회에는 초안이 예고되지 않았습니다. 인제스트에 draft를 실어 보내 주세요.' } })
+      return
+    }
+    // 자리는 한 번만 쓰인다. 쓰였다는 상태를 따로 두지 않고 **이미 붙은 문서**가 그 사실을 말한다 —
+    // 두 벌이면 언젠가 갈라지고, 갈라지는 순간 있던 초안이 조용히 덮어써진다.
+    if (record.draft.documentId) {
+      response.status(409).json({ error: { code: 'DRAFT_ALREADY_UPLOADED', message: '이 기회에는 이미 초안이 올라가 있습니다.' } })
+      return
+    }
+    if (!Buffer.isBuffer(request.body) || request.body.length === 0) {
+      response.status(400).json({ error: { code: 'DRAFT_FILE_REQUIRED', message: '올릴 초안 본문이 비어 있습니다.' } })
+      return
+    }
+
+    const id = `DOC-${Date.now()}-${randomBytes(4).toString('hex')}`
+    const name = draftDocumentName(record)
+    const uploadedAt = new Date().toISOString()
+    const document = {
+      id,
+      tenantId,
+      name,
+      originalName: safeDownloadName(name),
+      mime: DRAFT_MIME,
+      size: request.body.length,
+      // 분류·열람 범위·태그. 요청이 아니라 기회 기록에서 나온다.
+      ...draftDocumentFields(record),
+      summary: '',
+      uploadedAt,
+      // 사람이 올린 것처럼 꾸미지 않는다. 자료실 목록에서 이 자료의 출처가 워커임이 그대로 보인다.
+      uploadedById: 'opportunity-ingest',
+      uploadedByName: '기회 발굴 워커',
+      uploadedByRole: 'opportunity-ingest',
+      storage: documentStorage.backend,
+    }
+
+    let storedFile = null
+    const rollbacks = []
+    try {
+      storedFile = await putTenantDocument(documentStorage, { tenantId, id, body: request.body, contentType: document.mime })
+      Object.assign(document, storedFile)
+
+      const documents = Array.isArray(documentRecord(tenantId)?.data) ? [...documentRecord(tenantId).data] : []
+      documents.unshift(document)
+      rollbacks.push(stageDocumentList(tenantId, documents, 'opportunity-ingest'))
+
+      /**
+       * 문서 · 기회 기록 · 큐의 제안은 **한 커밋에 함께 탄다**. 갈라 두면 문서만 남고 기회가 그것을
+       * 가리키지 못하는 상태가 생기는데, 그 상태에서는 자리가 다시 열려 다음 실행이 같은 초안을 한 번 더 올린다.
+       */
+      const tenantStore = workspaceStore.tenants[tenantId] ??= {}
+      const previousOpportunities = tenantStore[OPPORTUNITIES_KEY]
+      tenantStore[OPPORTUNITIES_KEY] = {
+        data: opportunities.map((entry, position) => (position === index ? { ...entry, draft: { ...entry.draft, documentId: id } } : entry)),
+        updatedAt: uploadedAt,
+        updatedBy: 'opportunity-ingest',
+      }
+      rollbacks.push(() => {
+        if (previousOpportunities === undefined) delete tenantStore[OPPORTUNITIES_KEY]
+        else tenantStore[OPPORTUNITIES_KEY] = previousOpportunities
+      })
+
+      // 승인 큐에 이미 올라간 제안도 같은 문서를 가리키게 한다. 임계 미만이라 제안이 없으면 아무 일도 없다.
+      const sourceKey = `opportunity:${record.key}`
+      const existingProposals = proposalsOf(tenantId)
+      let proposalsTouched = false
+      const nextProposals = existingProposals.map((item) => {
+        if (item?.sourceKey !== sourceKey || item.status !== 'pending' || !item.payload?.draft) return item
+        proposalsTouched = true
+        return { ...item, payload: { ...item.payload, draft: { ...item.payload.draft, documentId: id } } }
+      })
+      if (proposalsTouched) {
+        const previousProposals = tenantStore[PROPOSALS_KEY]
+        const previousPolicies = tenantStore[AUTOMATION_POLICIES_KEY]
+        writeProposals(tenantId, nextProposals, 'opportunity-ingest')
+        rollbacks.push(() => {
+          if (previousProposals === undefined) delete tenantStore[PROPOSALS_KEY]; else tenantStore[PROPOSALS_KEY] = previousProposals
+          if (previousPolicies === undefined) delete tenantStore[AUTOMATION_POLICIES_KEY]; else tenantStore[AUTOMATION_POLICIES_KEY] = previousPolicies
+        })
+      }
+
+      await commitWorkspaceStore()
+      const { tenantId: _tenantId, ...safeDocument } = document
+      response.status(201).json({ document: safeDocument, opportunityId })
+    } catch (error) {
+      for (const rollback of rollbacks.reverse()) rollback()
+      if (storedFile) {
+        try { await deleteTenantDocument(documentStorage, document, tenantId) } catch { /* best-effort cleanup */ }
+      }
+      console.error('[server] opportunity draft upload failed', error)
+      response.status(500).json({ error: { code: 'DRAFT_UPLOAD_FAILED', message: '신청서 초안을 저장하지 못했습니다.' } })
+    }
   })
 
   // ------------------------------------------------------------------

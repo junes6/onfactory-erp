@@ -250,7 +250,11 @@ Content-Type: application/json
       "amount":    240000000,                  // 선택 · 원 단위 정수
       "link":      "https://www.g2b.go.kr/...", // 선택 · http/https만 저장
       "score":     0.82,                       // 선택 · 판정 점수. 0~1 비율과 0~100 백분율 모두 허용
-      "rationale": "감시 키워드 \"급식\" 일치"    // 선택 · 판정 근거
+      "rationale": "감시 키워드 \"급식\" 일치",   // 선택 · 판정 근거
+      "draft": {                               // 선택 · 신청서 초안 **예고**
+        "name": "…신청서 초안.md",               //        documentId는 싣지 않습니다 (서버가 붙입니다)
+        "sections": 5, "needsInput": 2
+      }
     }
   ]
 }
@@ -284,7 +288,15 @@ Content-Type: application/json
       "rawScore": 82, "scoreScale": "percent", "score": 0.82,
       "threshold": 0.6, "thresholdMet": true,
       "minAmount": 50000000, "amountMet": true,
-      "reason": "판정 점수 0.82이(가) 기준 0.6 이상입니다."
+      "reason": "판정 점수 0.82이(가) 기준 0.6 이상입니다.",
+      "draftUpload": {
+        "opportunityId": "OPP-1757289600000-a1b2c3",
+        "path": "/api/opportunities/OPP-1757289600000-a1b2c3/draft",
+        "ticket": "v1.eyJ0Ijoi…",
+        "expiresAt": "2026-09-08T00:30:00.000Z",
+        "contentType": "text/markdown",
+        "maxBytes": 524288
+      }
     }
   ]
 }
@@ -305,6 +317,38 @@ Content-Type: application/json
 | 404 | — | 보낸 건이 모두 존재하지 않는 고객사 |
 | 503 | `INGEST_NOT_CONFIGURED` | `OPPORTUNITY_INGEST_TOKEN` 미설정 |
 | 500 | `OPPORTUNITY_WRITE_FAILED` | 저장 실패 (아무 것도 반영되지 않음) |
+
+### 신청서 초안 업로드
+
+초안은 **인제스트 토큰으로 직접 올릴 수 없습니다.** 인제스트가 받아들인 건마다 1회용 자리표(`results[].draftUpload`)를 돌려주고, 워커는 그 자리표 하나로 초안 바이트만 올립니다.
+
+~~~
+POST /api/opportunities/:id/draft
+Authorization: Bearer <results[].draftUpload.ticket>   (또는 X-Draft-Ticket 헤더)
+Content-Type: text/markdown
+
+<마크다운 본문 (최대 512KB)>
+~~~
+
+**왜 자리표인가.** 인제스트 토큰에 자료실 업로드 권한을 얹으면 토큰 하나로 아무 고객사의 자료실에나 아무 파일을 넣을 수 있게 됩니다. 자리표는 인제스트 토큰으로 서명한 (테넌트 · 기회 · 만료 30분) 셋뿐이라, 한 장이 여는 것은 언제나 **초안 하나, 그 기회에 묶인 것** 하나입니다. 인제스트 토큰을 회전하면 남아 있던 자리표가 함께 닫힙니다.
+
+- **요청이 싣는 것은 바이트뿐입니다.** 문서의 이름·분류(`제안·견적`)·태그(`기회발굴`, `opportunity:<출처>:<공고번호>`)·열람 범위(회사 전체)는 전부 서버가 기회 기록에서 정합니다. 쿼리로 무엇을 보내도 읽지 않습니다.
+- 자리는 **초안을 예고했고(요청의 `draft`) 아직 문서가 붙지 않은** 건에만 발급됩니다. 중복·없는 고객사·임계 미만 판정으로 저장되지 않은 건에는 자리가 없습니다(임계 미만이어도 목록에는 남으므로 자리는 있습니다).
+- **한 자리는 한 번만 쓰입니다.** 두 번째 요청은 `DRAFT_ALREADY_UPLOADED`로 거절되고 바이트는 저장되지 않습니다.
+- 문서 · 기회 기록 · 승인 큐의 제안은 한 커밋에 함께 반영됩니다. 실패하면 셋 다 되돌아가고 저장한 파일도 지웁니다.
+
+| 상태 코드 | 오류 코드 | 뜻 |
+| --- | --- | --- |
+| 401 | `DRAFT_TICKET_REQUIRED` | 자리표를 보내지 않음 |
+| 401 | `DRAFT_TICKET_INVALID` | 서명이 맞지 않음 (인제스트 토큰 자체도 여기로 떨어집니다) |
+| 401 | `DRAFT_TICKET_EXPIRED` | 유효 기간(30분) 경과 — 인제스트를 다시 보내면 새 자리를 받습니다 |
+| 403 | `DRAFT_TICKET_MISMATCH` | 주소의 기회 id가 자리표와 다름 |
+| 404 | `OPPORTUNITY_NOT_FOUND` | 그 테넌트에 그 기회가 없음 |
+| 409 | `DRAFT_NOT_ANNOUNCED` | 인제스트에 `draft`를 싣지 않은 건 |
+| 409 | `DRAFT_ALREADY_UPLOADED` | 이미 초안이 붙어 있음 |
+| 400 | `DRAFT_FILE_REQUIRED` | 본문이 비어 있음 |
+| 413 | `PAYLOAD_TOO_LARGE` | 512KB 초과 |
+| 503 | `INGEST_NOT_CONFIGURED` | `OPPORTUNITY_INGEST_TOKEN` 미설정 |
 
 감시 키워드·지역·금액 하한·판정 점수 기준은 고객사 관리자가 **결재 · AI 제안** 화면의 [기회 감시 설정]에서 정합니다. 초기값은 업종 모듈이 채웁니다 (식품제조: 급식·수산물 납품·식품 R&D / IT서비스: 콘텐츠·소프트웨어 개발 용역·안전교육).
 
