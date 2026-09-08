@@ -81,6 +81,15 @@ export const isGuestGrantEnded = (grant, now = new Date()) => !grant
   || grant.status !== 'active'
   || (Boolean(grant.accessExpiresAt) && Date.parse(grant.accessExpiresAt) <= now.getTime())
 
+/**
+ * 같은 이메일로 다시 초대할 때 되살릴 수 있는 grant인가 — 이 회사에서 끝난(해지·만료) 것만.
+ * 'inactive'는 여기 없다: grant가 아직 살아 있고 '재활성'(POST /:id/status) 라우트가 그 자리를 맡는다.
+ * 되살리기를 그쪽까지 넓히면 관리자가 재활성 대신 재초대를 눌러 범위를 조용히 갈아 끼우게 된다.
+ */
+export const isRevivableGuestGrant = (grant, tenantId) => Boolean(grant)
+  && grant.tenantId === tenantId
+  && ['revoked', 'expired'].includes(grant.status)
+
 /** 게스트에게 보이는 업무: 범위 안 프로젝트에 귀속되고 본인이 담당자인 것만. 요청자인 것은 보지 않는다. */
 export const isGuestWorkItem = (item, auth) => Boolean(item?.projectId)
   && (auth?.guestScope?.projectIds ?? []).includes(item.projectId)
@@ -379,31 +388,8 @@ export function registerGuestRoutes({
     }
   }
 
-  const adminGuards = [requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity]
-
-  app.get('/api/admin/guests', ...adminGuards, (request, response) => {
-    const rows = grants().filter((grant) => grant?.tenantId === request.auth.tenantId).map(publicGrant)
-    rows.sort((left, right) => String(right.updatedAt ?? '').localeCompare(String(left.updatedAt ?? '')))
-    response.json({ guests: rows })
-  })
-
-  app.post('/api/admin/guests', ...adminGuards, async (request, response) => {
-    const email = String(request.body?.email ?? '').trim().toLowerCase()
-    const name = String(request.body?.name ?? '').trim().slice(0, 40)
-    const orgName = String(request.body?.orgName ?? '').trim().slice(0, 80)
-    if (!/^\S+@\S+\.\S+$/.test(email) || name.length < 2) { fail(response, 400, 'INVALID_GUEST_INVITE', '이름(2~40자)과 이메일을 입력해 주세요.'); return }
-    if (!orgName) { fail(response, 400, 'INVALID_GUEST_INVITE', '거래처(소속) 이름을 입력해 주세요.'); return }
-    const projectIds = parseProjectIds(request.auth.tenantId, request.body?.projectIds)
-    if (!projectIds) { fail(response, 400, 'INVALID_GUEST_PROJECTS', `초대할 프로젝트를 1~${MAX_PROJECTS_PER_GRANT}개 골라 주세요. 이 회사의 프로젝트만 지정할 수 있습니다.`); return }
-    const days = parseDays(request.body?.inviteExpiresInDays)
-    if (days === null) { fail(response, 400, 'INVALID_GUEST_INVITE', '초대 링크 유효기간은 1~30일 사이여야 합니다.'); return }
-    const accessExpiresAt = parseAccessExpiresAt(request.body?.accessExpiresAt)
-    if (accessExpiresAt === undefined || (accessExpiresAt && Date.parse(accessExpiresAt) <= clock().getTime())) { fail(response, 400, 'INVALID_GUEST_INVITE', '접속 종료일은 오늘 이후 날짜여야 합니다.'); return }
-    // core_accounts.email은 전역 UNIQUE라 다른 워크스페이스의 계정과도 겹칠 수 없다.
-    if (accounts.some((account) => account.email.toLowerCase() === email)) {
-      fail(response, 409, 'ACCOUNT_EXISTS', '이미 다른 워크스페이스에 등록된 이메일이거나 이 회사에 있는 계정입니다. 게스트는 새 이메일로만 초대할 수 있습니다.')
-      return
-    }
+  /** 보통의 초대 — 새 계정과 새 grant를 만든다. */
+  const inviteNewGuest = ({ request, email, name, orgName, projectIds, accessExpiresAt, days }) => {
     const now = nowIso(clock)
     const hex = () => randomBytes(6).toString('hex').toUpperCase()
     const accountId = `USR-${request.auth.tenantId}-${hex()}`
@@ -438,9 +424,6 @@ export function registerGuestRoutes({
       // 수락 때 게스트가 직접 정한다. 그 전에는 아무도 모르는 값이어야 한다.
       password: passwordDigest(randomBytes(32).toString('base64url'), accountId),
     }
-    const saved = snapshot()
-    const previousProjects = workspaceStore.tenants[request.auth.tenantId]?.['project-spaces']
-    const previousDocuments = workspaceStore.tenants[request.auth.tenantId]?.['company-documents']
     accounts.push(account)
     workspaceStore.invitedAccounts.push({
       id: accountId, email, name, tenantId: account.tenantId, tenantName: account.tenantName,
@@ -451,14 +434,107 @@ export function registerGuestRoutes({
     workspaceStore.guestGrants.push(grant)
     syncGuestMembership(grant)
     audit(request.auth.tenantId, '게스트 초대', `${name} (${orgName}) · 프로젝트 ${projectIds.length}개`, request.auth.name, grant.id)
+    return { grant, account, token }
+  }
+
+  /**
+   * 해지·만료된 게스트를 같은 계정으로 되살린다. 해지 라우트가 계정을 남기는 이유(그 사람이 남긴
+   * 댓글·첨부가 이름 없는 기록이 되지 않게)를 여기서 이어받는다 — 새 계정을 만들면 같은 사람의
+   * 예전 기록과 새 기록이 남남이 된다. 그래서 되살아나는 것은 신원(계정 id)뿐이다.
+   *
+   * grant를 새 행으로 만들지 않고 제자리에서 갈아 끼우는 이유가 셋이다.
+   * (1) guest_grants는 account_id에 부분 유니크 인덱스가 걸려 있다 — 살아 있는 grant는 계정당 하나다.
+   * (2) guestGrantOf는 accountId로 첫 행을 찾는다. 행이 둘이면 조회 순서가 유효 범위를 정하게 된다.
+   * (3) 감사(/audit)는 grant.id를 참조로 건다. id가 바뀌면 해지 전 기록이 새 grant에서 보이지 않는다.
+   *
+   * 옛 범위·옛 토큰·옛 세션·옛 비밀번호는 전부 여기서 끊는다. 비밀번호를 갈아 두지 않으면
+   * 해지 전에 알던 암호로 수락을 건너뛰고 들어올 길이 남는다.
+   */
+  const reviveGuest = (grant, account, { request, name, orgName, projectIds, accessExpiresAt, days }) => {
+    const endedAs = grant.status === 'expired' ? '만료' : '해지'
+    Object.assign(grant, {
+      name, orgName, projectIds,
+      invitedById: request.auth.id, invitedByName: request.auth.name,
+      status: 'invited',
+      resendCount: 0, lastResentAt: null,
+      accessExpiresAt,
+      acceptedAt: null, revokedAt: null, revokedById: null, deactivatedAt: null,
+      updatedAt: nowIso(clock),
+    })
+    const token = issueToken(grant, days)
+    Object.assign(account, {
+      name, team: orgName,
+      approved: false, approvalStatus: 'pending',
+      mustChangePassword: false, temporaryPasswordExpiresAt: null,
+      password: passwordDigest(randomBytes(32).toString('base64url'), account.id),
+    })
+    // 승인 결정을 지운다 — 남겨 두면 재기동 때 부트 조립이 'inactive'를 다시 씌워, 수락해도 못 들어온다.
+    delete workspaceStore.accountApprovals[account.id]
+    delete workspaceStore.accountCredentials[account.id]
+    const invited = workspaceStore.invitedAccounts.find((item) => item?.id === account.id)
+    if (invited) Object.assign(invited, { name, team: orgName, role: GUEST_ROLE, guestGrantId: grant.id })
+    else workspaceStore.invitedAccounts.push({
+      id: account.id, email: account.email, name, tenantId: grant.tenantId, tenantName: account.tenantName,
+      team: orgName, jobRole: account.jobRole ?? '외부 게스트', requested: account.requested ?? '게스트 초대',
+      role: GUEST_ROLE, guestGrantId: grant.id,
+    })
+    dropSessions(account.id)
+    // 옛 범위의 멤버·참여자·첨부 자리를 새 범위로 맞춘다. 만료는 멤버십을 정리하지 않으므로(로그인만 막는다)
+    // 이 호출이 없으면 되살린 게스트가 예전 프로젝트에 그대로 앉아 있게 된다.
+    syncGuestMembership(grant)
+    audit(request.auth.tenantId, '게스트 재초대', `${name} (${orgName}) · ${endedAs} 계정 되살림 · 프로젝트 ${projectIds.length}개`, request.auth.name, grant.id)
+    return { grant, account, token }
+  }
+
+  const adminGuards = [requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity]
+
+  app.get('/api/admin/guests', ...adminGuards, (request, response) => {
+    const rows = grants().filter((grant) => grant?.tenantId === request.auth.tenantId).map(publicGrant)
+    rows.sort((left, right) => String(right.updatedAt ?? '').localeCompare(String(left.updatedAt ?? '')))
+    response.json({ guests: rows })
+  })
+
+  app.post('/api/admin/guests', ...adminGuards, async (request, response) => {
+    const email = String(request.body?.email ?? '').trim().toLowerCase()
+    const name = String(request.body?.name ?? '').trim().slice(0, 40)
+    const orgName = String(request.body?.orgName ?? '').trim().slice(0, 80)
+    if (!/^\S+@\S+\.\S+$/.test(email) || name.length < 2) { fail(response, 400, 'INVALID_GUEST_INVITE', '이름(2~40자)과 이메일을 입력해 주세요.'); return }
+    if (!orgName) { fail(response, 400, 'INVALID_GUEST_INVITE', '거래처(소속) 이름을 입력해 주세요.'); return }
+    const projectIds = parseProjectIds(request.auth.tenantId, request.body?.projectIds)
+    if (!projectIds) { fail(response, 400, 'INVALID_GUEST_PROJECTS', `초대할 프로젝트를 1~${MAX_PROJECTS_PER_GRANT}개 골라 주세요. 이 회사의 프로젝트만 지정할 수 있습니다.`); return }
+    const days = parseDays(request.body?.inviteExpiresInDays)
+    if (days === null) { fail(response, 400, 'INVALID_GUEST_INVITE', '초대 링크 유효기간은 1~30일 사이여야 합니다.'); return }
+    const accessExpiresAt = parseAccessExpiresAt(request.body?.accessExpiresAt)
+    if (accessExpiresAt === undefined || (accessExpiresAt && Date.parse(accessExpiresAt) <= clock().getTime())) { fail(response, 400, 'INVALID_GUEST_INVITE', '접속 종료일은 오늘 이후 날짜여야 합니다.'); return }
+    // core_accounts.email은 전역 UNIQUE라 다른 워크스페이스의 계정과도 겹칠 수 없다. 그래서 셋으로 갈린다:
+    // 다른 회사의 계정 · 이 회사에서 쓰고 있는 계정 → 409. 이 회사의 해지·만료된 게스트 → 그 계정을 되살린다.
+    // 셋을 하나로 묶으면 한 번 해지된 거래처 담당자는 같은 이메일로 영영 다시 들어올 수 없다.
+    const existing = accounts.find((account) => account.email.toLowerCase() === email)
+    const revivable = existing?.role === GUEST_ROLE && existing.tenantId === request.auth.tenantId
+      ? grants().find((grant) => grant?.accountId === existing.id && isRevivableGuestGrant(grant, request.auth.tenantId))
+      : null
+    if (existing && !revivable) {
+      fail(response, 409, 'ACCOUNT_EXISTS', '이미 다른 워크스페이스에 등록된 이메일이거나 이 회사에서 쓰고 있는 계정입니다. 해지·만료된 게스트만 같은 이메일로 다시 초대할 수 있습니다.')
+      return
+    }
+    const saved = snapshot()
+    const previousProjects = workspaceStore.tenants[request.auth.tenantId]?.['project-spaces']
+    const previousRooms = workspaceStore.tenants[request.auth.tenantId]?.['messenger-conversations']
+    const previousDocuments = workspaceStore.tenants[request.auth.tenantId]?.['company-documents']
+    const previousAccount = revivable ? { ...existing } : null
+    const fields = { request, email, name, orgName, projectIds, accessExpiresAt, days }
+    const { grant, account, token } = revivable ? reviveGuest(revivable, existing, fields) : inviteNewGuest(fields)
     try {
       await commitWorkspaceStore()
+      if (revivable) await sessions.flush?.()
     } catch (error) {
-      accounts.splice(accounts.indexOf(account), 1)
+      if (previousAccount) Object.assign(account, previousAccount)
+      else accounts.splice(accounts.indexOf(account), 1)
       restore(saved)
       const tenantStore = workspaceStore.tenants[request.auth.tenantId]
       if (tenantStore) {
         if (previousProjects) tenantStore['project-spaces'] = previousProjects; else delete tenantStore['project-spaces']
+        if (previousRooms) tenantStore['messenger-conversations'] = previousRooms; else delete tenantStore['messenger-conversations']
         if (previousDocuments) tenantStore['company-documents'] = previousDocuments; else delete tenantStore['company-documents']
       }
       logger.error?.('[guest-invite] 초대를 저장하지 못했습니다.', { message: error?.message })
@@ -466,7 +542,7 @@ export function registerGuestRoutes({
       return
     }
     const invitation = await deliver({ request, grant, account, token })
-    response.status(201).json({ guest: publicGrant(grant), invitation })
+    response.status(201).json({ guest: publicGrant(grant), invitation: revivable ? { ...invitation, revived: true } : invitation })
   })
 
   app.post('/api/admin/guests/:id/resend', ...adminGuards, async (request, response) => {

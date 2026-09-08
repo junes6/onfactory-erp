@@ -138,8 +138,11 @@ type GuestGrant = {
   createdAt?: string
   acceptedAt?: string | null
 }
-/** 초대 결과. delivery가 'link-only'면 메일 어댑터가 없어 관리자가 링크를 직접 전달해야 한다. */
-type GuestInvitation = { url: string; expiresAt: string; delivery: 'sent' | 'link-only' }
+/**
+ * 초대 결과. delivery가 'link-only'면 메일 어댑터가 없어 관리자가 링크를 직접 전달해야 한다.
+ * revived면 해지·만료됐던 게스트의 계정을 되살린 것이다 — 옛 댓글·첨부가 그대로 그 사람의 것으로 남는다.
+ */
+type GuestInvitation = { url: string; expiresAt: string; delivery: 'sent' | 'link-only'; revived?: boolean }
 type GuestProjectOption = { id: string; name: string; status?: string }
 
 const guestStatusLabel: Record<GuestStatus, string> = { invited: '초대 대기', active: '활성', inactive: '비활성', revoked: '해지', expired: '만료' }
@@ -789,7 +792,9 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
     if (!body?.guest || !body.invitation) return
     // 모달을 닫지 않는다 — 링크를 복사해 전달하는 일이 아직 남았다.
     setGuestInvitation({ guest: body.guest, invitation: body.invitation })
-    onToast(body.invitation.delivery === 'sent' ? '초대 메일을 보냈습니다.' : '초대를 만들었습니다. 링크를 복사해 전달해 주세요.')
+    onToast(body.invitation.revived
+      ? '예전에 쓰던 계정을 되살려 다시 초대했습니다. 이전 비밀번호와 이전 프로젝트 범위는 함께 되살아나지 않습니다.'
+      : body.invitation.delivery === 'sent' ? '초대 메일을 보냈습니다.' : '초대를 만들었습니다. 링크를 복사해 전달해 주세요.')
   }
 
   const resendGuestInvite = async (guest: GuestGrant, trigger: HTMLButtonElement) => {

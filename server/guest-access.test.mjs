@@ -797,3 +797,140 @@ test('#21 이메일 어댑터: 성공이면 delivery sent, throw면 link-only로
     assert.ok(failStore.guestGrants.some((grant) => grant.email === 'new.guest@partner.example'), '발송 실패가 초대를 되돌리지 않는다')
   })
 })
+
+// ─────────────────────── 해지·만료 게스트 재초대(되살리기) ───────────────────────
+//
+// 결함이었던 것: 해지 라우트는 계정을 일부러 남기는데(감사 추적) 중복 검사는 해지 여부를 보지 않아,
+// 한 번 해지된 거래처 담당자는 같은 이메일로 영영 다시 들어올 수 없었다.
+// 되살리기는 '신원(계정 id)'만 잇는다 — 범위·토큰·세션·비밀번호는 전부 새로 발급한다.
+
+const acceptInvitation = (origin, token, password) => fetch(`${origin}/api/guest/invitations/${token}/accept`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password }),
+})
+
+test('해지된 게스트를 같은 이메일로 다시 초대하면 같은 계정이 되살아난다 (grant 행은 늘지 않는다)', async () => {
+  const store = seedStore()
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const a = api(origin, admin)
+    const stale = await login(origin, GUEST.email, GUEST.password)
+    assert.equal(stale.response.status, 200)
+    assert.equal((await a('DELETE', `/api/admin/guests/${GRANT_ID}`)).status, 200)
+    assert.equal((await login(origin, GUEST.email, GUEST.password)).body.error.code, 'ACCOUNT_INACTIVE')
+
+    const again = await a('POST', '/api/admin/guests', inviteBody({ email: GUEST.email, name: GUEST.name, orgName: '새거래처', projectIds: ['PRJ-C'] }))
+    assert.equal(again.status, 201, JSON.stringify(again.body))
+    assert.equal(again.body.guest.accountId, GUEST.id, '새 계정을 만들지 않고 옛 계정을 되살린다')
+    assert.equal(again.body.guest.id, GRANT_ID, 'grant도 제자리에서 갈아 끼운다 — 옛 감사 기록이 계속 이 게스트의 것이다')
+    assert.equal(store.guestGrants.length, 1, 'account_id 유니크(부분 인덱스)라 grant 행이 늘면 안 된다')
+    assert.equal(again.body.guest.status, 'invited')
+    assert.equal(again.body.guest.revokedAt, null)
+    assert.equal(again.body.guest.orgName, '새거래처', '다른 거래처 소속으로 다시 올 수 있다')
+    assert.ok(auditEvents(store).some((event) => event.event === '게스트 재초대' && event.reference === GRANT_ID))
+
+    // 옛 세션·옛 비밀번호는 되살아나지 않는다.
+    assert.equal((await fetch(`${origin}/api/projects`, { headers: stale.headers })).status, 401, '해지 때 끊긴 세션은 그대로 죽어 있다')
+    const oldPassword = await login(origin, GUEST.email, GUEST.password)
+    assert.equal(oldPassword.response.status, 401, '옛 비밀번호로는 들어올 수 없다')
+    assert.equal(oldPassword.body.error.code, 'INVALID_CREDENTIALS')
+
+    // 수락해야 비로소 열린다.
+    const token = tokenOf(again.body.invitation)
+    assert.equal((await acceptInvitation(origin, token, 'Revived!2026')).status, 200)
+    const back = await login(origin, GUEST.email, 'Revived!2026')
+    assert.equal(back.response.status, 200, JSON.stringify(back.body))
+    assert.equal(back.account.id, GUEST.id, '같은 계정 id로 돌아온다 — 옛 댓글·첨부가 그대로 이 사람의 것이다')
+    assert.equal(back.account.role, 'tenant-guest')
+    assert.deepEqual(back.account.guestScope.projectIds, ['PRJ-C'])
+    const projects = await api(origin, back)('GET', '/api/projects')
+    assert.deepEqual(projects.body.projects.map((project) => project.id), ['PRJ-C'], '옛 범위(PRJ-A)는 되살아나지 않는다')
+    const spaces = store.tenants[TENANT]['project-spaces'].data
+    assert.equal(spaces.find((project) => project.id === 'PRJ-A').members.some((member) => member.id === GUEST.id), false)
+    assert.equal(store.tenants[TENANT]['company-documents'].data.find((document) => document.id === 'DOC-A-ATT').allowedUserIds.includes(GUEST.id), false)
+  })
+})
+
+test('만료된 게스트를 다시 초대하면 옛 프로젝트 범위·만료일이 되살아나지 않는다', async () => {
+  const store = seedStore({ grantOverrides: { status: 'expired', accessExpiresAt: '2026-09-04T00:00:00.000Z' }, approvals: 'inactive' })
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    // 만료 잡은 멤버십을 정리하지 않는다(로그인만 막는다). 되살리기가 그 자리를 치워야 한다.
+    assert.ok(store.tenants[TENANT]['project-spaces'].data.find((project) => project.id === 'PRJ-A').members.some((member) => member.id === GUEST.id))
+    const again = await api(origin, admin)('POST', '/api/admin/guests', inviteBody({ email: GUEST.email, name: GUEST.name, orgName: ORG, projectIds: ['PRJ-C'] }))
+    assert.equal(again.status, 201, JSON.stringify(again.body))
+    assert.deepEqual(again.body.guest.projectIds, ['PRJ-C'])
+    assert.equal(again.body.guest.accessExpiresAt, null, '옛 접속 종료일은 사라진다')
+    assert.equal(again.body.guest.status, 'invited')
+    const spaces = store.tenants[TENANT]['project-spaces'].data
+    assert.equal(spaces.find((project) => project.id === 'PRJ-A').members.some((member) => member.id === GUEST.id), false, '옛 범위의 멤버 자리가 치워진다')
+    assert.equal(spaces.find((project) => project.id === 'PRJ-C').members.find((member) => member.id === GUEST.id)?.role, 'viewer')
+    const documents = store.tenants[TENANT]['company-documents'].data
+    assert.equal(documents.find((document) => document.id === 'DOC-A-ATT').allowedUserIds.includes(GUEST.id), false, '옛 범위의 첨부도 닫힌다')
+    assert.ok(documents.find((document) => document.id === 'DOC-C-ATT').allowedUserIds.includes(GUEST.id), '새 범위의 기존 첨부는 열린다')
+    const r1 = store.tenants[TENANT]['messenger-conversations'].data.find((item) => item.id === 'grp-R1')
+    assert.equal(r1.participantIds.includes(GUEST.id), false, '옛 범위의 채널에서 빠진다')
+    // 수락 전에는 여전히 못 들어온다.
+    assert.notEqual((await login(origin, GUEST.email, GUEST.password)).response.status, 200)
+    assert.equal((await acceptInvitation(origin, tokenOf(again.body.invitation), 'Revived!2026')).status, 200)
+    const back = await login(origin, GUEST.email, 'Revived!2026')
+    assert.equal(back.response.status, 200, JSON.stringify(back.body))
+    assert.deepEqual(back.account.guestScope.projectIds, ['PRJ-C'])
+    const documentList = await api(origin, back)('GET', '/api/documents')
+    assert.equal(documentList.body.documents.some((document) => document.id === 'DOC-A-ATT'), false)
+  })
+})
+
+test('되살리기는 옛 초대 토큰을 부활시키지 않는다', async () => {
+  const store = seedStore()
+  await withServer(buildApp(store), async (origin) => {
+    const a = api(origin, await login(origin, ADMIN.email))
+    const created = await a('POST', '/api/admin/guests', inviteBody())
+    assert.equal(created.status, 201)
+    const token = tokenOf(created.body.invitation)
+    assert.equal((await fetch(`${origin}/api/guest/invitations/${token}`)).status, 200)
+    assert.equal((await a('DELETE', `/api/admin/guests/${created.body.guest.id}`)).status, 200)
+    assert.equal((await fetch(`${origin}/api/guest/invitations/${token}`)).status, 404)
+    const again = await a('POST', '/api/admin/guests', inviteBody())
+    assert.equal(again.status, 201, JSON.stringify(again.body))
+    assert.equal((await fetch(`${origin}/api/guest/invitations/${token}`)).status, 404, '옛 토큰은 되살아나지 않는다')
+    const fresh = tokenOf(again.body.invitation)
+    assert.notEqual(fresh, token)
+    assert.equal((await fetch(`${origin}/api/guest/invitations/${fresh}`)).status, 200)
+    assert.equal(again.body.guest.resendCount, 0, '재발송 횟수는 새 초대의 것이다')
+  })
+})
+
+test('되살리기는 이 회사의 해지·만료된 게스트에게만 열린다', async () => {
+  const store = seedStore()
+  store.accountApprovals[PARK.id] = 'inactive'
+  store.tenants['TENANT-POHANG']['project-spaces'] = { data: [{ id: 'PRJ-P', name: '포항 프로젝트', visibility: 'members', status: 'active', ownerId: 'USR-POHANG-ADMIN', ownerName: '관리자', members: [{ id: 'USR-POHANG-ADMIN', name: '관리자', role: 'owner' }], createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' }], updatedAt: '2026-09-01T00:00:00.000Z' }
+  await withServer(buildApp(store), async (origin) => {
+    const a = api(origin, await login(origin, ADMIN.email))
+    // (a) 아직 유효한(활성) 게스트
+    const activeGuest = await a('POST', '/api/admin/guests', inviteBody({ email: GUEST.email }))
+    assert.equal(activeGuest.status, 409)
+    assert.equal(activeGuest.body.error.code, 'ACCOUNT_EXISTS')
+    // (b) 이 회사의 직원 — 비활성이어도 게스트로 되살리지 않는다(직원 계정을 게스트로 바꾸는 짓이다)
+    const employee = await a('POST', '/api/admin/guests', inviteBody({ email: PARK.email }))
+    assert.equal(employee.status, 409)
+    assert.equal(employee.body.error.code, 'ACCOUNT_EXISTS')
+    // (c) 비활성 게스트 — grant가 살아 있고 '재활성' 라우트가 따로 있다
+    assert.equal((await a('POST', `/api/admin/guests/${GRANT_ID}/status`, { status: 'inactive' })).status, 200)
+    const inactiveGuest = await a('POST', '/api/admin/guests', inviteBody({ email: GUEST.email }))
+    assert.equal(inactiveGuest.status, 409)
+    assert.equal(inactiveGuest.body.error.code, 'ACCOUNT_EXISTS')
+    // (d) 다른 테넌트는 남의 해지 게스트를 주워 갈 수 없다
+    assert.equal((await a('POST', `/api/admin/guests/${GRANT_ID}/status`, { status: 'active' })).status, 200)
+    assert.equal((await a('DELETE', `/api/admin/guests/${GRANT_ID}`)).status, 200)
+    const pohang = api(origin, await login(origin, 'admin@pohangcoop.co.kr'))
+    const stolen = await pohang('POST', '/api/admin/guests', inviteBody({ email: GUEST.email, projectIds: ['PRJ-P'] }))
+    assert.equal(stolen.status, 409, JSON.stringify(stolen.body))
+    assert.equal(stolen.body.error.code, 'ACCOUNT_EXISTS')
+    assert.deepEqual((await pohang('GET', '/api/admin/guests')).body.guests, [], '남의 게스트가 목록에 나타나지 않는다')
+    const grant = store.guestGrants.find((item) => item.id === GRANT_ID)
+    assert.equal(grant.status, 'revoked', '남의 초대 시도가 해지 상태를 건드리지 않는다')
+    assert.equal(grant.tokenHash, null, '토큰도 발급되지 않는다')
+    assert.equal(grant.tenantId, TENANT)
+    assert.equal((await login(origin, GUEST.email, GUEST.password)).body.error.code, 'ACCOUNT_INACTIVE', '해지된 계정은 계속 막혀 있다')
+  })
+})
