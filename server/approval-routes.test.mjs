@@ -271,9 +271,18 @@ test('3. PATCH·DELETE·회수는 기안자와 「기안」 상태에서만 열�
     const lateEdit = await call('PATCH', `/api/approval-documents/${id}`, { version: 3, title: '늦은 수정' })
     assert.equal(lateEdit.status, 409)
     assert.equal(lateEdit.body.error.code, 'APPROVAL_NOT_EDITABLE')
+    assert.match(lateEdit.body.error.message, /고칠 수 없습니다/)
+    /**
+     * 삭제에는 삭제의 답을 준다. 예전에는 두 경로가 `APPROVAL_NOT_EDITABLE` 하나를 함께 써서,
+     * 「삭제」를 누른 사람이 「내용을 고칠 수 없습니다」를 들었다(라이브 서버에서 실측했다).
+     * 묻지 않은 것에 답하면 사람은 고치는 길이 따로 있는 줄 알고 그것을 찾는다.
+     */
     const lateDelete = await call('DELETE', `/api/approval-documents/${id}`)
     assert.equal(lateDelete.status, 409)
-    assert.equal(lateDelete.body.error.code, 'APPROVAL_NOT_EDITABLE')
+    assert.equal(lateDelete.body.error.code, 'APPROVAL_NOT_DELETABLE')
+    assert.match(lateDelete.body.error.message, /지울 수 없습니다/)
+    assert.match(lateDelete.body.error.message, /반려/, '끝내는 길을 말한다')
+    assert.doesNotMatch(lateDelete.body.error.message, /고칠 수 없습니다/, '묻지 않은 것에 답하지 않는다')
 
     // 아직 아무도 보지 않았으므로 회수된다.
     const recalled = await call('POST', `/api/approval-documents/${id}/recall`, { version: 3 })

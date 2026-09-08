@@ -74,6 +74,7 @@ const ERROR_STATUS = new Map([
   [APPROVAL_ERRORS.LINE_BROKEN.code, 409],
   [APPROVAL_ERRORS.RECALL_FORBIDDEN.code, 409],
   [APPROVAL_ERRORS.NOT_EDITABLE.code, 409],
+  [APPROVAL_ERRORS.NOT_DELETABLE.code, 409],
   [APPROVAL_ERRORS.DELEGATE_CYCLE.code, 409],
 ])
 
@@ -853,7 +854,8 @@ export function registerApprovalRoutes({
     if (!found) { response.status(404).json({ error: NOT_FOUND }); return }
     const { rows, index, document } = found
     if (document.drafterId !== auth.id && auth.role !== 'tenant-admin') { response.status(403).json({ error: DRAFTER_REQUIRED }); return }
-    if (document.status !== '기안') { fail(response, APPROVAL_ERRORS.NOT_EDITABLE); return }
+    // 삭제에는 삭제의 답을 준다 — 「내용을 고칠 수 없습니다」는 묻지 않은 것에 대한 답이다.
+    if (document.status !== '기안') { fail(response, APPROVAL_ERRORS.NOT_DELETABLE); return }
     const written = rows.filter((_row, position) => position !== index)
     if (!await writeRows(auth.tenantId, DOCUMENTS_KEY, written, auth.id, now)) {
       response.status(500).json({ error: WRITE_FAILED })

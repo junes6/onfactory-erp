@@ -94,6 +94,13 @@ const APPROVAL_ERROR_TABLE = {
   REASON_REQUIRED: { code: 'APPROVAL_REASON_REQUIRED', message: '반려 사유를 5자 이상 적어 주세요.' },
   RECALL_FORBIDDEN: { code: 'APPROVAL_RECALL_FORBIDDEN', message: '이미 결재가 시작된 문서는 회수할 수 없습니다.' },
   NOT_EDITABLE: { code: 'APPROVAL_NOT_EDITABLE', message: '상신한 뒤에는 내용을 고칠 수 없습니다.' },
+  /**
+   * 삭제에는 삭제의 답을 준다. 예전에는 두 경로가 `NOT_EDITABLE` 하나를 함께 써서, 「삭제」를 누른
+   * 사람이 「내용을 고칠 수 없습니다」를 들었다 — 묻지 않은 것에 답하면 사람은 고치는 길이 따로
+   * 있는 줄 알고 그것을 찾는다(규칙 3·11). 상신한 결재는 **기록이라** 지워지지 않는다는 것이 사실이고,
+   * 잘못 올린 문서를 끝내는 길은 결재자의 반려다.
+   */
+  NOT_DELETABLE: { code: 'APPROVAL_NOT_DELETABLE', message: '상신한 결재는 기록이라 지울 수 없습니다. 잘못 올렸다면 결재자에게 반려를 받으면 됩니다.' },
   DELEGATE_INVALID: { code: 'APPROVAL_DELEGATE_INVALID', message: '대결자와 기간을 확인해 주세요.' },
   DELEGATE_CYCLE: { code: 'APPROVAL_DELEGATE_CYCLE', message: '대결은 한 단계까지만 지정할 수 있습니다.' },
   SEAT_TAKEN: { code: 'APPROVAL_SEAT_TAKEN', message: '이 결재선에서 이미 한 자리를 결재하셨습니다. 남은 자리는 다른 분이 결재해야 합니다.' },
