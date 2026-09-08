@@ -162,7 +162,9 @@ test('중지 알림을 누르면 고칠 수 있는 화면에 내려놓는다 —
   assert.match(app, /if \(page === 'people'\) \{ setPeopleInitialTab\('integrations'\); setNotificationsOpen\(false\); navigate\('people'\); return \}/)
   // 엔드포인트 id를 업무 초점 슬롯에 밀어 넣지 않는다 — 그 자리는 업무 id만 뜻한다.
   const handler = app.match(/onNavigate=\{\(page, focusId\) => \{[\s\S]*?\n\s{16}\}\}/)?.[0] ?? ''
-  assert.ok(handler.indexOf("if (page === 'people')") < handler.indexOf('if (focusId) setWorkFocusId(focusId)'))
+  const generic = handler.indexOf('if (target.workFocusId) setWorkFocusId(target.workFocusId)')
+  assert.ok(generic > 0, '일반 갈래를 찾지 못했다 — 이 시험이 재는 순서가 사라졌다')
+  assert.ok(handler.indexOf("if (page === 'people')") < generic)
 })
 
 test('열 때마다 채널 목록을 다시 읽고, 못 읽으면 빈 목록으로 접지 않는다', () => {

@@ -462,7 +462,7 @@ test('7. 승인된 지출 집계는 관리자에게 테넌트 전체, 직원에�
   })
 })
 
-test('8. generic 저장소 라우트는 두 키를 열지 않고, 게스트 세션은 결재 라우트 17개 전부에서 막힌다', async () => {
+test('8. generic 저장소 라우트는 두 키를 열지 않고, 게스트 세션은 결재 라우트 18개 전부에서 막힌다', async () => {
   const store = freshStore()
   await withServer(buildApp(store), async (origin) => {
     const admin = await login(origin, ADMIN.email)
@@ -498,8 +498,9 @@ test('8. generic 저장소 라우트는 두 키를 열지 않고, 게스트 세�
       ['DELETE', '/api/approval-documents/APD-X'], ['POST', '/api/approval-documents/APD-X/submit'],
       ['POST', '/api/approval-documents/APD-X/decide'], ['POST', '/api/approval-documents/APD-X/recall'],
       ['GET', '/api/approval-documents/APD-X/print'],
+      ['GET', '/api/approval-documents/APD-X/attachments/DOC-X'],
     ]
-    assert.equal(routes.length, 17, '결재 라우트는 17개다 — 늘리면 이 목록도 함께 늘려야 한다')
+    assert.equal(routes.length, 18, '결재 라우트는 18개다 — 늘리면 이 목록도 함께 늘려야 한다')
     for (const [method, route] of routes) {
       const result = await api(origin, guest)(method, route, method === 'GET' || method === 'DELETE' ? undefined : {})
       assert.equal(result.status, 403, `게스트가 ${method} ${route} 를 뚫었다 — ${result.status}`)
@@ -945,5 +946,560 @@ test('17. 끝난 결재의 첨부 — 반려·회수는 풀리고, 승인 근거
     assert.equal((await api(origin, drafter)('DELETE', `/api/approval-documents/${draftDoc.id}`)).status, 200)
     const freed = await remove('DOC-DRF-1')
     assert.equal(freed.status, 200, `문구가 말한 대로 연결을 풀었는데도 잠긴 채로 남았다 — ${JSON.stringify(freed.body)}`)
+  })
+})
+
+/**
+ * 화면과 같은 질의로 자료를 올린다(src/utils/documentAttachments.ts 의 uploadDocumentAttachment).
+ * allowedUserIds 를 붙이지 않는 것까지 그대로 — 결재선은 이 시점에 아직 정해지지 않았을 수 있다.
+ */
+async function uploadAttachment(origin, session, name) {
+  const params = new URLSearchParams({
+    name, category: '결재증빙', visibility: 'restricted', summary: `전자결재 · ${name}`, tags: 'approval-attachment',
+  })
+  const response = await fetch(`${origin}/api/documents?${params}`, {
+    method: 'POST',
+    headers: { ...session.headers, 'content-type': 'application/octet-stream', 'x-file-type': 'application/pdf', 'x-file-name': encodeURIComponent(name) },
+    body: Buffer.from(`bytes-of-${name}`),
+  })
+  const body = await readJson(response)
+  assert.equal(response.status, 201, JSON.stringify(body))
+  return body.document
+}
+
+/** 자료실 경로. 결재와 무관하게 「이 사람이 이 파일 자체를 열 수 있는가」를 잰다. */
+const download = (origin, session, id) => fetch(`${origin}/api/documents/${id}/download`, {
+  headers: { cookie: session.headers.cookie, 'x-workspace-identity': session.headers['x-workspace-identity'] },
+})
+
+/**
+ * 결재 범위 전용 경로. 「이 결재를 볼 수 있는 사람이, 이 결재가 붙잡은 첨부를」 여는 문이다.
+ * 자료실 명단을 고치지 않으므로 결재 문서가 닫히는 순간 이 문도 함께 닫힌다.
+ */
+const scopedDownload = (origin, session, documentId, attachmentId) => fetch(
+  `${origin}/api/approval-documents/${documentId}/attachments/${attachmentId}`,
+  { headers: { cookie: session.headers.cookie, 'x-workspace-identity': session.headers['x-workspace-identity'] } },
+)
+
+test('18. 결재선·참조에 선 사람은 그 결재 안에서 첨부를 연다 — 자료실 명단은 한 글자도 바뀌지 않는다', async () => {
+  const store = freshStore()
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const approver = await login(origin, SEO.email)
+    const watcher = await login(origin, LEE.email)
+    const stranger = await login(origin, PARK.email)
+
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+    const receipt = await uploadAttachment(origin, drafter, '영수증.pdf')
+    const extra = await uploadAttachment(origin, drafter, '견적서.pdf')
+    const unrelated = await uploadAttachment(origin, drafter, '무관한자료.pdf')
+    assert.equal(receipt.visibility, 'restricted')
+    assert.deepEqual(receipt.allowedUserIds, [OH.id], '이 시험의 전제: 올리는 순간에는 기안자만 열 수 있다')
+
+    const drafted = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: '9월 원부자재 대금',
+      values: { spent_on: '2026-09-01', amount: 1_240_000, receipt: receipt.id },
+      attachments: [extra.id], line: line(SEO.id), ccIds: [LEE.id], submit: true,
+    })
+    assert.equal(drafted.status, 201, JSON.stringify(drafted.body))
+    const id = drafted.body.document.id
+
+    // ① 결재를 볼 수 있는 사람은 그 결재 안에서 근거를 연다. 바이트까지 잰다 —
+    //    200 만 재면 「빈 응답을 200 으로 돌려주는」 구현도 통과한다.
+    for (const [who, session] of [['기안자', drafter], ['결재자', approver], ['참조자', watcher], ['관리자', admin]]) {
+      for (const [label, target] of [['항목 첨부', receipt], ['첨부 배열', extra]]) {
+        const got = await scopedDownload(origin, session, id, target.id)
+        assert.equal(got.status, 200, `${who}가 자기가 볼 결재의 ${label}을 열지 못한다`)
+        assert.equal(await got.text(), `bytes-of-${target.name}`, `${who}: ${label} 의 바이트가 다르다`)
+      }
+    }
+
+    // ② 그런데 자료실은 그대로다. 결재 한 번이 남의 자료실 열람 명단을 **영구히** 고치면,
+    //    그 결재가 끝나거나 사라져도 열람은 닫히지 않고 다음 결재가 그것을 또 넓힌다.
+    assert.equal((await download(origin, approver, receipt.id)).status, 404, '결재가 자료실 문까지 열었다')
+    assert.equal((await download(origin, watcher, extra.id)).status, 404, '결재가 자료실 문까지 열었다')
+    const after = (await api(origin, admin)('GET', '/api/documents')).body.documents.find((row) => row.id === receipt.id)
+    assert.deepEqual(after.allowedUserIds, [OH.id], '결재가 자료실 열람 명단을 넓혔다')
+    assert.equal(after.visibility, 'restricted', '결재가 공개 범위를 바꿨다')
+    const listed = await api(origin, approver)('GET', '/api/documents')
+    assert.equal((listed.body.documents ?? []).some((row) => row.id === receipt.id), false,
+      '결재 첨부가 결재자의 자료실 목록에 앉았다 — 결재가 끝나도 그 자리는 닫히지 않는다')
+
+    // ③ 결재선 밖의 직원에게는 두 문 모두 닫혀 있다.
+    assert.equal((await scopedDownload(origin, stranger, id, receipt.id)).status, 404, '결재선 밖 직원에게 열렸다')
+    assert.equal((await download(origin, stranger, receipt.id)).status, 404)
+
+    // ④ 이 결재가 붙잡지 않은 자료는 이 문으로 나가지 않는다 — 문서 id 하나로 자료실 전체를 여는 창구가 되면 안 된다.
+    assert.equal((await scopedDownload(origin, approver, id, unrelated.id)).status, 404,
+      '결재가 붙잡지 않은 자료가 결재 경로로 나갔다')
+
+    // ⑤ 상세는 첨부의 이름을 함께 준다(인쇄물·증빙과 같은 답이 한 곳에서 나온다).
+    const detail = await api(origin, approver)('GET', `/api/approval-documents/${id}`)
+    assert.equal(detail.status, 200, JSON.stringify(detail.body))
+    assert.deepEqual(detail.body.attachments.map((entry) => entry.name).sort(), ['견적서.pdf', '영수증.pdf'])
+    assert.deepEqual(detail.body.attachments.map((entry) => entry.canRead), [true, true])
+  })
+})
+
+test('19. 첨부를 여는 근거는 저장된 명단이 아니라 결재 문서다 — 커밋이 실패하면 열 근거도 없다', async () => {
+  const store = freshStore()
+  let failCommit = false
+  await withServer(buildApp(store, { onWorkspaceStoreChange: () => { if (failCommit) throw new Error('디스크가 꽉 찼다') } }), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const approver = await login(origin, SEO.email)
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+    const receipt = await uploadAttachment(origin, drafter, '롤백될 영수증.pdf')
+
+    failCommit = true
+    const created = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: '커밋이 실패할 기안', values: { spent_on: '2026-09-01', amount: 1_000, receipt: receipt.id },
+      line: line(SEO.id), submit: true,
+    })
+    failCommit = false
+    assert.equal(created.status, 500, JSON.stringify(created.body))
+    assert.equal(created.body.error.code, 'APPROVAL_WRITE_FAILED')
+
+    assert.deepEqual((await api(origin, drafter)('GET', '/api/approval-documents?scope=all')).body.documents, [])
+    const row = (await api(origin, admin)('GET', '/api/documents')).body.documents.find((entry) => entry.id === receipt.id)
+    assert.deepEqual(row.allowedUserIds, [OH.id], '실패한 쓰기가 자료의 열람 명단에 흔적을 남겼다')
+
+    // 대조군: 같은 요청이 커밋에 성공하면 그때 비로소 그 문서를 통해 열린다. 자료실은 여전히 닫혀 있다.
+    const ok = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: '이번엔 성공하는 기안', values: { spent_on: '2026-09-01', amount: 1_000, receipt: receipt.id },
+      line: line(SEO.id), submit: true,
+    })
+    assert.equal(ok.status, 201, JSON.stringify(ok.body))
+    assert.equal((await scopedDownload(origin, approver, ok.body.document.id, receipt.id)).status, 200)
+    assert.equal((await download(origin, approver, receipt.id)).status, 404)
+    const still = (await api(origin, admin)('GET', '/api/documents')).body.documents.find((entry) => entry.id === receipt.id)
+    assert.deepEqual(still.allowedUserIds, [OH.id], '성공한 쓰기가 자료의 열람 명단을 넓혔다')
+  })
+})
+
+test('20. 대결자는 자기가 결재할 문서의 첨부를 연다 — 미리 잡아 둔 대결도 그 날이 되면 열리고, 끝나면 닫힌다', async () => {
+  const store = freshStore()
+  // 시계를 옮겨 가며 잰다. 대결 기간은 '오늘'을 읽어 판정하므로, 「지정하는 순간」에 한 번 넓히고 마는
+  // 구현은 **미리 잡아 둔 대결**(휴가 전날 지정 — 가장 흔한 경우)에서 조용히 어긋난다.
+  const nowRef = { value: NOW }
+  await withServer(buildApp(store, { approvalClock: () => new Date(nowRef.value) }), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const standIn = await login(origin, YOON.email)   // SEO 의 대결자
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+
+    const receipt = await uploadAttachment(origin, drafter, '대결-영수증.pdf')
+    const sent = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: '내일부터 대결', values: { spent_on: '2026-09-01', amount: 90_000, receipt: receipt.id },
+      line: line(SEO.id), submit: true,
+    })
+    assert.equal(sent.status, 201, JSON.stringify(sent.body))
+    const id = sent.body.document.id
+
+    // ① 휴가 전날, 내일부터의 대결을 잡는다. 오늘은 아직 아무 자격도 없다.
+    assert.equal((await api(origin, admin)('PUT', `/api/approval-delegates/${SEO.id}`, {
+      delegateId: YOON.id, from: '2026-09-04', to: '2026-09-10',
+    })).status, 200)
+    assert.equal((await api(origin, standIn)('GET', `/api/approval-documents/${id}`)).status, 404, '기간 전인데 문서가 열렸다')
+    assert.equal((await scopedDownload(origin, standIn, id, receipt.id)).status, 404, '기간 전인데 첨부가 열렸다')
+
+    // ② 기간이 시작되는 날. 결재할 자격과 그 근거를 여는 자격이 **같은 날** 함께 온다 —
+    //    「승인 버튼은 눌리는데 영수증은 404」인 막다른 길을 만들지 않는다.
+    nowRef.value = '2026-09-04T01:00:00.000Z'
+    const onDuty = await api(origin, standIn)('GET', `/api/approval-documents/${id}`)
+    assert.equal(onDuty.status, 200, JSON.stringify(onDuty.body))
+    assert.equal(onDuty.body.permissions.canDecide, true, '이 시험의 전제: 대결 당일에는 결재할 차례다')
+    assert.deepEqual(onDuty.body.attachments, [{ id: receipt.id, name: '대결-영수증.pdf', canRead: true }],
+      '결재해야 할 사람에게 이름만 주고 파일은 닫아 두면 그 버튼은 막다른 길이다')
+    const bytes = await scopedDownload(origin, standIn, id, receipt.id)
+    assert.equal(bytes.status, 200, '대결 당일인데 근거를 열지 못한다')
+    assert.equal(await bytes.text(), 'bytes-of-대결-영수증.pdf')
+    assert.equal((await download(origin, standIn, receipt.id)).status, 404, '대결이 자료실 문까지 열었다')
+
+    // ③ 기간이 끝나면 함께 닫힌다. 저장된 명단으로 넓혀 두면 이 자리에서 200 이 남는다.
+    nowRef.value = '2026-09-11T01:00:00.000Z'
+    assert.equal((await api(origin, standIn)('GET', `/api/approval-documents/${id}`)).status, 404)
+    assert.equal((await scopedDownload(origin, standIn, id, receipt.id)).status, 404, '대결이 끝났는데 근거가 열린 채다')
+
+    // ④ 대결로 실제로 누른 사람은 그 뒤에도 연다 — 자리에 decidedById 가 남기 때문이다.
+    nowRef.value = '2026-09-04T02:00:00.000Z'
+    assert.equal((await api(origin, standIn)('POST', `/api/approval-documents/${id}/decide`, { decision: 'approve' })).status, 200)
+    nowRef.value = '2026-09-11T01:00:00.000Z'
+    assert.equal((await scopedDownload(origin, standIn, id, receipt.id)).status, 200,
+      '대결 기간이 끝나자 자기가 승인한 건의 근거가 닫혔다')
+  })
+})
+
+test('21. 임시저장은 미완성 기안을 받고, 필수는 상신에서 잰다 — 오류가 어느 칸인지 말한다', async () => {
+  const store = freshStore()
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const call = api(origin, drafter)
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+
+    // ① 지출일만 적고 임시저장 — 「임시저장」이 미완성 기안을 저장하지 못하면 그 버튼은 이름을 거짓말한다.
+    const saved = await call('POST', '/api/approval-documents', {
+      formId, title: '아직 쓰는 중', values: { spent_on: '2026-09-01' }, line: line(SEO.id), submit: false,
+    })
+    assert.equal(saved.status, 201, JSON.stringify(saved.body))
+    assert.equal(saved.body.document.status, '기안')
+    const id = saved.body.document.id
+
+    // ② 이어서 작성하다 채운 칸을 다시 비우는 것도 임시저장이다.
+    const cleared = await call('PATCH', `/api/approval-documents/${id}`, {
+      version: saved.body.document.version, values: { spent_on: '' },
+    })
+    assert.equal(cleared.status, 200, JSON.stringify(cleared.body))
+
+    // ③ 상신에서 비로소 잰다. 그리고 **어느 칸인지** 말한다.
+    const blocked = await call('POST', `/api/approval-documents/${id}/submit`, { version: cleared.body.document.version })
+    assert.equal(blocked.status, 400, JSON.stringify(blocked.body))
+    assert.equal(blocked.body.error.code, 'APPROVAL_VALUE_REQUIRED')
+    assert.equal(blocked.body.error.key, 'spent_on')
+    assert.match(blocked.body.error.message, /지출일/, '한 문장이 네 칸을 함께 가리키면 사람은 어디를 고칠지 모른다')
+
+    // ④ 다른 칸은 다른 문장을 받는다 — 다섯 갈래가 한 문장으로 뭉치지 않는다.
+    const filledDate = await call('PATCH', `/api/approval-documents/${id}`, {
+      version: cleared.body.document.version, values: { spent_on: '2026-09-01' },
+    })
+    assert.equal(filledDate.status, 200, JSON.stringify(filledDate.body))
+    const missingAmount = await call('POST', `/api/approval-documents/${id}/submit`, { version: filledDate.body.document.version })
+    assert.equal(missingAmount.body.error.key, 'amount')
+    assert.notEqual(missingAmount.body.error.message, blocked.body.error.message, '두 칸이 같은 문장을 받는다')
+    assert.match(missingAmount.body.error.message, /금액/)
+
+    // ⑤ 제목은 임시저장에서도 필요하다(목록에 이름 없는 줄을 만들지 않는다) — 그 문장도 칸을 말한다.
+    const noTitle = await call('POST', '/api/approval-documents', { formId, title: '   ', submit: false })
+    assert.equal(noTitle.status, 400, JSON.stringify(noTitle.body))
+    assert.equal(noTitle.body.error.key, 'title')
+    assert.match(noTitle.body.error.message, /제목/)
+
+    // ⑥ 다 채우면 상신된다. POST 로 곧장 상신할 때도 같은 잣대다.
+    const ready = (await call('GET', `/api/approval-documents/${id}`)).body.document
+    const filled = await call('PATCH', `/api/approval-documents/${id}`, {
+      version: ready.version, values: { spent_on: '2026-09-01', amount: 5_000 },
+    })
+    assert.equal(filled.status, 200, JSON.stringify(filled.body))
+    const submitted = await call('POST', `/api/approval-documents/${id}/submit`, { version: filled.body.document.version })
+    assert.equal(submitted.status, 200, JSON.stringify(submitted.body))
+    assert.equal(submitted.body.document.status, '결재중')
+    const straight = await call('POST', '/api/approval-documents', {
+      formId, title: '곧장 상신', values: { spent_on: '2026-09-01' }, line: line(SEO.id), submit: true,
+    })
+    assert.equal(straight.status, 400, JSON.stringify(straight.body))
+    assert.equal(straight.body.error.key, 'amount')
+
+    // ⑦ 결재자 자리가 빈 단계는 **구조로** 거절된다. 그래서 화면은 「단계 추가」만 누른 상태를
+    //    그대로 보내면 안 된다 — 임시저장 한 번이 통째로 400 이 되어 적어 둔 것이 남지 않는다.
+    //    화면이 빈 단계를 걷어내는 근거가 이 줄이다(scripts/approval-ui-contract.test.mjs 의 filledLineSteps).
+    const emptyStep = await call('POST', '/api/approval-documents', {
+      formId, title: '단계만 추가한 기안', values: {}, line: [{ mode: 'sequential', approvers: [] }], submit: false,
+    })
+    assert.equal(emptyStep.status, 400, JSON.stringify(emptyStep.body))
+    assert.equal(emptyStep.body.error.code, 'APPROVAL_LINE_INVALID')
+    const withoutStep = await call('POST', '/api/approval-documents', {
+      formId, title: '단계만 추가한 기안', values: {}, line: [], submit: false,
+    })
+    assert.equal(withoutStep.status, 201, `빈 단계를 걷어내면 임시저장이 지나야 한다 — ${JSON.stringify(withoutStep.body)}`)
+    assert.equal(withoutStep.body.document.status, '기안')
+  })
+})
+
+test('21-b. 상신이 거절돼도 그 다음 저장이 이어진다 — 화면이 타는 PATCH→상신 순서를 그대로 재현한다', async () => {
+  const store = freshStore()
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const call = api(origin, drafter)
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+
+    const saved = await call('POST', '/api/approval-documents', {
+      formId, title: '이어서 작성할 기안', values: {}, line: line(SEO.id), submit: false,
+    })
+    assert.equal(saved.status, 201, JSON.stringify(saved.body))
+    const id = saved.body.document.id
+    // 화면이 대화상자를 열 때 잡은 스냅샷. 이 값을 고정으로 계속 쓰면 두 번째 요청부터 409 다.
+    let version = saved.body.document.version
+
+    // ① PATCH 는 성공하고 상신이 400 으로 거절된다 — 이 회차가 처음 만든 갈래다.
+    const firstPatch = await call('PATCH', `/api/approval-documents/${id}`, { version, values: {}, title: '이어서 작성할 기안' })
+    assert.equal(firstPatch.status, 200, JSON.stringify(firstPatch.body))
+    version = firstPatch.body.document.version
+    const rejected = await call('POST', `/api/approval-documents/${id}/submit`, { version })
+    assert.equal(rejected.status, 400, JSON.stringify(rejected.body))
+    assert.equal(rejected.body.error.key, 'spent_on')
+
+    // ② 사람이 지적받은 칸을 채우고 다시 누른다. 아무도 먼저 저장하지 않았으므로 409 가 나면 안 된다.
+    const secondPatch = await call('PATCH', `/api/approval-documents/${id}`, {
+      version, values: { spent_on: '2026-09-01', amount: 3_000 },
+    })
+    assert.equal(secondPatch.status, 200, `상신 거절 뒤 다시 저장할 길이 없다 — ${JSON.stringify(secondPatch.body)}`)
+    version = secondPatch.body.document.version
+    const ok = await call('POST', `/api/approval-documents/${id}/submit`, { version })
+    assert.equal(ok.status, 200, JSON.stringify(ok.body))
+    assert.equal(ok.body.document.status, '결재중')
+    assert.deepEqual(ok.body.document.values.spent_on, '2026-09-01', '사람이 채운 값이 서버에 들어가지 못했다')
+
+    // ③ 진짜 충돌이 났을 때는 서버가 **지금 version** 을 함께 준다 — 화면이 스스로 맞출 수 있게.
+    const other = await call('POST', '/api/approval-documents', {
+      formId, title: '충돌을 볼 기안', values: {}, line: line(SEO.id), submit: false,
+    })
+    assert.equal(other.status, 201, JSON.stringify(other.body))
+    const stale = await call('PATCH', `/api/approval-documents/${other.body.document.id}`, { version: 0, values: {} })
+    assert.equal(stale.status, 409, JSON.stringify(stale.body))
+    assert.equal(stale.body.error.code, 'APPROVAL_VERSION_CONFLICT')
+    assert.equal(stale.body.error.currentVersion, other.body.document.version)
+  })
+})
+
+test('22. 「기안」은 아무 문도 열지 않는다 — 초안 하나로 남의 자료가 새 나가지 않는다', async () => {
+  const store = freshStore()
+  store.tenants[TENANT]['company-documents'] = {
+    data: [{ ...libraryDocument('DOC-PAY-1', '급여대장.pdf', ADMIN.id), visibility: 'restricted', allowedUserIds: [OH.id] }],
+    updatedAt: '2026-09-01T00:00:00.000Z', updatedBy: ADMIN.id,
+  }
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const cc = await login(origin, PARK.email)
+    const approver = await login(origin, SEO.email)
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+    const allowedOf = async () => (await api(origin, admin)('GET', '/api/documents')).body.documents
+      .find((row) => row.id === 'DOC-PAY-1').allowedUserIds
+    // 이 시험의 자료는 저장소에 바이트가 없는 고정물이다. 그래서 **인가를 지났는지**는 상태 코드로 갈린다:
+    // 404 = 인가 거절, 410 = 인가는 지났고 원본이 없다.
+    const sees = async (session) => (await api(origin, session)('GET', '/api/documents')).body.documents
+      .some((row) => row.id === 'DOC-PAY-1')
+
+    // 대조군: 직원이 PATCH 로 남의 자료 명단을 고치는 길은 관리자 전용이다.
+    assert.equal((await api(origin, drafter)('PATCH', '/api/documents/DOC-PAY-1', { allowedUserIds: [OH.id, PARK.id] })).status, 403)
+
+    // ① 초안만으로는 아무도 열리지 않는다. 초안은 기안자 말고 아무도 「지금 볼 이유」가 없다.
+    const draft = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: '초안', values: { spent_on: '2026-09-01', amount: 1_000 },
+      attachments: ['DOC-PAY-1'], ccIds: [PARK.id], line: line(SEO.id), submit: false,
+    })
+    assert.equal(draft.status, 201, JSON.stringify(draft.body))
+    const draftId = draft.body.document.id
+    assert.equal(await sees(cc), false, '초안 하나로 남의 자료가 열렸다')
+    assert.equal(await sees(approver), false, '초안 하나로 남의 자료가 열렸다')
+    assert.equal((await scopedDownload(origin, cc, draftId, 'DOC-PAY-1')).status, 404, '초안이 결재 경로로 남의 자료를 열었다')
+    assert.equal((await scopedDownload(origin, approver, draftId, 'DOC-PAY-1')).status, 404, '초안이 결재 경로로 남의 자료를 열었다')
+    assert.equal((await scopedDownload(origin, drafter, draftId, 'DOC-PAY-1')).status, 410,
+      '대조군: 자기 권한으로 열리는 사람은 초안에서도 지난다(410 = 인가는 지났고 원본이 없다)')
+    assert.deepEqual(await allowedOf(), [OH.id])
+
+    // ② 그 초안을 지워도 남는 것이 없다.
+    assert.equal((await api(origin, drafter)('DELETE', `/api/approval-documents/${draftId}`)).status, 200)
+    assert.deepEqual((await api(origin, drafter)('GET', '/api/approval-documents?scope=all')).body.documents, [])
+    assert.deepEqual(await allowedOf(), [OH.id])
+
+    // ③ 상신하면 **결재 범위에서** 열린다. 자료실 명단은 그대로다 — 넓힘이 남지 않으므로
+    //    관리자가 자료실에서 회수한 결정이 다음 결재 한 번으로 되돌아오지 않는다.
+    const sent = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: '상신본', values: { spent_on: '2026-09-01', amount: 1_000 },
+      attachments: ['DOC-PAY-1'], ccIds: [PARK.id], line: line(SEO.id), submit: false,
+    })
+    assert.equal(sent.status, 201, JSON.stringify(sent.body))
+    const sentId = sent.body.document.id
+    const submitted = await api(origin, drafter)('POST', `/api/approval-documents/${sentId}/submit`, { version: sent.body.document.version })
+    assert.equal(submitted.status, 200, JSON.stringify(submitted.body))
+
+    assert.equal((await scopedDownload(origin, cc, sentId, 'DOC-PAY-1')).status, 410, '상신했는데도 참조자가 근거를 열지 못한다')
+    assert.equal((await scopedDownload(origin, approver, sentId, 'DOC-PAY-1')).status, 410, '상신했는데도 결재자가 근거를 열지 못한다')
+    assert.deepEqual(await allowedOf(), [OH.id], '상신이 자료실 열람 명단을 넓혔다')
+    assert.equal(await sees(cc), false, '결재 첨부가 참조자의 자료실 목록에 앉았다')
+    assert.equal(await sees(approver), false, '결재 첨부가 결재자의 자료실 목록에 앉았다')
+
+    // ④ 상신한 문서는 어떤 끝에서도 지워지지 않는다 — 「누가·무엇을 근거로 열었는가」가 언제나 남는다.
+    assert.equal((await api(origin, drafter)('DELETE', `/api/approval-documents/${sentId}`)).status, 409)
+    const flowing = (await api(origin, drafter)('GET', `/api/approval-documents/${sentId}`)).body.document
+    assert.equal((await api(origin, drafter)('POST', `/api/approval-documents/${sentId}/recall`, { version: flowing.version })).status, 200)
+    assert.equal((await api(origin, drafter)('DELETE', `/api/approval-documents/${sentId}`)).status, 409, '회수한 뒤에도 근거는 남아야 한다')
+    assert.equal((await api(origin, admin)('DELETE', `/api/approval-documents/${sentId}`)).status, 409, '관리자도 근거를 지우지 못한다')
+  })
+})
+
+test('23. 부서 공개 자료도 결재 범위에서는 열린다 — 그러나 공개 범위 자체는 건드리지 않는다', async () => {
+  const store = freshStore()
+  store.tenants[TENANT]['company-documents'] = {
+    data: [{ ...libraryDocument('DOC-DEPT-1', '생산1팀-내부단가.pdf', OH.id), visibility: 'department', departments: ['생산 1팀'] }],
+    updatedAt: '2026-09-01T00:00:00.000Z', updatedBy: OH.id,
+  }
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const approver = await login(origin, SEO.email)   // 물류팀 — 그 부서가 아니다
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+
+    const sent = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: '부서 공개 자료를 붙인 결재', values: { spent_on: '2026-09-01', amount: 3_000 },
+      attachments: ['DOC-DEPT-1'], line: line(SEO.id), submit: true,
+    })
+    assert.equal(sent.status, 201, JSON.stringify(sent.body))
+    const id = sent.body.document.id
+
+    // 기안자가 그 자료를 붙여 이 사람에게 결재를 청했다 — 근거를 못 보는 채로 승인하게 두지 않는다.
+    // 이름과 바이트는 언제나 함께 간다(둘이 갈리면 이름만 새는 자리가 생긴다).
+    const theirs = await api(origin, approver)('GET', `/api/approval-documents/${id}`)
+    assert.equal(theirs.status, 200, JSON.stringify(theirs.body))
+    assert.deepEqual(theirs.body.attachments, [{ id: 'DOC-DEPT-1', name: '생산1팀-내부단가.pdf', canRead: true }])
+    assert.equal((await scopedDownload(origin, approver, id, 'DOC-DEPT-1')).status, 410, '인가는 지나야 한다(410 = 원본 없음)')
+
+    // 그러나 자료실 쪽은 한 글자도 바뀌지 않았다 — 부서 공개를 restricted 로 바꿔 넓히면
+    // 그 파일을 보던 같은 부서 전원이 끊긴다(확대가 축소를 겸한다).
+    assert.equal((await download(origin, approver, 'DOC-DEPT-1')).status, 404, '결재가 자료실 문까지 열었다')
+    const same = (await api(origin, admin)('GET', '/api/documents')).body.documents.find((row) => row.id === 'DOC-DEPT-1')
+    assert.equal(same.visibility, 'department', '부서 공개를 restricted 로 바꾸면 그 부서 전원이 끊긴다')
+    assert.deepEqual(same.departments, ['생산 1팀'])
+    assert.deepEqual(same.allowedUserIds, [])
+  })
+})
+
+test('24. 대결 지정 한 번이 자료실을 넓히지 않는다 — 연쇄도, 관리자 회수의 무력화도 없다', async () => {
+  const store = freshStore()
+  const nowRef = { value: NOW }
+  await withServer(buildApp(store, { approvalClock: () => new Date(nowRef.value) }), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const owner = await login(origin, OH.email)       // 영수증을 올린 사람
+    const seat = await login(origin, SEO.email)       // 결재선에 이름이 적힌 평사원
+    const standIn = await login(origin, LEE.email)    // 그가 세운 하루짜리 대결자 — 이 결재와 무관한 동료
+    const third = await login(origin, PARK.email)     // 대결자가 자기 결재의 참조로 넣으려는 사람
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+    const receipt = await uploadAttachment(origin, owner, '남의-영수증.pdf')
+    const allowedOf = async () => (await api(origin, admin)('GET', '/api/documents')).body.documents
+      .find((row) => row.id === receipt.id).allowedUserIds
+
+    const sent = await api(origin, owner)('POST', '/api/approval-documents', {
+      formId, title: '대결이 붙을 결재', values: { spent_on: '2026-09-01', amount: 7_000, receipt: receipt.id },
+      line: line(SEO.id), submit: true,
+    })
+    assert.equal(sent.status, 201, JSON.stringify(sent.body))
+    const id = sent.body.document.id
+
+    // ① 평사원 한 사람이 하루짜리 대결자를 세운다. 자료실 명단은 그대로여야 한다.
+    assert.equal((await api(origin, seat)('PUT', '/api/approval-delegates/me', {
+      delegateId: LEE.id, from: TODAY, to: TODAY,
+    })).status, 200)
+    assert.deepEqual(await allowedOf(), [OH.id], '대결 지정 한 번이 자료실 열람 명단을 넓혔다')
+    assert.equal((await download(origin, standIn, receipt.id)).status, 404, '대결자가 자료실에서 남의 원본을 연다')
+    assert.equal((await scopedDownload(origin, standIn, id, receipt.id)).status, 200, '대결 당일에는 결재 범위에서 열려야 한다')
+
+    // ② 대결 행을 지우면 그 문이 닫힌다. 저장된 명단으로 넓혀 두면 여기서 200 이 남는다.
+    assert.equal((await api(origin, seat)('PUT', '/api/approval-delegates/me', { delegateId: null })).status, 200)
+    assert.equal((await scopedDownload(origin, standIn, id, receipt.id)).status, 404, '대결 행을 지웠는데 근거가 열린 채다')
+    assert.equal((await api(origin, standIn)('GET', `/api/approval-documents/${id}`)).status, 404)
+    assert.deepEqual(await allowedOf(), [OH.id])
+
+    // ③ 연쇄가 없다 — 대결로 잠깐 열렸던 사람이 그 파일을 자기 결재에 붙여 남에게 넘길 수 없다.
+    //    (붙이려면 그 자료를 **자기 권한으로** 읽을 수 있어야 한다.)
+    const relay = await api(origin, standIn)('POST', '/api/approval-documents', {
+      formId, title: '넘겨 보기', values: { spent_on: '2026-09-01', amount: 1_000, receipt: receipt.id },
+      line: line(YOON.id), ccIds: [PARK.id], submit: true,
+    })
+    assert.equal(relay.status, 400, JSON.stringify(relay.body))
+    assert.equal(relay.body.error.code, 'APPROVAL_ATTACHMENT_FORBIDDEN')
+    assert.equal((await download(origin, third, receipt.id)).status, 404)
+    assert.deepEqual(await allowedOf(), [OH.id])
+
+    // ④ 관리자의 회수가 결재 한 번으로 되돌아오지 않는다.
+    assert.equal((await api(origin, admin)('PATCH', `/api/documents/${receipt.id}`, { allowedUserIds: [] })).status, 200)
+    const flowing = (await api(origin, seat)('GET', `/api/approval-documents/${id}`)).body.document
+    assert.equal(flowing.status, '결재중')
+    assert.equal((await api(origin, seat)('POST', `/api/approval-documents/${id}/decide`, { decision: 'approve' })).status, 200)
+    assert.deepEqual(await allowedOf(), [], '결재 한 번이 관리자의 회수를 되돌렸다')
+    // 올린 사람은 자기 업로드라 그대로 열린다(canReadDocument 의 기존 규칙). 그 밖의 사람은 닫힌 채다.
+    assert.equal((await download(origin, seat, receipt.id)).status, 404, '결재를 누른 것만으로 자료실 문이 열렸다')
+    assert.equal((await download(origin, standIn, receipt.id)).status, 404, '관리자가 회수한 열람이 결재로 되살아났다')
+  })
+})
+
+test('25. 열 수 없는 첨부는 이름을 싣지 않는다 — 이 저장소에서 파일 이름은 종종 내용이다', async () => {
+  const store = freshStore()
+  store.tenants[TENANT]['company-documents'] = {
+    data: [{ ...libraryDocument('DOC-DEPT-1', '생산1팀-내부단가.pdf', OH.id), visibility: 'department', departments: ['생산 1팀'] }],
+    updatedAt: '2026-09-01T00:00:00.000Z', updatedBy: OH.id,
+  }
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const approver = await login(origin, SEO.email)
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+
+    // 아직 상신하지 않은 기안이다. 결재선에 이름은 적혀 있어 문서는 보이지만, 첨부는 아직 열 수 없다.
+    const draft = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: '아직 안 보낸 기안', values: { spent_on: '2026-09-01', amount: 3_000 },
+      attachments: ['DOC-DEPT-1'], line: line(SEO.id), submit: false,
+    })
+    assert.equal(draft.status, 201, JSON.stringify(draft.body))
+    const id = draft.body.document.id
+
+    const theirs = await api(origin, approver)('GET', `/api/approval-documents/${id}`)
+    assert.equal(theirs.status, 200, JSON.stringify(theirs.body))
+    assert.deepEqual(theirs.body.attachments, [{ id: 'DOC-DEPT-1', canRead: false }],
+      '열 수 없는 첨부의 이름이 그대로 실려 나갔다')
+    assert.equal((await scopedDownload(origin, approver, id, 'DOC-DEPT-1')).status, 404, '이 시험의 전제: 그 파일은 실제로 닫혀 있다')
+
+    // 인쇄물도 같은 잣대다 — 상세에서 감춘 이름을 종이가 되돌려 놓으면 감춘 적이 없는 것과 같다.
+    const printed = await fetch(`${origin}/api/approval-documents/${id}/print`, {
+      headers: { cookie: approver.headers.cookie, 'x-workspace-identity': approver.headers['x-workspace-identity'] },
+    })
+    assert.equal(printed.status, 200)
+    const html = await printed.text()
+    assert.ok(!html.includes('생산1팀-내부단가'), '인쇄물에 열 수 없는 첨부의 이름이 실렸다')
+    assert.match(html, /열람 권한이 없는 첨부/)
+
+    // 대조군: 기안자 자신에게는 이름과 바이트가 함께 간다. 인쇄물에도 이름이 그대로 실린다.
+    const mine = await api(origin, drafter)('GET', `/api/approval-documents/${id}`)
+    assert.deepEqual(mine.body.attachments, [{ id: 'DOC-DEPT-1', name: '생산1팀-내부단가.pdf', canRead: true }])
+    const ownPrint = await fetch(`${origin}/api/approval-documents/${id}/print`, {
+      headers: { cookie: drafter.headers.cookie, 'x-workspace-identity': drafter.headers['x-workspace-identity'] },
+    })
+    assert.match(await ownPrint.text(), /생산1팀-내부단가\.pdf/)
+  })
+})
+
+test('26. 목록의 나머지에 닿는 길이 실제로 있다 — offset 이 그 다음 묶음을 꺼낸다', async () => {
+  const store = freshStore()
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const approver = await login(origin, SEO.email)
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+
+    const titles = []
+    for (let index = 0; index < 5; index += 1) {
+      const title = `대기 ${index + 1}`
+      const created = await api(origin, drafter)('POST', '/api/approval-documents', {
+        formId, title, values: { spent_on: '2026-09-01', amount: 1_000 }, line: line(SEO.id), submit: true,
+      })
+      assert.equal(created.status, 201, JSON.stringify(created.body))
+      titles.push(title)
+    }
+
+    // 「내 결재」 탭은 서버가 canDecide 로 거른다 — 그 탭에서는 상태 좁히기가 갈래를 만들지 못하므로
+    // (모두 '결재중'이다) 나머지에 닿는 길은 offset 뿐이다.
+    const call = api(origin, approver)
+    const first = await call('GET', '/api/approval-documents?scope=waiting&limit=2')
+    assert.equal(first.status, 200, JSON.stringify(first.body))
+    assert.equal(first.body.total, 5, '자른 배열의 길이가 아니라 전체 개수를 세야 한다')
+    assert.equal(first.body.documents.length, 2)
+
+    const second = await call('GET', '/api/approval-documents?scope=waiting&limit=2&offset=2')
+    const third = await call('GET', '/api/approval-documents?scope=waiting&limit=2&offset=4')
+    const reached = [...first.body.documents, ...second.body.documents, ...third.body.documents].map((row) => row.title)
+    assert.deepEqual([...new Set(reached)].sort(), [...titles].sort(), '이어 부르면 전부에 닿아야 한다')
+    assert.equal(second.body.total, 5, 'total 은 페이지마다 같은 뜻이어야 한다')
+
+    // 끝을 넘기면 빈 묶음이다(오류가 아니다) — 화면이 「더 보기」를 한 번 더 눌러도 막다른 길이 없다.
+    const past = await call('GET', '/api/approval-documents?scope=waiting&limit=2&offset=5')
+    assert.equal(past.status, 200, JSON.stringify(past.body))
+    assert.deepEqual(past.body.documents, [])
+    assert.equal(past.body.total, 5)
+    // 모양이 아닌 값은 거절하지 않고 처음부터 준다 — 목록은 읽기다.
+    const junk = await call('GET', '/api/approval-documents?scope=waiting&limit=2&offset=-3')
+    assert.equal(junk.body.documents.length, 2)
   })
 })

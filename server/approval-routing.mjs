@@ -397,13 +397,40 @@ function normalizeFieldValue(field, raw) {
 }
 
 /**
+ * 값 오류에 **어느 칸인지**를 붙인다. 「필수 항목을 채워 주세요.」 한 문장이 다섯 칸을 함께 가리키면
+ * 사람은 어디를 고쳐야 하는지 알 수 없고, 화면이 key 를 라벨로 옮겨 적으면 문장이 두 곳에서 나온다(규칙 3).
+ * 그래서 문장은 여기 한 곳에서 만들고, 라벨을 모를 때만 원래의 뭉뚱그린 문장으로 떨어진다.
+ */
+const LABELLED_VALUE_MESSAGE = {
+  [APPROVAL_ERRORS.VALUE_REQUIRED.code]: (label) => `‘${label}’ 항목을 채워 주세요.`,
+  [APPROVAL_ERRORS.VALUE_INVALID.code]: (label) => `‘${label}’ 항목의 값을 확인해 주세요.`,
+}
+
+export function valueError(base, { key, label, reason } = {}) {
+  const name = String(label ?? '').replace(CONTROL_RE, '').trim().slice(0, 60)
+  const compose = LABELLED_VALUE_MESSAGE[base?.code]
+  return {
+    ...base,
+    ...(key === undefined ? {} : { key }),
+    ...(reason === undefined ? {} : { reason }),
+    ...(compose && name ? { message: compose(name) } : {}),
+  }
+}
+
+/**
  * 양식과 값을 맞춘다. 값 검증은 이 함수 한 곳에만 있다.
  *
  * 양식에 없는 키는 버리지 않고 **거절**한다(`reason:'unknown-field'`). 조용히 버리면
  * 화면이 잘못된 키로 저장을 보내도 200이 돌아오고, 사람은 적은 값이 사라진 것을 나중에야 안다.
  * 비어 있는 선택 항목은 키 자체를 넣지 않는다 — 「값 없음」이 한 가지뿐이어야 집계가 흔들리지 않는다.
+ *
+ * `requireFilled:false` 는 **임시저장**이다. 「기안」은 아직 결재선을 돌지 않는 사람의 메모장이라
+ * 필수를 그때 재면 「임시저장」 버튼이 자기 이름을 거짓말한다(다섯 칸 중 넷이 필수인 지출결의서에서
+ * 제목과 지출일만 적고 누르면 400이다). 필수는 **상신**에서 잰다 — 결재선을 다시 재는 그 자리에서.
+ * 모양 검사(날짜·금액·선택지)는 임시저장에서도 그대로 돈다: 저장할 수 없는 값을 200으로 받으면
+ * 사람은 적은 값이 사라진 것을 상신할 때에야 안다.
  */
-export function normalizeApprovalValues(form, values) {
+export function normalizeApprovalValues(form, values, { requireFilled = true } = {}) {
   const fields = Array.isArray(form?.fields) ? form.fields : []
   if (values != null && (typeof values !== 'object' || Array.isArray(values))) {
     return { error: { ...APPROVAL_ERRORS.VALUE_INVALID, key: '' } }
@@ -420,11 +447,13 @@ export function normalizeApprovalValues(form, values) {
     // Object.prototype.constructor(함수)를 값으로 집어 「비었다」가 「이상하다」로 뒤집힌다.
     const raw = Object.hasOwn(source, field.key) ? source[field.key] : undefined
     if (isBlankValue(raw)) {
-      if (field.required) return { error: { ...APPROVAL_ERRORS.VALUE_REQUIRED, key: field.key } }
+      if (field.required && requireFilled) {
+        return { error: valueError(APPROVAL_ERRORS.VALUE_REQUIRED, { key: field.key, label: field.label }) }
+      }
       continue
     }
     const value = normalizeFieldValue(field, raw)
-    if (value === INVALID) return { error: { ...APPROVAL_ERRORS.VALUE_INVALID, key: field.key } }
+    if (value === INVALID) return { error: valueError(APPROVAL_ERRORS.VALUE_INVALID, { key: field.key, label: field.label }) }
     normalized[field.key] = value
   }
   return { values: normalized }
@@ -553,7 +582,7 @@ function pushHistory(history, entry) {
 
 /**
  * 이 사람이 지금 이 문서에서 채울 수 있는 자리 — 결재 자격 판정의 **유일한** 술어.
- * `applyApprovalDecision`(실제 결재)과 「내 결재함」·배지(목록)가 같은 문장을 써야
+ * `applyApprovalDecision`(실제 결재)과 「내 결재」 목록·배지가 같은 문장을 써야
  * 「대기 중이라고 표시된 문서를 눌렀더니 403」이 생기지 않는다.
  * → `{ seat, delegateOf, step }` | `{ error }`
  *

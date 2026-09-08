@@ -570,3 +570,41 @@ test('12. 반대로 항목을 양식에서 빼도 잠긴 자료는 인쇄물에 
     assert.ok((await printed.text()).includes('9월 영수증.pdf'), '잠겨 있는데 인쇄물 어디에도 그 연결이 보이지 않는다')
   })
 })
+
+test('13. 승인 증빙을 여는 명단과 첨부를 여는 명단은 **같은 배열**이다 — 참조자·대결자를 포함해', async () => {
+  const store = freshStore()
+  const storage = memoryStorage()
+  await withServer(buildApp(store, storage), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    // 대결자를 미리 세워 둔다 — 대결로 누른 사람은 첨부는 여는데 증빙은 못 여는 자리가 되기 쉽다.
+    assert.equal((await api(origin, admin)('PUT', `/api/approval-delegates/${SEO.id}`, {
+      delegateId: YOON.id, from: '2026-09-01', to: '2026-09-30',
+    })).status, 200)
+
+    const created = await api(origin, admin)('POST', '/api/approval-forms', form())
+    const drafter = await login(origin, OH.email)
+    const drafted = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId: created.body.form.id, title: '참조자가 있는 지출',
+      values: { spent_on: SPENT_ON, vendor: '동해수산', amount: 40_000 },
+      ccIds: [LEE.id], line: [{ mode: 'sequential', approvers: [SEO.id] }], submit: true,
+    })
+    assert.equal(drafted.status, 201, JSON.stringify(drafted.body))
+
+    const delegate = await login(origin, YOON.email)
+    const decided = await api(origin, delegate)('POST', `/api/approval-documents/${drafted.body.document.id}/decide`, { decision: 'approve' })
+    assert.equal(decided.status, 200, JSON.stringify(decided.body))
+
+    // 두 자리가 같은 함수에서 명단을 뽑는지 값으로 잰다. 갈리면 「영수증은 열리는데 그 승인 요약은 404」다.
+    const evidence = evidenceRows(store)[0]
+    assert.deepEqual([...evidence.allowedUserIds].sort(), [OH.id, LEE.id, SEO.id, YOON.id].sort(),
+      '기안자·참조자·결재자·대결자가 같은 규칙으로 들어와야 한다')
+
+    const watcher = await login(origin, LEE.email)
+    for (const [who, session] of [['참조자', watcher], ['대결자', delegate]]) {
+      const opened = await fetch(`${origin}/api/documents/${evidence.id}/download`, {
+        headers: { cookie: session.headers.cookie, 'x-workspace-identity': session.headers['x-workspace-identity'] },
+      })
+      assert.equal(opened.status, 200, `${who}가 자기가 볼 결재의 증빙 요약을 열지 못한다`)
+    }
+  })
+})

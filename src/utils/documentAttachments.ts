@@ -108,20 +108,27 @@ export async function uploadDocumentAttachments(files: File[], options: UploadAt
 
 export async function downloadDocumentAttachment(attachment: StoredDocumentAttachment, workspaceScope?: string) {
   if (!isStoredDocumentAttachment(attachment)) throw new Error('이전 버전에서 파일 정보만 등록된 자료라 원본을 내려받을 수 없습니다.')
-  const response = await fetch(`/api/documents/${encodeURIComponent(attachment.id)}/download`, {
-    headers: workspaceHeaders(workspaceScope),
-  })
+  return downloadAttachmentFrom(`/api/documents/${encodeURIComponent(attachment.id)}/download`, attachment, workspaceScope)
+}
+
+/**
+ * 주소를 부르는 쪽이 정하는 내려받기. 결재 첨부는 자료실 경로가 아니라 **결재 범위 경로**로 받는다 —
+ * 결재는 자료실의 열람 명단을 고치지 않으므로(그 넓힘은 되돌아오지 않는다) 자료실 경로로는
+ * 결재자가 근거를 열 수 없다. 바이트를 받아 저장하는 방법 자체는 한 곳에만 둔다.
+ */
+export async function downloadAttachmentFrom(url: string, attachment: StoredDocumentAttachment, workspaceScope?: string) {
+  const response = await fetch(url, { headers: workspaceHeaders(workspaceScope) })
   if (!response.ok) throw new Error(await responseError(response, `${attachment.name} 파일을 내려받지 못했습니다.`))
   const blob = await response.blob()
-  const url = URL.createObjectURL(blob)
+  const objectUrl = URL.createObjectURL(blob)
   try {
     const anchor = document.createElement('a')
-    anchor.href = url
+    anchor.href = objectUrl
     anchor.download = attachment.name
     document.body.appendChild(anchor)
     anchor.click()
     anchor.remove()
   } finally {
-    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
   }
 }

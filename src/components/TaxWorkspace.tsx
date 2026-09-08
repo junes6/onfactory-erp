@@ -22,6 +22,7 @@ import {
 } from '../utils/taxSchedule'
 import { evidenceDateOf, isTaxPeriodPreset, taxPeriodOptions, taxPeriodRange, type TaxPeriodPreset } from '../utils/taxEvidencePeriod'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
+import { ApprovalSpendPanel } from './approval/ApprovalSpendPanel'
 import { Button, ButtonLink, IconButton } from './ui/Button'
 
 type TaxStatus = '예정' | '신고 완료' | '납부 완료'
@@ -317,6 +318,10 @@ export function TaxWorkspace({ workspaceScope, canManage, currentUserId, current
         </div>}
       </section>
 
+      {/* 결재로 승인된 금액이 이 화면에서 처음 숫자가 된다. 증빙 파일함 **바로 위 형제**로 둔다 —
+          섹션 안에 넣으면 aria-labelledby="tax-evidence-title"(「증빙 파일함」)이 이 패널까지 덮어,
+          화면을 훑는 사람에게 결재 지출이 증빙 파일함의 일부로 읽힌다. */}
+      <ApprovalSpendPanel workspaceScope={workspaceScope} canManage={canManage} />
       <section className="tax-section-panel" aria-labelledby="tax-evidence-title">
         <header className="tax-section-head"><div><FileArchive size={18} /><div><h2 id="tax-evidence-title">{year}년 증빙 파일함</h2><span>상시 모아 두고, 기간만 골라 세무사에게 한 번에 전달</span></div></div></header>
         {canManage && <div className="tax-delivery-bar">

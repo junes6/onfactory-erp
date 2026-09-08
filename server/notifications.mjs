@@ -427,7 +427,11 @@ export function buildQuietDigest({ held, recipientId, now = new Date(), newNotif
     actorId: '',
     title: `밤사이 알림 ${held.length}건`,
     body: `${parts.join(' · ')}. 가장 최근: ${String(newest.title ?? '').slice(0, 60)}`,
-    page: NOTIFICATION_TYPES[newest.type]?.page ?? 'ai',
+    // 요약이 가리키는 자리는 **원 알림이 가리키던 그 자리**다. 유형 표(NOTIFICATION_TYPES.page)로
+    // 다시 찍으면 focusId 와 page 가 갈린다 — 'approval-requested' 의 표 값은 업무 결재 시절의
+    // 'tasks' 인데 focusId 는 결재 문서 id(APD-…)라, 사람은 요약을 눌러 업무지시 화면에 떨어지고
+    // 기다리던 결재는 열리지 않는다(규칙 3). page 를 적지 않은 옛 행만 표로 떨어진다.
+    page: String(newest.page ?? '') || NOTIFICATION_TYPES[newest.type]?.page || 'ai',
     focusId: String(newest.focusId ?? ''),
     source: null,
     readAt: null,

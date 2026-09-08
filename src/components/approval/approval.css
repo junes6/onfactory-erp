@@ -1,0 +1,107 @@
+/* 양식형 전자결재 — 승인 큐 화면 안에 사는 섹션. 별도 결재 목록 화면을 만들지 않는다. */
+.approval-doc-section { padding: var(--space-0); margin-bottom: var(--space-16); }
+.approval-doc-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding: var(--space-12) var(--space-16); border-bottom: var(--hairline) solid var(--line); flex-wrap: wrap; }
+.approval-doc-tabs { display: inline-flex; gap: var(--space-4); padding: var(--space-4); border-radius: var(--radius-8); background: var(--canvas); }
+.approval-doc-tabs button { position: relative; min-height: 38px; display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-0) var(--space-12); border: none; border-radius: var(--radius-8); color: var(--muted); background: transparent; font-size: var(--font-15); font-weight: var(--weight-medium); cursor: pointer; }
+.approval-doc-tabs button[aria-selected='true'] { color: var(--color-primary); background: var(--surface); }
+.approval-doc-tabs em { min-width: 22px; height: 22px; display: grid; place-items: center; padding-inline: var(--space-4); border-radius: var(--radius-8); background: var(--color-primary-soft); font-size: var(--font-13); font-style: normal; }
+.approval-doc-dot { width: 7px; height: 7px; display: inline-block; margin-left: var(--space-4); border-radius: var(--radius-8); background: var(--color-danger); }
+.approval-doc-delegate { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--muted); font-size: var(--font-11); }
+.approval-doc-toolbar-end { display: inline-flex; align-items: center; gap: var(--space-12); flex-wrap: wrap; }
+.approval-doc-filter select { min-height: 34px; padding: var(--space-0) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--muted); background: var(--surface); font-size: var(--font-13); }
+
+.approval-doc-list { display: flex; flex-direction: column; margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.approval-doc-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-12); padding: var(--space-12) var(--space-16); border-top: var(--hairline) solid var(--color-gray-200); }
+.approval-doc-row:first-child { border-top: none; }
+.approval-doc-row.is-selected { background: var(--color-primary-soft); }
+.approval-doc-row.is-rejected .approval-doc-main strong { color: var(--color-danger-ink); }
+.approval-doc-row.is-recalled { opacity: .78; }
+.approval-doc-kind { flex: 0 0 auto; }
+.approval-doc-main { min-width: 0; display: block; width: 100%; padding: var(--space-0); border: none; background: transparent; text-align: left; cursor: pointer; }
+.approval-doc-main strong { display: block; overflow: hidden; color: var(--ink); font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
+.approval-doc-main small { display: block; overflow: hidden; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
+.approval-doc-amount { color: var(--ink); font-weight: var(--weight-medium); font-variant-numeric: var(--numeric-features); }
+.approval-doc-line { display: inline-flex; align-items: center; gap: var(--space-4); margin-top: var(--space-4); }
+.approval-doc-line em { color: var(--subtle); font-size: var(--font-11); font-style: normal; }
+.approval-doc-step { width: 14px; height: 4px; display: inline-block; border-radius: var(--radius-8); background: var(--color-gray-200); }
+.approval-doc-step.is-done { background: var(--color-success); }
+.approval-doc-step.is-current { background: var(--color-primary); }
+.approval-doc-step.is-rejected { background: var(--color-danger); }
+.approval-doc-quiet { color: var(--subtle); font-size: var(--font-13); }
+.approval-doc-empty { display: flex; flex-direction: column; align-items: center; gap: var(--space-8); padding: var(--space-24) var(--space-16); color: var(--muted); font-size: var(--font-13); text-align: center; }
+/* 목록이 한 묶음에서 잘렸다는 사실과, 나머지에 닿는 길. 줄이 아니라 그 목록에 대한 말이라 배경을 깔아 갈라 둔다. */
+.approval-doc-more { display: flex; align-items: center; justify-content: center; gap: var(--space-8); padding: var(--space-12) var(--space-16); border-top: var(--hairline) solid var(--color-gray-200); color: var(--subtle); background: var(--canvas); font-size: var(--font-11); text-align: center; }
+.approval-doc-error { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding: var(--space-12) var(--space-16); color: var(--color-danger-ink); background: var(--color-danger-soft); font-size: var(--font-13); }
+
+/* 「선택」·도움말처럼 라벨 옆에 붙는 보조 문구. 본문과 같은 크기로 두면 무엇이 라벨인지 흐려진다. */
+:is(.approval-draft-modal, .approval-detail-modal, .approval-form-admin) .field-optional { color: var(--muted); font-size: var(--font-11); font-style: normal; font-weight: var(--weight-regular); }
+
+/* 기안 대화상자 */
+.approval-draft-modal { width: min(720px, 100%); }
+.approval-field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-12); }
+.approval-field-note { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-11); }
+.approval-attach-list { display: flex; flex-wrap: wrap; gap: var(--space-4); margin: var(--space-4) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
+.approval-attach-list li { display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--muted); font-size: var(--font-11); }
+
+.approval-line-editor { display: flex; flex-direction: column; gap: var(--space-8); margin-top: var(--space-8); }
+.approval-line-step { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-12); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.approval-line-step > strong { color: var(--muted); font-size: var(--font-13); font-weight: var(--weight-medium); white-space: nowrap; }
+.approval-line-step > div { min-width: 0; display: flex; flex-direction: column; gap: var(--space-8); }
+.approval-line-modes { display: flex; flex-wrap: wrap; gap: var(--space-16); }
+.approval-line-modes label { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--muted); font-size: var(--font-13); white-space: nowrap; }
+/* 이 편집기는 .form-field 안에 산다 — 거기서 input에 걸린 100% 너비·45px 높이를 라디오만 되돌린다. */
+.approval-line-modes input[type='radio'] { width: auto; height: auto; padding: var(--space-0); }
+.approval-line-approvers { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); }
+.approval-line-approvers > span { display: inline-flex; align-items: center; gap: var(--space-4); }
+.approval-line-approvers select { width: auto; min-width: 200px; }
+.approval-line-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); }
+
+/* 상세 대화상자 */
+.approval-detail-modal { width: min(760px, 100%); }
+.approval-detail-values { width: 100%; border-collapse: collapse; margin: var(--space-12) var(--space-0); }
+.approval-detail-values th,
+.approval-detail-values td { padding: var(--space-8) var(--space-12); border-bottom: var(--hairline) solid var(--line); font-size: var(--font-13); text-align: left; vertical-align: top; }
+.approval-detail-values th { width: 30%; color: var(--muted); font-weight: var(--weight-regular); }
+.approval-detail-attachments { display: flex; flex-wrap: wrap; gap: var(--space-8); margin: var(--space-0) var(--space-0) var(--space-12); padding: var(--space-0); list-style: none; }
+/* 이름은 보이는데 열 수는 없는 첨부. 버튼처럼 보이면 그 자리가 다시 막다른 길이 된다. */
+.approval-attachment-closed { display: inline-flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-8); border: var(--hairline) dashed var(--line); border-radius: var(--radius-8); color: var(--subtle); font-size: var(--font-11); }
+.approval-history { display: flex; flex-direction: column; margin: var(--space-0); padding: var(--space-0); list-style: none; border-top: var(--hairline) solid var(--line); }
+.approval-history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-4) var(--space-12); padding: var(--space-8) var(--space-0); border-bottom: var(--hairline) solid var(--line); font-size: var(--font-13); }
+.approval-history-row time { color: var(--subtle); font-size: var(--font-11); }
+.approval-history-row span { grid-column: 1 / -1; color: var(--muted); font-size: var(--font-11); }
+.approval-reject-form { display: flex; flex-direction: column; gap: var(--space-8); margin-top: var(--space-12); padding: var(--space-12); border: var(--hairline) solid var(--color-danger-soft); border-radius: var(--radius-8); background: var(--color-danger-soft); }
+.approval-reject-form p { margin: var(--space-0); color: var(--color-danger-ink); font-size: var(--font-11); }
+.approval-reject-form textarea { min-height: 84px; }
+.approval-print-note { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--subtle); font-size: var(--font-11); }
+
+/* 양식 관리(관리자) */
+.approval-form-admin { width: min(860px, 100%); }
+.approval-form-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-8) var(--space-12); padding: var(--space-12) var(--space-0); border-bottom: var(--hairline) solid var(--line); }
+.approval-form-row strong { color: var(--ink); font-size: var(--font-15); }
+.approval-form-row small { grid-column: 1 / -1; color: var(--muted); font-size: var(--font-11); }
+.approval-form-fields { display: flex; flex-direction: column; gap: var(--space-8); margin-top: var(--space-8); }
+.approval-form-field { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); align-items: end; gap: var(--space-8); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+/* 항목 한 줄의 조작부: 위·아래로 옮기기와 삭제를 한 덩이로 묶어 다른 입력 칸과 섞이지 않게 한다. */
+.approval-form-field-actions { display: flex; align-items: center; gap: var(--space-4); }
+.approval-form-error { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--color-danger-ink); font-size: var(--font-11); }
+.approval-delegate-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); align-items: end; gap: var(--space-8); margin-top: var(--space-8); }
+
+/* 승인된 지출(세무·자산 화면) */
+.approval-spend-panel { padding: var(--space-16); margin-bottom: var(--space-16); }
+.approval-spend-panel h2 { margin: var(--space-0); color: var(--ink); font-size: var(--font-15); }
+.approval-spend-lead { margin: var(--space-4) var(--space-0) var(--space-12); color: var(--muted); font-size: var(--font-13); }
+.approval-spend-months { display: flex; flex-direction: column; margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.approval-spend-months li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-8) var(--space-12); padding: var(--space-8) var(--space-0); border-top: var(--hairline) solid var(--line); }
+.approval-spend-months li:first-child { border-top: none; }
+.approval-spend-months b { color: var(--ink); font-size: var(--font-15); font-variant-numeric: var(--numeric-features); }
+.approval-spend-kinds { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.approval-spend-kinds span { padding: var(--space-4) var(--space-8); border-radius: var(--radius-8); color: var(--muted); background: var(--canvas); font-size: var(--font-11); }
+.approval-spend-scope { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--subtle); font-size: var(--font-11); }
+
+html[data-theme='dark'] :is(.approval-doc-tabs button[aria-selected='true'], .approval-spend-kinds span) { background: var(--surface); }
+
+@media (max-width: 760px) {
+  .approval-doc-row { grid-template-columns: auto minmax(0, 1fr); }
+  .approval-doc-row > :last-child { grid-column: 1 / -1; }
+  .approval-line-step { grid-template-columns: minmax(0, 1fr); }
+}

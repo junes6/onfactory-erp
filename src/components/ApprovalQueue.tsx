@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUpRight, BookOpen, Check, ClipboardCheck, FileText, Keyboard, MessageCircle, MessagesSquare, Pencil, Radar, RefreshCw, ShieldAlert, Sparkles, X } from 'lucide-react'
+import { ArrowUpRight, BookOpen, Check, ClipboardCheck, FilePlus2, FileText, Keyboard, MessageCircle, MessagesSquare, Pencil, Radar, RefreshCw, Settings2, ShieldAlert, Sparkles, X } from 'lucide-react'
 import { formatDateTime } from '../utils/dateTime'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ApprovalQueue.css'
 import { Button, IconButton } from './ui/Button'
 import { OpportunityWatch } from './OpportunityWatch'
+import { ApprovalDocumentSection } from './approval/ApprovalDocumentSection'
+import type { ApprovalAccount } from './approval/approvalTypes'
 
 type ProposalKind = 'document-classification' | 'task-from-message' | 'sentinel-task' | 'lens-task' | 'opportunity' | 'principle' | 'thread-conclusion' | 'wiki-task'
 type ProposalStatus = 'pending' | 'approved' | 'edited' | 'rejected' | 'expired'
@@ -72,16 +74,25 @@ function evidenceTarget(proposal: Proposal): { page: string; focusId: string; la
   return null
 }
 
-export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onOpenEvidence, onPendingChange }: {
+export function ApprovalQueue({ account, workspaceScope, focusId, onToast, onOpenTask, onOpenEvidence, onPendingChange, onWaitingChange }: {
+  account: ApprovalAccount
   workspaceScope?: string
+  /** 알림·푸시가 지목한 결재 문서. 전자결재 섹션이 마운트하자마자 그 문서를 연다. */
+  focusId?: string
   onToast: (message: string) => void
   onOpenTask: (taskId: string) => void
   onOpenEvidence?: (page: string, focusId: string) => void
   onPendingChange?: (count: number) => void
+  /** 결재 대기와 결과 확인은 다른 사실이라 갈라서 올린다 — 부르는 쪽이 두 문장으로 말할 수 있게. */
+  onWaitingChange?: (summary: { waiting: number; decided: number }) => void
 }) {
   const [data, setData] = useState<QueueResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [draftOpen, setDraftOpen] = useState(false)
+  const [formAdminOpen, setFormAdminOpen] = useState(false)
+  // 전자결재 섹션이 대화상자를 그리고 있는가. 그 위에서는 이 화면의 한 글자 단축키가 쉰다.
+  const [approvalModalOpen, setApprovalModalOpen] = useState(false)
   const [filter, setFilter] = useState<'pending' | 'all'>('pending')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -90,8 +101,15 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onOpenEvide
   const [pendingDecision, setPendingDecision] = useState<{ proposal: Proposal; decision: 'approve' | 'reject' } | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const headers = useMemo(() => (workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined), [workspaceScope])
+  /**
+   * AI 제안 큐는 관리자 전용 라우트(`/api/proposals` 가 `requireTenantAdmin` 을 지난다)다.
+   * 직원이 이 화면에 들어와도 부르지 않는다 — 부르면 403 이 상시 오류 문구로 떠서,
+   * 정작 볼 수 있는 자기 결재 목록 위에 「불러오지 못했습니다」가 얹힌다.
+   */
+  const isAdmin = account.role === 'tenant-admin'
 
   const load = useCallback(async (silent = false) => {
+    if (!isAdmin) { setData(null); setLoading(false); return }
     if (!silent) setLoading(true)
     setError('')
     try {
@@ -105,7 +123,7 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onOpenEvide
     } finally {
       setLoading(false)
     }
-  }, [headers, onPendingChange])
+  }, [headers, isAdmin, onPendingChange])
 
   useEffect(() => { void load() }, [load])
   useEffect(() => {
@@ -150,10 +168,18 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onOpenEvide
     } catch (reason) { onToast(reason instanceof Error ? reason.message : '센티널 평가에 실패했습니다.') }
   }
 
-  // 키보드: ↑↓ 이동, Enter/A 승인, E 수정, X 거절
+  /**
+   * 키보드: ↑↓ 이동, Enter/A 승인, E 수정, X 거절.
+   *
+   * 이 단축키는 **이 화면의 목록 위에서만** 살아야 한다. 대화상자가 열려 있을 때도 살아 있으면
+   * 결재 상세의 「승인」이나 기안의 「상신」에 포커스를 두고 Enter 를 누르는 순간 `preventDefault()`
+   * 가 그 버튼의 기본 동작을 삼키고, 대신 무관한 AI 제안의 확인 대화상자가 그 위에 겹쳐 뜬다
+   * (`e` 는 수정 대화상자를 겹쳐 연다). 그래서 결재 대화상자(`approvalModalOpen`)와 확인
+   * 대화상자(`pendingDecision`)를 함께 본다 — 「무엇이 열려 있는가」는 그것을 그리는 쪽이 답한다.
+   */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (editing) return
+      if (editing || pendingDecision || approvalModalOpen) return
       const target = event.target as HTMLElement | null
       if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
       if (!selected) return
@@ -169,26 +195,44 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onOpenEvide
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editing, selected, selectedId, visible])
+  }, [approvalModalOpen, editing, pendingDecision, selected, selectedId, visible])
 
   const pendingCount = data?.pendingCount ?? 0
   const stats = data?.stats ?? []
 
   return <div className="content-page approval-page">
     <header className="page-header">
-      <div><span className="eyebrow">AI REVIEW</span><h1>AI 제안 검토</h1><p>AI가 "이렇게 할까요?"라고 올린 제안을 사람이 결정합니다. 승인하기 전에는 아무것도 실행되지 않습니다.</p></div>
-      <div className="page-header-actions"><Button tone="secondary" type="button" onClick={() => void evaluateNow()}><RefreshCw size={17} /> 지금 점검</Button></div>
+      <div><span className="eyebrow">APPROVALS</span><h1>결재 · AI 제안</h1><p>내가 결재할 문서와, AI가 올린 제안을 한 곳에서 봅니다. 승인하기 전에는 아무것도 실행되지 않습니다.</p></div>
+      <div className="page-header-actions">
+        <Button tone="primary" type="button" onClick={() => setDraftOpen(true)}><FilePlus2 size={17} /> 새 기안</Button>
+        {isAdmin && <Button tone="secondary" type="button" onClick={() => void evaluateNow()}><RefreshCw size={17} /> 지금 점검</Button>}
+        {isAdmin && <Button tone="ghost" type="button" onClick={() => setFormAdminOpen(true)}><Settings2 size={17} /> 양식 관리</Button>}
+      </div>
     </header>
 
-    <section className="approval-stats" aria-label="유형별 최근 4주 승인률">
+    {/* 결재가 먼저, AI 제안이 뒤. 결재 대기·완료를 위한 별도 화면을 만들지 않고 같은 큐 안에 둔다. */}
+    <ApprovalDocumentSection
+      account={account}
+      workspaceScope={workspaceScope}
+      focusId={focusId}
+      draftOpen={draftOpen}
+      formAdminOpen={formAdminOpen}
+      onCloseDraft={() => setDraftOpen(false)}
+      onCloseFormAdmin={() => setFormAdminOpen(false)}
+      onToast={onToast}
+      onWaitingChange={onWaitingChange}
+      onModalChange={setApprovalModalOpen}
+    />
+
+    {isAdmin && <section className="approval-stats" aria-label="유형별 최근 4주 승인률">
       {stats.map((stat) => <article key={stat.kind}>
         <StatusBadge className="status-pill" tone={metaFor(stat.kind).tone}>{metaFor(stat.kind).label}</StatusBadge>
         <strong>{stat.approvalRate === null ? '아직 데이터 없음' : `${stat.approvalRate}%`}</strong>
         <small>{stat.total ? `최근 ${stat.windowDays}일 승인 ${stat.approved + stat.edited} · 거절 ${stat.rejected}` : `최근 ${stat.windowDays}일 결정 없음`}</small>
       </article>)}
-    </section>
+    </section>}
 
-    <section className="panel approval-panel">
+    {isAdmin && <section className="panel approval-panel">
       <div className="approval-toolbar">
         <div className="approval-tabs" role="tablist"><button type="button" role="tab" aria-selected={filter === 'pending'} onClick={() => setFilter('pending')}>검토 대기 <em>{pendingCount}</em></button><button type="button" role="tab" aria-selected={filter === 'all'} onClick={() => setFilter('all')}>전체 이력</button></div>
         <span className="approval-keys"><Keyboard size={15} /> ↑↓ 이동 · Enter/A 승인 · E 수정 · X 거절</span>
@@ -219,9 +263,9 @@ export function ApprovalQueue({ workspaceScope, onToast, onOpenTask, onOpenEvide
                 </article>
               })}
             </div>}
-    </section>
+    </section>}
 
-    <OpportunityWatch workspaceScope={workspaceScope} onToast={onToast} />
+    {isAdmin && <OpportunityWatch workspaceScope={workspaceScope} onToast={onToast} />}
 
     {editing && <ProposalEditDialog proposal={editing} busy={busyId === editing.id} onClose={() => setEditing(null)} onSubmit={(payload, reason) => void decide(editing, 'edit', payload, reason)} />}
     {pendingDecision && <ShortcutConfirmDialog

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const read = (relativePath) => readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
-const [app, collaboration, dashboard, business, factory, people, library, compliance, taxAssets, taxWorkspace, ipRights, itServices, wikiPage, apiSmoke, quickLinkSmoke, workspaceHook, serverApp, packageJsonText] = await Promise.all([
+const [app, collaboration, dashboard, business, factory, people, library, compliance, taxAssets, taxWorkspace, ipRights, itServices, wikiPage, approvalSection, approvalDraft, approvalDraftSave, apiSmoke, quickLinkSmoke, workspaceHook, serverApp, packageJsonText] = await Promise.all([
   read('src/App.tsx'),
   read('src/components/CollaborationSuite.tsx'),
   read('src/components/DashboardWorkspace.tsx'),
@@ -17,12 +17,19 @@ const [app, collaboration, dashboard, business, factory, people, library, compli
   read('src/components/IpRights.tsx'),
   read('src/components/ItServices.tsx'),
   read('src/components/wiki/WikiPage.tsx'),
+  read('src/components/approval/ApprovalDocumentSection.tsx'),
+  read('src/components/approval/ApprovalDraftDialog.tsx'),
+  read('src/utils/approvalDraft.ts'),
   read('server/store/menu-write-smoke.test.mjs'),
   read('scripts/quick-links-storage.test.mjs'),
   read('src/hooks/useWorkspaceState.ts'),
   read('server/app.mjs'),
   read('package.json'),
 ])
+
+// 결재 화면은 목록(섹션)·기안 대화상자·저장 절차가 한 화면을 이룬다 —
+// create/update/delete가 세 파일에 나뉘어 산다(저장 절차만 떼어 낸 이유는 approvalDraft.ts 주석).
+const approvalScreen = `${approvalSection}\n${approvalDraft}\n${approvalDraftSave}`
 
 function expectAll(source, checks, screen) {
   for (const [pattern, message] of checks) {
@@ -224,6 +231,21 @@ const contracts = [
       [/onToast\(cause instanceof Error \? cause\.message : '문서를 보관하지 못했습니다\.'\)/, 'archive failure handling'],
     ],
   },
+  {
+    screen: '결재 · AI 제안', persistenceId: 'approval-api', source: approvalScreen, checks: [
+      [/const response = await fetch\(`\/api\/approval-documents\?\$\{params\}`, \{ headers \}\)/, 'list goes through the dedicated approval route'],
+      [/const created = await fetch\('\/api\/approval-documents', \{\s*\n?\s*method: 'POST', headers, body: JSON\.stringify\(\{ \.\.\.body, submit, clientRequestId \}\)/, 'create goes through the dedicated approval route with an idempotency key'],
+      // 프롭 스냅샷(draft.version)이 아니라 **응답이 알려 준 지금 version** 을 보낸다 —
+      // 스냅샷을 다시 쓰면 PATCH 한 번 뒤의 모든 요청이 409 로 튕기고 빠져나갈 길이 없다.
+      [/const patched = await call\('PATCH', path, \{ \.\.\.payload, version \}\)/, 'update sends the version the screen actually holds'],
+      [/setVersion\(outcome\.version\)/, 'the screen adopts the version the server just reported'],
+      [/const removeDraft = async \(\) => \{[\s\S]*?method: 'DELETE'[\s\S]*?if \(!response\.ok\) throw new Error\(body\.error\?\.message \|\| '기안을 지우지 못했습니다\.'\)/, 'delete wiring and failure handling'],
+      [/onSaved=\{\(\) => \{ setEditing\(null\); onCloseDraft\(\); void load\(true\) \}\}/, 'create/update/delete refresh the visible list'],
+      [/if \(canEditDraft\(item, account\.id\)\) return \{ label: '이어서 작성', run: \(\) => setEditing\(item\) \}/, 'edit entry point wiring'],
+      [/onToast\(reason instanceof Error \? reason\.message : '결재를 올리지 못했습니다\.'\)/, 'create failure surfaces the server sentence'],
+      [/onToast\(reason instanceof Error \? reason\.message : '결재를 회수하지 못했습니다\.'\)/, 'recall failure handling'],
+    ],
+  },
 ]
 
 for (const contract of contracts) {
@@ -233,7 +255,7 @@ for (const contract of contracts) {
 }
 
 test('all UI contracts stay paired to the same persistence target exercised by lifecycle smoke', () => {
-  assert.equal(contracts.length, 16)
+  assert.equal(contracts.length, 17)
   const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   for (const { screen, persistenceId } of contracts) {
     if (persistenceId.startsWith('localStorage:')) {
@@ -241,17 +263,19 @@ test('all UI contracts stay paired to the same persistence target exercised by l
       assert.match(quickLinkSmoke, new RegExp(escape(persistenceId.slice('localStorage:'.length))), `${screen} localStorage target mismatch`)
       continue
     }
-    // generic 워크스페이스 PUT이 없는 두 화면(자료실·문서)은 전용 라우트로 산다 —
+    // generic 워크스페이스 PUT이 없는 세 화면(자료실·문서·결재)은 전용 라우트로 산다 —
     // 스모크의 짝도 key가 아니라 그 화면을 가리키는 리터럴이다.
     const pairedCase = persistenceId === 'documents-api'
       ? /const documentCase = \{ screen: '기업 자료실', persistenceId: 'documents-api' \}/
       : persistenceId === 'wiki-api'
         ? /const wikiCase = \{ screen: '문서', persistenceId: 'wiki-api' \}/
-        : new RegExp(`screen: '${escape(screen)}', key: '${escape(persistenceId)}'`)
+        : persistenceId === 'approval-api'
+          ? /const approvalCase = \{ screen: '결재 · AI 제안', persistenceId: 'approval-api' \}/
+          : new RegExp(`screen: '${escape(screen)}', key: '${escape(persistenceId)}'`)
     assert.match(apiSmoke, pairedCase, `${screen} UI target ${persistenceId} is not the lifecycle target`)
   }
   for (const marker of ['CREATE', 'RESTART/PERSIST', 'UPDATE', 'RESTART/UPDATE-PERSIST', 'DELETE', 'FINAL RESTART/EMPTY']) {
-    const dynamicCount = '\\$\\{workspaceCases\\.length \\+ 2\\}\\/\\$\\{workspaceCases\\.length \\+ 2\\}'
+    const dynamicCount = '\\$\\{workspaceCases\\.length \\+ 3\\}\\/\\$\\{workspaceCases\\.length \\+ 3\\}'
     assert.match(apiSmoke, new RegExp(`t\\.diagnostic\\(\\\`${marker.replace('/', '\\/')} ${dynamicCount} PASS`), `missing dynamic lifecycle marker: ${marker}`)
   }
   assert.ok((apiSmoke.match(/await withRuntimeApp\(/g) ?? []).length >= 4, 'create/update/delete must each cross isolated app/store restarts')

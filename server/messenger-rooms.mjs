@@ -689,7 +689,7 @@ export function registerMessengerRoomRoutes({
     // 루트와 답글을 한 덩이 본문으로 잇는다. 승격된 업무를 보는 사람은 스레드를 못 열 수도 있으므로
     // 무슨 말이 오갔는지가 그 자리에 남아 있어야 한다.
     // 지워진 루트는 싣지 않는다 — tombstone('삭제된 메시지')이 맨 앞에 오면 자동 제목이 그 문구가 되어
-    // 아무도 읽을 수 없는 말의 이름을 단 업무가 결재함에 선다. 승격이 옮겨 적는 것은 남아 있는 말이다.
+    // 아무도 읽을 수 없는 말의 이름을 단 업무가 승인 큐에 선다. 승격이 옮겨 적는 것은 남아 있는 말이다.
     const content = [...(root.deletedAt ? [] : [root.text]), ...replies.map((item) => item.text)].join('\n\n').slice(0, 4_000)
     let created
     try {

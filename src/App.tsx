@@ -47,6 +47,7 @@ import { WorkCalendarView } from './components/WorkCalendarView'
 import { WorkFilterBar } from './components/WorkFilterBar'
 import { SavedViewMenu } from './components/SavedViewMenu'
 import { collectCreateFields, CustomFieldAdmin, CustomFieldCreateInputs, CustomFieldEditor, useCustomFields, type CustomFieldDefinition, type WorkFieldSaveResult } from './components/CustomFieldInputs'
+import { approvalSeenAt, notificationFocusTarget } from './utils/approvalLine'
 import { isWorkOverdue, projectBarLabel, scheduleBlockReason, workPeriodLabel, SCHEDULE_ORDER_HINT } from './utils/workTimeline'
 import type { ScheduleResult } from './utils/workTimeline'
 import { activeFilterCount, applyWorkFilters, DEFAULT_WORK_SORT, EMPTY_WORK_FILTERS, readStoredWorkView, sortWorkItems, writeStoredWorkView, type WorkFilters, type WorkSort } from './utils/workViews'
@@ -85,7 +86,9 @@ type PlatformTicketSummary = { id: string; tenantId: string; tenant: string; tit
 type PlatformDirectoryState = { tenants: Tenant[]; supportTickets: PlatformTicketSummary[] }
 type SupportSessionRequest = { tenantId: string; ticketId: string; scope: string; duration: string; reason: string }
 
-const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'journal', 'projects', 'finance', 'ip', 'products', 'inventory', 'factory', 'people', 'wiki', 'documents', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
+// R16-I4: 'approvals'를 직원에게 연다 — 자기 전자결재를 보는 화면이 여기 하나뿐이기 때문이다.
+// AI 제안(관리자 전용 라우트)은 화면이 role로 감춘다.
+const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'approvals', 'journal', 'projects', 'finance', 'ip', 'products', 'inventory', 'factory', 'people', 'wiki', 'documents', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
 const AUTH_SYNC_KEY = 'onfactory-auth-sync'
 const emptyWorkItems: WorkItem[] = []
 const emptyWorkRules: WorkRule[] = []
@@ -252,8 +255,11 @@ type DashboardDropTarget = {
   edge: 'before' | 'after'
 }
 
-function AIHome({ workItems, products, salesChannels, itProjects, itContracts, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, onOpenTask, easyMode = false, industryType, pendingProposals = 0, onAdvanceTask, onCreateTask, onNavigate, onOpenAlerts, onToast }: {
+function AIHome({ workItems, products, salesChannels, itProjects, itContracts, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, onOpenTask, easyMode = false, industryType, pendingProposals = 0, decidedUnread = 0, onAdvanceTask, onCreateTask, onNavigate, onOpenAlerts, onToast }: {
+  /** 사람이 **지금 결정할 것** — AI 제안 + 내가 결재할 문서. */
   pendingProposals?: number
+  /** 이미 끝난 내 기안 중 아직 결과를 확인하지 않은 건수. 결정할 것이 아니라 읽을 것이다. */
+  decidedUnread?: number
   workItems: WorkItem[]
   products: DashboardProduct[]
   salesChannels: DashboardSalesChannel[]
@@ -552,7 +558,14 @@ function AIHome({ workItems, products, salesChannels, itProjects, itContracts, c
             : <button className={todayEvents.length === 0 ? 'is-neutral' : ''} type="button" aria-label={`오늘 일정 ${todayEvents.length}건`} onClick={() => onNavigate('schedule')}><CalendarDays size={15} /><span>오늘 일정</span><strong>{todayEvents.length}</strong></button>}
           <button className={myWork.length === 0 ? 'is-neutral' : ''} type="button" aria-label={`확인할 업무 ${myWork.length}건`} onClick={() => onNavigate('tasks')}><ListChecks size={15} /><span>확인 업무</span><strong>{myWork.length}</strong></button>
           <button className={attentionCount === 0 ? 'is-neutral' : ''} type="button" aria-label={`AI 알림 ${attentionCount}건`} onClick={onOpenAlerts}><Sparkles size={15} /><span>AI 알림</span><strong>{attentionCount}</strong></button>
-          {canAssignTasks && <button className={pendingProposals === 0 ? 'is-neutral' : 'is-attention'} type="button" aria-label={`검토할 AI 제안 ${pendingProposals}건`} onClick={() => onNavigate('approvals')}><ClipboardCheck size={15} /><span>AI 제안</span><strong>{pendingProposals}</strong></button>}
+          {/* R16-I4: 직원에게도 연다 — 자기 전자결재가 이 입구 뒤에 있다. 값은 호출부가 결재+제안을 합쳐 넘긴다.
+              숫자는 하나지만 문장은 둘이다 — 「대기」와 「결과 확인」을 한 낱말로 묶으면, 결재할 것이 없는
+              사람이 「대기 1건」을 읽고 들어와 '지금 결재할 문서가 없습니다'를 본다(규칙 11·13). */}
+          <button className={pendingProposals + decidedUnread === 0 ? 'is-neutral' : 'is-attention'} type="button"
+            aria-label={decidedUnread > 0
+              ? `결재·검토 대기 ${pendingProposals}건 · 결과 확인 ${decidedUnread}건`
+              : `결재·검토 대기 ${pendingProposals}건`}
+            onClick={() => onNavigate('approvals')}><ClipboardCheck size={15} /><span>결재·제안</span><strong>{pendingProposals + decidedUnread}</strong></button>
         </div>{layoutOpen ? <Button tone="primary" type="button" onClick={finishLayoutEdit}><Check size={18} /> 편집 완료</Button> : <DashboardLayoutButton onClick={() => setLayoutOpen(true)} />}{canAssignTasks ? <Button tone="primary" type="button" onClick={() => onCreateTask()}><Plus size={18} /> 새 업무 지시</Button> : <StatusBadge className="status-pill" tone="neutral">직원용 업무 화면</StatusBadge>}</>}
       />
       {canAssignTasks && <DailyDigest workspaceScope={workspaceScope} onToast={onToast} onOpenTask={(taskId) => onOpenTask?.(taskId)} onNavigate={(page) => onNavigate(page as PageId)} />}
@@ -2010,6 +2023,20 @@ export default function App() {
   // same browser can never reuse another employee's filtered response.
   const workspaceScope = account?.tenantId && account.id ? `${account.tenantId}:${account.id}` : undefined
   const [pendingProposals, setPendingProposals] = useState(0)
+  /**
+   * 내가 결재할 문서. **`pendingProposals`와 합치지 않는다** — 그 state는 SSE(`proposal` 이벤트)와
+   * ApprovalQueue의 `onPendingChange`가 통째로 덮어쓰므로, 합산값을 거기 넣으면 30초마다 숫자가
+   * 제안 수로 되돌아간다. 더하는 일은 배지에서만 한다.
+   */
+  const [approvalWaiting, setApprovalWaiting] = useState(0)
+  /**
+   * 결과가 나온 내 기안(승인·반려). 「내가 결재할 것」과 **다른 사실**이라 다른 state다 —
+   * 배지의 한 숫자에 함께 실리더라도, 사람이 읽는 문장은 둘을 갈라 말해야 한다. 합쳐 두면
+   * 결재할 것이 하나도 없는 사람이 「결재·검토 대기 1건」을 읽고 들어와 빈 목록을 본다(규칙 11).
+   */
+  const [approvalDecided, setApprovalDecided] = useState(0)
+  /** 알림·푸시가 지목한 결재 문서. 결재 화면이 열리며 그 문서를 편다. */
+  const [approvalFocusId, setApprovalFocusId] = useState('')
   const [profileOpen, setProfileOpen] = useState(false)
   /** 인사·조직을 어느 탭으로 열라는 '이번 한 번'의 부탁. 값이 남아 있으면 그 세션 내내
    *  사이드바로 들어와도 그 탭이 먼저 열린다 — PeopleOperationsPage가 마운트마다 다시 적용하기 때문이다. */
@@ -2077,7 +2104,11 @@ export default function App() {
   // 게스트 세션에서는 이 스트림을 열지 않는다 — GuestWorkspace가 자기 구독 하나로 업무·알림 갱신을 함께 처리한다(오리진당 연결 수 절약).
   useEventStream(authStatus === 'signed-in' && mode === 'tenant' && account?.role !== 'tenant-guest', (event) => {
     if (event.kind === 'notification' || event.kind === 'resync') void loadNotifications()
-    if (event.kind === 'proposal' && typeof event.data.pending === 'number') setPendingProposals(event.data.pending)
+    // 제안 대기 수는 **관리자만의 사실**이다. `/api/proposals`가 requireTenantAdmin이고 제안 패널도
+    // isAdmin으로 감춰져 있는데, proposal 프레임은 테넌트 전원에게 간다(server/app.mjs의 events.publish에
+    // accountIds가 없다). role을 보지 않고 받으면 직원의 결재 배지·홈 타일이 자기가 열 수도 없는 숫자를
+    // 세어 「결재·검토 대기 1건」이라 말하고, 눌러 들어간 화면에는 아무것도 없다.
+    if (isTenantAdmin && event.kind === 'proposal' && typeof event.data.pending === 'number') setPendingProposals(event.data.pending)
     // 남이 만들거나 상태를 바꾼 업무는 여기서 다시 읽는다. 이 줄이 없을 때 실측한 결과:
     // 서버는 그 업무를 이 사람에게 주는데 열려 있는 화면은 0건이었고, 다른 메뉴에 갔다 돌아와도
     // 그대로 0건이었다(전체 새로고침을 해야 1건). 사이드바 배지도 같은 배열에서 나오므로
@@ -2096,8 +2127,13 @@ export default function App() {
       const params = new URL(data.url, window.location.origin).searchParams
       const page = params.get('page')
       const focus = params.get('focus')
-      if (focus) setWorkFocusId(focus)
-      if (page) navigate(page as PageId)
+      // 어디를 열 것인가는 page가 아니라 **id의 모양**이 정한다(notificationFocusTarget).
+      // page로 먼저 가르면 결재 문서를 가리키면서 page가 'approvals'가 아닌 알림 — 아침 요약과
+      // 유형표가 아직 'tasks'인 결재 요청 — 이 업무 id 자리로 흘러들어 아무것도 열리지 않는다.
+      const target = notificationFocusTarget(page, focus)
+      setApprovalFocusId(target.approvalFocusId)
+      if (target.workFocusId) setWorkFocusId(target.workFocusId)
+      if (target.page) navigate(target.page as PageId)
       void loadNotifications()
     }
     navigator.serviceWorker.addEventListener('message', onMessage)
@@ -2121,6 +2157,37 @@ export default function App() {
    */
   const isGuestSession = account?.role === 'tenant-guest'
   const tenantDataEnabled = authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange && !isGuestSession
+  /**
+   * 전자결재 배지. 직원에게도 도는 저비용 요약 경로(`/api/approval-documents/summary`)를 60초마다 읽는다.
+   * `seenAt`은 결재 화면이 쓰는 것과 **같은 값**을 보낸다 — 다른 값을 보내면 사이드바 숫자와
+   * 탭의 점이 서로 다른 사실을 세게 되고, 그 차이는 화면 어디에도 적히지 않는다(규칙 3).
+   */
+  useEffect(() => {
+    if (!tenantDataEnabled || !workspaceScope || !account?.id) { setApprovalWaiting(0); setApprovalDecided(0); return }
+    let active = true
+    const headers = { 'x-workspace-identity': workspaceScope }
+    const accountId = account.id
+    type ApprovalSummaryBody = { waitingOnMe?: number; decidedUnread?: number }
+    const loadWaiting = () => fetch(`/api/approval-documents/summary?seenAt=${encodeURIComponent(approvalSeenAt(accountId))}`, { headers })
+      .then(async (response) => (response.ok ? response.json() as Promise<ApprovalSummaryBody> : {} as ApprovalSummaryBody))
+      .then((body) => {
+        if (!active) return
+        setApprovalWaiting(Number(body.waitingOnMe ?? 0))
+        setApprovalDecided(Number(body.decidedUnread ?? 0))
+      })
+      .catch(() => {})
+    void loadWaiting()
+    const timer = window.setInterval(() => { void loadWaiting() }, 60_000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [account?.id, tenantDataEnabled, workspaceScope])
+  /**
+   * 결재 화면이 목록을 새로 읽을 때마다 같은 두 수를 올려 준다. **참조가 안정적이어야 한다** —
+   * 매 렌더 새 함수를 내려보내면 섹션의 `load` 가 매번 다시 만들어져 폴링이 폭주한다(규칙 5).
+   */
+  const handleApprovalSummary = useCallback((summary: { waiting: number; decided: number }) => {
+    setApprovalWaiting(summary.waiting)
+    setApprovalDecided(summary.decided)
+  }, [])
   /** 자식만 보이는 직원에게 서버가 붙여 주는 상위 제목. 담당·상태·마감은 오지 않는다(응답 봉투 parents). */
   const [workParentRefs, setWorkParentRefs] = useState<Record<string, ParentRef>>({})
   const [workItems, setWorkItems] = useWorkspaceState<WorkItem[]>('work-items', emptyWorkItems, {
@@ -2481,7 +2548,9 @@ export default function App() {
     ...item,
     badge: item.id === 'tasks'
       ? scopedWorkItems.filter((workItem) => workItem.status !== '결재완료').length
-      : item.id === 'approvals' ? pendingProposals : undefined,
+      // 결재 배지는 두 사실을 더한다: 내가 결재할 문서 + 사람이 결정할 AI 제안.
+      // 더하는 일은 여기서만 한다 — 두 state 중 하나에 합산값을 넣으면 갱신이 서로를 지운다.
+      : item.id === 'approvals' ? pendingProposals + approvalWaiting + approvalDecided : undefined,
   }))
   // 개인 메뉴: 업종 레지스트리가 아니라 계정 권한으로 붙는다. 권한 없는 계정에는 노출되지 않는다.
   const personalMenu: NavItem[] = account?.role === 'tenant-admin' ? [{ id: 'judgement' as PageId, label: '내 판단 기록', icon: BookOpen }] : []
@@ -2557,6 +2626,9 @@ export default function App() {
     // 출처 배지가 지정한 인사·조직 탭은 그 한 번뿐이다. 인사·조직을 떠날 때 지우지 않으면
     // 그 뒤로는 사이드바로 들어와도 늘 외부 연동이 먼저 열린다.
     if (nextPage !== 'people') setPeopleInitialTab(null)
+    // 알림이 지목한 결재 문서도 그 한 번뿐이다. 지우지 않으면 사이드바로 들어올 때마다
+    // 지난번 알림의 문서가 계속 펼쳐진다.
+    if (nextPage !== 'approvals') setApprovalFocusId('')
     setPage(nextPage)
     setMobileNav(false)
     setQuery('')
@@ -2924,7 +2996,7 @@ export default function App() {
       return <PlatformConsole section={page as PlatformSection} focusId={platformFocusId} refreshToken={platformRefreshToken} onSectionChange={(section) => navigate(section)} onReturnTenant={requestTenantSupportAccess} onRequestSupport={setSupportTenant} onEnterTenant={(tenantId) => void enterTenant(tenantId)} onDataChanged={() => setPlatformRefreshToken((current) => current + 1)} onToast={setToast} />
     }
     if (account?.role === 'tenant-member' && !tenantMemberPages.has(page)) {
-      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} itProjects={dashboardItProjects} itContracts={dashboardItContracts} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
+      return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} itProjects={dashboardItProjects} itContracts={dashboardItContracts} calendarEvents={dashboardCalendarEvents} currentUserName={account.name} currentUserId={account.id} companyName={tenantName} canAssignTasks={false} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals + approvalWaiting} decidedUnread={approvalDecided} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
     switch (page) {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} calendarCallbackFlag={calendarCallbackFlag} onCalendarCallbackHandled={() => setCalendarCallbackFlag('')} />
@@ -2939,14 +3011,32 @@ export default function App() {
       case 'sales': return <SalesChannels onToast={setToast} workspaceScope={workspaceScope} companyName={tenantName} canManage={account?.role === 'tenant-admin'} />
       case 'people': return <PeopleOperationsPage initialTab={peopleInitialTab ?? undefined} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} canManage={account?.role === 'tenant-admin'} canOversee={account?.role === 'tenant-admin' || account?.oversight === true} currentUserId={account?.id} currentUserName={account?.name ?? ''} currentUserTeam={account?.team ?? '미지정'} workspaceScope={workspaceScope} />
       case 'judgement': return <PersonalCorePage workspaceScope={workspaceScope} onToast={setToast} />
-      case 'approvals': return <ApprovalQueue workspaceScope={workspaceScope} onToast={setToast} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenEvidence={(page) => navigate(page as PageId)} onPendingChange={setPendingProposals} />
+      // onOpenEvidence가 focusId를 버리던 결함을 여기서 고친다 — 근거 링크가 문서를 열지 못하고
+      // 그 화면의 첫 줄만 보여 주던 자리다. 결재 문서는 결재 화면 자신이 열고, 그 밖은 업무 자리로 간다.
+      case 'approvals': return <ApprovalQueue
+        account={{ id: account?.id ?? '', name: account?.name ?? '', role: account?.role ?? '' }}
+        workspaceScope={workspaceScope}
+        focusId={approvalFocusId}
+        onToast={setToast}
+        onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }}
+        onOpenEvidence={(page, focusId) => {
+          // id는 그 id를 뜻하는 자리에만 넣는다. 자료 id를 workFocusId에 넣으면 업무 화면이
+          // 없는 업무를 찾다가 아무것도 못 여는 자리로 사람을 데려간다.
+          if (page === 'approvals') { setApprovalFocusId(focusId); return }
+          if (page === 'wiki' && focusId) setWikiFocusId(focusId)
+          else if (page === 'tasks' && focusId) setWorkFocusId(focusId)
+          navigate(page as PageId)
+        }}
+        onPendingChange={setPendingProposals}
+        onWaitingChange={handleApprovalSummary}
+      />
       case 'wiki': return <WikiPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} focusDocumentId={wikiFocusId} focusProjectId={wikiProjectId} onFocusHandled={() => { setWikiFocusId(undefined); setWikiProjectId(undefined) }} streamRef={wikiStreamRef} onAskLens={setLensTarget} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} industryType={account?.industryType ?? 'food_manufacturing'} onAskLens={setLensTarget} onToast={setToast} />
       case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} companyName={tenantName} onAskLens={setLensTarget} onToast={setToast} />
       case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onNavigate={(target) => { if (target === 'people') setPeopleInitialTab('accounts'); navigate(target as PageId) }} />
       case 'it-deliverables':
       case 'it-contracts': return <ItServicesPage view={page as ItServicesView} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} onToast={setToast} />
-      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} itProjects={dashboardItProjects} itContracts={dashboardItContracts} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
+      default: return <AIHome workItems={scopedWorkItems} products={dashboardProducts} salesChannels={dashboardSalesChannels} itProjects={dashboardItProjects} itContracts={dashboardItContracts} calendarEvents={dashboardCalendarEvents} currentUserName={account?.name ?? ''} currentUserId={account?.id ?? ''} companyName={tenantName} canAssignTasks={account?.role === 'tenant-admin'} workspaceScope={workspaceScope} easyMode={easyHomeActive} industryType={account?.industryType ?? 'food_manufacturing'} pendingProposals={pendingProposals + approvalWaiting} decidedUnread={approvalDecided} onAdvanceTask={advanceTask} onCreateTask={(text = '', completionCriteria = '') => setTaskDraft({ title: text, completionCriteria })} onNavigate={navigate} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }} onToast={setToast} />
     }
   }
 
@@ -3067,8 +3157,13 @@ export default function App() {
                   // 한쪽은 '주소를 고쳐 주세요'라고 말해 놓고 고칠 수 없는 화면을 연다.
                   // 엔드포인트 id를 workFocusId에 넣지 않는다: 그 자리는 업무 id만 뜻한다.
                   if (page === 'people') { setPeopleInitialTab('integrations'); setNotificationsOpen(false); navigate('people'); return }
-                  if (focusId) setWorkFocusId(focusId)
-                  navigate(page as PageId)
+                  // 어디를 열 것인가는 page가 아니라 **id의 모양**이 정한다(notificationFocusTarget).
+                  // 결재 문서 id는 결재 자리에서만 뜻이 있고, page:'approvals'로 오는 알림이 전부
+                  // 결재 문서인 것도 아니다(AI 제안 PRP-·센티널·기회 OPP-).
+                  const target = notificationFocusTarget(page, focusId)
+                  setApprovalFocusId(target.approvalFocusId)
+                  if (target.workFocusId) setWorkFocusId(target.workFocusId)
+                  navigate((target.page || page) as PageId)
                 }}
                 onToast={setToast}
                 onClose={() => setNotificationsOpen(false)}

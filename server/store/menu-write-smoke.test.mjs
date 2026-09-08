@@ -115,6 +115,8 @@ const workspaceCases = [
 const documentCase = { screen: '기업 자료실', persistenceId: 'documents-api' }
 // 문서(위키)는 generic 워크스페이스 PUT이 없다(병합을 우회할 수 없게 막았다) — 자료실처럼 전용 라우트로 산다.
 const wikiCase = { screen: '문서', persistenceId: 'wiki-api' }
+// 양식형 전자결재도 generic PUT이 403으로 닫혀 있다(결재선·이력이 원료라 PUT 한 번으로 '승인'이 되면 안 된다).
+const approvalCase = { screen: '결재 · AI 제안', persistenceId: 'approval-api' }
 
 function emptyStore() {
   return {
@@ -185,6 +187,7 @@ test('all tenant write surfaces create, survive a store/app restart, update, and
   let documentId = ''
   let wikiId = ''
   let wikiBlockId = ''
+  let approvalId = ''
   try {
     await writeFile(storeFile, JSON.stringify(emptyStore()), 'utf8')
 
@@ -207,7 +210,26 @@ test('all tenant write surfaces create, survive a store/app restart, update, and
       assert.equal(wikiCreate.status, 201, JSON.stringify(wikiBody))
       wikiId = wikiBody.document.id
       wikiBlockId = wikiBody.document.blocks[0].id
-      t.diagnostic(`CREATE ${workspaceCases.length + 2}/${workspaceCases.length + 2} PASS · ${workspaceCases.map((item) => item.screen).join(', ')}, 기업 자료실, ${wikiCase.screen}`)
+      // 결재는 씨앗 양식을 읽는 것에서 시작한다 — 목록 라우트가 없으면 만들지 못하는 멱등 시드다.
+      const formsResponse = await fetch(`${origin}/api/approval-forms`, { headers: authHeaders(cookie, false) })
+      const formsBody = await formsResponse.json()
+      assert.equal(formsResponse.status, 200, JSON.stringify(formsBody))
+      const seedForm = formsBody.forms.find((form) => form.id === 'AFM-SEED-EXPENSE')
+      assert.ok(seedForm, '지출결의 씨앗 양식이 있어야 결재를 기안할 수 있다')
+      const approvalCreate = await fetch(`${origin}/api/approval-documents`, {
+        method: 'POST', headers: authHeaders(cookie),
+        body: JSON.stringify({
+          formId: seedForm.id,
+          title: '스모크 지출결의',
+          values: { spent_on: '2026-08-21', vendor: '스모크 거래처', amount: 12000, purpose: '메뉴 쓰기 점검' },
+          clientRequestId: 'APD-SMOKE-1',
+        }),
+      })
+      const approvalBody = await approvalCreate.json()
+      assert.equal(approvalCreate.status, 201, JSON.stringify(approvalBody))
+      assert.equal(approvalBody.document.status, '기안')
+      approvalId = approvalBody.document.id
+      t.diagnostic(`CREATE ${workspaceCases.length + 3}/${workspaceCases.length + 3} PASS · ${workspaceCases.map((item) => item.screen).join(', ')}, 기업 자료실, ${wikiCase.screen}, ${approvalCase.screen}`)
     })
 
     await withRuntimeApp(storeFile, documentDirectory, async (origin) => {
@@ -224,7 +246,11 @@ test('all tenant write surfaces create, survive a store/app restart, update, and
       const wikiReadBody = await wikiRead.json()
       assert.equal(wikiRead.status, 200, JSON.stringify(wikiReadBody))
       assert.equal(wikiReadBody.document.title, '스모크 문서')
-      t.diagnostic(`RESTART/PERSIST ${workspaceCases.length + 2}/${workspaceCases.length + 2} PASS · 생성 데이터와 자료 원본 유지`)
+      const approvalRead = await fetch(`${origin}/api/approval-documents/${encodeURIComponent(approvalId)}`, { headers: authHeaders(cookie, false) })
+      const approvalReadBody = await approvalRead.json()
+      assert.equal(approvalRead.status, 200, JSON.stringify(approvalReadBody))
+      assert.equal(approvalReadBody.document.title, '스모크 지출결의')
+      t.diagnostic(`RESTART/PERSIST ${workspaceCases.length + 3}/${workspaceCases.length + 3} PASS · 생성 데이터와 자료 원본 유지`)
 
       for (const item of workspaceCases) await putWorkspace(origin, cookie, item, item.updated)
       const updateDocument = await fetch(`${origin}/api/documents/${encodeURIComponent(documentId)}`, {
@@ -242,7 +268,13 @@ test('all tenant write surfaces create, survive a store/app restart, update, and
       const wikiOpsBody = await wikiOps.json()
       assert.equal(wikiOps.status, 200, JSON.stringify(wikiOpsBody))
       assert.deepEqual(wikiOpsBody.applied, ['OP-SMOKE-000001'])
-      t.diagnostic(`UPDATE ${workspaceCases.length + 2}/${workspaceCases.length + 2} PASS · 공장 토큰색 블록 및 창고 정보 포함`)
+      // 결재 기안은 generic PUT이 아니라 전용 PATCH로 고친다. version이 맞아야 지나간다.
+      const approvalUpdate = await fetch(`${origin}/api/approval-documents/${encodeURIComponent(approvalId)}`, {
+        method: 'PATCH', headers: authHeaders(cookie),
+        body: JSON.stringify({ version: approvalReadBody.document.version, title: '스모크 지출결의 수정' }),
+      })
+      assert.equal(approvalUpdate.status, 200, await approvalUpdate.text())
+      t.diagnostic(`UPDATE ${workspaceCases.length + 3}/${workspaceCases.length + 3} PASS · 공장 토큰색 블록 및 창고 정보 포함`)
     })
 
     await withRuntimeApp(storeFile, documentDirectory, async (origin) => {
@@ -253,7 +285,9 @@ test('all tenant write surfaces create, survive a store/app restart, update, and
       const wikiAfterUpdate = await (await fetch(`${origin}/api/wiki/${encodeURIComponent(wikiId)}`, { headers: authHeaders(cookie, false) })).json()
       assert.equal(wikiAfterUpdate.document.blocks[0].text, '스모크 문단 수정')
       assert.equal(wikiAfterUpdate.document.version, 2)
-      t.diagnostic(`RESTART/UPDATE-PERSIST ${workspaceCases.length + 2}/${workspaceCases.length + 2} PASS`)
+      const approvalAfterUpdate = await (await fetch(`${origin}/api/approval-documents/${encodeURIComponent(approvalId)}`, { headers: authHeaders(cookie, false) })).json()
+      assert.equal(approvalAfterUpdate.document.title, '스모크 지출결의 수정')
+      t.diagnostic(`RESTART/UPDATE-PERSIST ${workspaceCases.length + 3}/${workspaceCases.length + 3} PASS`)
 
       for (const item of workspaceCases) await putWorkspace(origin, cookie, item, item.empty)
       const removeDocument = await fetch(`${origin}/api/documents/${encodeURIComponent(documentId)}`, {
@@ -265,7 +299,12 @@ test('all tenant write surfaces create, survive a store/app restart, update, and
       assert.equal(wikiArchive.status, 200, await wikiArchive.text())
       const wikiPurge = await fetch(`${origin}/api/wiki/${encodeURIComponent(wikiId)}?purge=1`, { method: 'DELETE', headers: authHeaders(cookie, false) })
       assert.equal(wikiPurge.status, 200, await wikiPurge.text())
-      t.diagnostic(`DELETE ${workspaceCases.length + 2}/${workspaceCases.length + 2} PASS · 본인 임시저장 일지 및 자료 원본 포함`)
+      // 결재는 '기안' 상태에서만 지울 수 있다. 상신한 뒤에는 회수·반려로만 끝난다.
+      const approvalDelete = await fetch(`${origin}/api/approval-documents/${encodeURIComponent(approvalId)}`, {
+        method: 'DELETE', headers: authHeaders(cookie, false),
+      })
+      assert.equal(approvalDelete.status, 200, await approvalDelete.text())
+      t.diagnostic(`DELETE ${workspaceCases.length + 3}/${workspaceCases.length + 3} PASS · 본인 임시저장 일지 및 자료 원본 포함`)
     })
 
     await withRuntimeApp(storeFile, documentDirectory, async (origin) => {
@@ -277,7 +316,11 @@ test('all tenant write surfaces create, survive a store/app restart, update, and
       assert.equal(wikiList.documents.length, 0, '완전히 지운 문서는 재기동해도 돌아오지 않는다')
       const wikiGone = await fetch(`${origin}/api/wiki/${encodeURIComponent(wikiId)}`, { headers: authHeaders(cookie, false) })
       assert.equal(wikiGone.status, 404)
-      t.diagnostic(`FINAL RESTART/EMPTY ${workspaceCases.length + 2}/${workspaceCases.length + 2} PASS · 삭제 후 재등장 없음`)
+      const approvalGone = await fetch(`${origin}/api/approval-documents/${encodeURIComponent(approvalId)}`, { headers: authHeaders(cookie, false) })
+      assert.equal(approvalGone.status, 404, '지운 결재 기안은 재기동해도 돌아오지 않는다')
+      const approvalList = await (await fetch(`${origin}/api/approval-documents`, { headers: authHeaders(cookie, false) })).json()
+      assert.equal(approvalList.documents.length, 0)
+      t.diagnostic(`FINAL RESTART/EMPTY ${workspaceCases.length + 3}/${workspaceCases.length + 3} PASS · 삭제 후 재등장 없음`)
     })
   } finally {
     await rm(directory, { recursive: true, force: true })

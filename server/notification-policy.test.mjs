@@ -121,6 +121,26 @@ test('아침 요약은 안 읽은 것만, 긴급은 빼고 센다', () => {
   assert.match(digest.body, /멘션 1건/)
 })
 
+test('아침 요약은 원 알림이 가리키던 자리를 그대로 가리킨다 — 유형 표로 다시 찍지 않는다', () => {
+  // NOTIFICATION_TYPES['approval-requested'].page 는 업무 결재 시절의 'tasks' 다. 그 표로 다시 찍으면
+  // focusId 는 결재 문서 id(APD-…)인데 page 는 'tasks' 인 요약이 나가고, 사람은 「밤사이 알림 1건」을
+  // 눌러 업무지시 화면에 떨어진다 — 기다리던 결재는 열리지 않는다(규칙 3·11).
+  const held = [notice('approval-requested', {
+    id: 'A', createdAt: '2026-09-04T17:00:00.000Z', page: 'approvals', focusId: 'APD-MTKCDCW0-DE3D',
+  })]
+  const digest = buildQuietDigest({ held, recipientId: ME, now: new Date('2026-09-04T22:05:00.000Z') })
+  assert.equal(digest.page, 'approvals', '요약이 원 알림과 다른 화면을 가리킨다')
+  assert.equal(digest.focusId, 'APD-MTKCDCW0-DE3D')
+
+  // page 를 적지 않은 옛 행은 그대로 유형 표로 떨어진다(하위호환).
+  const legacy = buildQuietDigest({
+    held: [notice('mention', { id: 'B', createdAt: '2026-09-04T17:00:00.000Z' })],
+    recipientId: ME,
+    now: new Date('2026-09-04T22:05:00.000Z'),
+  })
+  assert.equal(legacy.page, 'messenger')
+})
+
 test('참아 둔 것이 없으면 아침에 아무것도 보내지 않는다', () => {
   assert.equal(buildQuietDigest({ held: [], recipientId: ME }), null)
 })

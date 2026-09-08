@@ -23,9 +23,11 @@ import {
   normalizeDelegate,
   pendingApproverIds,
   summarizePostings,
+  valueError,
 } from './approval-routing.mjs'
 import { renderApprovalMarkdown, renderApprovalPrintHtml } from './approval-print.mjs'
 import { billingDate } from './billing-service.mjs'
+import { DocumentStorageError, getTenantDocument, tenantDocumentSignedUrl } from './document-storage-service.mjs'
 import { GUEST_ROLE, GUEST_SCOPE_FORBIDDEN } from './guest-access.mjs'
 
 /**
@@ -76,6 +78,10 @@ const ERROR_STATUS = new Map([
 ])
 
 const NOT_FOUND = { code: 'APPROVAL_DOCUMENT_NOT_FOUND', message: '결재 문서를 찾을 수 없거나 열람 권한이 없습니다.' }
+/** 첨부 한 건의 404. 「이 결재의 첨부가 아니다」와 「열 권한이 없다」를 가르지 않는다 — 가르면 존재가 샌다. */
+const ATTACHMENT_NOT_FOUND = { code: 'APPROVAL_ATTACHMENT_NOT_FOUND', message: '첨부 자료를 찾을 수 없거나 열람 권한이 없습니다.' }
+/** 열 수 없는 첨부가 인쇄물에서 차지하는 자리. 이름 대신 이 문장이다 — 파일 이름은 종종 내용이다. */
+const ATTACHMENT_CLOSED_LABEL = '열람 권한이 없는 첨부'
 const FORM_NOT_FOUND = { code: 'APPROVAL_FORM_NOT_FOUND', message: '결재 양식을 찾을 수 없습니다.' }
 const WRITE_FAILED = { code: 'APPROVAL_WRITE_FAILED', message: '결재 내용을 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }
 const DRAFTER_REQUIRED = { code: 'APPROVAL_DRAFTER_REQUIRED', message: '기안자만 할 수 있습니다.' }
@@ -179,6 +185,57 @@ export function registerApprovalRoutes({
       if (!hadTenant && Object.keys(tenantStore).length === 0) delete workspaceStore.tenants[tenantId]
       return false
     }
+  }
+
+  /**
+   * 승인 증빙 문서(`writeEvidenceFile`)를 열 사람들 — 기안자 · 참조자 · 결재선에 이름이 적힌 사람과
+   * 실제로 누른 사람.
+   *
+   * **여기서 만드는 명단은 이 커밋에서 새로 태어나는 자료 한 건(.md)의 것뿐이다.** 이미 있던
+   * 자료실 행의 `allowedUserIds` 는 결재가 절대 고치지 않는다 — 그 이유는 아래
+   * `canReadApprovalAttachment` 의 주석이 적는다.
+   *
+   * 오늘자 대결자를 넣지 않는 이유도 같다. 대결은 기간이 끝나면 사라지는 사실인데, 새 문서의
+   * 명단에 박아 두면 그 사람은 대결이 끝난 뒤에도 영원히 그 증빙을 연다. 대결로 **실제로 누른**
+   * 사람은 자리에 `decidedById` 로 남아 아래 배열에 그대로 들어온다.
+   */
+  const evidenceReaderIds = (document) => {
+    const approvers = (Array.isArray(document?.line) ? document.line : [])
+      .flatMap((step) => (Array.isArray(step?.approvers) ? step.approvers : []))
+    return [...new Set([
+      document?.drafterId,
+      ...(Array.isArray(document?.ccIds) ? document.ccIds : []),
+      ...approvers.map((approver) => approver?.accountId),
+      ...approvers.map((approver) => approver?.decidedById),
+    ].filter((id) => typeof id === 'string' && id))]
+  }
+
+  /**
+   * 이 사람이 **지금** 이 결재의 이 첨부를 열 수 있는가. 부르는 쪽은 이미 두 가지를 지났다:
+   * 문서를 볼 수 있다(`canReadApprovalDocument`)는 것과, 그 id 가 이 문서가 붙잡은 첨부
+   * (`linkedAttachmentIdsOf`)라는 것.
+   *
+   * **저장된 명단이 아니라 매 요청 다시 재는 술어다.** 이전 회차는 결재가 자료실 행의
+   * `allowedUserIds` 에 사람을 더해 두는 방식이었는데, 그 넓힘은 되돌아오지 않아서 —
+   *
+   * - 평사원 한 명이 아무 동료나 하루짜리 대결자로 세우는 것만으로 그 동료가 남의 restricted
+   *   원본을 영구히 얻었고(대결 행을 지워도 닫히지 않았다),
+   * - 그렇게 얻은 사람이 같은 파일을 자기 결재에 붙여 또 넘기는 **연쇄**가 있었고,
+   * - 관리자가 `PATCH /api/documents/:id` 로 회수해도 **다음 결재 한 번이 되돌려** 놓았다.
+   *
+   * 결재 문서의 가시성은 이미 매 요청 다시 재고 있었다(대결이 끝나는 순간 404). 첨부만 저장된
+   * ACL 로 남겨 두면 그 비대칭이 곧 구멍이다 — 문서는 404 인데 원본만 200 으로 열려, 맥락 없이
+   * 파일만 남는다. 그래서 첨부도 문서와 **같은 방식으로** 잰다.
+   *
+   * 「기안」은 아무 문도 열지 않는다. 초안은 아직 아무에게도 갈 일이 없는데 여기서 열어 주면
+   * 초안 하나를 만드는 것만으로 남의 자료를 임의의 구성원에게 보여 줄 수 있다. 상신 뒤로 미루면
+   * 넓힘을 설명하는 결재 문서가 **반드시** 남는다(상신한 문서는 어떤 끝에서도 지워지지 않는다).
+   * 그때까지는 자기 자료실 권한으로만 연다.
+   */
+  const canReadApprovalAttachment = (document, row, auth) => {
+    if (!row) return false
+    if (canReadDocument(row, auth)) return true
+    return document?.status !== '기안'
   }
 
   /** 결재자로 지정할 수 있는 계정. 게스트와 미승인 계정은 결재선에 설 수 없다. */
@@ -450,6 +507,8 @@ export function registerApprovalRoutes({
     if (result.error) { fail(response, result.error); return }
     const position = rows.findIndex((row) => row?.recordType === 'delegate' && row.accountId === targetId)
     const next = position < 0 ? [...rows, result.delegate] : rows.map((row, at) => (at === position ? result.delegate : row))
+    // 대결 행만 쓴다. 자료실 열람 명단은 건드리지 않는다 — 대결자가 근거를 여는 자격은
+    // 저장해 두는 명단이 아니라 요청마다 다시 재는 술어다(canReadApprovalAttachment).
     if (!await writeRows(auth.tenantId, FORMS_KEY, next, auth.id, now)) {
       response.status(500).json({ error: WRITE_FAILED })
       return
@@ -475,6 +534,15 @@ export function registerApprovalRoutes({
     const status = APPROVAL_STATUS_SET.has(String(request.query.status ?? '')) ? String(request.query.status) : ''
     const requested = Number(request.query.limit)
     const limit = Number.isInteger(requested) && requested > 0 ? Math.min(requested, MAX_LIST_LIMIT) : MAX_LIST_LIMIT
+    /**
+     * 나머지에 닿는 길. 이것이 없으면 「내 결재」 탭에서 상한을 넘긴 문서에 **어떤 길로도** 닿지
+     * 못한다 — 그 탭은 서버가 `canDecide` 로 거르는데 canDecide 는 '결재중'만 통과시키므로,
+     * 화면이 주는 상태 좁히기 여섯 갈래 중 '결재중'은 좁히지 않은 것과 같고 나머지는 0건이다.
+     * 「남은 N건은 좁혀 찾아 주세요」가 참이 되려면 좁힐 길이 실제로 있어야 한다(규칙 11).
+     * 모양이 아닌 값은 거절하지 않고 처음부터 준다 — 목록은 읽기이고, 400 은 화면을 멈춘다.
+     */
+    const requestedOffset = Number(request.query.offset)
+    const offset = Number.isInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0
     const scoped = readable.filter((document) => {
       if (scope === 'waiting') return canDecide(document, auth.id, delegateFor)
       if (scope === 'drafted') return document.drafterId === auth.id
@@ -483,7 +551,7 @@ export function registerApprovalRoutes({
     }).filter((document) => !status || document.status === status)
     const documents = [...scoped]
       .sort((left, right) => String(right.updatedAt ?? '').localeCompare(String(left.updatedAt ?? '')))
-      .slice(0, limit)
+      .slice(offset, offset + limit)
     response.json({
       documents,
       // 자른 배열의 길이를 세지 않는다. summary 는 「볼 수 있는 전부」를 세고, documents 는 그중 limit 개다.
@@ -538,9 +606,27 @@ export function registerApprovalRoutes({
     const { document } = found
     const form = formsOf(auth.tenantId).find((entry) => entry.id === document.formId) ?? null
     const seat = approvalSeatFor(document, { actorId: auth.id, delegateFor })
+    // 첨부의 **이름**은 여기서 한 번만 답한다. 화면이 자료 목록을 따로 훑어 이름을 맞추면
+    // 인쇄물·증빙과 다른 답이 나올 수 있고, 이름 없는 내려받기 버튼은 무엇을 내려받는지 말하지
+    // 못한다. 무엇이 첨부인가는 쓰기 때 저장된 배열이 정한다(linkedAttachmentIdsOf).
+    //
+    // `canRead` 는 내려받기 라우트와 **같은 술어**로 답한다(canReadApprovalAttachment) — 두 자리가
+    // 각자 판정하면 「버튼은 그려지는데 누르면 404」나 그 반대가 생긴다(규칙 1·3·5·8).
+    //
+    // 그리고 `canRead:false` 인 항목에는 **이름을 싣지 않는다.** 이 저장소에서 파일 이름은 종종
+    // 내용이다(「생산1팀-내부단가.pdf」). 열 수 없는 파일의 이름을 주는 것은 「무엇을 내려받는지
+    // 말해 준다」는 근거가 서지 않는 자리다 — 내려받을 수 없으니까.
+    const library = Array.isArray(documentRecord(auth.tenantId)?.data) ? documentRecord(auth.tenantId).data : []
+    const attachments = linkedAttachmentIdsOf(document, form)
+      .map((attachmentId) => library.find((row) => row?.id === attachmentId))
+      .filter(Boolean)
+      .map((row) => (canReadApprovalAttachment(document, row, auth)
+        ? { id: row.id, name: String(row.name ?? row.originalName ?? '첨부파일'), canRead: true }
+        : { id: row.id, canRead: false }))
     response.json({
       document,
       form,
+      attachments,
       permissions: {
         canDecide: Boolean(seat.seat),
         canRecall: canRecall(document, auth.id),
@@ -549,6 +635,58 @@ export function registerApprovalRoutes({
       },
       delegateOf: seat.delegateOf ?? null,
     })
+  })
+
+  // ── 10-b. 결재 범위 첨부 내려받기 ───────────────────────────────────────────
+  /**
+   * **결재가 붙잡은 첨부를, 그 결재를 볼 수 있는 사람에게만** 넘긴다.
+   *
+   * 이 문이 있어야 결재가 자료실의 열람 명단을 고치지 않을 수 있다. 자료실 명단을 고치는 방식은
+   * 되돌아오지 않아서 대결 한 번·결재 한 번이 남의 원본을 영구히 열어젖혔다
+   * (`canReadApprovalAttachment` 주석). 여기서는 매 요청 세 가지를 다시 잰다:
+   *
+   * 1) 이 결재를 볼 수 있는가(`findDocument` → `canReadApprovalDocument`) — 대결이 끝나면 거짓이 된다,
+   * 2) 이 id 가 **이 결재가 붙잡은** 첨부인가(`linkedAttachmentIdsOf`) — 아니면 문서 id 하나로
+   *    자료실 전체를 여는 창구가 된다,
+   * 3) 「기안」이 아니거나, 자기 자료실 권한으로 이미 열리는가(`canReadApprovalAttachment`).
+   *
+   * 하나라도 어긋나면 404다 — 「권한이 없습니다」는 그 파일이 이 결재에 붙어 있다는 사실 자체를
+   * 알려 준다(이 파일이 지키는 것 ①).
+   */
+  app.get('/api/approval-documents/:id/attachments/:attachmentId', ...guards, async (request, response) => {
+    const auth = gate(request, response)
+    if (!auth) return
+    const now = clock().toISOString()
+    const delegateFor = delegateForOf(auth.tenantId, auth.id, billingDate(now))
+    const found = findDocument(auth, request.params.id, delegateFor)
+    if (!found) { response.status(404).json({ error: NOT_FOUND }); return }
+    const { document } = found
+    const attachmentId = String(request.params.attachmentId ?? '')
+    const form = formsOf(auth.tenantId).find((entry) => entry.id === document.formId) ?? null
+    if (!linkedAttachmentIdsOf(document, form).includes(attachmentId)) {
+      response.status(404).json({ error: ATTACHMENT_NOT_FOUND }); return
+    }
+    const library = Array.isArray(documentRecord(auth.tenantId)?.data) ? documentRecord(auth.tenantId).data : []
+    const row = library.find((entry) => entry?.id === attachmentId)
+    if (!canReadApprovalAttachment(document, row, auth)) {
+      response.status(404).json({ error: ATTACHMENT_NOT_FOUND }); return
+    }
+    if (!documentStorage) { response.status(404).json({ error: ATTACHMENT_NOT_FOUND }); return }
+    // 내려받기 횟수는 세지 않는다. '자주 찾는 파일' 집계는 자료실의 사실이고, 결재자가 근거를
+    // 한 번 열어 본 것을 거기에 섞으면 그 수가 무엇을 세는지 답할 수 없게 된다.
+    try {
+      const signedUrl = await tenantDocumentSignedUrl(documentStorage, row, auth.tenantId)
+      if (signedUrl) { response.redirect(302, signedUrl); return }
+      const body = await getTenantDocument(documentStorage, row, auth.tenantId)
+      response.setHeader('content-type', row.mime || 'application/octet-stream')
+      response.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeFileName(row.originalName || row.name, 'document'))}`)
+      response.send(body)
+    } catch (error) {
+      // 자료실 경로와 같은 문장을 쓴다 — 같은 파일을 두 문으로 열었을 때 다른 말을 하면 안 된다.
+      const status = error instanceof DocumentStorageError ? error.status : 500
+      const code = error instanceof DocumentStorageError ? error.code : 'DOCUMENT_DOWNLOAD_FAILED'
+      response.status(status).json({ error: { code, message: status === 410 ? '파일 원본을 찾을 수 없습니다. 관리자에게 복구를 요청해 주세요.' : '자료를 다운로드하지 못했습니다.' } })
+    }
   })
 
   // ── 11. 기안 ────────────────────────────────────────────────────────────────
@@ -583,16 +721,18 @@ export function registerApprovalRoutes({
       response.status(409).json({ error: { code: 'APPROVAL_FORM_INACTIVE', message: '더 이상 쓰지 않는 양식입니다. 다른 양식을 골라 주세요.' } })
       return
     }
+    const submit = request.body?.submit === true
     const title = clip(request.body?.title, MAX_TITLE)
-    if (!title) { fail(response, { ...APPROVAL_ERRORS.VALUE_REQUIRED, key: 'title' }); return }
-    const values = normalizeApprovalValues(form, request.body?.values)
+    // 제목은 임시저장에서도 받는다 — 목록에 이름 없는 줄을 만들면 「이어서 작성」할 문서를 고를 길이 없다.
+    if (!title) { fail(response, valueError(APPROVAL_ERRORS.VALUE_REQUIRED, { key: 'title', label: '제목' })); return }
+    // 필수 항목은 **상신에서** 잰다. '기안'은 아직 아무에게도 가지 않은 메모장이다(normalizeApprovalValues 주석).
+    const values = normalizeApprovalValues(form, request.body?.values, { requireFilled: submit })
     if (values.error) { fail(response, values.error); return }
     const attachments = normalizeAttachments(request.body?.attachments)
     if (attachments.error) { fail(response, attachments.error); return }
     const index = accountIndexOf(auth)
     const cc = normalizeCcIds(request.body?.ccIds, index)
     if (cc.error) { fail(response, cc.error); return }
-    const submit = request.body?.submit === true
     const line = normalizeApprovalLine(request.body?.line, {
       drafterId: auth.id, approverIds: index, defaultLine: form.defaultLine, requireSteps: submit,
     })
@@ -660,12 +800,14 @@ export function registerApprovalRoutes({
     const body = request.body ?? {}
     if (Object.hasOwn(body, 'title')) {
       const title = clip(body.title, MAX_TITLE)
-      if (!title) { fail(response, { ...APPROVAL_ERRORS.VALUE_REQUIRED, key: 'title' }); return }
+      if (!title) { fail(response, valueError(APPROVAL_ERRORS.VALUE_REQUIRED, { key: 'title', label: '제목' })); return }
       next.title = title
     }
     if (Object.hasOwn(body, 'values')) {
       if (!form) { response.status(404).json({ error: FORM_NOT_FOUND }); return }
-      const values = normalizeApprovalValues(form, body.values)
+      // PATCH 는 '기안'에서만 열린다 — 여기가 곧 임시저장이므로 필수를 재지 않는다.
+      // 「이어서 작성」하다 채운 칸을 다시 비우는 것도 저장돼야 한다.
+      const values = normalizeApprovalValues(form, body.values, { requireFilled: false })
       if (values.error) { fail(response, values.error); return }
       next.values = values.values
     }
@@ -755,6 +897,14 @@ export function registerApprovalRoutes({
     // 아무도 결재할 수 없는 채로 돌기 시작한다. 아직 아무도 결정하지 않았으므로 다시 만들어도 잃는 것이 없다.
     const line = normalizeApprovalLine(document.line, { drafterId: auth.id, approverIds: accountIndexOf(auth), requireSteps: true })
     if (line.error) { fail(response, line.error); return }
+    // 필수 항목도 여기서 잰다. '기안'은 임시저장이라 빈 칸을 받아 두고, 남에게 가는 순간에 비로소
+    // 다 채웠는지 묻는다. 양식이 사라진 옛 문서는 무엇이 필수인지 답할 곳이 없으므로 그냥 지난다 —
+    // 되살릴 수 없는 양식 때문에 이미 쓴 기안이 영영 상신되지 못하는 막다른 길을 만들지 않는다.
+    const submitForm = formsOf(auth.tenantId).find((entry) => entry.id === document.formId) ?? null
+    if (submitForm) {
+      const values = normalizeApprovalValues(submitForm, document.values, { requireFilled: true })
+      if (values.error) { fail(response, values.error); return }
+    }
     const next = {
       ...document,
       line: line.line,
@@ -770,7 +920,7 @@ export function registerApprovalRoutes({
       response.status(500).json({ error: WRITE_FAILED })
       return
     }
-    announceStep(auth, next, formsOf(auth.tenantId).find((entry) => entry.id === next.formId) ?? null, now)
+    announceStep(auth, next, submitForm, now)
     response.json({ document: next })
   })
 
@@ -845,7 +995,6 @@ export function registerApprovalRoutes({
       decided.history = applied.history
       effects.evidenceTaggedAttachments = applied.tagged
     }
-
     const tenantStore = workspaceStore.tenants[auth.tenantId] ??= {}
     const previousDocumentsRecord = tenantStore[DOCUMENTS_KEY]
     tenantStore[DOCUMENTS_KEY] = {
@@ -914,7 +1063,6 @@ export function registerApprovalRoutes({
       document: decided, form, tenantName: auth.tenantName ?? '', attachments, attachmentIds, names,
     }), 'utf8')
     const evidenceId = `DOC-${new Date(now).getTime()}-${randomBytes(4).toString('hex')}`
-    const approvers = (Array.isArray(decided.line) ? decided.line : []).flatMap((step) => (Array.isArray(step?.approvers) ? step.approvers : []))
     const evidenceDoc = {
       id: evidenceId,
       tenantId: auth.tenantId,
@@ -925,13 +1073,8 @@ export function registerApprovalRoutes({
       category: '세무·회계',
       visibility: 'restricted',
       departments: [],
-      // 이름이 적힌 결재자와 **실제로 누른 사람**을 함께 넣는다. decidedById 를 빼면 대결로 승인한
-      // 사람이 자기가 승인한 건의 증빙을 열지 못한다(§1.5 가시성이 고친 것과 같은 종류의 구멍이다).
-      allowedUserIds: [...new Set([
-        decided.drafterId,
-        ...approvers.map((approver) => approver?.accountId),
-        ...approvers.map((approver) => approver?.decidedById),
-      ].filter(Boolean))],
+      // **이 커밋에서 새로 태어나는 문서 하나**의 명단이다. 이미 있던 자료실 행은 건드리지 않는다.
+      allowedUserIds: evidenceReaderIds(decided),
       aiPolicy: 'active',
       tags: [...taxTags, `approval:${decided.id}`],
       summary: `${taxDate} ${form.evidenceCategory} · ${form.name} 승인`,
@@ -1028,10 +1171,17 @@ export function registerApprovalRoutes({
     // 무엇이 첨부인지는 여기서 한 번만 답하고, 렌더러는 그 목록에 이름을 붙일 뿐이다.
     // 그 답은 쓰기 때 저장된 배열이다 — 인쇄물이 증빙·삭제 잠금과 같은 사실을 말해야 한다.
     const attachmentIds = linkedAttachmentIdsOf(document, form)
+    // 이름을 실을지도 상세·내려받기와 **같은 술어**로 가른다. 인쇄물만 이름을 흘리면 상세에서
+    // 감춘 것을 종이가 되돌려 놓는다(규칙 3·8). 열 수 없는 첨부는 이름 대신 그 사실을 적는다.
     const attachments = attachmentIds
       .map((id) => library.find((row) => row?.id === id))
       .filter(Boolean)
-      .map((row) => ({ id: row.id, name: String(row.name ?? row.originalName ?? '첨부파일') }))
+      .map((row) => ({
+        id: row.id,
+        name: canReadApprovalAttachment(document, row, auth)
+          ? String(row.name ?? row.originalName ?? '첨부파일')
+          : ATTACHMENT_CLOSED_LABEL,
+      }))
     response.set('content-type', 'text/html; charset=utf-8')
     // 결재문서는 사람이 열 때마다 지금의 결재선을 그대로 찍어야 한다. 프록시가 한 장을 캐시하면
     // 다음 사람이 남의 진행 상태를 본다.

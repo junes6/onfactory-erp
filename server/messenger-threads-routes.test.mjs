@@ -225,7 +225,7 @@ test('루트를 지워도 스레드는 열린다 — 답글은 다른 사람의 
     assert.match(late.body.error.message, /지워진 말에는 답글을 달 수 없습니다/)
 
     // 승격은 남아 있는 말만 옮겨 적는다. tombstone이 맨 앞에 오면 자동 제목이 '삭제된 메시지'가 되어
-    // 아무도 읽을 수 없는 말의 이름을 단 업무가 결재함에 선다.
+    // 아무도 읽을 수 없는 말의 이름을 단 업무가 승인 큐에 선다.
     const promoted = await post(origin, park, `/api/messenger/conversations/${room.id}/threads/${root.id}/promote`, { kind: 'task' })
     assert.equal(promoted.status, 201)
     const created = (await get(origin, admin, '/api/workspace/work-items')).body.data.find((item) => item.id === promoted.body.created.id)

@@ -57,7 +57,7 @@ const routeNavigation: Readonly<Record<TenantRouteId, NavigationModuleItem>> = {
   ai: { id: 'ai', label: 'AI 업무허브', icon: Sparkles },
   schedule: { id: 'schedule', label: '일정관리', icon: CalendarDays },
   tasks: { id: 'tasks', label: '업무지시 · 결재', icon: ListChecks },
-  approvals: { id: 'approvals', label: 'AI 제안 검토', icon: ClipboardCheck },
+  approvals: { id: 'approvals', label: '결재 · AI 제안', icon: ClipboardCheck },
   journal: { id: 'journal', label: '일일업무일지', icon: NotebookPen },
   projects: { id: 'projects', label: '프로젝트', icon: FolderKanban },
   people: { id: 'people', label: '인사 · 조직', icon: Users },
