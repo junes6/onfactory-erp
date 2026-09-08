@@ -2284,12 +2284,14 @@ export function createApp(options = {}) {
         ...(Array.isArray(item?.comments) ? item.comments.flatMap((comment) => Array.isArray(comment?.attachments) ? comment.attachments.map(idOf) : []) : []),
         // R16-H: 문서(위키) 본문의 그림·파일. 빠뜨리면 문서 속 그림이 자료실에서 그냥 지워진다.
         ...(Array.isArray(item?.blocks) ? item.blocks.map((block) => block?.attachmentId) : []),
-        // R16-I: 결재 양식의 `attachment` 항목 값(`values.<key>`에 든 `DOC-…`). 첨부 배열과 같은
-        // 자료를 같은 무게로 붙잡는다 — 여기를 세지 않으면 「영수증」 칸에 넣은 파일만 결재가 도는
-        // 중에 자료실에서 지워진다. 문자열 갈래와 같은 스위치로 열어 결재 키에서만 켜진다.
-        ...(stringAttachments && item?.values && typeof item.values === 'object' && !Array.isArray(item.values)
-          ? Object.values(item.values)
-          : []),
+        // R16-I: 결재 문서가 붙잡은 자료. 결재 라우트가 쓰기마다 `attachmentIdsOf`(첨부 배열 ∪
+        // 양식의 `attachment` **항목** 값)로 적어 두는 서버 소유 필드다. 여기서 `values` 를 다시
+        // 훑지 않는 이유: 「무엇이 첨부인가」를 두 곳이 다르게 답하면, 읽기 권한을 검사하는 쪽
+        // (forbiddenAttachment)보다 세는 쪽이 넓어져 아무나 자유 텍스트 칸에 `DOC-` 한 줄을 적는
+        // 것만으로 **읽을 권한도 없는** 남의 자료를 영구히 삭제 불가로 묶는다.
+        // 문자열 갈래와 같은 스위치로 열어 결재 키에서만 켜진다 — 결재 밖 키에 이 이름의 배열을
+        // 심어 같은 짓을 하는 길도 함께 닫힌다.
+        ...(stringAttachments && Array.isArray(item?.linkedAttachmentIds) ? item.linkedAttachmentIds : []),
         item?.evidenceId,
         item?.drawingDocumentId,
         item?.backgroundDocumentId,
@@ -2336,20 +2338,45 @@ export function createApp(options = {}) {
     }
     return resolved
   }
-  const documentIsReferenced = (tenantId, id) => {
+  /**
+   * 이 자료를 **무엇이** 붙잡고 있는가. 「잡혀 있다」만으로는 사용자에게 할 말을 정할 수 없다 —
+   * 사람이 풀 수 있는 연결과, 규정상 영구히 남는 승인 근거는 다른 사실이고 다른 문장을 받아야 한다.
+   *
+   * 끝난 결재 중 **반려·회수는 세지 않는다.** 그 문서는 죽었고 화면에 연결을 풀 길도 없다
+   * (PATCH 는 409 APPROVAL_NOT_EDITABLE, DELETE 는 '기안' 에서만 열린다). 그것까지 세면
+   * 잘못 올려 반려된 기안 하나가 그 영수증을 자료실에 영구히 못 박고, 409 문구는 아무도
+   * 할 수 없는 행동을 하라고 말한다(규칙 11).
+   *
+   * 돌려주는 값: `null`(안 잡힘) · `'approval-evidence'`(승인된 결재의 근거, 영구) ·
+   * `'approval-active'`(결재중 — 결과에 따라 갈린다) · `'linked'`(화면에서 풀 수 있는 연결).
+   * `'기안'` 은 마지막 갈래다 — 기안자가 PATCH 로 첨부를 비우거나 기안을 지우면 그 자리에서 풀린다.
+   */
+  const documentReferenceHold = (tenantId, id) => {
     const tenantStore = workspaceStore.tenants[tenantId] ?? {}
     const document = (Array.isArray(documentRecord(tenantId)?.data) ? documentRecord(tenantId).data : []).find((item) => item.id === id)
+    // 결재가 먼저다. 승인 근거로 잠긴 자료는 다른 연결을 다 풀어도 지워지지 않으므로,
+    // 「연결을 해제하라」는 문장을 주면 사용자는 풀고 와서 같은 409를 다시 받는다.
+    const approvals = Array.isArray(tenantStore['approval-documents']?.data) ? tenantStore['approval-documents'].data : []
+    const held = (rows) => linkedDocumentIds(rows, { stringAttachments: true }).includes(id)
+    if (held(approvals.filter((row) => row?.status === '승인'))) return 'approval-evidence'
+    if (held(approvals.filter((row) => row?.status === '결재중'))) return 'approval-active'
     // 보관한 공지는 채널에서 내려간 글이다. 그 첨부까지 영구 잠그면 자료실을 정리할 길이 사라진다
     // (공지에는 삭제 라우트가 없다).
     const activeNotices = (Array.isArray(tenantStore[NOTICES_KEY]?.data) ? tenantStore[NOTICES_KEY].data : [])
       .filter((notice) => !notice?.archivedAt)
-    return isFactoryDrawingDocument(document)
+    const linked = isFactoryDrawingDocument(document)
       || linkedDocumentIds(activeNotices).includes(id)
-      // 결재 문서는 첨부(`attachments[]` **문자열** 배열)와 증빙(`evidenceId`)으로 자료를 붙잡는다.
-      // 빠뜨리면 결재가 도는 중에 근거 파일이 자료실에서 사라진다. 문자열 갈래는 그 키에서만 켠다 —
-      // 다른 키는 객체 첨부만 쓰고, 거기까지 켜면 generic PUT의 수용 계약이 함께 좁아진다.
-      || ['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations', 'project-posts', 'it-contracts', 'it-deliverables', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'wiki-documents', 'approval-documents']
-        .some((key) => linkedDocumentIds(tenantStore[key]?.data, { stringAttachments: key === 'approval-documents' }).includes(id))
+      || held(approvals.filter((row) => row?.status === '기안'))
+      || ['daily-journals', 'compliance-records', 'work-items', 'inventory-movements', 'factory-layouts', 'messenger-conversations', 'project-posts', 'it-contracts', 'it-deliverables', 'it-support-programs', 'company-assets', 'tax-events', 'ip-rights', 'wiki-documents']
+        .some((key) => linkedDocumentIds(tenantStore[key]?.data).includes(id))
+    return linked ? 'linked' : null
+  }
+  const documentIsReferenced = (tenantId, id) => documentReferenceHold(tenantId, id) !== null
+  /** 잡고 있는 것마다 사람이 실제로 할 수 있는 일이 다르다. 한 사실에 한 문장(규칙 3·11). */
+  const DOCUMENT_HOLD_MESSAGE = {
+    'approval-evidence': '승인된 전자결재의 근거 자료입니다. 결재 기록이 이 파일을 가리키므로 삭제할 수 없습니다.',
+    'approval-active': '결재가 도는 중인 문서가 이 자료를 근거로 쓰고 있습니다. 그 결재가 반려·회수되면 삭제할 수 있고, 승인되면 근거로 남아 삭제할 수 없습니다.',
+    linked: '다른 화면에서 사용 중인 자료입니다. 해당 화면에서 먼저 연결을 해제한 뒤 삭제해 주세요.',
   }
   const safeDownloadName = (value) => String(value || 'document').replace(/[\r\n"]/g, '_').slice(0, 180)
   /**
@@ -2895,10 +2922,11 @@ export function createApp(options = {}) {
     if (!document) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } }); return }
     if (isFactoryDrawingDocument(document) && request.auth.role !== 'tenant-admin') { response.status(403).json({ error: { code: 'FACTORY_DRAWING_WRITE_FORBIDDEN', message: '공장 배경 도면은 회사 관리자만 삭제할 수 있습니다.' } }); return }
     if (request.auth.role !== 'tenant-admin' && document.uploadedById !== request.auth.id) { response.status(403).json({ error: { code: 'DOCUMENT_DELETE_FORBIDDEN', message: '본인이 업로드한 자료만 삭제할 수 있습니다.' } }); return }
-    // 문장은 `documentIsReferenced` 가 실제로 훑는 범위와 같아야 한다(규칙 11). 그 판정은 공지·도면과
-    // 저장소 키 열다섯 개를 본다 — 화면 이름을 나열하면 그 목록은 키가 늘 때마다 조용히 거짓이 되고,
-    // 사용자는 그 자료를 붙잡고 있지도 않은 화면에 가서 연결을 풀라는 말을 듣는다. 그래서 범위로 적는다.
-    if (documentIsReferenced(request.auth.tenantId, document.id)) { response.status(409).json({ error: { code: 'DOCUMENT_IN_USE', message: '다른 화면에서 사용 중인 자료입니다. 해당 화면에서 먼저 연결을 해제한 뒤 삭제해 주세요.' } }); return }
+    // 문장은 `documentReferenceHold` 가 실제로 답한 것과 같아야 한다(규칙 11). 화면 이름을 나열하면
+    // 그 목록은 키가 늘 때마다 조용히 거짓이 되므로 범위로 적고, **할 수 있는 일이 다른 세 갈래**는
+    // 문장을 가른다 — 승인 근거는 영영 못 지우는데 「연결을 해제한 뒤」라고 말하면 거짓말이다.
+    const hold = documentReferenceHold(request.auth.tenantId, document.id)
+    if (hold) { response.status(409).json({ error: { code: 'DOCUMENT_IN_USE', message: DOCUMENT_HOLD_MESSAGE[hold] } }); return }
     let originalBytes = null
     let removedFile = false
     try {
@@ -7621,6 +7649,13 @@ export function createApp(options = {}) {
       response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } })
       return
     }
+    // 「전용 라우트가 있는 영역」이라는 사실은 직무보다 먼저 답한다 — 같은 키를 보는 GET 과 같은 순서다.
+    // 직무 판정이 앞서면 구성원만 STORE_WRITE_FORBIDDEN 을 받아, 같은 키를 두고 GET 과 PUT 이
+    // 서로 다른 문장을 주고 화면은 어디로 가야 하는지 알 수 없게 된다.
+    if (APPROVAL_ONLY_KEYS.has(key)) {
+      response.status(403).json({ error: { code: 'APPROVAL_ROUTE_REQUIRED', message: '전자결재 양식과 문서는 결재 화면에서만 변경할 수 있습니다.' } })
+      return
+    }
     if (request.auth.role === 'tenant-member' && !TENANT_MEMBER_WRITE_KEYS.has(key)) {
       response.status(403).json({ error: { code: 'STORE_WRITE_FORBIDDEN', message: '현재 직무 권한으로 이 데이터를 변경할 수 없습니다.' } })
       return
@@ -7640,10 +7675,6 @@ export function createApp(options = {}) {
     }
     if (key === 'personal-todos') {
       response.status(403).json({ error: { code: 'PERSONAL_TODO_ROUTE_REQUIRED', message: '개인 할 일은 내 할 일 전용 기능에서만 변경할 수 있습니다.' } })
-      return
-    }
-    if (APPROVAL_ONLY_KEYS.has(key)) {
-      response.status(403).json({ error: { code: 'APPROVAL_ROUTE_REQUIRED', message: '전자결재 양식과 문서는 결재 화면에서만 변경할 수 있습니다.' } })
       return
     }
     if (key === PROJECT_TEMPLATES_KEY) {

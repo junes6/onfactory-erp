@@ -68,6 +68,7 @@ const ERROR_STATUS = new Map([
   [APPROVAL_ERRORS.NOT_APPROVER.code, 403],
   [APPROVAL_ERRORS.SEAT_TAKEN.code, 403],
   [APPROVAL_ERRORS.ALREADY_DECIDED.code, 409],
+  [APPROVAL_ERRORS.NOT_SUBMITTED.code, 409],
   [APPROVAL_ERRORS.LINE_BROKEN.code, 409],
   [APPROVAL_ERRORS.RECALL_FORBIDDEN.code, 409],
   [APPROVAL_ERRORS.NOT_EDITABLE.code, 409],
@@ -159,8 +160,13 @@ export function registerApprovalRoutes({
   /**
    * 키 하나를 쓰고 커밋한다. 실패하면 **그 키만** 이전 값으로 되돌린다 —
    * 테넌트 객체 전체를 되돌리면 같은 커밋에 실린 다른 키의 변경까지 함께 사라진다.
+   *
+   * 되돌리기의 마지막 줄은 회사 객체 자체다(app.mjs 의 stageDocumentList 와 같은 모양). `??= {}` 로
+   * 만들어 놓은 빈 회사를 남기면 **저장된 적 없는 회사**가 메모리에 앉고, 다음 성공 커밋이 그것을
+   * 그대로 디스크에 싣는다. 우리가 만들었고 아직 비어 있을 때만 지운다.
    */
   const writeRows = async (tenantId, key, rows, accountId, now) => {
+    const hadTenant = Object.prototype.hasOwnProperty.call(workspaceStore.tenants, tenantId)
     const tenantStore = workspaceStore.tenants[tenantId] ??= {}
     const previous = tenantStore[key]
     tenantStore[key] = { data: rows, updatedAt: now, updatedBy: accountId }
@@ -170,6 +176,7 @@ export function registerApprovalRoutes({
     } catch {
       if (previous === undefined) delete tenantStore[key]
       else tenantStore[key] = previous
+      if (!hadTenant && Object.keys(tenantStore).length === 0) delete workspaceStore.tenants[tenantId]
       return false
     }
   }
@@ -256,10 +263,33 @@ export function registerApprovalRoutes({
       .filter((value) => typeof value === 'string' && ATTACHMENT_ID_RE.test(value))
   }
 
+  /**
+   * 이 문서가 붙잡은 자료 전부 — 첨부 배열 ∪ 「첨부」 항목 값. **쓰기 시점에만** 부른다.
+   *
+   * 이 배열 하나가 **세 가지 답의 원천**이다: 열람 권한 검사(forbiddenAttachment)·증빙 태그·
+   * 자료실의 삭제 잠금(app.mjs 의 linkedDocumentIds 가 읽는 `linkedAttachmentIds`).
+   * 셋이 각자 「무엇이 첨부인가」를 판정하면 그 사이가 벌어지는 순간이 곧 구멍이다.
+   */
   const attachmentIdsOf = (document, form) => [...new Set([
     ...(Array.isArray(document?.attachments) ? document.attachments : []).filter((id) => typeof id === 'string'),
     ...attachmentValueIds(document, form),
   ])]
+
+  /**
+   * **읽기 시점의 답** — 증빙 태그·증빙 본문·인쇄물이 무엇을 첨부로 볼 것인가.
+   *
+   * 여기서 `attachmentIdsOf` 를 다시 부르면 그 순간의 **양식**으로 다시 계산하게 되어, 관리자가
+   * 항목 하나의 타입을 text → attachment 로 바꾸는 것만으로 쓰기 때 `forbiddenAttachment` 를
+   * 한 번도 지나지 않은 자료 id 가 증빙·인쇄 경로로 들어온다(그 파일 이름이 증빙 마크다운과
+   * 인쇄물에 실리고, tax-evidence 태그가 붙어 세무사 전달 묶음에 섞인다). 반대로 항목을 양식에서
+   * 빼면 삭제 잠금만 남고 인쇄물 어디에도 그 연결이 보이지 않아 409 문구가 거짓이 된다.
+   *
+   * 그래서 답은 **쓰기 때 검사를 지나 저장된 서버 소유 필드 하나**뿐이다. 그 필드가 없는 옛 행에서만
+   * 양식으로 다시 계산한다(하위호환) — 그 행은 애초에 이 필드가 생기기 전에 쓰인 것이다.
+   */
+  const linkedAttachmentIdsOf = (document, form) => (Array.isArray(document?.linkedAttachmentIds)
+    ? document.linkedAttachmentIds.filter((id) => typeof id === 'string')
+    : attachmentIdsOf(document, form))
 
   /**
    * 첨부 목록. 구조가 어긋나면 거절하고, **읽을 수 없는 자료를 가리키면 거절한다** —
@@ -289,6 +319,17 @@ export function registerApprovalRoutes({
   }
 
   const publicForm = (form) => ({ id: form.id, name: form.name, kind: form.kind, active: form.active !== false })
+
+  /**
+   * `?seenAt=` 한 곳. **목록과 요약이 같은 규칙을 쓴다** — 같은 이름·같은 모양의 `summary.decidedUnread`
+   * 가 라우트마다 다른 사실을 세면(요약은 「본 뒤에 끝난 것」, 목록은 「끝난 것 전부」) 그 차이는
+   * 응답 어디에도 적히지 않고, 목록으로 탭 점을 찍는 화면에서는 점이 영원히 꺼지지 않는다.
+   * 못 읽는 값은 빈 문자열로 떨어져 「전부」가 된다 — 조용히 0으로 만들면 점이 반대로 영영 안 켜진다.
+   */
+  const seenAtOf = (request) => {
+    const value = String(request.query.seenAt ?? '').trim()
+    return Number.isFinite(Date.parse(value)) ? value : ''
+  }
 
   const summaryOf = (documents, auth, delegateFor, seenAt) => {
     const readable = documents.filter((document) => canReadApprovalDocument(document, auth, delegateFor))
@@ -446,7 +487,8 @@ export function registerApprovalRoutes({
     response.json({
       documents,
       // 자른 배열의 길이를 세지 않는다. summary 는 「볼 수 있는 전부」를 세고, documents 는 그중 limit 개다.
-      summary: summaryOf(all, auth, delegateFor, ''),
+      // `seenAt` 은 요약 라우트와 같은 자리에서 같은 규칙으로 읽는다(seenAtOf).
+      summary: summaryOf(all, auth, delegateFor, seenAtOf(request)),
       total: scoped.length,
       forms: formsOf(auth.tenantId).map(publicForm),
       version: workspaceRecordVersion(workspaceStore.tenants?.[auth.tenantId]?.[DOCUMENTS_KEY]),
@@ -459,8 +501,7 @@ export function registerApprovalRoutes({
     if (!auth) return
     const now = clock().toISOString()
     const delegateFor = delegateForOf(auth.tenantId, auth.id, billingDate(now))
-    const seenAt = String(request.query.seenAt ?? '').trim()
-    response.json(summaryOf(documentsOf(auth.tenantId), auth, delegateFor, Number.isFinite(Date.parse(seenAt)) ? seenAt : ''))
+    response.json(summaryOf(documentsOf(auth.tenantId), auth, delegateFor, seenAtOf(request)))
   })
 
   // ── 9. 승인된 지출 집계 ─────────────────────────────────────────────────────
@@ -516,11 +557,17 @@ export function registerApprovalRoutes({
     if (!auth) return
     const now = clock().toISOString()
     const rows = documentRowsOf(auth.tenantId)
-    const clientRequestId = clip(request.body?.clientRequestId, 120)
-    if (clientRequestId && !CLIENT_REQUEST_ID_RE.test(clientRequestId)) {
+    // 멱등 키는 **자르지 않고 거절한다.** 사람이 읽는 글자가 아니라 구조이기 때문이다 —
+    // 먼저 120자로 자른 뒤 모양을 보면 121자 이상에서 앞 120자가 같은 두 요청이 같은 키가 되어,
+    // 두 번째 기안이 만들어지지 않고 첫 번째 문서가 replayed 로 돌아간다(두 건을 올린 사람에게
+    // 남의 제목이 뜬다). 자르지 않으므로 정규식의 길이 경계 {1,120} 도 죽은 검사가 아니게 된다.
+    const rawClientRequestId = request.body?.clientRequestId
+    if (rawClientRequestId != null && rawClientRequestId !== ''
+      && (typeof rawClientRequestId !== 'string' || !CLIENT_REQUEST_ID_RE.test(rawClientRequestId))) {
       fail(response, { ...APPROVAL_ERRORS.VALUE_INVALID, key: 'clientRequestId' })
       return
     }
+    const clientRequestId = typeof rawClientRequestId === 'string' ? rawClientRequestId : ''
     // 같은 요청을 두 번 보낸 것과 두 건을 올린 것은 다른 사실이다. 재시도는 새 문서를 만들지 않는다.
     if (clientRequestId) {
       const replayed = rows.find((row) => row?.clientRequestId === clientRequestId && row?.drafterId === auth.id)
@@ -560,6 +607,9 @@ export function registerApprovalRoutes({
       title,
       values: values.values,
       attachments: attachments.attachments,
+      // 서버가 정하는 파생 필드. 요청 본문은 이 칸을 정하지 못한다 — 여기에 임의의 id 를 실을 수
+      // 있으면 자료실의 삭제 잠금이 본문 한 줄로 열린다.
+      linkedAttachmentIds: attachmentIdsOf({ attachments: attachments.attachments, values: values.values }, form),
       line: line.line,
       ccIds: cc.ccIds,
       drafterId: auth.id,
@@ -578,7 +628,7 @@ export function registerApprovalRoutes({
       completedAt: null,
     }
     // 열지 못하는 자료를 결재에 붙일 수 없다 — 첨부 배열과 「첨부」 항목 값을 같은 잣대로 본다.
-    if (forbiddenAttachment(attachmentIdsOf(draft, form), auth)) {
+    if (forbiddenAttachment(draft.linkedAttachmentIds, auth)) {
       response.status(400).json({ error: { code: 'APPROVAL_ATTACHMENT_FORBIDDEN', message: '열람할 수 없는 자료는 결재에 첨부할 수 없습니다.' } })
       return
     }
@@ -635,7 +685,10 @@ export function registerApprovalRoutes({
       if (line.error) { fail(response, line.error); return }
       next.line = line.line
     }
-    if (forbiddenAttachment(attachmentIdsOf(next, form), auth)) {
+    // 값이 바뀌었으면 붙잡은 자료도 바뀐다. 파생 필드를 여기서 다시 적지 않으면 「첨부」 칸을
+    // 비운 뒤에도 그 자료가 자료실에서 지워지지 않는다.
+    next.linkedAttachmentIds = attachmentIdsOf(next, form)
+    if (forbiddenAttachment(next.linkedAttachmentIds, auth)) {
       response.status(400).json({ error: { code: 'APPROVAL_ATTACHMENT_FORBIDDEN', message: '열람할 수 없는 자료는 결재에 첨부할 수 없습니다.' } })
       return
     }
@@ -729,7 +782,7 @@ export function registerApprovalRoutes({
     const delegateFor = delegateForOf(auth.tenantId, auth.id, billingDate(now))
     const found = findDocument(auth, request.params.id, delegateFor)
     if (!found) { response.status(404).json({ error: NOT_FOUND }); return }
-    const { rows, index, document } = found
+    const { document } = found
     const decision = String(request.body?.decision ?? '')
     if (decision !== 'approve' && decision !== 'reject') {
       response.status(400).json({ error: { code: 'INVALID_DECISION', message: '승인 또는 반려만 보낼 수 있습니다.' } })
@@ -743,8 +796,7 @@ export function registerApprovalRoutes({
     const form = formsOf(auth.tenantId).find((entry) => entry.id === decided.formId) ?? null
 
     const effects = {}
-    let evidenceDoc = null
-    let nextDocumentList = null
+    let evidence = null
 
     if (decided.status === '승인') {
       // 0) 멱등의 전부. 이미 만들어진 절반은 다시 만들지 않는다.
@@ -756,13 +808,9 @@ export function registerApprovalRoutes({
           })
         } else {
           try {
-            const staged = await buildEvidence({ auth, decided, form, now })
-            evidenceDoc = staged.evidenceDoc
-            nextDocumentList = staged.documents
-            decided.evidenceId = staged.evidenceDoc.id
-            decided.history = staged.history
-            effects.evidenceId = staged.evidenceDoc.id
-            effects.evidenceTaggedAttachments = staged.tagged
+            evidence = await writeEvidenceFile({ auth, decided, form, now })
+            decided.evidenceId = evidence.evidenceDoc.id
+            effects.evidenceId = evidence.evidenceDoc.id
           } catch {
             response.status(500).json({ error: WRITE_FAILED })
             return
@@ -776,10 +824,32 @@ export function registerApprovalRoutes({
     }
 
     // 3) 저장 — 두 키를 한 커밋으로. 되돌리기는 키 단위다.
+    //
+    // **두 배열은 여기서 다시 읽는다.** 증빙 바이트를 쓰는 `await` 동안 다른 요청이 같은 두 키에
+    // 이미 200/201 로 답했을 수 있고, 그때 읽어 둔 배열로 덮어쓰면 확정된 그 쓰기가 응답만 남기고
+    // 조용히 사라진다(자료 이름 변경 · 같은 순간의 다른 기안). 읽기와 쓰기 사이에 await 가 있는 한
+    // 쓸 수 있는 것은 **쓰기 직전에 읽은** 배열뿐이다.
+    const currentRows = documentRowsOf(auth.tenantId)
+    const currentIndex = currentRows.findIndex((row) => row?.id === document.id)
+    const current = currentIndex < 0 ? null : currentRows[currentIndex]
+    if (!current || current.version !== document.version || current.status !== document.status) {
+      // 이 문서 자체가 그 사이에 바뀌었다. 결정은 우리가 읽은 그 순간의 사실에 대한 것이었으므로 버린다.
+      if (evidence) { try { await deleteTenantDocument(documentStorage, evidence.evidenceDoc, auth.tenantId) } catch { /* best-effort */ } }
+      response.status(409).json({ error: { code: 'APPROVAL_VERSION_CONFLICT', message: '다른 곳에서 먼저 저장되었습니다. 최신 내용을 불러온 뒤 다시 시도해 주세요.', currentVersion: current?.version ?? null } })
+      return
+    }
+    let nextDocumentList = null
+    if (evidence) {
+      const applied = applyEvidenceToLibrary(evidence, { auth, history: decided.history, now })
+      nextDocumentList = applied.documents
+      decided.history = applied.history
+      effects.evidenceTaggedAttachments = applied.tagged
+    }
+
     const tenantStore = workspaceStore.tenants[auth.tenantId] ??= {}
     const previousDocumentsRecord = tenantStore[DOCUMENTS_KEY]
     tenantStore[DOCUMENTS_KEY] = {
-      data: rows.map((row, position) => (position === index ? decided : row)),
+      data: currentRows.map((row, position) => (position === currentIndex ? decided : row)),
       updatedAt: now,
       updatedBy: auth.id,
     }
@@ -792,7 +862,7 @@ export function registerApprovalRoutes({
       else tenantStore[DOCUMENTS_KEY] = previousDocumentsRecord
       // 저장소에 이미 쓴 증빙 바이트를 최선을 다해 지운다. 실패해도 500 은 그대로다 —
       // 커밋이 안 됐으므로 그 파일을 가리키는 행이 어디에도 없다.
-      if (evidenceDoc) { try { await deleteTenantDocument(documentStorage, evidenceDoc, auth.tenantId) } catch { /* best-effort */ } }
+      if (evidence) { try { await deleteTenantDocument(documentStorage, evidence.evidenceDoc, auth.tenantId) } catch { /* best-effort */ } }
       response.status(500).json({ error: WRITE_FAILED })
       return
     }
@@ -818,15 +888,18 @@ export function registerApprovalRoutes({
   })
 
   /**
-   * 승인 증빙 한 벌을 **만들어 두기만** 한다. 커밋은 부르는 쪽이 결재 문서와 함께 한 번에 한다.
+   * 승인 증빙의 **바이트만** 쓴다. 자료 목록에 얹는 일은 하지 않는다.
    *
-   * 저장소에 바이트를 쓰는 것은 여기서 일어나고(커밋보다 먼저여야 원본 없는 행이 생기지 않는다),
-   * 자료 목록에 얹는 것은 부르는 쪽이 stageDocumentList 로 한다.
+   * 두 일을 갈라 놓은 이유가 이 함수의 전부다: 바이트 쓰기는 `await` 이고, 그 await 를 사이에 두고
+   * 「자료 목록을 읽어」→「그 배열로 덮어쓰기」를 하면 그동안 확정된 남의 쓰기가 사라진다.
+   * 그래서 목록을 읽는 일은 await 가 끝난 뒤 `applyEvidenceToLibrary` 가 한다.
+   * 바이트가 커밋보다 먼저인 것은 그대로다 — 원본 없는 행이 생기는 쪽이 더 나쁘다.
    */
-  async function buildEvidence({ auth, decided, form, now }) {
-    const documents = Array.isArray(documentRecord(auth.tenantId)?.data) ? [...documentRecord(auth.tenantId).data] : []
+  async function writeEvidenceFile({ auth, decided, form, now }) {
+    const documents = Array.isArray(documentRecord(auth.tenantId)?.data) ? documentRecord(auth.tenantId).data : []
     const names = accountIndexOf(auth)
-    const attachmentIds = attachmentIdsOf(decided, form)
+    // 쓰기 때 검사를 지난 그 배열. 양식으로 다시 계산하지 않는다(linkedAttachmentIdsOf 주석).
+    const attachmentIds = linkedAttachmentIdsOf(decided, form)
     const attachments = attachmentIds
       .map((id) => documents.find((row) => row?.id === id))
       .filter(Boolean)
@@ -838,7 +911,7 @@ export function registerApprovalRoutes({
     const taxTags = ['tax-evidence', `tax-year:${taxDate.slice(0, 4)}`, `tax-bucket:${form.evidenceCategory}`, `tax-date:${taxDate}`]
 
     const body = Buffer.from(renderApprovalMarkdown({
-      document: decided, form, tenantName: auth.tenantName ?? '', attachments, names,
+      document: decided, form, tenantName: auth.tenantName ?? '', attachments, attachmentIds, names,
     }), 'utf8')
     const evidenceId = `DOC-${new Date(now).getTime()}-${randomBytes(4).toString('hex')}`
     const approvers = (Array.isArray(decided.line) ? decided.line : []).flatMap((step) => (Array.isArray(step?.approvers) ? step.approvers : []))
@@ -872,10 +945,18 @@ export function registerApprovalRoutes({
       tenantId: auth.tenantId, id: evidenceId, body, contentType: 'text/markdown',
     })
     Object.assign(evidenceDoc, stored)
+    return { evidenceDoc, attachmentIds, taxTags }
+  }
 
-    // 첨부도 같은 기간에 묶이게 태그를 더한다. 자료실 한 건의 태그 상한을 넘기면 **자르지 않고 건너뛰고**
-    // 그 사실을 이력에 남긴다 — 조용히 자르면 사용자는 '첨부가 증빙함에 안 보인다'만 겪는다.
-    let history = decided.history
+  /**
+   * 증빙 행을 자료 목록에 얹고, 첨부에도 같은 기간의 태그를 더한다. **동기**다 —
+   * 목록을 읽는 순간과 그 배열로 쓰는 순간 사이에 다른 요청이 끼어들 틈을 두지 않기 위해서다.
+   * 자료실 한 건의 태그 상한을 넘기면 **자르지 않고 건너뛰고** 그 사실을 이력에 남긴다 —
+   * 조용히 자르면 사용자는 '첨부가 증빙함에 안 보인다'만 겪는다.
+   */
+  function applyEvidenceToLibrary({ evidenceDoc, attachmentIds, taxTags }, { auth, history: startingHistory, now }) {
+    const documents = Array.isArray(documentRecord(auth.tenantId)?.data) ? documentRecord(auth.tenantId).data : []
+    let history = startingHistory
     let tagged = 0
     const attachmentSet = new Set(attachmentIds)
     const nextDocuments = documents.map((row) => {
@@ -886,7 +967,10 @@ export function registerApprovalRoutes({
       if (current.length + missing.length > MAX_DOCUMENT_TAGS) {
         history = pushHistory(history, {
           at: now, actorId: auth.id, actorName: clip(auth.name, MAX_TITLE), action: '증빙 경고',
-          comment: `첨부 ‘${String(row.name ?? row.id)}’은 태그 상한으로 증빙 태그를 붙이지 못했습니다.`,
+          // 조사는 값에 따라 갈린다('영수증.png'는 받침이 없어 '는'이다). 이 저장소의 관례대로
+          // `은(는)` 으로 적는다 — 이 이력은 「첨부가 증빙함에 안 보인다」를 겪는 사람이 이유를
+          // 찾으러 읽는 유일한 문장이고, 결재 이력에 영구히 남는다.
+          comment: `첨부 ‘${String(row.name ?? row.id)}’은(는) 태그 상한으로 증빙 태그를 붙이지 못했습니다.`,
           delegateOf: null,
         })
         return row
@@ -895,7 +979,7 @@ export function registerApprovalRoutes({
       return { ...row, tags: [...current, ...missing] }
     })
     nextDocuments.unshift(evidenceDoc)
-    return { evidenceDoc, documents: nextDocuments, history, tagged }
+    return { documents: nextDocuments, history, tagged }
   }
 
   // ── 16. 회수 ────────────────────────────────────────────────────────────────
@@ -941,7 +1025,10 @@ export function registerApprovalRoutes({
     const { document } = found
     const form = formsOf(auth.tenantId).find((entry) => entry.id === document.formId) ?? null
     const library = Array.isArray(documentRecord(auth.tenantId)?.data) ? documentRecord(auth.tenantId).data : []
-    const attachments = attachmentIdsOf(document, form)
+    // 무엇이 첨부인지는 여기서 한 번만 답하고, 렌더러는 그 목록에 이름을 붙일 뿐이다.
+    // 그 답은 쓰기 때 저장된 배열이다 — 인쇄물이 증빙·삭제 잠금과 같은 사실을 말해야 한다.
+    const attachmentIds = linkedAttachmentIdsOf(document, form)
+    const attachments = attachmentIds
       .map((id) => library.find((row) => row?.id === id))
       .filter(Boolean)
       .map((row) => ({ id: row.id, name: String(row.name ?? row.originalName ?? '첨부파일') }))
@@ -950,7 +1037,7 @@ export function registerApprovalRoutes({
     // 다음 사람이 남의 진행 상태를 본다.
     response.set('cache-control', 'no-store')
     response.send(renderApprovalPrintHtml({
-      document, form, tenantName: auth.tenantName ?? '', printedAt: now, attachments, names: accountIndexOf(auth),
+      document, form, tenantName: auth.tenantName ?? '', printedAt: now, attachments, attachmentIds, names: accountIndexOf(auth),
     }))
   })
 }

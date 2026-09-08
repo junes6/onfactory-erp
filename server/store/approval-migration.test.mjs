@@ -280,7 +280,15 @@ test('8. 결재 문서의 첨부·증빙은 자료실에서 지워지지 않고,
         /업무·일지·인증·재고·공장 또는 메신저/,
         `409 문장이 실제 범위보다 좁은 닫힌 열거다 — ${removed.body?.error?.message}`,
       )
-      assert.match(String(removed.body?.error?.message ?? ''), /다른 화면에서 사용 중인 자료입니다/)
+      // 그리고 문장은 **실제로 할 수 있는 일**을 말해야 한다. 이 문서는 `'결재중'` 이라 PATCH 가
+      // 409 `APPROVAL_NOT_EDITABLE` 이고 DELETE 도 닫혀 있다 — 「연결을 해제한 뒤 삭제하라」는
+      // 이 갈래에서 아무도 할 수 없는 행동이다. 결과에 따라 갈린다는 사실을 그대로 적는다.
+      assert.match(String(removed.body?.error?.message ?? ''), /반려·회수되면 삭제할 수 있고/)
+      assert.doesNotMatch(
+        String(removed.body?.error?.message ?? ''),
+        /연결을 해제/,
+        `결재중 문서의 409가 할 수 없는 행동을 하라고 말한다 — ${removed.body?.error?.message}`,
+      )
     }
     // 대조군이 없으면 '무엇이든 409'인 시험과 구분되지 않는다.
     const free = await call('DELETE', '/api/documents/DOC-APPROVAL-FREE')

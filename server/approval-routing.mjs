@@ -74,7 +74,10 @@ const APPROVAL_ERROR_TABLE = {
   FIELD_INVALID: { code: 'APPROVAL_FIELD_INVALID', message: '양식 항목을 확인해 주세요.' },
   AMOUNT_FIELD_INVALID: { code: 'APPROVAL_FORM_AMOUNT_FIELD_INVALID', message: '금액 집계 항목은 이 양식의 금액 항목 중에서 골라야 합니다.' },
   EVIDENCE_INVALID: { code: 'APPROVAL_FORM_EVIDENCE_INVALID', message: '증빙 분류는 「매출」·「매입」·「급여」·「경비」·「신고·납부」·「기타」 중 하나여야 합니다.' },
-  LINE_INVALID: { code: 'APPROVAL_LINE_INVALID', message: '결재선을 확인해 주세요. 순차 단계는 결재자 1명, 병렬 단계는 2명 이상이어야 합니다.' },
+  // 숫자를 말하는 문장은 돌아가는 앱이 실제로 거절하는 값과 같아야 한다(규칙 11). 「2명 이상」만
+  // 적으면 6명을 넣어 거절당한 사람이 자기가 이미 2명 이상을 넣었다는 사실만 확인하고 끝난다.
+  // 이 문장의 세 숫자는 MAX_LINE_STEPS·MAX_APPROVERS_PER_STEP 이 정본이고, 시험이 그 상수로 다시 잰다.
+  LINE_INVALID: { code: 'APPROVAL_LINE_INVALID', message: '결재선을 확인해 주세요. 단계는 8개까지, 순차 단계는 결재자 1명, 병렬 단계는 2~5명이어야 합니다.' },
   LINE_SELF: { code: 'APPROVAL_LINE_SELF', message: '기안자는 자기 문서의 결재자가 될 수 없습니다.' },
   LINE_DUPLICATE: { code: 'APPROVAL_LINE_DUPLICATE', message: '같은 사람을 결재선에 두 번 넣을 수 없습니다.' },
   LINE_UNKNOWN: { code: 'APPROVAL_LINE_UNKNOWN_APPROVER', message: '결재자로 지정할 수 없는 계정이 있습니다.' },
@@ -83,6 +86,10 @@ const APPROVAL_ERROR_TABLE = {
   VALUE_INVALID: { code: 'APPROVAL_VALUE_INVALID', message: '항목 값을 확인해 주세요.' },
   NOT_APPROVER: { code: 'APPROVAL_NOT_APPROVER', message: '지금 이 문서를 결재할 차례가 아닙니다.' },
   ALREADY_DECIDED: { code: 'APPROVAL_ALREADY_DECIDED', message: '이미 끝난 결재입니다.' },
+  // 「아직 시작하지 않았다」와 「이미 끝났다」는 다른 사실이다. 결재선에 이름이 적힌 사람은 상신 전
+  // 문서도 목록에서 보므로 실제로 눌러 볼 수 있는 자리이고, 그때 「이미 끝난 결재입니다」를 받으면
+  // 같은 응답에 실린 상태(`기안`)와 정면으로 어긋난다.
+  NOT_SUBMITTED: { code: 'APPROVAL_NOT_SUBMITTED', message: '아직 상신되지 않은 문서입니다. 기안자가 상신해야 결재할 수 있습니다.' },
   LINE_BROKEN: { code: 'APPROVAL_LINE_BROKEN', message: '결재선이 손상되었습니다. 관리자에게 알려 주세요.' },
   REASON_REQUIRED: { code: 'APPROVAL_REASON_REQUIRED', message: '반려 사유를 5자 이상 적어 주세요.' },
   RECALL_FORBIDDEN: { code: 'APPROVAL_RECALL_FORBIDDEN', message: '이미 결재가 시작된 문서는 회수할 수 없습니다.' },
@@ -571,6 +578,8 @@ function pushHistory(history, entry) {
  */
 export function approvalSeatFor(document, { actorId, delegateFor } = {}) {
   const { id: actor } = requireActor({ id: actorId })
+  // 상신 전(`기안`)과 종결(`승인`·`반려`·`회수`)을 가른다 — 둘 다 결재할 수 없지만 푸는 길이 다르다.
+  if (document?.status === '기안') return { error: APPROVAL_ERRORS.NOT_SUBMITTED }
   if (document?.status !== '결재중') return { error: APPROVAL_ERRORS.ALREADY_DECIDED }
 
   const line = Array.isArray(document?.line) ? document.line : []

@@ -63,7 +63,8 @@ const html = () => renderApprovalPrintHtml({
 
 test('1. 이력의 각 줄(단계·결재자·결정·시각)이 인쇄물에 그대로 있다', () => {
   const page = html()
-  for (const fragment of ['1단계 · 순차', '2단계 · 순차', '서동현', '승인', '반려', '2026-09-03T01:00:00.000Z', '2026-09-03T02:00:00.000Z', '확인했습니다']) {
+  // 시각은 한국 시간이다(01:00Z → 10:00 KST). 시험 13이 그 사실 자체를 잰다.
+  for (const fragment of ['1단계 · 순차', '2단계 · 순차', '서동현', '승인', '반려', '2026-09-03 10:00', '2026-09-03 11:00', '확인했습니다']) {
     assert.ok(page.includes(fragment), `인쇄물에 '${fragment}'가 없다`)
   }
   // 표 머리 다섯 칸 + 결재선 두 줄. 이력이 통째로 빠지면 이 단언이 먼저 빨개진다.
@@ -180,4 +181,165 @@ test('9. 인쇄 라우트는 text/html 로 나가고, 못 읽는 사람에게는
     const delegate = await get(await login(OH.email))
     assert.equal(delegate.status, 200, '대결로 결재한 사람이 자기가 누른 문서를 못 본다')
   })
+})
+
+/**
+ * 「첨부」 **항목**(type:'attachment')으로 붙인 파일. 씨앗 지출결의서의 「영수증」이 이 모양이고,
+ * 첨부 배열은 비어 있다. 무엇이 첨부인지는 라우트가 attachmentIdsOf 로 이미 답했으므로
+ * 렌더러는 그 목록을 받아 이름을 붙일 뿐, 두 번째로 판정하지 않는다.
+ */
+const FIELD_FORM = {
+  ...FORM,
+  id: 'AFM-PRINT-02',
+  fields: [...FORM.fields, { key: 'receipt', label: '영수증', type: 'attachment', required: false, options: [], help: '', position: 3 }],
+}
+const FIELD_DOCUMENT = {
+  ...DOCUMENT,
+  id: 'APD-PRINT-02', formId: FIELD_FORM.id, title: '항목으로 붙인 영수증',
+  attachments: [],
+  values: { ...DOCUMENT.values, receipt: 'DOC-PRINT-RECEIPT' },
+}
+
+test('10. 「첨부」 항목 값으로 붙인 파일도 첨부 구역에 파일 이름으로 나온다 — 이름표를 만들어 놓고 버리지 않는다', async () => {
+  const passed = { attachments: [{ id: 'DOC-PRINT-RECEIPT', name: '영수증.pdf' }], attachmentIds: ['DOC-PRINT-RECEIPT'] }
+  const body = renderApprovalMarkdown({ document: FIELD_DOCUMENT, form: FIELD_FORM, tenantName: '햇살바다', names: new Map(), ...passed })
+  assert.ok(body.includes('## 첨부'), '증빙 본문에 첨부 절이 없다 — 세무사가 받는 것은 이 마크다운이다')
+  assert.ok(body.includes('- 영수증.pdf'), `증빙 본문에 첨부 파일 이름이 없다\n${body}`)
+  const page = renderApprovalPrintHtml({ document: FIELD_DOCUMENT, form: FIELD_FORM, tenantName: '햇살바다', printedAt: '2026-09-04T05:00:00.000Z', names: new Map(), ...passed })
+  assert.ok(page.includes('영수증.pdf'), '인쇄물의 첨부 구역에 파일 이름이 없다')
+
+  // 자료실에서 이름을 못 찾은 id 는 지금까지처럼 id 그대로 찍는다 — 붙어 있다는 사실 자체는 남는다.
+  const orphan = renderApprovalMarkdown({ document: FIELD_DOCUMENT, form: FIELD_FORM, tenantName: '햇살바다', attachments: [], attachmentIds: ['DOC-PRINT-RECEIPT'], names: new Map() })
+  assert.ok(orphan.includes('- DOC-PRINT-RECEIPT'))
+
+  // 돌아가는 앱으로 같은 사실을 잰다(규칙 11). 인쇄 라우트가 목록의 원천이다.
+  const store = {
+    version: 2,
+    tenants: {
+      [TENANT]: {
+        'approval-forms': { data: [FIELD_FORM], updatedAt: '2026-09-01T00:00:00.000Z' },
+        'approval-documents': { data: [FIELD_DOCUMENT], updatedAt: '2026-09-03T02:00:00.000Z' },
+        'company-documents': {
+          data: [{
+            id: 'DOC-PRINT-RECEIPT', tenantId: TENANT, name: '영수증-2026-09-02.pdf', originalName: '영수증-2026-09-02.pdf',
+            mime: 'application/pdf', size: 12, category: '공통자료', visibility: 'all', departments: [], allowedUserIds: [],
+            tags: [], summary: '', uploadedAt: '2026-09-01T00:00:00.000Z', uploadedById: ADMIN.id, uploadedByName: '김서원', storage: 'local',
+          }],
+          updatedAt: '2026-09-01T00:00:00.000Z',
+        },
+      },
+    },
+    platform: {}, accountApprovals: {}, accountCredentials: {}, invitedAccounts: [], passwordResetRequests: [],
+  }
+  const app = createApp({ apiKey: '', initialWorkspaceStore: store, onWorkspaceStoreChange: () => {} })
+  await withServer(app, async (origin) => {
+    const response = await fetch(`${origin}/api/auth/login`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workspace: 'tenant', email: ADMIN.email, password: 'demo1234' }),
+    })
+    assert.equal(response.status, 200)
+    const account = (await response.json()).account
+    const printed = await fetch(`${origin}/api/approval-documents/APD-PRINT-02/print`, {
+      headers: { cookie: response.headers.get('set-cookie') ?? '', 'x-workspace-identity': `${account.tenantId}:${account.id}` },
+    })
+    assert.equal(printed.status, 200)
+    const html = await printed.text()
+    assert.ok(html.includes('영수증-2026-09-02.pdf'), '인쇄 라우트가 「첨부」 항목의 파일 이름을 찍지 않았다')
+  })
+})
+
+/**
+ * 「첨부」 타입 항목의 **값 칸**도 파일 이름이다.
+ *
+ * 같은 문서 안에서 첨부 절은 이름을 쓰고 항목 표는 내부 id 를 쓰면, 한 사실을 한 장의 종이가
+ * 두 가지로 말한다. 하필 씨앗 양식(지출결의서)의 「영수증」이 그 타입이라 대표 경로가 전부 이 모양이고,
+ * 증빙 마크다운은 회사 밖 세무사에게 나간다.
+ */
+test('11. 「첨부」 항목의 값 칸도 파일 이름으로 찍힌다 — 첨부 절과 항목 표가 같은 말을 한다', async () => {
+  const passed = { attachments: [{ id: 'DOC-PRINT-RECEIPT', name: '영수증.pdf' }], attachmentIds: ['DOC-PRINT-RECEIPT'] }
+  const body = renderApprovalMarkdown({ document: FIELD_DOCUMENT, form: FIELD_FORM, tenantName: '햇살바다', names: new Map(), ...passed })
+  assert.ok(body.includes('- 영수증: 영수증.pdf'), `증빙 마크다운의 항목 줄이 내부 id 로 찍혔다\n${body}`)
+  assert.ok(!body.includes('- 영수증: DOC-PRINT-RECEIPT'), '항목 줄에 내부 id 가 남았다')
+
+  const page = renderApprovalPrintHtml({ document: FIELD_DOCUMENT, form: FIELD_FORM, tenantName: '햇살바다', printedAt: '2026-09-04T05:00:00.000Z', names: new Map(), ...passed })
+  const cell = page.match(/<dt>영수증<\/dt><dd>([^<]*)<\/dd>/)
+  assert.equal(cell?.[1], '영수증.pdf', `인쇄물의 항목 칸이 내부 id 로 찍혔다 — ${cell?.[1]}`)
+
+  // 금액은 지금까지처럼 사람이 읽는 서식이고, text 는 그대로다(한 갈래만 바꿨다는 대조군).
+  assert.ok(page.includes('1,240,000원'))
+
+  // 이름을 못 찾은 id 는 id 그대로 남긴다 — 붙어 있다는 사실 자체는 남아야 한다.
+  const orphan = renderApprovalPrintHtml({ document: FIELD_DOCUMENT, form: FIELD_FORM, tenantName: '햇살바다', printedAt: '2026-09-04T05:00:00.000Z', names: new Map(), attachments: [], attachmentIds: [] })
+  assert.equal(orphan.match(/<dt>영수증<\/dt><dd>([^<]*)<\/dd>/)?.[1], 'DOC-PRINT-RECEIPT')
+})
+
+/**
+ * 세무사에게 나가는 것은 이 마크다운이다. 여러 줄 값은 **지원되는 입력**이므로
+ * (approval-routing.mjs 의 CONTROL_RE 가 `\x0A` 를 일부러 남긴다) 접는 것은 렌더러의 몫이다.
+ * 표만 막고 목록 세 곳을 두면, 같은 파일이 한 사실을 두 잣대로 말하고 느슨한 쪽이 위조 통로가 된다.
+ */
+test('12. 여러 줄 값이 증빙 마크다운에 없던 절과 표를 만들어 내지 못한다', () => {
+  const forgedTable = [
+    '한빛상사', '', '## 결재 이력', '',
+    '| 단계 | 결재자 | 결정 | 시각 | 의견 |',
+    '| --- | --- | --- | --- | --- |',
+    '| 1단계 · 순차 | 대표이사 김서원 | 승인 | 2026-09-01 | 전결 |', '',
+  ].join('\n')
+  const body = renderApprovalMarkdown({
+    document: {
+      ...DOCUMENT,
+      title: '9월 대금\n- 상태: 승인(전결)\n- 결재자: 대표이사',
+      values: { ...DOCUMENT.values, vendor: forgedTable },
+      rejectionReason: '보완해 주세요.\n## 결재 이력\n| 단계 | 결재자 |\n| --- | --- |',
+    },
+    form: FORM, tenantName: '햇살바다',
+    attachments: [{ id: 'DOC-PRINT-RECEIPT', name: '영수증.pdf\n\n## 첨부\n\n- 위조.pdf' }],
+    attachmentIds: ['DOC-PRINT-RECEIPT'],
+    names: new Map([[SEO.id, '서동현'], [YOON.id, '윤서진'], [OH.id, '오태식']]),
+  })
+
+  // 절 제목은 파일이 스스로 찍은 것뿐이다 — 항목·첨부·제목·반려 사유 어디에서도 늘지 않는다.
+  assert.equal(body.match(/^## 결재 이력$/gm)?.length, 1, `없던 「결재 이력」 절이 생겼다\n${body}`)
+  assert.equal(body.match(/^## 첨부$/gm)?.length, 1, `없던 「첨부」 절이 생겼다\n${body}`)
+  assert.equal(body.match(/^# /gm)?.length, 1, '제목 줄이 늘었다')
+
+  // 진짜 표는 머리 2줄 + 결재선 2줄로 정확히 넷이고, 칸 수는 모두 다섯이다.
+  const rows = body.split('\n').filter((line) => line.startsWith('| '))
+  assert.equal(rows.length, 4, `표 줄 수가 다르다 — 위조 표가 섞였다\n${rows.join('\n')}`)
+  for (const row of rows) assert.equal(row.split(/(?<!\\)\|/).length, 7, `표 한 줄의 칸 수가 다르다: ${row}`)
+
+  // 값 자체는 버리지 않는다. 한 줄로 접고 파이프만 escape 한다.
+  assert.ok(body.includes('- 거래처: 한빛상사 ## 결재 이력'), `거래처 값이 통째로 사라졌다\n${body}`)
+  assert.ok(body.includes('- 영수증.pdf ## 첨부 - 위조.pdf'), `첨부 이름이 한 줄로 접히지 않았다\n${body}`)
+  assert.ok(body.startsWith('# 9월 대금 - 상태: 승인(전결) - 결재자: 대표이사\n'), `제목 줄이 여러 줄로 새어 나갔다\n${body}`)
+})
+
+/**
+ * 증빙 요약·세무 태그는 `billingDate`(KST)로 만들어진다. 시각 칸만 UTC ISO 로 두면
+ * **한 파일이 두 날짜를 말한다** — 요약은 「2026-09-04 … 승인」, 이력 표는 「…T23:30:00.000Z」.
+ */
+test('13. 시각은 인쇄물·증빙 모두 한국 시간이고, 그 사실을 문서 자신이 말한다', () => {
+  const morning = {
+    ...DOCUMENT,
+    status: '승인',
+    submittedAt: '2026-09-03T22:00:00.000Z',    // KST 2026-09-04 07:00
+    completedAt: '2026-09-03T23:30:00.000Z',    // KST 2026-09-04 08:30
+    line: [{
+      step: 1, mode: 'sequential',
+      approvers: [{ accountId: SEO.id, name: '서동현', decision: 'approved', decidedAt: '2026-09-03T23:30:00.000Z', decidedById: SEO.id, comment: '', delegateOf: null }],
+    }],
+  }
+  const body = renderApprovalMarkdown({ document: morning, form: FORM, tenantName: '햇살바다', names: new Map() })
+  assert.ok(body.includes('- 상신: 2026-09-04 07:00'), `상신 시각이 KST 가 아니다\n${body}`)
+  assert.ok(body.includes('- 완료: 2026-09-04 08:30'), `완료 시각이 KST 가 아니다\n${body}`)
+  assert.ok(body.includes('| 2026-09-04 08:30 |'), `이력 표의 시각이 KST 가 아니다\n${body}`)
+  assert.doesNotMatch(body, /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, 'UTC ISO 문자열이 증빙에 그대로 남았다')
+  assert.ok(body.includes('한국 표준시(KST)'), '어떤 시간대인지 문서 자신이 말해야 한다')
+
+  const page = renderApprovalPrintHtml({ document: morning, form: FORM, tenantName: '햇살바다', printedAt: '2026-09-03T23:40:00.000Z', names: new Map() })
+  assert.ok(page.includes('상신 2026-09-04 07:00'), `인쇄물 머리의 상신 시각이 KST 가 아니다`)
+  assert.ok(page.includes('<td>2026-09-04 08:30</td>'), '인쇄물 이력 표의 시각이 KST 가 아니다')
+  assert.ok(page.includes('2026-09-04 08:40 출력'), '인쇄 시각이 KST 가 아니다')
+  assert.doesNotMatch(page, /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, 'UTC ISO 문자열이 인쇄물에 그대로 남았다')
+  assert.ok(page.includes('한국 표준시(KST)'), '어떤 시간대인지 인쇄물 자신이 말해야 한다')
 })

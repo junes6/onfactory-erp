@@ -226,12 +226,31 @@ test('8) 이미 승인한 사람이 다시 누르면 「이미 한 자리를 결
   assert.equal(twice.document, undefined)
 })
 
-test('9) 끝난 문서·기안 중인 문서에는 결재할 수 없다', () => {
+test('9) 끝난 문서와 아직 상신하지 않은 문서는 둘 다 결재할 수 없되, 다른 사실로 답한다', () => {
   const line = buildLine([{ mode: 'sequential', approvers: ['AA'] }])
-  for (const status of ['승인', '반려', '회수', '기안']) {
+  for (const status of ['승인', '반려', '회수']) {
     const result = approve(pendingDocument(line, { status }), 'AA')
     assert.equal(result.error.code, APPROVAL_ERRORS.ALREADY_DECIDED.code, `${status} 상태에서 결재가 막혀야 한다`)
   }
+  // 「아직 시작하지 않았다」를 「이미 끝났다」로 말하면 같은 응답에 실린 상태(기안)와 어긋난다.
+  // 결재선에 이름이 적힌 사람은 상신 전 문서도 목록에서 보므로 실제로 눌러 볼 수 있는 자리다.
+  const draft = approve(pendingDocument(line, { status: '기안' }), 'AA')
+  assert.equal(draft.error.code, APPROVAL_ERRORS.NOT_SUBMITTED.code)
+  assert.notEqual(draft.error.code, APPROVAL_ERRORS.ALREADY_DECIDED.code)
+  assert.match(draft.error.message, /상신/)
+})
+
+test('9-1) 결재선 오류 문구는 이 파일의 상한 상수를 그대로 말한다 — 6명을 넣고 「2명 이상」을 듣지 않는다', () => {
+  const message = APPROVAL_ERRORS.LINE_INVALID.message
+  // 규칙 11: 범위를 말하는 문장은 돌아가는 코드에 대고 잰다. 상수를 고치면 이 단언이 먼저 빨개진다.
+  assert.ok(message.includes(`2~${MAX_APPROVERS_PER_STEP}명`), `병렬 상한(${MAX_APPROVERS_PER_STEP})을 말하지 않는다 — ${message}`)
+  assert.ok(message.includes(`${MAX_LINE_STEPS}개까지`), `단계 상한(${MAX_LINE_STEPS})을 말하지 않는다 — ${message}`)
+  // 그 문장이 실제로 그 값에서 나온다: 6명은 거절, 5명은 통과.
+  const tooMany = normalizeApprovalLine([{ mode: 'parallel', approvers: ['AA', 'BB', 'CC', 'DD', 'EE', 'FF'] }])
+  assert.equal(tooMany.error.code, APPROVAL_ERRORS.LINE_INVALID.code)
+  assert.equal(normalizeApprovalLine([{ mode: 'parallel', approvers: ['AA', 'BB', 'CC', 'DD', 'EE'] }]).error, undefined)
+  const tooDeep = normalizeApprovalLine(Array.from({ length: MAX_LINE_STEPS + 1 }, (_value, index) => ({ mode: 'sequential', approvers: [`U${index}`] })))
+  assert.equal(tooDeep.error.code, APPROVAL_ERRORS.LINE_INVALID.code)
 })
 
 test('10) 대결자가 대신 결재하면 결재자 칸과 이력에 원결재자가 남는다', () => {

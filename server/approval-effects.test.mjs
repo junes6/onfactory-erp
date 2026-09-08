@@ -265,6 +265,9 @@ test('5. 태그가 17개인 첨부에는 증빙 태그를 붙이지 않고 건�
     const warning = last.body.document.history.find((entry) => entry.action === '증빙 경고')
     assert.ok(warning, '태그 상한으로 건너뛴 사실이 이력에 없다 — 사용자는 「첨부가 증빙함에 안 보인다」만 겪는다')
     assert.ok(warning.comment.includes('태그 가득한 영수증.pdf'))
+    // 조사는 값에 따라 갈린다(받침이 없는 '…png'·'…jpg' 로 끝나는 이름이 실제로 온다). 이 저장소의
+    // 관례대로 `은(는)` 으로 적는다 — 이 문장은 결재 이력에 영구히 남는다.
+    assert.ok(warning.comment.includes('은(는)'), `값에 따라 갈리는 조사를 한쪽으로 못 박았다 — ${warning.comment}`)
     // 「첨부」 항목 값과 첨부 배열을 같은 잣대로 본다: 증빙은 그래도 1건 만들어졌다.
     assert.equal(evidenceRows(store).filter((row) => row.category === '세무·회계').length, 1)
   })
@@ -388,5 +391,182 @@ test('8. 최종 승인은 알림 없이도 기안자에게 닿는다 — 「내�
     assert.equal(notificationsFor(store, OH.id).length, 0, '최종 승인에 새 알림 유형을 만들지 않는다')
     const afterSeen = await api(origin, drafter)('GET', `/api/approval-documents/summary?seenAt=${encodeURIComponent('2026-09-04T00:00:00.000Z')}`)
     assert.equal(afterSeen.body.decidedUnread, 0)
+  })
+})
+
+test('9. 「첨부」 항목으로 붙인 파일도 증빙 태그를 받고, 그 파일 이름이 증빙 본문에 적힌다', async () => {
+  const store = freshStore({
+    'company-documents': { data: [libraryDocument('DOC-RECEIPT-01', '영수증-2026-09-02.pdf')], updatedAt: '2026-09-01T00:00:00.000Z' },
+  })
+  const storage = memoryStorage()
+  await withServer(buildApp(store, storage), async (origin) => {
+    const { last } = await runApproval(origin, {
+      formInput: form(),
+      // 첨부 배열은 비운다. 씨앗 지출결의서의 「영수증」은 이 갈래로 붙는다.
+      values: { spent_on: SPENT_ON, vendor: '동해수산', amount: 1_240_000, receipt: 'DOC-RECEIPT-01' },
+    })
+    assert.equal(last.body.effects.evidenceTaggedAttachments, 1, '항목으로 붙인 첨부를 세지 않았다')
+    const receipt = documentsIn(store).find((row) => row.id === 'DOC-RECEIPT-01')
+    assert.ok(receipt.tags.includes('tax-evidence'), '첨부에 세무 태그가 붙지 않았다')
+
+    // 태그는 붙었는데 이름이 본문에 없으면, 같은 파일을 두고 ZIP 과 증빙 본문이 다른 사실을 말한다.
+    const evidence = documentsIn(store).find((row) => row.id === last.body.effects.evidenceId)
+    const body = (await getTenantDocument(storage, evidence, TENANT)).toString('utf8')
+    assert.ok(body.includes('## 첨부'), `증빙 본문에 첨부 절이 없다\n${body}`)
+    assert.ok(body.includes('영수증-2026-09-02.pdf'), `증빙 본문에 첨부 파일 이름이 없다\n${body}`)
+  })
+})
+
+/** put 이 끝날 때까지 승인을 붙잡아 두는 저장소. 「읽은 뒤 늦게 쓰는 창」을 시계 없이 정확히 연다. */
+function gatedStorage() {
+  const base = memoryStorage()
+  let open
+  let entered
+  const gate = new Promise((resolve) => { open = resolve })
+  const putEntered = new Promise((resolve) => { entered = resolve })
+  return { ...base, putEntered, open: () => open(), async put(key, body) { entered(); await gate; return base.put(key, body) } }
+}
+
+test('10. 증빙 파일을 쓰는 동안 확정된 다른 쓰기가 사라지지 않는다 — 읽은 배열로 늦게 덮어쓰지 않는다', async () => {
+  const store = freshStore({
+    'company-documents': { data: [libraryDocument('DOC-RENAME-01', '원래이름.pdf')], updatedAt: '2026-09-01T00:00:00.000Z' },
+  })
+  const storage = gatedStorage()
+  await withServer(buildApp(store, storage), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const approver = await login(origin, SEO.email)
+    const other = await login(origin, LEE.email)
+    const created = await api(origin, admin)('POST', '/api/approval-forms', form())
+    const formId = created.body.form.id
+    const drafted = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: '승인될 문서', values: { spent_on: SPENT_ON, vendor: '동해수산', amount: 1_000 },
+      line: [{ mode: 'sequential', approvers: [SEO.id] }], submit: true,
+    })
+    assert.equal(drafted.status, 201, JSON.stringify(drafted.body))
+
+    // 승인을 증빙 파일 쓰기 한가운데에 세워 둔다.
+    const deciding = api(origin, approver)('POST', `/api/approval-documents/${drafted.body.document.id}/decide`, { decision: 'approve' })
+    await storage.putEntered
+
+    // 그 창 안에서 두 쓰기가 200/201 로 확정된다. 확정된 쓰기는 확정된 채로 남아야 한다.
+    const renamed = await api(origin, admin)('PATCH', '/api/documents/DOC-RENAME-01', { name: '바뀐이름.pdf' })
+    assert.equal(renamed.status, 200, JSON.stringify(renamed.body))
+    const late = await api(origin, other)('POST', '/api/approval-documents', {
+      formId, title: '창 안에서 올린 기안', values: { spent_on: SPENT_ON, vendor: '남해수산', amount: 2_000 },
+    })
+    assert.equal(late.status, 201, JSON.stringify(late.body))
+
+    storage.open()
+    const decided = await deciding
+    assert.equal(decided.status, 200, JSON.stringify(decided.body))
+    assert.equal(decided.body.document.status, '승인')
+
+    assert.equal(documentsIn(store).find((row) => row.id === 'DOC-RENAME-01')?.name, '바뀐이름.pdf', '200 으로 답한 이름 변경이 조용히 되돌아갔다')
+    const rows = store.tenants[TENANT]['approval-documents'].data
+    assert.ok(rows.some((row) => row.id === late.body.document.id), '201 로 답한 기안이 승인 커밋에 지워졌다')
+    assert.equal(rows.find((row) => row.id === drafted.body.document.id).status, '승인')
+    assert.equal(evidenceRows(store).length, 1)
+  })
+})
+
+/**
+ * 「무엇이 첨부인가」의 답은 **하나**다 — 쓰기 때 forbiddenAttachment 를 지나 저장된 linkedAttachmentIds.
+ *
+ * 증빙 태그·증빙 본문·인쇄물이 그 배열 대신 「그때의 양식」으로 다시 계산하면, 관리자가 항목 하나의
+ * 타입을 바꾸는 것만으로 두 답이 갈린다. 그 순간 셋이 함께 일어난다: 권한 검사를 한 번도 지나지
+ * 않은 자료의 이름이 증빙 마크다운과 인쇄물에 실리고(세무사에게 나간다), 그 자료에 tax-evidence
+ * 태그가 붙어 전달 묶음에 섞이고, 태그가 붙었는데도 삭제 잠금은 옛 값을 보므로 잠기지 않는다.
+ */
+test('11. 양식 항목의 타입이 바뀌어도 증빙·인쇄는 쓰기 때 검사한 집합만 읽는다', async () => {
+  const secret = {
+    ...libraryDocument('DOC-SECRET-9', '임원급여대장.pdf'),
+    uploadedById: ADMIN.id, visibility: 'restricted', allowedUserIds: [ADMIN.id],
+  }
+  const store = freshStore({ 'company-documents': { data: [secret], updatedAt: '2026-09-01T00:00:00.000Z' } })
+  const storage = memoryStorage()
+  await withServer(buildApp(store, storage), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const approver = await login(origin, SEO.email)
+
+    // memo 는 **자유 text** 다. 기안자는 남의 자료 id 를 그냥 적을 수 있고, 그것은 첨부가 아니다.
+    const created = await api(origin, admin)('POST', '/api/approval-forms', {
+      name: '항목 타입 뒤집기', kind: '지출결의',
+      fields: [
+        { key: 'spent_on', label: '지출일', type: 'date', required: true },
+        { key: 'amount', label: '금액', type: 'money', required: true },
+        { key: 'memo', label: '메모', type: 'text', required: false },
+      ],
+      defaultLine: [], ccIds: [], amountFieldKey: 'amount', evidenceCategory: '경비',
+    })
+    assert.equal(created.status, 201, JSON.stringify(created.body))
+    const form = created.body.form
+
+    const drafted = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId: form.id, title: '메모에 남의 자료 id', values: { spent_on: SPENT_ON, amount: 1_000, memo: 'DOC-SECRET-9' },
+      line: [{ mode: 'sequential', approvers: [SEO.id] }], submit: true,
+    })
+    assert.equal(drafted.status, 201, JSON.stringify(drafted.body))
+    assert.deepEqual(drafted.body.document.linkedAttachmentIds, [], 'text 칸은 첨부가 아니다 — 이 시험의 전제')
+    const id = drafted.body.document.id
+
+    // 관리자가 그 항목을 「첨부」로 바꾼다. 이미 돌고 있는 문서의 값은 그대로다.
+    const patched = await api(origin, admin)('PATCH', `/api/approval-forms/${form.id}`, {
+      ...form, version: form.version,
+      fields: form.fields.map((field) => (field.key === 'memo' ? { ...field, type: 'attachment' } : field)),
+    })
+    assert.equal(patched.status, 200, JSON.stringify(patched.body))
+    assert.equal(patched.body.form.fields.find((field) => field.key === 'memo').type, 'attachment')
+
+    const decided = await api(origin, approver)('POST', `/api/approval-documents/${id}/decide`, { decision: 'approve' })
+    assert.equal(decided.status, 200, JSON.stringify(decided.body))
+    assert.equal(decided.body.document.status, '승인')
+
+    // (a) 세무 태그가 붙지 않았다 — 붙었다면 세무사 전달 ZIP 에 원본 바이트째로 실려 나간다.
+    const secretRow = documentsIn(store).find((row) => row.id === 'DOC-SECRET-9')
+    assert.deepEqual(secretRow.tags, [], `검사받지 않은 자료에 세무 태그가 붙었다 — ${JSON.stringify(secretRow.tags)}`)
+    assert.equal(decided.body.effects.evidenceTaggedAttachments, 0)
+    assert.equal(selectTaxEvidence(documentsIn(store), resolveEvidencePeriod({ year: '2026' })).length, 1, '증빙 묶음에 남의 자료가 섞였다')
+
+    // (b) 증빙 마크다운에도 (c) 인쇄물에도 그 파일 이름이 없다. 둘 다 회사 밖으로 나가는 종이다.
+    const evidence = documentsIn(store).find((row) => row.id === decided.body.effects.evidenceId)
+    const body = (await getTenantDocument(storage, evidence, TENANT)).toString('utf8')
+    assert.ok(!body.includes('임원급여대장.pdf'), `증빙 본문에 열람 권한 없는 자료의 이름이 실렸다\n${body}`)
+    const printed = await fetch(`${origin}/api/approval-documents/${id}/print`, { headers: drafter.headers })
+    assert.equal(printed.status, 200)
+    assert.ok(!(await printed.text()).includes('임원급여대장.pdf'), '인쇄물에 열람 권한 없는 자료의 이름이 실렸다')
+
+    // (d) 태그가 붙지 않았으므로 잠금도 없다 — 셋이 같은 배열을 읽는다는 사실을 삭제로 확인한다.
+    assert.equal((await api(origin, admin)('DELETE', '/api/documents/DOC-SECRET-9')).status, 200)
+  })
+})
+
+test('12. 반대로 항목을 양식에서 빼도 잠긴 자료는 인쇄물에 그대로 보인다 — 409 문구가 참이다', async () => {
+  const store = freshStore({
+    'company-documents': { data: [libraryDocument('DOC-RECEIPT-77', '9월 영수증.pdf')], updatedAt: '2026-09-01T00:00:00.000Z' },
+  })
+  await withServer(buildApp(store, memoryStorage()), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const created = await api(origin, admin)('POST', '/api/approval-forms', form())
+    const formInput = created.body.form
+    const drafted = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId: formInput.id, title: '영수증 붙인 기안',
+      values: { spent_on: SPENT_ON, vendor: '동해수산', amount: 1_000, receipt: 'DOC-RECEIPT-77' },
+    })
+    assert.equal(drafted.status, 201, JSON.stringify(drafted.body))
+
+    const patched = await api(origin, admin)('PATCH', `/api/approval-forms/${formInput.id}`, {
+      ...formInput, version: formInput.version, fields: formInput.fields.filter((field) => field.key !== 'receipt'),
+    })
+    assert.equal(patched.status, 200, JSON.stringify(patched.body))
+
+    // 「해당 화면에서 먼저 연결을 해제한 뒤 삭제해 주세요」가 참이려면 그 연결이 화면에 보여야 한다.
+    const blocked = await api(origin, admin)('DELETE', '/api/documents/DOC-RECEIPT-77')
+    assert.equal(blocked.status, 409, JSON.stringify(blocked.body))
+    assert.equal(blocked.body.error.code, 'DOCUMENT_IN_USE')
+    const printed = await fetch(`${origin}/api/approval-documents/${drafted.body.document.id}/print`, { headers: drafter.headers })
+    assert.ok((await printed.text()).includes('9월 영수증.pdf'), '잠겨 있는데 인쇄물 어디에도 그 연결이 보이지 않는다')
   })
 })

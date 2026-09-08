@@ -3,6 +3,8 @@ import { scryptSync } from 'node:crypto'
 import test from 'node:test'
 
 import { createApp } from './app.mjs'
+// 상한은 순수 모듈이 정본이다. 시험이 숫자를 다시 적으면 상한이 바뀔 때 시험만 조용히 낡는다.
+import { MAX_DOCUMENTS_PER_TENANT, MAX_FORMS_PER_TENANT } from './approval-routing.mjs'
 import { withServer } from './test-server.mjs'
 
 /**
@@ -206,12 +208,21 @@ test('2. 대결자는 기간 안에서만 결재하고, decidedById 는 재기�
     assert.equal(seat.decidedById, YOON.id, '실제로 누른 사람이 자리에 남아야 한다')
     assert.equal(seat.delegateOf, SEO.id)
 
-    // 재기동. 같은 저장소로 앱을 새로 세워 decidedById 가 살아남는지 본다 —
-    // 이 값이 떨어지면 인쇄물의 「대결」 표기와 대결자의 열람 권한이 함께 죽는다.
-    await withServer(buildApp(store), async (rebooted) => {
+    // 대조군. 같은 결재선인데 **아직 아무도 누르지 않은** 문서다. 대결 기간이 끝나면 이것은 보이지 않는다.
+    const untouched = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: '아무도 안 누른 건', values: { spent_on: '2026-09-01', amount: 20_000 }, line: line(SEO.id), submit: true,
+    })
+    assert.equal(untouched.status, 201, JSON.stringify(untouched.body))
+
+    // 재기동. 시계는 **대결 기간(…09-10)이 끝난 뒤**로 준다 — 기간이 살아 있으면 가시성 다섯째 절
+    // (대결 기간)이 열람을 대신 열어 주어, 이 시험은 넷째 절(decidedById)을 잠그지 못한다.
+    // 그 값이 떨어지면 인쇄물의 「대결」 표기와 대결자의 열람 권한이 함께 죽는다.
+    await withServer(buildApp(store, { approvalClock: () => new Date('2026-09-20T01:00:00.000Z') }), async (rebooted) => {
       const reader = await login(rebooted, YOON.email)
+      const stale = await api(rebooted, reader)('GET', `/api/approval-documents/${untouched.body.document.id}`)
+      assert.equal(stale.status, 404, '대결 기간이 아직 살아 있다 — 이 시험은 decidedById 를 잠그지 못한다')
       const reloaded = await api(rebooted, reader)('GET', `/api/approval-documents/${id}`)
-      assert.equal(reloaded.status, 200, '대결로 결재한 사람이 재기동 뒤 자기가 누른 문서를 못 본다')
+      assert.equal(reloaded.status, 200, '대결로 결재한 사람이 기간이 끝난 뒤 자기가 누른 문서를 못 본다')
       assert.equal(reloaded.body.document.line[0].approvers[0].decidedById, YOON.id)
     })
   })
@@ -464,6 +475,18 @@ test('8. generic 저장소 라우트는 두 키를 열지 않고, 게스트 세�
       assert.equal(write.body.error.code, 'APPROVAL_ROUTE_REQUIRED')
     }
 
+    // 구성원도 같은 문장을 받는다. 「없는 영역」과 「전용 라우트가 있는 영역」이 같은 답을 주면
+    // 화면은 어디로 가야 하는지 알 수 없다 — 그래서 키 판정이 직무 판정보다 **앞**이어야 하고,
+    // 그 순서가 GET 과 PUT 에서 같아야 한다.
+    const member = await login(origin, OH.email)
+    for (const key of ['approval-forms', 'approval-documents']) {
+      for (const [method, payload] of [['GET', undefined], ['PUT', { data: [] }]]) {
+        const result = await api(origin, member)(method, `/api/workspace/${key}`, payload)
+        assert.equal(result.status, 403, `${method} ${key}`)
+        assert.equal(result.body.error.code, 'APPROVAL_ROUTE_REQUIRED', `구성원의 ${method} ${key} 가 다른 문장을 받았다 — ${JSON.stringify(result.body)}`)
+      }
+    }
+
     const guest = await login(origin, GUEST.email, GUEST.password)
     const routes = [
       ['GET', '/api/approval-forms'], ['POST', '/api/approval-forms'],
@@ -488,7 +511,11 @@ test('8. generic 저장소 라우트는 두 키를 열지 않고, 게스트 세�
 test('9. 결재가 붙잡은 「첨부」 항목 값은 자료실에서 지워지지 않는다 — 결재 밖 키의 values 는 그대로다', async () => {
   const store = freshStore({
     'company-documents': {
-      data: [libraryDocument('DOC-RECEIPT-01', '영수증.pdf'), libraryDocument('DOC-ASSET-01', '자산 사진.pdf')],
+      data: [
+        libraryDocument('DOC-RECEIPT-01', '영수증.pdf'),
+        libraryDocument('DOC-ASSET-01', '자산 사진.pdf'),
+        libraryDocument('DOC-TEXT-01', '자유 텍스트에 적힌 파일.pdf'),
+      ],
       updatedAt: '2026-09-01T00:00:00.000Z',
     },
     // 대조군. 결재 밖 키의 values 안에 든 DOC- 문자열은 참조로 세지 않는다 —
@@ -512,6 +539,15 @@ test('9. 결재가 붙잡은 「첨부」 항목 값은 자료실에서 지워�
     const free = await api(origin, admin)('DELETE', '/api/documents/DOC-ASSET-01')
     assert.equal(free.status, 200, `결재 밖 키의 values 가 자료 삭제를 잠갔다 — ${JSON.stringify(free.body)}`)
 
+    // 대조군 ①: **같은 결재 문서 안**의 text 칸에 든 DOC- 는 참조가 아니다. 참조로 세는 집합이
+    // 첨부 권한을 검사한 집합보다 넓으면, 아무나 자유 텍스트 한 줄로 남의 자료를 묶을 수 있다.
+    const inText = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: 'text 칸에 적어 둔 id', values: { spent_on: '2026-09-01', amount: 1_000, purpose: 'DOC-TEXT-01' },
+    })
+    assert.equal(inText.status, 201, JSON.stringify(inText.body))
+    const textFree = await api(origin, admin)('DELETE', '/api/documents/DOC-TEXT-01')
+    assert.equal(textFree.status, 200, `결재 문서의 text 칸이 자료 삭제를 잠갔다 — ${JSON.stringify(textFree.body)}`)
+
     // 열지 못하는 자료는 결재에 붙일 수 없다(첨부 배열도 같은 잣대).
     const hiddenFile = libraryDocument('DOC-SECRET', '남의 비밀.pdf', PARK.id)
     store.tenants[TENANT]['company-documents'].data.push({ ...hiddenFile, visibility: 'restricted', allowedUserIds: [PARK.id] })
@@ -520,6 +556,155 @@ test('9. 결재가 붙잡은 「첨부」 항목 값은 자료실에서 지워�
     })
     assert.equal(forbidden.status, 400)
     assert.equal(forbidden.body.error.code, 'APPROVAL_ATTACHMENT_FORBIDDEN')
+
+    // 대조군 ②: 같은 자료의 id 를 **text 칸**에 적으면 400 도 아니고 잠금도 아니다.
+    // 읽을 권한조차 없는 자료를 문자열 한 줄로 영구히 붙잡는 길이 열려 있으면 안 된다.
+    const secretInText = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: '못 읽는 자료를 text 칸에', values: { spent_on: '2026-09-01', amount: 3_000, purpose: 'DOC-SECRET' },
+    })
+    assert.equal(secretInText.status, 201, JSON.stringify(secretInText.body))
+    const secretFree = await api(origin, admin)('DELETE', '/api/documents/DOC-SECRET')
+    assert.equal(secretFree.status, 200, `읽을 권한도 없는 자료가 text 한 줄로 잠겼다 — ${JSON.stringify(secretFree.body)}`)
+
+    // ── PATCH 갈래. 파생 필드를 **고칠 때도** 다시 적지 않으면 두 가지가 함께 무너진다:
+    // 「첨부」 칸을 비워도 자료가 영원히 잠기고, PATCH 가 「기안 때의 옛 집합」을 검사하게 되어
+    // 읽을 권한 없는 자료를 밀어 넣는 길이 열린다. 두 사실을 각각 잰다.
+    const editable = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: 'PATCH 로 고칠 기안', values: { spent_on: '2026-09-01', amount: 5_000, receipt: 'DOC-RECEIPT-01' },
+    })
+    assert.equal(editable.status, 201, JSON.stringify(editable.body))
+    const draftedId = editable.body.document.id
+    assert.deepEqual(editable.body.document.linkedAttachmentIds, ['DOC-RECEIPT-01'])
+
+    const cleared = await api(origin, drafter)('PATCH', `/api/approval-documents/${draftedId}`, {
+      version: editable.body.document.version, values: { spent_on: '2026-09-01', amount: 5_000 },
+    })
+    assert.equal(cleared.status, 200, JSON.stringify(cleared.body))
+    assert.deepEqual(cleared.body.document.linkedAttachmentIds, [], 'PATCH 가 파생 필드를 다시 적지 않았다')
+    // 처음 기안(위쪽 '영수증 붙인 기안')도 아직 이 자료를 붙잡고 있으므로, 그것부터 지워야 잠금이 풀린다.
+    const firstDraftId = (await api(origin, drafter)('GET', '/api/approval-documents?scope=drafted'))
+      .body.documents.find((row) => row.title === '영수증 붙인 기안').id
+    assert.equal((await api(origin, drafter)('DELETE', `/api/approval-documents/${firstDraftId}`)).status, 200)
+    const unlocked = await api(origin, admin)('DELETE', '/api/documents/DOC-RECEIPT-01')
+    assert.equal(unlocked.status, 200, `「첨부」 칸을 비웠는데 자료가 잠긴 채로 남았다 — ${JSON.stringify(unlocked.body)}`)
+
+    store.tenants[TENANT]['company-documents'].data.push({
+      ...libraryDocument('DOC-SECRET-2', '또 다른 비밀.pdf', PARK.id), visibility: 'restricted', allowedUserIds: [PARK.id],
+    })
+    const pushed = await api(origin, drafter)('PATCH', `/api/approval-documents/${draftedId}`, {
+      version: cleared.body.document.version, values: { spent_on: '2026-09-01', amount: 5_000, receipt: 'DOC-SECRET-2' },
+    })
+    assert.equal(pushed.status, 400, `PATCH 가 읽을 수 없는 자료를 받아들였다 — ${JSON.stringify(pushed.body)}`)
+    assert.equal(pushed.body.error.code, 'APPROVAL_ATTACHMENT_FORBIDDEN')
+  })
+})
+
+test('12. 목록은 상한 100에서 자르고 total 은 자르기 전 개수이며, 멱등 키는 자르지 않고 거절한다', async () => {
+  const store = freshStore()
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const call = api(origin, drafter)
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+
+    // 상한을 잃으면 5,000건 저장 상한까지 한 응답에 실린다. 101을 달라고 해도 100이다.
+    const seeded = Array.from({ length: 105 }, (_value, index) => ({
+      id: `APD-SEED-${String(index).padStart(4, '0')}`, formId, formName: '출장비 정산', formVersion: 1, kind: '출장',
+      title: `심어 둔 문서 ${index}`, values: {}, attachments: [], linkedAttachmentIds: [], line: [], ccIds: [],
+      drafterId: OH.id, drafterName: OH.name, status: '기안', currentStep: 0, rejectionReason: '',
+      evidenceId: null, posting: null, history: [], version: 1, clientRequestId: '',
+      createdAt: '2026-09-01T00:00:00.000Z', updatedAt: `2026-09-01T00:${String(index % 60).padStart(2, '0')}:00.000Z`,
+      submittedAt: null, completedAt: null,
+    }))
+    store.tenants[TENANT]['approval-documents'] = { data: seeded, updatedAt: '2026-09-01T00:00:00.000Z' }
+
+    const listed = await call('GET', '/api/approval-documents?limit=101')
+    assert.equal(listed.status, 200, JSON.stringify(listed.body))
+    assert.equal(listed.body.documents.length, 100, '목록 상한 100이 사라졌다')
+    // 자른 배열의 길이를 세지 않는다(규칙 13).
+    assert.equal(listed.body.total, 105)
+    assert.equal((await call('GET', '/api/approval-documents?limit=5')).body.documents.length, 5)
+
+    // 121자 이상에서 앞 120자가 같은 두 키는 **합쳐지지 않는다.** 먼저 자른 뒤 모양을 보면
+    // 두 번째 기안이 만들어지지 않고 첫 문서가 replayed 로 돌아가 남의 제목이 화면에 뜬다.
+    const long = await call('POST', '/api/approval-documents', {
+      formId, title: '너무 긴 멱등 키', values: { spent_on: '2026-09-01', amount: 1_000 }, clientRequestId: `${'a'.repeat(120)}1`,
+    })
+    assert.equal(long.status, 400, JSON.stringify(long.body))
+    assert.equal(long.body.error.code, 'APPROVAL_VALUE_INVALID')
+    assert.equal(long.body.error.key, 'clientRequestId')
+    // 120자까지는 그대로 받고, 재시도는 여전히 한 건이다.
+    const key = 'a'.repeat(120)
+    const first = await call('POST', '/api/approval-documents', {
+      formId, title: '경계값 멱등 키', values: { spent_on: '2026-09-01', amount: 1_000 }, clientRequestId: key,
+    })
+    assert.equal(first.status, 201, JSON.stringify(first.body))
+    assert.equal(first.body.document.clientRequestId, key, '멱등 키가 저장될 때 잘렸다')
+    const retry = await call('POST', '/api/approval-documents', {
+      formId, title: '경계값 멱등 키', values: { spent_on: '2026-09-01', amount: 1_000 }, clientRequestId: key,
+    })
+    assert.equal(retry.body.replayed, true)
+  })
+})
+
+test('13. 상신 전 문서를 결재하면 「이미 끝난 결재」가 아니라 「아직 상신되지 않았다」로 답한다', async () => {
+  const store = freshStore()
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const approver = await login(origin, SEO.email)
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+    const drafted = await api(origin, drafter)('POST', '/api/approval-documents', {
+      formId, title: '아직 안 올린 문서', values: { spent_on: '2026-09-01', amount: 1_000 }, line: line(SEO.id),
+    })
+    assert.equal(drafted.status, 201, JSON.stringify(drafted.body))
+    const id = drafted.body.document.id
+
+    // 결재선에 이름이 적힌 사람은 상신 전 문서도 목록에서 본다 — 그래서 실제로 눌러 볼 수 있는 자리다.
+    const read = await api(origin, approver)('GET', `/api/approval-documents/${id}`)
+    assert.equal(read.status, 200, JSON.stringify(read.body))
+    assert.equal(read.body.document.status, '기안')
+    assert.equal(read.body.permissions.canDecide, false)
+
+    const decided = await api(origin, approver)('POST', `/api/approval-documents/${id}/decide`, { decision: 'approve' })
+    assert.equal(decided.status, 409, JSON.stringify(decided.body))
+    assert.equal(decided.body.error.code, 'APPROVAL_NOT_SUBMITTED')
+    assert.notEqual(decided.body.error.code, 'APPROVAL_ALREADY_DECIDED', '끝나지도 시작하지도 않은 문서를 「이미 끝났다」고 말한다')
+
+    // 상신한 뒤에는 같은 사람이 같은 요청으로 200을 받는다 — 막은 것은 상태뿐이다.
+    const submitted = await api(origin, drafter)('POST', `/api/approval-documents/${id}/submit`, { version: drafted.body.document.version })
+    assert.equal(submitted.status, 200, JSON.stringify(submitted.body))
+    assert.equal((await api(origin, approver)('POST', `/api/approval-documents/${id}/decide`, { decision: 'approve' })).status, 200)
+    // 끝난 뒤에야 「이미 끝난 결재」다.
+    const again = await api(origin, approver)('POST', `/api/approval-documents/${id}/decide`, { decision: 'approve' })
+    assert.equal(again.status, 409)
+    assert.equal(again.body.error.code, 'APPROVAL_ALREADY_DECIDED')
+  })
+})
+
+test('14. 커밋이 실패하면 저장된 적 없는 회사 객체도 함께 되돌아간다', async () => {
+  // 회사 칸이 아예 없는 저장소. `??= {}` 로 만든 빈 회사를 남기면 다음 성공 커밋이 그것을 디스크에 싣는다.
+  const store = { ...freshStore(), tenants: {} }
+  let failCommit = false
+  await withServer(buildApp(store, { onWorkspaceStoreChange: () => { if (failCommit) throw new Error('디스크가 꽉 찼다') } }), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    assert.equal(Object.hasOwn(store.tenants, TENANT), false, '시험이 시작부터 전제를 잃었다')
+
+    failCommit = true
+    const created = await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)
+    failCommit = false
+    assert.equal(created.status, 500, JSON.stringify(created.body))
+    assert.equal(created.body.error.code, 'APPROVAL_WRITE_FAILED')
+    assert.equal(Object.hasOwn(store.tenants, TENANT), false, '커밋이 실패했는데 없던 회사 객체가 남았다')
+
+    // 대조군: 원래 있던 회사는 실패해도 지워지지 않는다(그 안의 다른 키가 함께 사라지면 안 된다).
+    store.tenants[TENANT] = { notifications: { data: [], updatedAt: '2026-09-01T00:00:00.000Z' } }
+    failCommit = true
+    assert.equal((await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).status, 500)
+    failCommit = false
+    assert.equal(Object.hasOwn(store.tenants, TENANT), true, '있던 회사 객체를 지웠다')
+    assert.ok(store.tenants[TENANT].notifications, '같은 회사의 다른 키가 함께 사라졌다')
+    assert.equal(store.tenants[TENANT]['approval-forms'], undefined, '실패한 쓰기가 그 키에 남았다')
   })
 })
 
@@ -602,5 +787,163 @@ test('11. 반려는 사유 5자 이상을 요구하고, 병렬 단계는 전원 
     assert.equal(rejected.body.document.rejectionReason, '금액 근거가 없습니다.')
     // 먼저 승인한 사람의 기록은 지워지지 않는다 — 누가 무엇을 했는지가 이력의 전부다.
     assert.equal(rejected.body.document.line[0].approvers.find((approver) => approver.accountId === SEO.id).decision, 'approved')
+  })
+})
+
+/**
+ * §1.5 표가 선언한 두 상한. 동작은 옳았지만 잠그는 시험이 하나도 없었다 —
+ * 잠금이 없는 상한은 다음 리팩터가 조용히 지운다. 상한-1 통과와 상한 거절을 함께 잰다.
+ */
+test('15. 양식 60개·문서 5,000건 상한은 상한-1 에서 통과하고 상한에서 409다', async () => {
+  const seedForm = (index) => ({
+    recordType: 'form', id: `AFM-SEED-${String(index).padStart(4, '0')}`, name: `씨앗 양식 ${index}`, kind: '품의',
+    description: '', fields: [], defaultLine: [], ccIds: [], amountFieldKey: null, evidenceCategory: null,
+    active: true, version: 1, createdById: ADMIN.id, createdByName: '김서원',
+    createdAt: NOW, updatedAt: NOW, updatedById: ADMIN.id,
+  })
+  const forms = freshStore({
+    'approval-forms': { data: Array.from({ length: MAX_FORMS_PER_TENANT - 1 }, (_value, index) => seedForm(index)), updatedAt: NOW },
+  })
+  await withServer(buildApp(forms), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const last = await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)
+    assert.equal(last.status, 201, `상한-1(${MAX_FORMS_PER_TENANT - 1}개)에서 거절했다 — ${JSON.stringify(last.body)}`)
+    const over = await api(origin, admin)('POST', '/api/approval-forms', { ...EXPENSE_FORM, name: '넘치는 양식' })
+    assert.equal(over.status, 409, JSON.stringify(over.body))
+    assert.equal(over.body.error.code, 'APPROVAL_FORM_LIMIT')
+    // 숫자를 말하는 문장은 실제 상한과 같아야 한다(규칙 11).
+    assert.ok(over.body.error.message.includes(`${MAX_FORMS_PER_TENANT}개`), `문구가 상한을 말하지 않는다 — ${over.body.error.message}`)
+  })
+
+  const seedDocument = (index) => ({
+    id: `APD-SEED-${String(index).padStart(5, '0')}`, formId: 'AFM-SEED-0000', formName: '씨앗 양식 0', formVersion: 1,
+    kind: '품의', title: `씨앗 문서 ${index}`, values: {}, attachments: [], linkedAttachmentIds: [],
+    line: [], ccIds: [], drafterId: OH.id, drafterName: '오태식', status: '기안', currentStep: 1,
+    rejectionReason: '', evidenceId: null, posting: null, history: [], version: 1, clientRequestId: '',
+    createdAt: NOW, updatedAt: NOW, submittedAt: null, completedAt: null,
+  })
+  const documents = freshStore({
+    'approval-documents': { data: Array.from({ length: MAX_DOCUMENTS_PER_TENANT - 1 }, (_value, index) => seedDocument(index)), updatedAt: NOW },
+  })
+  await withServer(buildApp(documents), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+    const body = { formId, values: { spent_on: '2026-09-01', amount: 1_000 } }
+    const last = await api(origin, drafter)('POST', '/api/approval-documents', { ...body, title: '마지막 한 건' })
+    assert.equal(last.status, 201, `상한-1(${MAX_DOCUMENTS_PER_TENANT - 1}건)에서 거절했다 — ${JSON.stringify(last.body)}`)
+    const over = await api(origin, drafter)('POST', '/api/approval-documents', { ...body, title: '넘치는 한 건' })
+    assert.equal(over.status, 409, JSON.stringify(over.body))
+    assert.equal(over.body.error.code, 'APPROVAL_DOCUMENT_LIMIT')
+    assert.ok(over.body.error.message.includes(`${MAX_DOCUMENTS_PER_TENANT}건`), `문구가 상한을 말하지 않는다 — ${over.body.error.message}`)
+  })
+})
+
+/**
+ * 같은 이름·같은 모양의 칸이 라우트마다 다른 사실을 세면, 그 차이는 응답 어디에도 적히지 않는다.
+ * 목록으로 「내가 올린 것」 탭 점을 찍는 화면에서는 그 점이 영원히 꺼지지 않는다.
+ */
+test('16. summary.decidedUnread 는 목록에서도 요약에서도 같은 뜻이다 — seenAt 을 같은 규칙으로 읽는다', async () => {
+  const store = freshStore()
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const approver = await login(origin, SEO.email)
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+    for (const title of ['9월 출장 정산 1', '9월 출장 정산 2']) {
+      const drafted = await api(origin, drafter)('POST', '/api/approval-documents', {
+        formId, title, values: { spent_on: '2026-09-01', amount: 1_000 }, line: line(SEO.id), submit: true,
+      })
+      assert.equal(drafted.status, 201, JSON.stringify(drafted.body))
+      const decided = await api(origin, approver)('POST', `/api/approval-documents/${drafted.body.document.id}/decide`, { decision: 'approve' })
+      assert.equal(decided.status, 200, JSON.stringify(decided.body))
+    }
+    const call = api(origin, drafter)
+    const pairs = async (query) => [
+      (await call('GET', `/api/approval-documents${query}`)).body.summary.decidedUnread,
+      (await call('GET', `/api/approval-documents/summary${query}`)).body.decidedUnread,
+    ]
+    // seenAt 이 없으면 「끝난 내 기안 전부」다 — 두 라우트가 같은 수를 말한다.
+    assert.deepEqual(await pairs(''), [2, 2])
+    // 마지막으로 본 시각 뒤에 끝난 것은 없다. 목록이 seenAt 을 버리면 여기서 2가 나온다.
+    assert.deepEqual(await pairs(`?seenAt=${encodeURIComponent(NOW)}`), [0, 0])
+    // 못 읽는 값은 두 라우트 모두 「전부」로 떨어진다 — 조용히 0으로 만들면 점이 영영 안 켜진다.
+    assert.deepEqual(await pairs('?seenAt=어제'), [2, 2])
+  })
+})
+
+/**
+ * 409 문구는 **할 수 있는 행동**을 말해야 한다(규칙 11). 종결한 결재의 첨부에는 세 가지 사실이 있고,
+ * 그 셋은 사람이 할 수 있는 일이 서로 다르므로 같은 문장을 받으면 안 된다.
+ */
+test('17. 끝난 결재의 첨부 — 반려·회수는 풀리고, 승인 근거는 잠긴 채 그 사실을 문구가 말한다', async () => {
+  const store = freshStore({
+    'company-documents': {
+      data: [
+        libraryDocument('DOC-REJ-1', '반려된 영수증.pdf'),
+        libraryDocument('DOC-RCL-1', '회수된 영수증.pdf'),
+        libraryDocument('DOC-APR-1', '승인된 영수증.pdf'),
+        libraryDocument('DOC-ACT-1', '도는 중인 영수증.pdf'),
+        libraryDocument('DOC-DRF-1', '기안에 붙은 영수증.pdf'),
+      ],
+      updatedAt: '2026-09-01T00:00:00.000Z',
+    },
+  })
+  await withServer(buildApp(store), async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const drafter = await login(origin, OH.email)
+    const approver = await login(origin, SEO.email)
+    const formId = (await api(origin, admin)('POST', '/api/approval-forms', EXPENSE_FORM)).body.form.id
+    const draft = async (title, receipt, submit) => {
+      const created = await api(origin, drafter)('POST', '/api/approval-documents', {
+        formId, title, values: { spent_on: '2026-09-01', amount: 1_000, receipt }, line: line(SEO.id), submit,
+      })
+      assert.equal(created.status, 201, JSON.stringify(created.body))
+      return created.body.document
+    }
+    const remove = (id) => api(origin, admin)('DELETE', `/api/documents/${id}`)
+
+    // ① 반려. 종결 문서는 PATCH 도 DELETE 도 409 라서 화면에 연결을 풀 길이 없다 —
+    //    잠금이 남으면 잘못 올려 반려된 기안 하나가 그 영수증을 자료실에 영구히 못 박는다.
+    const rejectedDoc = await draft('반려될 기안', 'DOC-REJ-1', true)
+    const rejected = await api(origin, approver)('POST', `/api/approval-documents/${rejectedDoc.id}/decide`, { decision: 'reject', reason: '영수증이 흐립니다.' })
+    assert.equal(rejected.status, 200, JSON.stringify(rejected.body))
+    assert.equal(rejected.body.document.status, '반려')
+    assert.equal((await api(origin, drafter)('PATCH', `/api/approval-documents/${rejectedDoc.id}`, { version: rejected.body.document.version, values: {} })).status, 409, '이 시험의 전제: 종결 문서는 고칠 수 없다')
+    const freedByReject = await remove('DOC-REJ-1')
+    assert.equal(freedByReject.status, 200, `반려된 결재가 자료를 영구히 붙잡았다 — ${JSON.stringify(freedByReject.body)}`)
+
+    // ② 회수도 같다.
+    const recalledDoc = await draft('회수할 기안', 'DOC-RCL-1', true)
+    const recalled = await api(origin, drafter)('POST', `/api/approval-documents/${recalledDoc.id}/recall`, { version: recalledDoc.version })
+    assert.equal(recalled.status, 200, JSON.stringify(recalled.body))
+    assert.equal(recalled.body.document.status, '회수')
+    const freedByRecall = await remove('DOC-RCL-1')
+    assert.equal(freedByRecall.status, 200, `회수된 결재가 자료를 영구히 붙잡았다 — ${JSON.stringify(freedByRecall.body)}`)
+
+    // ③ 승인은 영구히 잠긴다. 그것이 근거의 뜻이다 — 다만 「연결을 해제하라」고 말하지 않는다.
+    const approvedDoc = await draft('승인될 기안', 'DOC-APR-1', true)
+    const approved = await api(origin, approver)('POST', `/api/approval-documents/${approvedDoc.id}/decide`, { decision: 'approve' })
+    assert.equal(approved.body.document.status, '승인')
+    const locked = await remove('DOC-APR-1')
+    assert.equal(locked.status, 409, JSON.stringify(locked.body))
+    assert.equal(locked.body.error.code, 'DOCUMENT_IN_USE')
+    assert.match(locked.body.error.message, /삭제할 수 없습니다/)
+    assert.doesNotMatch(locked.body.error.message, /연결을 해제/, '할 수 없는 행동을 하라고 말한다')
+
+    // ④ 결재중은 아직 갈리지 않았다. 문구가 두 갈래를 그대로 말한다.
+    await draft('도는 중인 기안', 'DOC-ACT-1', true)
+    const active = await remove('DOC-ACT-1')
+    assert.equal(active.status, 409, JSON.stringify(active.body))
+    assert.match(active.body.error.message, /반려·회수되면/)
+
+    // ⑤ 기안은 기안자가 풀 수 있다 — 「연결을 해제한 뒤」가 참인 유일한 갈래다. 문구대로 해 본다.
+    const draftDoc = await draft('아직 상신 안 한 기안', 'DOC-DRF-1', false)
+    const held = await remove('DOC-DRF-1')
+    assert.equal(held.status, 409, JSON.stringify(held.body))
+    assert.match(held.body.error.message, /연결을 해제한 뒤/)
+    assert.equal((await api(origin, drafter)('DELETE', `/api/approval-documents/${draftDoc.id}`)).status, 200)
+    const freed = await remove('DOC-DRF-1')
+    assert.equal(freed.status, 200, `문구가 말한 대로 연결을 풀었는데도 잠긴 채로 남았다 — ${JSON.stringify(freed.body)}`)
   })
 })
