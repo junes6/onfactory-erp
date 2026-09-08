@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUpRight, BookOpen, Check, ClipboardCheck, FilePlus2, FileText, Keyboard, MessageCircle, MessagesSquare, Pencil, Radar, RefreshCw, Settings2, ShieldAlert, Sparkles, X } from 'lucide-react'
+import { ArrowUpRight, BookOpen, Check, ClipboardCheck, FilePlus2, FileText, Keyboard, MessageCircle, MessagesSquare, Pencil, Radar, RefreshCw, Settings2, ShieldAlert, Sparkles, Users, X } from 'lucide-react'
 import { formatDateTime } from '../utils/dateTime'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ApprovalQueue.css'
@@ -8,7 +8,7 @@ import { OpportunityWatch } from './OpportunityWatch'
 import { ApprovalDocumentSection } from './approval/ApprovalDocumentSection'
 import type { ApprovalAccount } from './approval/approvalTypes'
 
-type ProposalKind = 'document-classification' | 'task-from-message' | 'sentinel-task' | 'lens-task' | 'opportunity' | 'principle' | 'thread-conclusion' | 'wiki-task'
+type ProposalKind = 'document-classification' | 'task-from-message' | 'sentinel-task' | 'lens-task' | 'opportunity' | 'principle' | 'thread-conclusion' | 'wiki-task' | 'meeting-task'
 type ProposalStatus = 'pending' | 'approved' | 'edited' | 'rejected' | 'expired'
 
 type Proposal = {
@@ -46,6 +46,10 @@ const kindMeta: Record<ProposalKind, KindMeta> = {
   'thread-conclusion': { label: '스레드 결론', tone: 'success', icon: MessagesSquare },
   // R16-H: 문서의 체크 항목에서 올라온 업무. 근거 링크는 아래 evidenceTarget이 그 문서로 보낸다.
   'wiki-task': { label: '문서에서 승격', tone: 'info', icon: BookOpen },
+  // R16-M: 회의록에서 뽑은 할 일. 서버의 PROPOSAL_KINDS 에 이 종류가 들어간 순간부터
+  // 통계 카드는 **회의록을 한 번도 쓰지 않은 회사에도** 뜬다 — 라벨이 없으면 그 자리에
+  // 한국어 화면 한가운데 영문 슬러그가 박힌다.
+  'meeting-task': { label: '회의록에서 추출', tone: 'info', icon: Users },
 }
 
 /**
@@ -71,6 +75,10 @@ function evidenceTarget(proposal: Proposal): { page: string; focusId: string; la
   if (proposal.kind === 'task-from-message' && payload?.conversationId) return { page: 'messenger', focusId: payload.conversationId, label: '원본 대화 열기' }
   if (proposal.kind === 'sentinel-task' && payload?.complianceId) return { page: 'compliance', focusId: payload.complianceId, label: '인증 대장 열기' }
   if (proposal.kind === 'wiki-task' && payload?.documentId) return { page: 'wiki', focusId: payload.documentId, label: '원본 문서 열기' }
+  // R16-M: 회의에서 뽑은 할 일의 근거는 그 회의록 문서다 — 결정과 인용이 적힌 자리이고,
+  // 승인 뒤 업무의 출처 배지가 가는 곳(server/app.mjs 의 workOriginFromProposal)과 같다.
+  // 링크가 없으면 결재자는 한 줄 요약만 보고 결정하게 된다.
+  if (proposal.kind === 'meeting-task' && payload?.documentId) return { page: 'wiki', focusId: payload.documentId, label: '회의록 문서 열기' }
   return null
 }
 

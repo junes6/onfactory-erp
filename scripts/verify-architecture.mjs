@@ -117,6 +117,7 @@ const workspaceTables = [
   'bulk_imports', 'bulk_import_rules',
   'wiki_documents', 'wiki_revisions',
   'approval_forms', 'approval_documents',
+  'meeting_notes',
 ]
 for (const table of workspaceTables) {
   const definition = schema.match(new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+${table}\\s*\\(([\\s\\S]*?)\\);`, 'i'))?.[1] ?? ''

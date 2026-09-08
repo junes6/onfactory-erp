@@ -26,7 +26,26 @@ export const TRANSCRIPT_MIME_TYPES = Object.freeze(new Set([...PLAIN_MIME_TYPES,
 /** 같은 목록의 확장자 쪽. 윈도우는 .vtt·.srt·.md에 MIME을 등록해 두지 않아 이쪽이 유일한 단서일 때가 있다. */
 export const TRANSCRIPT_EXTENSIONS = Object.freeze(new Set([...PLAIN_EXTENSIONS, ...CUE_EXTENSIONS]))
 
-/** 한 회의에서 받아 두는 전사 원문의 상한. 코드유닛이 아니라 사람이 세는 글자 수다. */
+/** 사람이 회의 녹음으로 올릴 법한 것. 확장자도 함께 보는 이유는 위와 같다(윈도가 MIME을 안 준다). */
+const SPEECH_EXTENSIONS = Object.freeze(new Set(['.m4a', '.mp3', '.wav', '.webm', '.ogg', '.aac', '.flac', '.mp4', '.mov', '.amr', '.opus']))
+
+/**
+ * 이 파일이 **녹음처럼 보이는가**. 거절 문구를 고르는 데만 쓴다 — 무엇을 읽을지는 언제나
+ * `transcriptFormatOf` 한 곳이 정한다(판정을 두 벌로 만들지 않는다).
+ */
+export function looksLikeSpeech({ mime, filename } = {}) {
+  const type = String(mime ?? '').toLowerCase()
+  if (type.startsWith('audio/') || type.startsWith('video/')) return true
+  const name = String(filename ?? '').toLowerCase()
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 && SPEECH_EXTENSIONS.has(name.slice(dot))
+}
+
+/**
+ * 한 회의에서 읽어 들이는 전사 원문의 상한. 코드유닛이 아니라 사람이 세는 글자 수다.
+ * 넘으면 앞부분만 읽고, **버린 글자 수를 `unreadCharacters`로 함께 돌려준다** — 조용히 자르면
+ * 화면이 실제보다 짧은 회의였다고 말하게 된다(요약도 그 뒷부분을 보지 못한다).
+ */
 export const MAX_TRANSCRIPT_CHARS = 200_000
 
 export class TranscriptionError extends Error {
@@ -227,8 +246,20 @@ export function transcriptFromCues(text) {
  * 전사 어댑터를 만든다.
  * `fetchImpl`은 실제 음성 벤더가 정해졌을 때 쓸 주입 자리다 — 오늘의 두 구현은 네트워크를 부르지 않는다.
  */
+/**
+ * 설정하지 않았을 때의 값.
+ *
+ * `text`다. 사람이 **이미 올린** 회의록 원문(.txt·.vtt·.srt·.md)에서 글자를 옮기는 일에는
+ * 벤더도, 네트워크 호출도, 회사 밖으로 나가는 바이트도 없다 — 켜 두지 않을 이유가 없는 기능을
+ * 기본값으로 꺼 두면, 원문을 올린 사람이 「처리」를 눌러 503을 받는다(실측으로 그랬다).
+ *
+ * 음성은 이 값과 무관하게 여전히 안 된다. 벤더가 정해지지 않았고, 오디오는 형식 판정에서 걸린다.
+ * 기능 자체를 끄고 싶으면 `TRANSCRIPTION_PROVIDER=none`을 명시하면 된다.
+ */
+export const DEFAULT_TRANSCRIPTION_PROVIDER = 'text'
+
 export function createTranscription({ env = process.env, fetchImpl = fetch } = {}) {
-  const name = String(env.TRANSCRIPTION_PROVIDER ?? 'none').trim() || 'none'
+  const name = String(env.TRANSCRIPTION_PROVIDER ?? DEFAULT_TRANSCRIPTION_PROVIDER).trim() || DEFAULT_TRANSCRIPTION_PROVIDER
 
   if (!TRANSCRIPTION_PROVIDERS.includes(name)) {
     // 실제 음성 벤더 자리(구현하지 않는다):
@@ -273,9 +304,17 @@ export function createTranscription({ env = process.env, fetchImpl = fetch } = {
     async transcribe({ body, mime, filename } = {}) {
       const format = transcriptFormatOf({ mime, filename })
       if (!format) {
+        /**
+         * 녹음을 올린 사람에게는 **왜 안 되는지**를 함께 말한다. 「TXT를 올려 주세요」만 주면
+         * 자기가 파일을 잘못 골랐다고 읽고 같은 녹음을 다시 올린다 — 음성 전사는 아직 연결되지
+         * 않았고, 그것은 사람이 파일을 바꿔서 될 일이 아니다.
+         */
         throw new TranscriptionError(
           'MEETING_SOURCE_UNSUPPORTED',
-          '이 형식은 회의록 원문으로 읽을 수 없습니다. TXT·VTT·SRT·Markdown 파일을 올려 주세요.',
+          looksLikeSpeech({ mime, filename })
+            ? '음성 파일에서 글자를 뽑는 연결이 아직 없습니다. 녹음은 자료실에 그대로 보관되고, '
+              + '지금은 회의록 원문(TXT·VTT·SRT·Markdown)을 올리면 요약과 업무 추출까지 됩니다.'
+            : '이 형식은 회의록 원문으로 읽을 수 없습니다. TXT·VTT·SRT·Markdown 파일을 올려 주세요.',
           415,
         )
       }
@@ -292,6 +331,9 @@ export function createTranscription({ env = process.env, fetchImpl = fetch } = {
       }
       const raw = typeof body === 'string' ? body : decodeUtf8(body)
       const parsed = format === 'cue' ? transcriptFromCues(raw) : transcriptFromPlainText(raw)
+      // 자르기 **전**의 길이를 여기서 센다. 이 값이 없으면 부르는 쪽이 셀 수 있는 것은 잘린 뒤의
+      // 길이뿐이라, 200,000자를 넘는 전사에서 화면이 실제보다 짧은 회의였다고 말하게 된다(규칙 10·13).
+      const sourceCharacters = countCharacters(parsed)
       // toWellFormed는 짝 없는 서로게이트만 U+FFFD로 바꾼다. 문자열 body로 들어온 그 조각을 그대로 두면
       // 반환본과 UTF-8 저장본이 달라져 아래 bytes가 거짓말이 된다(바이트 body는 위에서 이미 걸러진다).
       const text = clipCharacters(parsed, MAX_TRANSCRIPT_CHARS).toWellFormed()
@@ -306,6 +348,10 @@ export function createTranscription({ env = process.env, fetchImpl = fetch } = {
         model: 'transcript-upload',
         format,
         characters: countCharacters(text),
+        // 원문 전체 글자 수와, 이 어댑터가 상한에서 **읽지 못하고 버린** 글자 수. 화면이
+        // 「뒷부분 N자는 읽지 못했습니다」를 말할 수 있는 유일한 근거다.
+        sourceCharacters,
+        unreadCharacters: Math.max(0, sourceCharacters - countCharacters(text)),
         bytes: Buffer.byteLength(text, 'utf8'),
       }
     },

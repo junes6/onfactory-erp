@@ -169,7 +169,7 @@ console.log(`[scheduler] ${app.locals.scheduler.listJobs().length}개 정기 작
 
 const server = app.listen(port, host, () => {
   const mode = process.env.ANTHROPIC_API_KEY?.trim() ? 'Claude' : 'demo'
-  console.log(`[server] http://${host}:${port} (${mode} mode, ${runtimeStore.adapter.kind}${runtimeStore.adapter.readOnly ? ' read-only' : ''} store)`)
+  console.log(`[server] http://${host}:${port} (${mode} mode, ${runtimeStore.adapter.kind}${runtimeStore.adapter.readOnly ? ' read-only' : ''} store · 전사 ${app.locals.transcription.name})`)
 })
 
 let shuttingDown = false

@@ -20,6 +20,8 @@ import { ProductManagement, SalesChannels } from './components/BusinessPages'
 import { BillingDashboard } from './components/BillingDashboard'
 import { CompanyLibrary } from './components/CompanyLibrary'
 import { WikiPage } from './components/wiki/WikiPage'
+// R16-M4: 회의록. 녹음·전사·요약은 문서 편집과 성격이 다른 흐름이라 화면을 따로 둔다.
+import { MeetingNotesPage } from './components/MeetingNotes'
 import { DailyJournalPage, MessengerDrawer, parseMessengerFocus, SchedulePage, type MessengerFocus } from './components/CollaborationSuite'
 import { CALENDAR_CALLBACK_MESSAGES } from './components/CalendarConnection'
 import { ComplianceCenter } from './components/ComplianceCenter'
@@ -73,7 +75,7 @@ import { DailyDigest } from './components/DailyDigest'
 import { PersonalCorePage } from './components/PersonalCorePage'
 import { BRAND } from './brand'
 
-type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'finance' | 'ip' | 'judgement' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'wiki' | 'documents' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
+type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'finance' | 'ip' | 'judgement' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'wiki' | 'documents' | 'meetings' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
 type PageId = TenantPage | PlatformSection | 'billing'
 type AppMode = 'tenant' | 'platform'
 type NavItem = { id: PageId; label: string; icon: typeof Sparkles; badge?: number }
@@ -88,7 +90,7 @@ type SupportSessionRequest = { tenantId: string; ticketId: string; scope: string
 
 // R16-I4: 'approvals'를 직원에게 연다 — 자기 전자결재를 보는 화면이 여기 하나뿐이기 때문이다.
 // AI 제안(관리자 전용 라우트)은 화면이 role로 감춘다.
-const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'approvals', 'journal', 'projects', 'finance', 'ip', 'products', 'inventory', 'factory', 'people', 'wiki', 'documents', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
+const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'approvals', 'journal', 'projects', 'finance', 'ip', 'products', 'inventory', 'factory', 'people', 'wiki', 'documents', 'meetings', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
 const AUTH_SYNC_KEY = 'onfactory-auth-sync'
 const emptyWorkItems: WorkItem[] = []
 const emptyWorkRules: WorkRule[] = []
@@ -3032,6 +3034,8 @@ export default function App() {
       />
       case 'wiki': return <WikiPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} focusDocumentId={wikiFocusId} focusProjectId={wikiProjectId} onFocusHandled={() => { setWikiFocusId(undefined); setWikiProjectId(undefined) }} streamRef={wikiStreamRef} onAskLens={setLensTarget} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} />
       case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} industryType={account?.industryType ?? 'food_manufacturing'} onAskLens={setLensTarget} onToast={setToast} />
+      // R16-M4: 회의록 문서는 위키에 만들어진다 — page만 바꾸면 문서 목록 첫 화면이 열려 그 회의록에 닿지 못한다.
+      case 'meetings': return <MeetingNotesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} isAdmin={account?.role === 'tenant-admin'} onOpenDocument={(documentId) => { setWikiFocusId(documentId); navigate('wiki') }} onNavigate={(target) => navigate(target as PageId)} onToast={setToast} />
       case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} companyName={tenantName} onAskLens={setLensTarget} onToast={setToast} />
       case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onNavigate={(target) => { if (target === 'people') setPeopleInitialTab('accounts'); navigate(target as PageId) }} />
       case 'it-deliverables':

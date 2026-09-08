@@ -12,7 +12,13 @@ type UploadAttachmentOptions = {
   allowedUserIds?: string[]
 }
 
-const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+/**
+ * 자료실이 한 번에 받는 바이트. 서버 `express.raw({ limit: '10mb' })`와 같은 수이고,
+ * **여기가 그 수를 아는 유일한 자리**다 — 녹음처럼 스스로 바이트를 쌓는 화면이 자기 상한을
+ * 따로 적으면 두 수가 조용히 갈리고, 사람은 40분을 녹음한 뒤에야 통째로 거절당한다.
+ * (R16-M4: `src/utils/mediaRecorder.ts`의 `MAX_RECORDING_BYTES`가 이 값에서 나온다.)
+ */
+export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
 
 function workspaceHeaders(workspaceScope?: string): Record<string, string> {
   return workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}

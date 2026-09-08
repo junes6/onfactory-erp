@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import test from 'node:test'
 
+import { PROPOSAL_KINDS } from '../server/proposal-engine.mjs'
 import { saveApprovalDraft } from '../src/utils/approvalDraft.ts'
 import { approvalListEmptyText, filledLineSteps, notificationFocusTarget } from '../src/utils/approvalLine.ts'
 
@@ -425,6 +426,24 @@ test('양식 항목은 순서를 바꿀 수 있고, 금액 후보는 저장할 �
   // 한글 라벨만 적은 money 항목이 금액 집계 후보에서 사라지고 amountFieldKey 가 null 로 저장된다.
   assert.match(admin, /const withKeys = \(\) => fields\.map\(\(field, position\) => \(\{ \.\.\.field, key: keyOf\(field, position\) \}\)\)/)
   assert.match(admin, /const moneyFields = withKeys\(\)\.filter\(\(field\) => field\.type === 'money'\)/)
+})
+
+test('승인 큐의 제안 종류는 서버 목록과 한 벌이다 — 한국어 화면에 영문 슬러그가 박히지 않는다', () => {
+  const union = approvalQueue.slice(approvalQueue.indexOf('type ProposalKind ='), approvalQueue.indexOf('type ProposalStatus ='))
+  const meta = attributeBody(approvalQueue, approvalQueue.indexOf('{', approvalQueue.indexOf('const kindMeta')))
+  assert.ok(PROPOSAL_KINDS.length >= 7, '서버 목록을 읽지 못하면 이 시험은 아무것도 재지 않는다')
+  for (const kind of PROPOSAL_KINDS) {
+    // 통계 카드(`approvalStatistics`)는 PROPOSAL_KINDS 전체를 **무조건** 만든다 — 그 기능을 한 번도
+    // 쓰지 않은 회사의 관리자 화면에도 카드가 뜨므로, 라벨이 없으면 그 자리에 영문 슬러그가 박힌다.
+    assert.ok(union.includes(`'${kind}'`), `ProposalKind 에 '${kind}' 가 없다 — 서버가 먼저 배포되면 화면이 슬러그를 그린다`)
+    const label = new RegExp(`(?:'${kind}'|${kind})\\s*:\\s*\\{[^}]*label:\\s*'([^']+)'`, 'u').exec(meta)?.[1]
+    assert.ok(label, `kindMeta 에 '${kind}' 가 없다 — 배지와 통계 카드에 영문 슬러그가 그대로 뜬다`)
+    assert.notEqual(label, kind)
+    assert.match(label, /[가-힣]/u, `'${kind}' 의 라벨이 한국어가 아니다: ${label}`)
+  }
+  // 회의에서 뽑은 할 일의 근거는 그 회의록 문서다. 링크가 없으면 결재자는 한 줄 요약만 보고
+  // 결정하게 되고, 승인 뒤 업무의 출처 배지가 가는 곳(server/app.mjs)과도 말이 갈린다.
+  assert.match(approvalQueue, /proposal\.kind === 'meeting-task' && payload\?\.documentId/u)
 })
 
 test('승인된 지출 패널은 증빙 파일함의 일부가 아니다', () => {

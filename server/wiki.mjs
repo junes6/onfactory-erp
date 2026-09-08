@@ -2,9 +2,9 @@ import { AI_LEVEL_LABELS, aiLevelLowered, aiLevelOf, aiMayList, aiMayReadBody, n
 import { GUEST_ROLE, guestWorkItemViolation } from './guest-access.mjs'
 import { AUTOMATION_POLICIES_KEY, PROPOSALS_KEY } from './proposal-engine.mjs'
 import {
-  ARCHIVE_RETENTION_DAYS, BLOCK_ID_RE, LINK_ID_PREFIX, MAX_DOCUMENTS_PER_TENANT, MAX_ICON, MAX_OPS_PER_BATCH,
+  ARCHIVE_RETENTION_DAYS, BLOCK_ID_RE, LINK_ID_PREFIX, MAX_BLOCKS_PER_DOCUMENT, MAX_DOCUMENTS_PER_TENANT, MAX_ICON, MAX_OPS_PER_BATCH,
   MAX_SUMMARY, MAX_TITLE, PRESENCE_MIN_INTERVAL_MS, PRESENCE_TTL_MS,
-  buildSearchText, excerptOf, linkTokensIn, neutralizeLinks, newBlockId, newDocumentId, redactLinks, removeLinks, stripLinks, wikiPlainText,
+  buildSearchText, excerptOf, linkTokensIn, neutralizeLinks, newBlockId, newDocumentId, redactLinks, removeLinks, stripLinks, validateNewBlock, wikiPlainText,
 } from './wiki-blocks.mjs'
 import { mergeOps } from './wiki-merge.mjs'
 import {
@@ -447,7 +447,7 @@ export function registerWikiRoutes({
    */
   const publicDocument = (document, auth) => {
     const resolve = resolveFor(auth)
-    const { tenantId, clientRequestId, ...rest } = document
+    const { tenantId, clientRequestId, systemRequestId, ...rest } = document
     return {
       ...rest,
       summary: redactLinks(document.summary ?? '', resolve),
@@ -693,6 +693,150 @@ export function registerWikiRoutes({
     return document
   }
 
+  /**
+   * 문서 행 하나를 만들어 저장한다. **문서 잠금 안에서만** 부른다(`withWikiLock`).
+   *
+   * 왜 함수로 뽑는가: 문서를 만드는 문이 둘이 됐다(사람이 누르는 `POST /api/wiki`, 회의록이
+   * 요약을 옮겨 담는 `createWikiDocument`). 문서의 모양과 v1 이력·SSE가 두 곳에서 갈리면
+   * **다른 문으로 태어난 문서만** v1로 되돌릴 수 없거나 검색에 걸리지 않는다.
+   * 반환은 `{ document }` 또는 `{ refusal }` — 라우트가 그대로 HTTP로 옮긴다.
+   */
+  const insertWikiDocument = async (auth, {
+    title, blocks, icon = '', parentId = null, projectId = null, templateId = null, origin = null,
+    clientRequestId = null, systemRequestId = null,
+  }) => {
+    const documents = documentsOf(auth.tenantId)
+    // 상한은 문서 행을 새로 만드는 **모든** 문이 본다. 라우트가 앞에서 한 번 더 보는 것은
+    // 부모·템플릿을 찾기 전에 답하기 위함이고, 판정은 같은 한 자리에서 나온다.
+    const limit = documentLimitRefusal(documents)
+    if (limit) return { refusal: limit }
+    const now = nowIso()
+    const seeded = blocks.map((block, index) => ({ ...block, seq: index + 1, editedById: auth.id, editedAt: now }))
+    const document = {
+      id: freshDocumentId(documents),
+      tenantId: auth.tenantId,
+      title,
+      icon,
+      parentId,
+      projectId,
+      spaceId: null,
+      blocks: seeded,
+      version: 1,
+      blockSeq: seeded.length,
+      tombstones: [],
+      recentOpIds: [],
+      recentLostOpIds: [],
+      searchText: buildSearchText(seeded),
+      aiLevel: 'indexed',
+      summary: '',
+      summarySource: 'manual',
+      writeScope: 'author',
+      isTemplate: false,
+      templateId,
+      origin,
+      clientRequestId: clientRequestId || null,
+      // **본문에서 절대 오지 않는 칸**(규칙 7). 모듈 밖 호출(`createWikiDocument`)이 자기 멱등 키를
+      // 여기에 적고, 사람이 누르는 `POST /api/wiki`는 언제나 null로 둔다 — 두 키가 한 칸을 쓰면
+      // 누구나 그 값을 먼저 만들어 두는 것만으로 서버가 만들 문서를 자기 문서로 바꿔치기한다.
+      systemRequestId: systemRequestId || null,
+      createdById: auth.id,
+      createdByName: auth.name ?? '',
+      createdAt: now,
+      lastEditedById: auth.id,
+      lastEditedByName: auth.name ?? '',
+      lastEditedAt: now,
+      archivedAt: null,
+    }
+    // v1에도 이력 한 줄을 남긴다 — 남기지 않으면 가장 오래된 버전이 2가 되어 v1로는 되돌릴 수 없다.
+    const revision = buildRevision({
+      document,
+      result: { ...metaResult(), changed: { ...emptyChange(), inserted: seeded.map((block) => block.id) }, changedCount: seeded.length },
+      actorId: auth.id, actorName: auth.name ?? '', now,
+    })
+    const saved = await saveWiki(auth.tenantId, [document, ...documents], appendRevision(revisionsOf(auth.tenantId), revision), auth.id)
+    if (!saved) return { refusal: { status: 500, code: 'WIKI_WRITE_FAILED', message: '문서를 저장하지 못했습니다.' } }
+    publishOps(auth.tenantId, document, auth.id, seeded.map((block) => block.id))
+    return { document }
+  }
+
+  /** 서버가 만든 문서의 출처 한 칸. 문자열 다섯 개만 남기고 자른다(app.mjs의 `hasWorkOriginShape`와 같은 어휘). */
+  const originOf = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const kind = trimmed(value.kind, 40)
+    if (!kind) return null
+    const row = { kind }
+    for (const key of ['label', 'detail', 'page', 'focusId']) {
+      const text = trimmed(value[key], 120)
+      if (text) row[key] = text
+    }
+    return row
+  }
+
+  /**
+   * **모듈 밖에서 문서를 만드는 유일한 문**(오늘은 회의록이 쓴다).
+   * 잠금·상한·블록 규격·v1 이력·SSE가 사람이 누르는 라우트와 같은 자리에서 나온다.
+   *
+   * `systemRequestId`를 주면 같은 키로 다시 불렀을 때 **새 문서를 만들지 않고** 그때 만든 문서를
+   * 그대로 돌려준다 — 부르는 쪽이 문서를 만든 뒤의 커밋에 실패해 사람이 다시 눌렀을 때,
+   * 회의 하나에 회의록 문서가 둘 생기지 않게 한다.
+   *
+   * **`clientRequestId`와 칸을 가른 이유**(규칙 7): 그 칸은 `POST /api/wiki`의 본문이 정한다.
+   * 같은 칸을 쓰면 회의를 볼 수 있는 아무나 `clientRequestId:'meeting:<회의id>'`로 빈 문서를 먼저
+   * 만들어 두는 것만으로, 그 뒤의 요약이 **회의록 블록을 한 줄도 쓰지 않고** 그 문서를 회의록으로
+   * 채택한다 — 승인 큐의 「회의록에서 추출」 배지가 사람이 손으로 쓴 문서를 가리키게 된다.
+   *
+   * 재전송 조회에 `createdById`를 걸지 않는 것도 그래서다. 이 키는 서버가 회의 하나에 하나씩만
+   * 발급하므로 **누가 다시 눌러도 그 회의의 문서는 하나**여야 한다(사람이 고르는 키는 만든 사람까지
+   * 함께 보아야 남의 문서를 떠보는 오라클이 되지 않지만, 서버가 정하는 키는 그 반대다).
+   */
+  const createWikiDocument = async ({
+    auth, title, blocks, icon = '', projectId = null, templateId = null, origin = null, systemRequestId = null,
+  }) => {
+    if (!auth?.id || !auth?.tenantId) {
+      return { refusal: { status: 403, code: 'TENANT_REQUIRED', message: '회사 워크스페이스에서만 쓸 수 있습니다.' } }
+    }
+    const rows = Array.isArray(blocks) ? blocks : []
+    const invalid = { status: 400, code: 'WIKI_BLOCK_INVALID', message: '문서 본문을 만들지 못했습니다.' }
+    if (!rows.length || rows.length > MAX_BLOCKS_PER_DOCUMENT) return { refusal: invalid }
+    // 사람이 보낸 블록과 **같은 자**를 댄다. 서버가 만든 블록이라고 규격을 건너뛰면,
+    // 만드는 쪽이 실수한 날 그 문서만 편집·병합에서 400을 내는 반쪽 문서가 된다.
+    const validated = []
+    for (const raw of rows) {
+      const checked = validateNewBlock(raw)
+      if (!checked.ok) return { refusal: invalid }
+      validated.push(checked.block)
+    }
+    return withWikiLock(auth.tenantId, async () => {
+      const key = trimmed(systemRequestId, 120)
+      if (key) {
+        const replayed = documentsOf(auth.tenantId).find((row) => row?.systemRequestId === key)
+        if (replayed) return { document: replayed, replayed: true }
+      }
+      return insertWikiDocument(auth, {
+        title: trimmed(title, MAX_TITLE) || UNTITLED,
+        icon: trimmed(icon, MAX_ICON),
+        blocks: validated,
+        parentId: null,
+        projectId: trimmed(projectId, 60) || null,
+        templateId: trimmed(templateId, 60) || null,
+        origin: originOf(origin),
+        clientRequestId: null,
+        systemRequestId: key || null,
+      })
+    })
+  }
+
+  /**
+   * 서버가 만든 문서를 그 시스템 키로 찾는다(오늘은 회의록이 「그 회의록 문서가 **실제로** 있는가」를
+   * 잴 때 쓴다). 회의 레코드의 `documentId`로 재면 요약 커밋이 실패해 생긴 미아 문서를 놓쳐,
+   * 되돌리기 응답이 「문서는 남아 있습니다」를 빼고 말하게 된다(규칙 11).
+   */
+  const findSystemWikiDocument = (tenantId, systemRequestId) => {
+    const key = trimmed(systemRequestId, 120)
+    if (!key) return null
+    return documentsOf(tenantId).find((row) => row?.systemRequestId === key) ?? null
+  }
+
   // 1. 목록
   app.get('/api/wiki', ...guards, async (request, response) => {
     if (!requireTenant(request, response)) return
@@ -816,51 +960,21 @@ export function registerWikiRoutes({
         templateBlocks = instantiateTemplateBlocks(templateSource, { newBlockId })
       }
 
-      const now = nowIso()
-      const title = trimmed(body.title, MAX_TITLE) || (templateSource ? clip(templateSource.title, MAX_TITLE) : UNTITLED)
-      const blocks = (templateBlocks ?? [{ id: newBlockId(), type: 'text', text: '' }])
-        .map((block, index) => ({ ...block, seq: index + 1, editedById: auth.id, editedAt: now }))
-      const document = {
-        id: freshDocumentId(documents),
-        tenantId: auth.tenantId,
-        title,
+      const created = await insertWikiDocument(auth, {
+        title: trimmed(body.title, MAX_TITLE) || (templateSource ? clip(templateSource.title, MAX_TITLE) : UNTITLED),
         icon: trimmed(body.icon, MAX_ICON) || (templateSource ? clip(templateSource.icon, MAX_ICON) : ''),
+        blocks: templateBlocks ?? [{ id: newBlockId(), type: 'text', text: '' }],
         parentId,
         projectId,
-        spaceId: null,
-        blocks,
-        version: 1,
-        blockSeq: blocks.length,
-        tombstones: [],
-        recentOpIds: [],
-        recentLostOpIds: [],
-        searchText: buildSearchText(blocks),
-        aiLevel: 'indexed',
-        summary: '',
-        summarySource: 'manual',
-        writeScope: 'author',
-        isTemplate: false,
         templateId: templateSource ? templateSource.id : null,
         origin: null,
         clientRequestId: clientRequestId || null,
-        createdById: auth.id,
-        createdByName: auth.name ?? '',
-        createdAt: now,
-        lastEditedById: auth.id,
-        lastEditedByName: auth.name ?? '',
-        lastEditedAt: now,
-        archivedAt: null,
-      }
-      // v1에도 이력 한 줄을 남긴다 — 남기지 않으면 가장 오래된 버전이 2가 되어 v1로는 되돌릴 수 없다.
-      const revision = buildRevision({
-        document,
-        result: { ...metaResult(), changed: { ...emptyChange(), inserted: blocks.map((block) => block.id) }, changedCount: blocks.length },
-        actorId: auth.id, actorName: auth.name ?? '', now,
+        // 사람이 누르는 문은 시스템 키를 **절대** 적지 않는다(규칙 7) — 적을 수 있으면
+        // 서버가 만들 문서를 미리 선점해 바꿔치기하는 길이 열린다.
+        systemRequestId: null,
       })
-      const saved = await saveWiki(auth.tenantId, [document, ...documents], appendRevision(revisionsOf(auth.tenantId), revision), auth.id)
-      if (!saved) { fail(response, 500, 'WIKI_WRITE_FAILED', '문서를 저장하지 못했습니다.'); return }
-      publishOps(auth.tenantId, document, auth.id, blocks.map((block) => block.id))
-      response.status(201).json({ document: publicDocument(document, auth) })
+      if (created.refusal) { refuse(response, created.refusal); return }
+      response.status(201).json({ document: publicDocument(created.document, auth) })
     })
   })
 
@@ -1457,6 +1571,7 @@ export function registerWikiRoutes({
         templateId: null,
         origin: { kind: 'user', label: '내 템플릿' },
         clientRequestId: null,
+        systemRequestId: null,
         createdById: auth.id,
         createdByName: auth.name ?? '',
         createdAt: now,
@@ -1805,5 +1920,5 @@ export function registerWikiRoutes({
     return { removed }
   }
 
-  return { canReadWikiDocument, wikiLensSourceOf, wikiAiContext, archiveProjectWikiDocuments, sweepWikiArchive, sweepWikiRevisions }
+  return { canReadWikiDocument, createWikiDocument, findSystemWikiDocument, wikiLensSourceOf, wikiAiContext, archiveProjectWikiDocuments, sweepWikiArchive, sweepWikiRevisions }
 }

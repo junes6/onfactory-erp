@@ -534,6 +534,15 @@ CREATE TABLE IF NOT EXISTS approval_documents (
   created_by TEXT, PRIMARY KEY (org_id, id)
 );
 
+-- R16-M: 회의록. 전사 원문·요약·결정·할 일과 그 결과로 만든 문서·제안의 id가 payload 안에 통째로 들어간다.
+-- 마이그레이션 사슬(supabase/migrations/20260914000000_meeting_notes.sql)과 **같은 본문**이다.
+CREATE TABLE IF NOT EXISTS meeting_notes (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
 -- R16-L: 외부 연동. tokenHash(sha256)와 signingSecretEnc(AES-256-GCM 봉인문)만 들어간다 — 평문은 저장하지 않는다.
 -- 게스트 범위가 아니므로 아래 게스트 DO 루프에 넣지 않고 service 전용 정책만 붙인다.
 CREATE TABLE IF NOT EXISTS webhook_endpoints (
@@ -782,6 +791,14 @@ ALTER TABLE approval_documents FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS approval_documents_service ON approval_documents;
 CREATE POLICY approval_documents_service ON approval_documents USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
 
+-- R16-M: 회의록도 서비스 컨텍스트만 통과한다. 게스트 정책은 만들지 않는다 — 회의 음성과 그 전사는
+-- 참석하지 않은 사람의 말까지 담는 개인정보이고, 외부 거래처 세션에 그것을 여는 것은
+-- 앱 필터 한 겹으로 감당할 일이 아니다. 여는 날에는 위 게스트 DO 루프 ARRAY와 함께 고친다.
+ALTER TABLE meeting_notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE meeting_notes FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS meeting_notes_service ON meeting_notes;
+CREATE POLICY meeting_notes_service ON meeting_notes USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+
 DROP POLICY IF EXISTS project_spaces_guest_read ON project_spaces;
 CREATE POLICY project_spaces_guest_read ON project_spaces FOR SELECT USING (
   current_setting('app.role', TRUE) = 'tenant-guest'
@@ -952,6 +969,8 @@ CREATE INDEX IF NOT EXISTS wiki_revisions_document_idx ON wiki_revisions (org_id
 CREATE INDEX IF NOT EXISTS approval_documents_status_idx ON approval_documents (org_id, (payload ->> 'status')) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS approval_documents_drafter_idx ON approval_documents (org_id, (payload ->> 'drafterId')) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS approval_documents_month_idx ON approval_documents (org_id, (payload -> 'posting' ->> 'month')) WHERE deleted_at IS NULL;
+-- 회의록 목록은 언제나 '아직 도는 것(transcribing·summarizing)'과 '끝난 것'을 갈라 읽는다.
+CREATE INDEX IF NOT EXISTS meeting_notes_status_idx ON meeting_notes (org_id, (payload ->> 'status')) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ai_conversations_owner_idx ON ai_conversations (org_id, (payload ->> 'ownerId'), (payload ->> 'updatedAt') DESC);
 CREATE INDEX IF NOT EXISTS ai_conversations_trash_idx ON ai_conversations (org_id, (payload ->> 'deletedAt'));
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON auth_sessions (expires_at) WHERE revoked_at IS NULL;

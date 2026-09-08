@@ -4,6 +4,8 @@ import test from 'node:test'
 
 import { newDb } from 'pg-mem'
 
+import { MEETING_USAGE_ACCOUNTING } from '../meeting-notes.mjs'
+import { fallbackMeetingSummary } from '../meeting-summary.mjs'
 import { emptyWorkspaceStore } from './constants.mjs'
 import { JsonStoreAdapter } from './json-store.mjs'
 import { applyPostgresGuestContext, applyPostgresServiceContext, PostgresStoreAdapter, withoutPgMemUnsupportedRls } from './postgres-store.mjs'
@@ -11,6 +13,8 @@ import { StoreVerificationError, UnknownWorkspaceKeyError } from './errors.mjs'
 import { assertKnownWorkspaceKeys } from './workspace-codec.mjs'
 
 const GUEST_TOKEN_HASH = 'c'.repeat(64)
+/** 회의록 fixture 의 기준 시각. `fallbackMeetingSummary` 는 벽시계를 읽지 않으므로 여기서 준다(규칙 12). */
+const FALLBACK_FIXTURE_NOW = '2026-08-20T07:12:00.000Z'
 
 async function testAdapter() {
   const memory = newDb({ autoCreateForeignKeyIndices: true })
@@ -231,6 +235,65 @@ function fixture() {
       }],
       updatedAt: '2026-08-20T06:30:00.000Z', updatedBy: 'USR-HSB-STAFF',
     },
+    // R16-M: 회의록. 전사 원문과 요약(결정·할 일에 붙은 인용)이 payload JSONB로 그대로 왕복해야 한다 —
+    // 인용 한 줄이 왕복에서 사라지면 그 결정은 근거 없는 문장이 되고, 화면은 그것을 그대로 회의록 문서에 싣는다.
+    //
+    // 두 행은 **같은 원문**에 대한 두 갈래의 산출물이다. 이름과 내용이 어긋나면 안 되기 때문에 갈라 둔다:
+    //   01 = `mode:'ai'`            — 모델을 부른 갈래. 참석자·담당·마감은 여기서만 나온다.
+    //   02 = `mode:'grounded-fallback'` — 모델을 부르지 않은 갈래. `fallbackMeetingSummary` 가
+    //        같은 원문에 실제로 내놓는 값 그대로다(시험이 그 함수와 글자 그대로 견준다).
+    // `usage` 의 회계 어휘(`*Accounting`)는 M3이 `MEETING_USAGE_ACCOUNTING` 으로 정했다(부록 B-2가
+    // M3에 넘긴 일). 이제 fixture 도 그 어휘로 적고, 아래 시험이 **그 목록에 있는 낱말인지**와
+    // **갈래 이름과 어긋나지 않는지**를 함께 잰다 — 모델을 부르지 않은 갈래가 '원장에 적혔다'고
+    // 말하면, 다음 절이 그것을 '연동 없을 때의 모양'으로 베낀다.
+    'meeting-notes': {
+      data: [{
+        id: 'MTG-FIXTURE-01', tenantId: 'TENANT-HSB', title: '9월 품질 회의',
+        recordingDocumentId: 'DOC-MTG-REC-01', transcriptDocumentId: 'DOC-MTG-TXT-01',
+        transcriptText: '김서원: 단가는 동결합니다.\n이한별: 다음 주까지 마무리하겠습니다.',
+        transcriptChars: 37, transcriptTruncated: false, transcriptUnreadChars: 0,
+        documentId: 'WDOC-fixture-01', participantIds: ['USR-HSB-ADMIN'],
+        status: 'done', error: '',
+        summary: {
+          summary: '단가를 동결하고 후속 작업을 다음 주까지 마무리하기로 했습니다.',
+          participants: ['김서원', '이한별'],
+          decisions: [{ text: '단가 동결', quote: '단가는 동결' }],
+          tasks: [{ title: '후속 작업 마무리', owner: '이한별', due: '2026-08-28', quote: '다음 주까지 마무리' }],
+          insufficient: false, mode: 'ai', notice: '',
+        },
+        proposalIds: ['PROP-MTG-01'],
+        // 모델을 부른 갈래 — 전사도 요약도 원장에 한 줄씩 남았다.
+        usage: {
+          transcriptionMs: 0, tokensIn: 1_180, tokensOut: 240, mode: 'ai',
+          transcriptionAccounting: 'recorded', summaryAccounting: 'recorded',
+        },
+        createdById: 'USR-HSB-ADMIN', createdByName: 'HSB 관리자',
+        createdAt: '2026-08-20T07:10:00.000Z', updatedAt: '2026-08-20T07:12:00.000Z',
+      }, {
+        id: 'MTG-FIXTURE-02', tenantId: 'TENANT-HSB', title: '9월 품질 회의',
+        recordingDocumentId: '', transcriptDocumentId: 'DOC-MTG-TXT-02',
+        transcriptText: '김서원: 단가는 동결합니다.\n이한별: 다음 주까지 마무리하겠습니다.',
+        transcriptChars: 37, transcriptTruncated: false, transcriptUnreadChars: 0,
+        documentId: '', participantIds: ['USR-HSB-ADMIN'],
+        status: 'done', error: '',
+        summary: {
+          summary: '김서원: 단가는 동결합니다. 이한별: 다음 주까지 마무리하겠습니다.',
+          participants: [],
+          decisions: [],
+          tasks: [{ title: '이한별: 다음 주까지 마무리하겠습니다', owner: '', due: '', quote: '이한별: 다음 주까지 마무리하겠습니다.' }],
+          insufficient: false, mode: 'grounded-fallback', notice: 'AI 연결이 없어 회의록 원문에서 그대로 뽑아 정리했습니다.',
+        },
+        proposalIds: [],
+        // 모델도 원장도 부르지 않은 갈래 — **0원 행을 원장에 넣지 않는다**(`not-applicable`).
+        usage: {
+          transcriptionMs: 0, tokensIn: 0, tokensOut: 0, mode: 'grounded-fallback',
+          transcriptionAccounting: 'not-applicable', summaryAccounting: 'not-applicable',
+        },
+        createdById: 'USR-HSB-ADMIN', createdByName: 'HSB 관리자',
+        createdAt: '2026-08-20T07:10:00.000Z', updatedAt: '2026-08-20T07:12:00.000Z',
+      }],
+      updatedAt: '2026-08-20T07:12:00.000Z', updatedBy: 'USR-HSB-ADMIN',
+    },
   }
   snapshot.tenants['TENANT-POHANG'] = {
     'work-items': { data: [{ id: 'WORK-1', title: '별도 조합 업무', due: '2026-08-22T09:00:00.000Z', status: '업무요청' }], updatedAt: '2026-08-20T01:00:00.000Z' },
@@ -382,6 +445,39 @@ test('postgres adapter normalizes tenant rows, restores the facade, and writes s
     assert.equal(roundTrippedApproval.line[0].approvers[0].decidedById, 'USR-HSB-STAFF', '누가 실제로 눌렀는지가 사라지면 「대결」 표기와 대결자 열람이 함께 죽는다')
     assert.equal(roundTrippedApproval.line[0].approvers[0].delegateOf, 'USR-HSB-ADMIN')
     assert.equal(roundTrippedApproval.posting.amount, 250000, '게시 금액이 사라지면 「승인된 지출」 집계가 조용히 0이 된다')
+    const roundTrippedMeetings = facade.tenants['TENANT-HSB']['meeting-notes'].data
+    const roundTrippedMeeting = roundTrippedMeetings.find((row) => row.id === 'MTG-FIXTURE-01')
+    assert.equal(roundTrippedMeeting.summary.mode, 'ai', '참석자·담당·마감이 든 요약은 모델을 부른 갈래의 산출물이다')
+    assert.equal(roundTrippedMeeting.transcriptText, '김서원: 단가는 동결합니다.\n이한별: 다음 주까지 마무리하겠습니다.', '전사 원문의 줄바꿈은 왕복에서 살아 있어야 한다')
+    assert.equal(roundTrippedMeeting.summary.decisions[0].quote, '단가는 동결', '인용이 사라지면 그 결정은 근거 없는 문장이 된다')
+    assert.equal(roundTrippedMeeting.summary.tasks[0].due, '2026-08-28', '마감이 사라지면 업무 제안이 기한 없는 할 일이 된다')
+    // 정직함 제약. `grounded-fallback` 은 **모델을 부르지 않은** 갈래이므로 그 이름을 단 fixture 는
+    // 모델만 만들 수 있는 것(참석자·담당·마감)을 담아서는 안 된다. 이름과 내용이 어긋난 fixture 를
+    // 다음 절이 '연동 없을 때의 모양'으로 베끼면, 화면이 벤더 없이도 그것이 나오는 것처럼 말하게 된다.
+    // 그래서 '보기 좋은 값'이 아니라 그 함수가 같은 원문에 실제로 내놓는 값과 글자 그대로 견준다.
+    const roundTrippedFallback = roundTrippedMeetings.find((row) => row.id === 'MTG-FIXTURE-02')
+    assert.ok(roundTrippedFallback, 'AI 연결이 없는 갈래의 본보기 행이 있어야 한다')
+    assert.deepEqual(
+      roundTrippedFallback.summary,
+      fallbackMeetingSummary(roundTrippedFallback.transcriptText, { title: roundTrippedFallback.title, now: new Date(FALLBACK_FIXTURE_NOW) }),
+      'AI 연결이 없는 갈래의 fixture 는 그 갈래가 실제로 내놓는 값과 한 글자도 달라서는 안 된다',
+    )
+    assert.deepEqual(roundTrippedFallback.summary.participants, [], '참석자는 원문에서 이름을 골라내는 순간 추측이다 — 연동 없는 갈래는 비운다')
+    assert.equal(roundTrippedFallback.summary.tasks[0].owner, '', '담당은 원문에 `@이름`·`이름님`이 없으면 비운다')
+    assert.equal(roundTrippedFallback.summary.tasks[0].due, '', '아무도 말하지 않은 마감을 회의 결과로 적지 않는다')
+    assert.ok(roundTrippedFallback.summary.notice, 'AI 연결이 없었다는 사실은 요약과 함께 저장돼야 한다')
+    // 부록 B-2가 M3에 넘긴 나머지 절반: 회계 어휘. 저장소 어디에도 정의가 없는 낱말이 본보기로 굳지
+    // 않게, fixture 의 값이 **M3이 정한 그 목록**에 실제로 있는지 왕복 뒤에 잰다.
+    for (const row of roundTrippedMeetings) {
+      for (const key of ['transcriptionAccounting', 'summaryAccounting']) {
+        assert.ok(MEETING_USAGE_ACCOUNTING.includes(row.usage[key]),
+          `${row.id}의 ${key}가 정의된 어휘가 아니다 — ${row.usage[key]}`)
+      }
+    }
+    // 이름과 내용이 어긋나면 안 된다. 모델을 부르지 않은 갈래가 '원장에 적혔다'고 말하면,
+    // 다음 절이 그 모양을 베껴 화면이 벤더 없이도 청구가 남는 것처럼 말하게 된다.
+    assert.equal(roundTrippedFallback.usage.summaryAccounting, 'not-applicable', '부르지 않은 호출의 값은 0이 아니라 없음이다')
+    assert.equal(roundTrippedMeeting.usage.summaryAccounting, 'recorded', '대조군: 모델을 부른 갈래는 원장에 한 줄이 남는다')
     const roundTrippedNotice = facade.tenants['TENANT-HSB'].notices.data[0]
     assert.equal(roundTrippedNotice.body, '첫 줄\n둘째 줄', '공지 본문의 줄바꿈은 왕복에서 살아 있어야 한다')
     assert.deepEqual(roundTrippedNotice.acknowledgements, [{ accountId: 'USR-TENANT-HSB-GUEST01', at: '2026-08-20T07:00:00.000Z' }])

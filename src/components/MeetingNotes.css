@@ -1,0 +1,96 @@
+/* 회의록 — 목록·상세·녹음. 토큰만 쓴다(hex 0개). */
+.meeting-page { display: flex; flex-direction: column; }
+
+/* 「지금 무엇이 되고 무엇이 안 되는가」를 목록보다 먼저 읽는 자리. 경고가 아니라 사실이라 danger 를 쓰지 않는다. */
+.meeting-provider-note { display: flex; align-items: flex-start; gap: var(--space-8); margin: var(--space-0) var(--space-0) var(--space-16); padding: var(--space-12) var(--space-16); border: var(--hairline) solid var(--color-warning-soft); border-radius: var(--radius-8); color: var(--color-warning-ink); background: var(--color-warning-soft); font-size: var(--font-13); line-height: 1.6; }
+.meeting-provider-note svg { flex: 0 0 auto; margin-top: var(--space-4); }
+.meeting-error { margin: var(--space-0) var(--space-0) var(--space-12); padding: var(--space-12) var(--space-16); border-radius: var(--radius-8); color: var(--color-danger-ink); background: var(--color-danger-soft); font-size: var(--font-13); }
+
+.meeting-list { display: flex; flex-direction: column; margin: var(--space-0); padding: var(--space-0); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); list-style: none; }
+.meeting-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-12); padding: var(--space-12) var(--space-16); border-top: var(--hairline) solid var(--color-gray-200); }
+.meeting-row:first-child { border-top: none; }
+.meeting-row.is-failed .meeting-main strong { color: var(--color-danger-ink); }
+.meeting-main { min-width: 0; display: block; width: 100%; padding: var(--space-0); border: none; background: transparent; text-align: left; cursor: pointer; }
+.meeting-main strong { display: block; overflow: hidden; color: var(--ink); font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
+.meeting-main small { display: block; overflow: hidden; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
+.meeting-main .meeting-outcome-line { color: var(--color-success-ink); }
+.meeting-main .meeting-failed-line { color: var(--color-danger-ink); }
+.meeting-main .meeting-missing-line { color: var(--color-warning-ink); }
+/* 처리 중에도 버튼은 남는다 — 프로세스가 죽어 굳은 회의를 되살릴 길이 그것뿐이다(규칙 1·11). */
+.meeting-row-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-8); }
+.meeting-progress { max-width: 260px; color: var(--subtle); font-size: var(--font-11); text-align: right; }
+.meeting-more { display: flex; align-items: center; justify-content: center; gap: var(--space-8); padding: var(--space-12) var(--space-16); border-top: var(--hairline) solid var(--color-gray-200); color: var(--subtle); background: var(--canvas); font-size: var(--font-11); text-align: center; }
+.meeting-total { margin: var(--space-12) var(--space-0) var(--space-0); color: var(--subtle); font-size: var(--font-11); font-variant-numeric: var(--numeric-features); }
+.meeting-empty { display: flex; flex-direction: column; align-items: center; gap: var(--space-8); padding: var(--space-32) var(--space-16); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--muted); background: var(--surface); font-size: var(--font-13); text-align: center; }
+.meeting-empty h3 { margin: var(--space-0); color: var(--ink); font-size: var(--font-15); }
+.meeting-empty p { margin: var(--space-0); }
+.meeting-quiet { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--subtle); font-size: var(--font-11); line-height: 1.65; }
+
+/* 녹음 */
+.meeting-recorder-note { max-width: 320px; margin: var(--space-0); color: var(--subtle); font-size: var(--font-11); line-height: 1.6; }
+.meeting-recorder-confirm { max-width: 380px; display: flex; flex-direction: column; gap: var(--space-8); padding: var(--space-12); border: var(--hairline) solid var(--color-warning-soft); border-radius: var(--radius-8); background: var(--color-warning-soft); }
+.meeting-recorder-confirm p { margin: var(--space-0); color: var(--color-warning-ink); font-size: var(--font-11); line-height: 1.6; }
+.meeting-recorder-confirm-actions { display: flex; justify-content: flex-end; gap: var(--space-8); }
+.meeting-recorder-bar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-8); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--color-danger-soft); border-radius: var(--radius-8); background: var(--color-danger-soft); }
+.meeting-recorder-bar strong { color: var(--color-danger-ink); font-size: var(--font-15); font-variant-numeric: var(--numeric-features); }
+.meeting-recorder-bar small { color: var(--color-danger-ink); font-size: var(--font-11); }
+.meeting-recorder-dot { width: 9px; height: 9px; display: inline-block; border-radius: var(--radius-8); background: var(--color-danger); }
+.meeting-recorder-meter { width: 96px; height: 4px; display: inline-block; overflow: hidden; border-radius: var(--radius-8); background: var(--color-gray-200); }
+.meeting-recorder-meter-fill { height: 4px; display: block; background: var(--color-danger); }
+
+/* 상세 */
+.meeting-detail-modal { width: min(760px, 100%); }
+.meeting-create-modal { width: min(620px, 100%); }
+.meeting-detail { padding: var(--space-16); }
+.meeting-detail section { margin-bottom: var(--space-16); }
+.meeting-detail h3 { margin: var(--space-0) var(--space-0) var(--space-8); color: var(--muted); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.meeting-detail p { margin: var(--space-0); color: var(--ink); font-size: var(--font-13); line-height: 1.7; }
+.meeting-detail ul { display: flex; flex-direction: column; gap: var(--space-8); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.meeting-detail li { padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); font-size: var(--font-13); }
+.meeting-detail li em { display: block; margin-top: var(--space-4); color: var(--subtle); font-size: var(--font-11); font-style: normal; }
+.meeting-source-card { padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--canvas); }
+.meeting-ai-level { display: inline-flex; align-items: center; margin-left: var(--space-8); padding: var(--space-4) var(--space-8); border-radius: var(--radius-8); color: var(--color-blue-deep); background: var(--color-primary-soft); font-size: var(--font-11); }
+.meeting-transcript details { margin-top: var(--space-4); }
+.meeting-transcript summary { color: var(--muted); font-size: var(--font-13); cursor: pointer; }
+.meeting-transcript pre { max-height: 260px; overflow: auto; margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--canvas); font-size: var(--font-11); line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+/* 「요약」과 「만들어진 것」 절. `.meeting-detail section`의 바깥 간격 위에 **절 안쪽** 규칙을 얹는다 —
+   이 절만 제목이 여러 번 반복되고(요약 → 결정 사항 → 다음 할 일) 목록 바로 뒤에 다음 제목이 붙어
+   읽힌다. 설계 §4.6이 이름만 적고 규칙을 주지 않아 클래스와 스타일시트가 갈려 있던 자리다. */
+.meeting-outcome { display: flex; flex-direction: column; gap: var(--space-8); }
+.meeting-outcome h3 { margin: var(--space-0); }
+.meeting-outcome h3 ~ h3 { margin-top: var(--space-8); }
+.meeting-outcome .meeting-quiet { margin-top: var(--space-0); }
+.meeting-proposal-link { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-8); }
+.meeting-manage { padding-top: var(--space-12); border-top: var(--hairline) solid var(--line); }
+.meeting-participants { display: flex; flex-wrap: wrap; gap: var(--space-8); margin: var(--space-0); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.meeting-participants legend { color: var(--muted); font-size: var(--font-13); }
+.meeting-participants legend em { color: var(--subtle); font-size: var(--font-11); font-style: normal; }
+.meeting-participants label { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--ink); font-size: var(--font-13); }
+.meeting-participants input[type='checkbox'] { width: auto; height: auto; }
+/* 상한에 닿아 더 고를 수 없는 칸은 그렇게 보여야 한다 — 눌러도 아무 일이 없는 칸은 고장으로 읽힌다. */
+.meeting-participants input[type='checkbox']:disabled { cursor: not-allowed; }
+.meeting-participants label:has(input:disabled) { color: var(--subtle); }
+.meeting-manage-actions { display: flex; justify-content: flex-end; gap: var(--space-8); margin-top: var(--space-12); }
+.meeting-detail-footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-8); padding: var(--space-12) var(--space-16); border-top: var(--hairline) solid var(--line); }
+/* 누를 수 없는 사람에게 버튼 대신 서버가 할 말을 그 자리에서 한다(규칙 8·11). */
+.meeting-footer-note { margin-right: auto; max-width: 380px; color: var(--subtle); font-size: var(--font-11); line-height: 1.6; }
+
+/* 새 회의 */
+.meeting-source-picked { display: flex; align-items: center; gap: var(--space-8); margin: var(--space-0); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--canvas); font-size: var(--font-13); }
+.meeting-field-note { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--subtle); font-size: var(--font-11); line-height: 1.65; }
+
+/* AI 처리 수준 동의 */
+.meeting-ai-consent { width: min(620px, 100%); }
+.meeting-ai-consent p { margin: var(--space-0) var(--space-0) var(--space-12); color: var(--ink); font-size: var(--font-13); line-height: 1.75; }
+.meeting-consent-levels { display: flex; flex-direction: column; gap: var(--space-8); margin: var(--space-0); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); }
+.meeting-consent-levels legend { color: var(--muted); font-size: var(--font-13); }
+.meeting-consent-levels label { display: flex; align-items: flex-start; gap: var(--space-8); color: var(--ink); font-size: var(--font-13); line-height: 1.6; }
+.meeting-consent-levels input[type='radio'] { width: auto; height: auto; margin-top: var(--space-4); padding: var(--space-0); }
+
+html[data-theme='dark'] :is(.meeting-source-card, .meeting-transcript pre, .meeting-source-picked) { background: var(--surface); }
+
+@media (max-width: 760px) {
+  .meeting-row { grid-template-columns: auto minmax(0, 1fr); }
+  .meeting-row > :last-child { grid-column: 1 / -1; }
+  .meeting-progress { max-width: none; text-align: left; }
+}

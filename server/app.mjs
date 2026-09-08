@@ -46,6 +46,9 @@ import { workItemTreeViolation, openSubtaskCount, parentRefsFor, prependWithinCa
 import { isScheduleInstant, scheduleArrayViolation, registerWorkItemScheduleRoutes } from './work-item-schedule.mjs'
 // R16-H: 문서(위키). 라우트·권한·병합·이력이 이 모듈 한 벌 안에 있다 — app.mjs에는 라우트를 새로 쓰지 않는다.
 import { registerWikiRoutes } from './wiki.mjs'
+// R16-M: 회의록. 전사 어댑터와 라우트 한 벌. 어댑터는 오늘 none·text 둘뿐이고, 벤더가 없으면 그 사실을 503으로 답한다.
+import { createTranscription } from './transcription.mjs'
+import { registerMeetingNoteRoutes } from './meeting-notes.mjs'
 import { CUSTOM_FIELD_KEY, customFieldViolation, hasWorkFieldValuesShape, registerCustomFieldRoutes } from './custom-fields.mjs'
 import { registerSavedViewRoutes } from './saved-views.mjs'
 import { PROJECT_TEMPLATES_KEY, registerProjectTemplateRoutes } from './project-templates.mjs'
@@ -180,6 +183,10 @@ const WORKSPACE_STORE_KEYS = new Set([
   // R16-I: 양식형 전자결재. **등록해 두고 403으로 닫는다** — 키를 아예 빼면 404 STORE_KEY_NOT_FOUND라
   // '없는 영역'과 '전용 라우트가 있는 영역'이 같은 답을 받고, 화면은 어디로 가야 하는지 알 수 없다.
   'approval-forms', 'approval-documents',
+  // R16-M: 회의록. 같은 이유로 등록해 두고 403으로 닫는다 — 전사 원문·요약·인용이 원료라
+  // generic PUT 한 번이면 아무도 하지 않은 말이 '끝난 회의록'으로 저장되고, 그것이 그대로
+  // 회의록 문서와 업무 제안의 근거가 된다.
+  'meeting-notes',
 ])
 // 알림·알림설정·푸시구독은 "내 것만" 나가야 하므로 전용 라우트로만 연다.
 const NOTIFICATION_KEYS = new Set(['notifications', 'notification-settings', 'push-subscriptions'])
@@ -191,6 +198,8 @@ const PROJECT_STAGES = new Set(['준비', '수주 검토', '수주 확정', '진
 const PROPOSAL_ONLY_KEYS = new Set(['ai-proposals', 'automation-policies', 'project-spaces', 'project-posts'])
 // 양식 결재는 결재선·이력이 원료이므로 generic PUT 금지. 전용 라우트로만 바뀐다.
 const APPROVAL_ONLY_KEYS = new Set(['approval-forms', 'approval-documents'])
+// 회의록은 전사 원문·근거 인용이 원료이므로 generic GET/PUT 금지. /api/meetings 로만 읽고 쓴다.
+const MEETING_ONLY_KEYS = new Set(['meeting-notes'])
 // 이 키가 바뀌면 생존 센티널을 즉시 재평가한다.
 // 센티널 재평가를 부르는 키. 업종 모듈 키를 빠뜨리면 그 업종은 규칙이 있어도 평가가 돌지 않는다.
 const SENTINEL_TRIGGER_KEYS = new Set([
@@ -319,10 +328,12 @@ function workOriginFromProposal(proposal) {
       : proposal?.kind === 'opportunity' ? `외부 기회(${String(proposal.payload?.source ?? '외부').slice(0, 20)})`
         : proposal?.kind === 'lens-task' ? '문서 렌즈에서 추출'
           : proposal?.kind === 'wiki-task' ? '문서에서 승격'
-            : 'AI 제안에서 생성'
+            : proposal?.kind === 'meeting-task' ? '회의록에서 추출'
+              : 'AI 제안에서 생성'
   // R16-H: 문서에서 올라온 제안은 승인된 뒤에도 **문서로** 되짚어야 한다.
   // page를 'approvals'로 고정해 두면 그 업무의 출처 배지가 이미 결정된 제안 카드로 되돌아가는 막다른 길이 된다.
-  const fromWiki = proposal?.kind === 'wiki-task' && Boolean(proposal.payload?.documentId)
+  // R16-M: 회의에서 뽑은 할 일도 같은 문으로 되짚는다 — 그 회의록 문서가 결정과 인용이 적힌 자리다.
+  const fromWiki = ['wiki-task', 'meeting-task'].includes(proposal?.kind) && Boolean(proposal.payload?.documentId)
   return {
     kind: String(proposal?.kind ?? 'proposal'),
     label,
@@ -2219,6 +2230,15 @@ export function createApp(options = {}) {
     if (document.visibility === 'department') return Array.isArray(document.departments) && document.departments.includes(account.team)
     return document.visibility === 'restricted' && Array.isArray(document.allowedUserIds) && document.allowedUserIds.includes(account.id)
   }
+  /**
+   * 이 자료가 **회사 구성원 전원**에게 열려 있는가. 위 `canReadDocument`가 아무 직원에게나 참을
+   * 돌려주는 갈래는 `visibility === 'all'` 하나뿐이고, 개발운영지원 자료는 그 값이어도 올린 사람
+   * (과 restricted 허용 명단)에게만 열린다 — 그래서 **문자열 하나로 재면 그 갈래에서 거짓말이 된다**.
+   * 「이 자료보다 넓게 열리는가」를 말하는 자리(회의록 문서의 열람 범위)가 이 술어를 쓴다(규칙 8·11).
+   */
+  const isDocumentOpenToEveryone = (document) => Boolean(document)
+    && !isDeveloperSupportDocument(document)
+    && document.visibility === 'all'
   const listParameter = (value, limit = 20) => String(value ?? '').split(',').map((item) => item.trim()).filter(Boolean).slice(0, limit)
   /**
    * R16-I: 자료 목록을 tenantStore에 얹기만 하고 커밋은 부르는 쪽에 맡긴다.
@@ -2231,8 +2251,13 @@ export function createApp(options = {}) {
     const hadTenant = Object.prototype.hasOwnProperty.call(workspaceStore.tenants, tenantId)
     const tenantStore = workspaceStore.tenants[tenantId] ??= {}
     const previous = tenantStore['company-documents']
-    tenantStore['company-documents'] = { data: documents, updatedAt: new Date().toISOString(), updatedBy: accountId }
+    const staged = { data: documents, updatedAt: new Date().toISOString(), updatedBy: accountId }
+    tenantStore['company-documents'] = staged
     return () => {
+      // **우리가 얹은 그 레코드가 아직 그대로일 때만** 되돌린다. 그 사이에 다른 요청이 이 키를
+      // 다시 썼다면(예: 처리 중인 회의 옆에서 사람이 AI 처리 수준을 「보관만」으로 내렸다) 그 쓰기는
+      // 이미 커밋됐다 — 여기서 옛 스냅샷으로 덮으면 저장된 것과 메모리가 갈린다(규칙 9).
+      if (tenantStore['company-documents'] !== staged) return
       if (previous === undefined) delete tenantStore['company-documents']
       else tenantStore['company-documents'] = previous
       if (!hadTenant && Object.keys(tenantStore).length === 0) delete workspaceStore.tenants[tenantId]
@@ -2295,6 +2320,12 @@ export function createApp(options = {}) {
         item?.evidenceId,
         item?.drawingDocumentId,
         item?.backgroundDocumentId,
+        // R16-M: 회의가 원본으로 쓰는 자료실 파일(녹음·전사 원문). 결재의 `linkedAttachmentIds` 와 달리
+        // 스위치 없이 여는 이유: 스칼라 갈래는 `canReferenceDocuments` 가 generic PUT 을 **읽을 수 있는
+        // 자료로만** 좁히므로(형제 `drawingDocumentId`·`backgroundDocumentId` 와 같다), 남의 자료를
+        // 지목해 삭제 불가로 묶는 길이 열리지 않는다.
+        item?.recordingDocumentId,
+        item?.transcriptDocumentId,
       ]).map((id) => String(id ?? '')).filter((id) => id.startsWith('DOC-')))]
       : []
   }
@@ -2348,7 +2379,8 @@ export function createApp(options = {}) {
    * 할 수 없는 행동을 하라고 말한다(규칙 11).
    *
    * 돌려주는 값: `null`(안 잡힘) · `'approval-evidence'`(승인된 결재의 근거, 영구) ·
-   * `'approval-active'`(결재중 — 결과에 따라 갈린다) · `'linked'`(화면에서 풀 수 있는 연결).
+   * `'approval-active'`(결재중 — 결과에 따라 갈린다) · `'meeting-source'`(회의의 원본 녹음·전사) ·
+   * `'linked'`(화면에서 풀 수 있는 연결).
    * `'기안'` 은 마지막 갈래다 — 기안자가 PATCH 로 첨부를 비우거나 기안을 지우면 그 자리에서 풀린다.
    */
   const documentReferenceHold = (tenantId, id) => {
@@ -2360,6 +2392,13 @@ export function createApp(options = {}) {
     const held = (rows) => linkedDocumentIds(rows, { stringAttachments: true }).includes(id)
     if (held(approvals.filter((row) => row?.status === '승인'))) return 'approval-evidence'
     if (held(approvals.filter((row) => row?.status === '결재중'))) return 'approval-active'
+    // R16-M: 회의의 원본(녹음·전사 원문). 아래 `linked` 목록에 섞지 않고 따로 세는 것은 **할 수 있는 일이
+    // 다르기 때문**이다 — 회의에는 원본 연결만 끊는 자리가 없어(제목·참석자만 고칠 수 있다) 「연결을
+    // 해제한 뒤」는 아무도 할 수 없는 지시가 된다. 회의를 지우는 것이 유일하게 푸는 길이다(규칙 3·11).
+    // 회의록 문서(위키)가 대신 잡아 주지도 않는다: 원본은 `attachmentId` 블록이 아니라 문단 텍스트로만
+    // 들어가므로 'wiki-documents' 갈래가 그 id 를 세지 않는다.
+    const meetings = Array.isArray(tenantStore['meeting-notes']?.data) ? tenantStore['meeting-notes'].data : []
+    if (linkedDocumentIds(meetings).includes(id)) return 'meeting-source'
     // 보관한 공지는 채널에서 내려간 글이다. 그 첨부까지 영구 잠그면 자료실을 정리할 길이 사라진다
     // (공지에는 삭제 라우트가 없다).
     const activeNotices = (Array.isArray(tenantStore[NOTICES_KEY]?.data) ? tenantStore[NOTICES_KEY].data : [])
@@ -2376,6 +2415,10 @@ export function createApp(options = {}) {
   const DOCUMENT_HOLD_MESSAGE = {
     'approval-evidence': '승인된 전자결재의 근거 자료입니다. 결재 기록이 이 파일을 가리키므로 삭제할 수 없습니다.',
     'approval-active': '결재가 도는 중인 문서가 이 자료를 근거로 쓰고 있습니다. 그 결재가 반려·회수되면 삭제할 수 있고, 승인되면 근거로 남아 삭제할 수 없습니다.',
+    // 회의를 지울 수 있는 사람은 그 회의를 만든 사람과 회사 관리자다(meeting-notes.mjs의 `canManageMeeting`).
+    // 자료 주인이 반드시 그 사람인 것은 아니므로(관리자가 남의 자료로 회의를 만들 수 있다)
+    // **누가 지울 수 있는지**까지 말한다 — 아무도 할 수 없는 지시를 주지 않는다(규칙 3·11).
+    'meeting-source': '회의록이 원본(녹음·전사 원문)으로 쓰고 있는 자료입니다. 회의를 만든 사람이나 회사 관리자가 회의록 화면에서 그 회의를 삭제하면 이 자료도 삭제할 수 있습니다.',
     linked: '다른 화면에서 사용 중인 자료입니다. 해당 화면에서 먼저 연결을 해제한 뒤 삭제해 주세요.',
   }
   const safeDownloadName = (value) => String(value || 'document').replace(/[\r\n"]/g, '_').slice(0, 180)
@@ -2624,23 +2667,34 @@ export function createApp(options = {}) {
       }
     }
     documents[index] = updatedDocument
-    // 수준을 '보관만'으로 내리면 그 문서에서 나온 AI 파생물을 파기한다. 문서에 저장되는 파생물은
-    // 승인 큐의 분류 제안(sourceKey `doc:<id>`) 하나뿐이다 — summary는 사람이 쓴 값일 수 있어 건드리지 않는다.
     /**
-     * 제안 삭제는 이 쓰기에 딸린 부수 효과다. writeProposals는 테넌트 store를 **제자리에서** 고치는데,
+     * 수준을 '보관만'으로 내리면 그 문서에서 나온 AI 파생물을 **전부** 파기한다(DECISIONS.md 3-5).
+     * 오늘 그 파생물은 둘이다:
+     *   1) 승인 큐의 분류 제안(sourceKey `doc:<id>`) — `dropPendingClassification`
+     *   2) R16-M 회의록: 이 자료를 원본으로 쓰는 회의의 전사 사본·요약과 대기 중인 `meeting-task` 제안
+     *      — `purgeMeetingDerivatives`. 수준을 내리는 문이 둘(여기 · 회의록의 revoke-ai)인데
+     *      한쪽만 지키면 약속이 반쪽이라, 두 문이 **같은 함수**를 부른다.
+     * summary는 사람이 쓴 값일 수 있어 건드리지 않는다.
+     *
+     * 제안·회의 파기는 이 쓰기에 딸린 부수 효과다. writeProposals는 테넌트 store를 **제자리에서** 고치는데,
      * persistDocumentList의 스냅샷은 테넌트 store '참조'만 되돌리므로 커밋이 실패하면 문서 변경은
-     * 되돌아가고 제안 삭제만 살아남는다 — 그리고 다음에 성공하는 아무 쓰기가 그것을 조용히 확정한다.
+     * 되돌아가고 파기만 살아남는다 — 그리고 다음에 성공하는 아무 쓰기가 그것을 조용히 확정한다.
      * 한 쓰기에 속한 변경은 함께 살거나 함께 죽는다(벌크 이관의 commitRows(onRollback)와 같은 모양).
      */
     const tenantStoreBefore = workspaceStore.tenants[request.auth.tenantId]
     const previousProposals = tenantStoreBefore?.[PROPOSALS_KEY]
     const previousPolicies = tenantStoreBefore?.[AUTOMATION_POLICIES_KEY]
     let droppedProposal = false
+    let purgedMeetings = null
     if (documentAiPolicy(updatedDocument) === 'locked' && documentAiPolicy(previous) !== 'locked') {
       droppedProposal = dropPendingClassification(request.auth.tenantId, updatedDocument.id)
+      purgedMeetings = meetingNotes.purgeMeetingDerivatives(request.auth.tenantId, updatedDocument.id, request.auth.id)
     }
     try { await persistDocumentList(request.auth.tenantId, documents, request.auth.id); const { tenantId: _tenantId, ...safeDocument } = documents[index]; response.json({ document: safeDocument }) }
     catch {
+      // 회의 쪽을 먼저 되돌린다 — 그쪽이 제안 키도 함께 잡아 두었으므로, 뒤이어 도는 아래 되돌리기가
+      // 이 쓰기 **이전**의 제안 레코드로 최종 확정한다.
+      purgedMeetings?.rollback()
       if (droppedProposal) {
         const current = workspaceStore.tenants[request.auth.tenantId]
         if (current) {
@@ -7578,6 +7632,10 @@ export function createApp(options = {}) {
       response.status(403).json({ error: { code: 'APPROVAL_ROUTE_REQUIRED', message: '전자결재 양식과 문서는 결재 화면에서만 조회할 수 있습니다.' } })
       return
     }
+    if (MEETING_ONLY_KEYS.has(key)) {
+      response.status(403).json({ error: { code: 'MEETING_ROUTE_REQUIRED', message: '회의록은 회의록 화면에서만 조회할 수 있습니다.' } })
+      return
+    }
     if (request.auth.role === 'tenant-member' && !TENANT_MEMBER_READ_KEYS.has(key)) {
       response.status(403).json({ error: { code: 'STORE_READ_FORBIDDEN', message: '현재 직무 권한으로 이 데이터를 볼 수 없습니다.' } })
       return
@@ -7654,6 +7712,10 @@ export function createApp(options = {}) {
     // 서로 다른 문장을 주고 화면은 어디로 가야 하는지 알 수 없게 된다.
     if (APPROVAL_ONLY_KEYS.has(key)) {
       response.status(403).json({ error: { code: 'APPROVAL_ROUTE_REQUIRED', message: '전자결재 양식과 문서는 결재 화면에서만 변경할 수 있습니다.' } })
+      return
+    }
+    if (MEETING_ONLY_KEYS.has(key)) {
+      response.status(403).json({ error: { code: 'MEETING_ROUTE_REQUIRED', message: '회의록은 회의록 화면에서만 변경할 수 있습니다.' } })
       return
     }
     if (request.auth.role === 'tenant-member' && !TENANT_MEMBER_WRITE_KEYS.has(key)) {
@@ -8420,6 +8482,31 @@ export function createApp(options = {}) {
   // (스케줄러의 now는 벽시계라, 보관 만료를 그 시계로 재면 그 시험은 날짜가 지나야만 통과한다).
   app.locals.sweepWikiArchive = wiki.sweepWikiArchive
   app.locals.sweepWikiRevisions = wiki.sweepWikiRevisions
+
+  // R16-M: 회의록. **H 뒤에 온다** — 회의록 문서는 위키 문서이고, 그것을 만드는 문은
+  // `wiki.createWikiDocument` 하나다(없으면 아래 등록이 부팅에서 throw한다).
+  // meeting-notes도 WORKSPACE_STORE_KEYS에 등록해 두고 403 MEETING_ROUTE_REQUIRED로 닫는다.
+  const transcription = options.transcription ?? createTranscription({ env: options.env ?? process.env })
+  app.locals.transcription = transcription
+  // `meetingNotes.purgeMeetingDerivatives`는 이 줄보다 **위**에 있는 `PATCH /api/documents/:id`가
+  // 쓴다(수준을 '보관만'으로 내릴 때). 그 핸들러는 요청 시점에 돌므로 여기서 잡아 두면 닿는다 —
+  // 라우트 등록 순서(회의록은 H 뒤)를 바꾸지 않고 한 규칙을 두 문이 함께 쓰게 하는 자리다.
+  const meetingNotes = registerMeetingNoteRoutes({
+    app, requireAuth, requireMatchingWorkspaceIdentity,
+    workspaceStore, accounts, commitWorkspaceStore,
+    client, model, billingService, usageMetadataFor, extractText, mapAnthropicError,
+    documentStorage, documentRecord, getTenantDocument, stageDocumentList, canReadDocument,
+    // 「회의록 문서가 원본보다 넓게 열리는가」는 `visibility` 문자열이 아니라 **판정**으로 재야 한다
+    // (개발운영지원 자료는 'all'이어도 올린 사람에게만 열린다).
+    isDocumentOpenToEveryone,
+    createWikiDocument: wiki.createWikiDocument,
+    findSystemWikiDocument: wiki.findSystemWikiDocument,
+    // 제안은 승인 큐의 것과 **같은 한 벌**로 넣고 만료시킨다 — 문마다 따로 적으면 같은 큐에
+    // 서로 다른 규칙으로 쌓인다(알림·SSE는 커밋 뒤에 내야 하므로 announce를 갈라 받는다).
+    enqueueProposal, announceProposal, newProposalId, proposalsOf, writeProposals,
+    transcription,
+    ...(typeof options.meetingClock === 'function' ? { clock: options.meetingClock } : {}),
+  })
 
   scheduler.register({
     id: 'wiki-archive-sweep',

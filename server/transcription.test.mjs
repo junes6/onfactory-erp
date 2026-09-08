@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  DEFAULT_TRANSCRIPTION_PROVIDER,
+  looksLikeSpeech,
   MAX_TRANSCRIPT_CHARS,
   TRANSCRIPTION_PROVIDERS,
   TranscriptionError,
@@ -47,7 +49,8 @@ const SRT = [
 ].join('\n')
 
 test('none 어댑터는 오디오를 받지 않는다고 분명히 말한다', () => {
-  const transcription = createTranscription({ env: {}, fetchImpl: explodingFetch })
+  // none은 이제 **명시했을 때만** 나온다(기본값은 text다 — 아래 「설정하지 않으면 text로 읽는다」).
+  const transcription = createTranscription({ env: { TRANSCRIPTION_PROVIDER: 'none' }, fetchImpl: explodingFetch })
   assert.equal(transcription.name, 'none')
   assert.equal(transcription.acceptsAudio, false)
   assert.equal(transcription.acceptsTranscript, false)
@@ -152,9 +155,25 @@ test('알 수 없는 TRANSCRIPTION_PROVIDER는 부팅에서 드러난다 — 조
   )
 })
 
-test('환경변수가 비어 있으면 none으로 읽는다', () => {
-  assert.equal(createTranscription({ env: { TRANSCRIPTION_PROVIDER: '   ' }, fetchImpl: explodingFetch }).name, 'none')
-  assert.equal(createTranscription({ env: {}, fetchImpl: explodingFetch }).name, 'none')
+/**
+ * 설정하지 않은 배포에서 **원문 업로드는 된다.**
+ *
+ * 처음 기본값은 `none`이었는데, 그러면 사람이 회의록 원문을 올리고 「처리」를 눌러도 503이 돌아온다
+ * (라이브 서버에서 실측했다). 이미 올린 텍스트에서 글자를 옮기는 데는 벤더도 네트워크도 필요 없으므로
+ * 꺼 둘 이유가 없다. 음성은 이 값과 무관하게 여전히 안 된다 — 벤더가 없고 형식 판정에서 걸린다.
+ */
+test('설정하지 않으면 text로 읽는다 — 올린 원문은 벤더 없이도 읽힌다', () => {
+  assert.equal(DEFAULT_TRANSCRIPTION_PROVIDER, 'text')
+  assert.equal(createTranscription({ env: {}, fetchImpl: explodingFetch }).name, 'text')
+  assert.equal(createTranscription({ env: { TRANSCRIPTION_PROVIDER: '   ' }, fetchImpl: explodingFetch }).name, 'text')
+  // 기본값에서도 회의록 원문은 받아들이고, 음성은 받지 않는다.
+  const fallback = createTranscription({ env: {}, fetchImpl: explodingFetch })
+  assert.equal(fallback.accepts('text/plain', '9월 회의.txt'), true)
+  assert.equal(fallback.accepts('text/vtt', '9월 회의.vtt'), true)
+  assert.equal(fallback.accepts('audio/mp4', '9월 회의.m4a'), false, '음성은 벤더가 정해질 때까지 받지 않는다')
+  assert.equal(fallback.acceptsAudio, false)
+  // 끄고 싶으면 명시한다. 그때만 아무것도 받지 않는다.
+  assert.equal(createTranscription({ env: { TRANSCRIPTION_PROVIDER: 'none' }, fetchImpl: explodingFetch }).name, 'none')
 })
 
 // ---------------------------------------------------------------------------
@@ -426,4 +445,61 @@ test('none 문구는 실제로 되는 설정을 말한다 — 어느 설정에�
   assert.equal(result.text, '김지훈: 라벨은 A안으로 확정했습니다.')
   // ③ none 자신은 그 일을 한다고 말하지 않는다.
   assert.equal(none.accepts('text/plain', '9월 회의.txt'), false)
+})
+
+test('상한에서 읽지 못한 뒷부분을 어댑터가 숫자로 말한다 — 자른 뒤의 길이로는 셀 수 없다', async () => {
+  const transcription = createTranscription({ env: { TRANSCRIPTION_PROVIDER: 'text' }, fetchImpl: explodingFetch })
+  const overflow = 5_000
+  const clipped = await transcription.transcribe({
+    body: Buffer.from('가'.repeat(MAX_TRANSCRIPT_CHARS + overflow), 'utf8'),
+    mime: 'text/plain',
+  })
+  // 자르기 **전**의 길이. 회의록 화면이 적는 「전사 N자」의 근거가 이 값이고, 잘린 뒤의 길이를 세면
+  // 실제보다 짧은 회의였다고 말하게 된다(규칙 13).
+  assert.equal(clipped.sourceCharacters, MAX_TRANSCRIPT_CHARS + overflow)
+  assert.equal(clipped.unreadCharacters, overflow, '요약이 보지 못한 뒷부분의 길이다')
+  assert.equal(clipped.characters, MAX_TRANSCRIPT_CHARS, 'characters 는 지금도 실제로 읽은 글자 수다')
+
+  // 상한 안에서는 0이 「모른다」가 아니라 「버린 것이 없다」여야 한다.
+  const whole = await transcription.transcribe({ body: '김지훈: 오늘 회의 시작합니다.', mime: 'text/plain' })
+  assert.equal(whole.unreadCharacters, 0)
+  assert.equal(whole.sourceCharacters, whole.characters)
+
+  // 자막에서는 **말**의 길이다 — 걷어낸 타임코드·큐 번호는 원문 글자 수에 들어가지 않는다.
+  const cue = await transcription.transcribe({ body: Buffer.from(VTT, 'utf8'), mime: 'text/vtt' })
+  assert.equal(cue.sourceCharacters, countCharacters(cue.text))
+  assert.equal(cue.unreadCharacters, 0)
+  assert.ok(cue.sourceCharacters < countCharacters(VTT), '타임코드까지 세면 화면이 없는 발언까지 있었다고 말한다')
+})
+
+/**
+ * 녹음을 올린 사람에게는 **왜 안 되는지**를 함께 말해야 한다. 「TXT를 올려 주세요」만 주면
+ * 자기가 파일을 잘못 골랐다고 읽고 같은 녹음을 다시 올린다 — 음성 전사는 아직 연결되지 않았고,
+ * 그것은 사람이 파일을 바꿔서 될 일이 아니다.
+ */
+test('녹음을 올리면 형식 탓이 아니라 연결이 없다는 사실을 말한다', async () => {
+  const transcription = createTranscription({ env: {}, fetchImpl: explodingFetch })
+  const cases = [['audio/mp4', '9월 회의.m4a'], ['', '9월 회의.mp3'], ['video/webm', '회의.webm'], ['application/octet-stream', '회의.wav']]
+  for (const [mime, filename] of cases) {
+    const message = await transcription
+      .transcribe({ body: Buffer.from('바이트'), mime, filename })
+      .then(() => '', (error) => error.message)
+    assert.match(message, /음성 파일에서 글자를 뽑는 연결이 아직 없습니다/, `녹음인데 형식 탓으로 답했다: ${filename}`)
+    assert.match(message, /자료실에 그대로 보관/, '올린 녹음이 어떻게 되는지도 말한다')
+  }
+  // 녹음이 아닌 것에는 그 문장을 주지 않는다 — 사실이 아니다.
+  const other = await transcription
+    .transcribe({ body: Buffer.from('%PDF-1.7'), mime: 'application/pdf', filename: '회의.pdf' })
+    .then(() => '', (error) => error.message)
+  assert.doesNotMatch(other, /음성 파일에서/)
+  assert.match(other, /TXT·VTT·SRT·Markdown/)
+})
+
+test('looksLikeSpeech는 거절 문구를 고르는 데만 쓰고, 무엇을 읽을지는 정하지 않는다', () => {
+  assert.equal(looksLikeSpeech({ mime: 'audio/mpeg' }), true)
+  assert.equal(looksLikeSpeech({ mime: '', filename: 'a.M4A' }), true)
+  assert.equal(looksLikeSpeech({ mime: 'text/plain', filename: 'a.txt' }), false)
+  assert.equal(looksLikeSpeech({}), false)
+  // 판정은 한 곳이다: 녹음처럼 보여도 읽을 수 있는 형식이면 읽는다.
+  assert.equal(createTranscription({ env: {}, fetchImpl: explodingFetch }).accepts('text/vtt', '회의.vtt'), true)
 })

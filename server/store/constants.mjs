@@ -93,6 +93,9 @@ export const WORKSPACE_TABLES = Object.freeze({
   // 한 배열에 합치면 양식 한 장을 읽을 때마다 그 회사의 결재 문서 전체가 딸려 온다.
   'approval-forms': 'approval_forms',
   'approval-documents': 'approval_documents',
+  // R16-M: 회의록. 전사 원문과 요약이 payload 안에 산다 — 회의 음성은 개인정보라
+  // 게스트 정책도, generic PUT 도 열지 않고 전용 라우트만 문이 된다(M3).
+  'meeting-notes': 'meeting_notes',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

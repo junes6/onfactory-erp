@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const read = (relativePath) => readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
-const [app, collaboration, dashboard, business, factory, people, library, compliance, taxAssets, taxWorkspace, ipRights, itServices, wikiPage, approvalSection, approvalDraft, approvalDraftSave, apiSmoke, quickLinkSmoke, workspaceHook, serverApp, packageJsonText] = await Promise.all([
+const [app, collaboration, dashboard, business, factory, people, library, compliance, taxAssets, taxWorkspace, ipRights, itServices, wikiPage, approvalSection, approvalDraft, approvalDraftSave, meetingNotes, apiSmoke, quickLinkSmoke, workspaceHook, serverApp, packageJsonText] = await Promise.all([
   read('src/App.tsx'),
   read('src/components/CollaborationSuite.tsx'),
   read('src/components/DashboardWorkspace.tsx'),
@@ -20,6 +20,7 @@ const [app, collaboration, dashboard, business, factory, people, library, compli
   read('src/components/approval/ApprovalDocumentSection.tsx'),
   read('src/components/approval/ApprovalDraftDialog.tsx'),
   read('src/utils/approvalDraft.ts'),
+  read('src/components/MeetingNotes.tsx'),
   read('server/store/menu-write-smoke.test.mjs'),
   read('scripts/quick-links-storage.test.mjs'),
   read('src/hooks/useWorkspaceState.ts'),
@@ -246,6 +247,23 @@ const contracts = [
       [/onToast\(reason instanceof Error \? reason\.message : '결재를 회수하지 못했습니다\.'\)/, 'recall failure handling'],
     ],
   },
+  {
+    // 회의록도 generic 워크스페이스 PUT이 403으로 닫혀 있다 — 전사 원문과 근거 인용이 원료라
+    // PUT 한 번으로 '아무도 하지 않은 말'이 끝난 회의록이 되는 길이 있으면 안 된다.
+    screen: '회의록', persistenceId: 'meeting-api', source: meetingNotes, checks: [
+      // 목록은 한 묶음씩 `limit`·`offset`으로 읽는다(M4 지적 3·5) — 그래도 전용 회의 라우트다.
+      [/const response = await fetch\(`\/api\/meetings\?\$\{params\}`, \{ headers \}\)/, 'list goes through the dedicated meeting route'],
+      [/await fetch\('\/api\/meetings', \{\s*\n?\s*method: 'POST'/, 'create goes through the dedicated meeting route'],
+      [/setMeetings\(\(current\) => \[body\.meeting!, \.\.\.current\]\)/, 'create response immediately updates the visible list'],
+      [/method: 'PATCH', headers: jsonHeaders, body: JSON\.stringify\(patch\)/, 'update sends only the fields the screen owns'],
+      [/setMeetings\(\(current\) => current\.map\(\(row\) => \(row\.id === body\.meeting!\.id \? body\.meeting! : row\)\)\)/, 'update response immediately updates the visible list'],
+      [/const deleteMeeting = async[\s\S]*?method: 'DELETE'[\s\S]*?current\.filter\(\(row\) => row\.id !== meeting\.id\)/, 'delete wiring and immediate list update'],
+      [/if \(!response\.ok\) throw new Error\(body\.error\?\.message \|\| '회의를 지우지 못했습니다\.'\)/, 'delete failure surfaces the server sentence'],
+      [/onClick=\{\(\) => setCreateOpen\(true\)\}/, 'create button wiring'],
+      [/onClick=\{\(\) => onDelete\(meeting\)\}/, 'delete button wiring'],
+      [/onToast\(body\.message \|\| '회의를 지웠습니다\.'\)/, 'what survived the delete is said by the server, not invented by the screen'],
+    ],
+  },
 ]
 
 for (const contract of contracts) {
@@ -255,7 +273,7 @@ for (const contract of contracts) {
 }
 
 test('all UI contracts stay paired to the same persistence target exercised by lifecycle smoke', () => {
-  assert.equal(contracts.length, 17)
+  assert.equal(contracts.length, 18)
   const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   for (const { screen, persistenceId } of contracts) {
     if (persistenceId.startsWith('localStorage:')) {
@@ -263,7 +281,7 @@ test('all UI contracts stay paired to the same persistence target exercised by l
       assert.match(quickLinkSmoke, new RegExp(escape(persistenceId.slice('localStorage:'.length))), `${screen} localStorage target mismatch`)
       continue
     }
-    // generic 워크스페이스 PUT이 없는 세 화면(자료실·문서·결재)은 전용 라우트로 산다 —
+    // generic 워크스페이스 PUT이 없는 네 화면(자료실·문서·결재·회의록)은 전용 라우트로 산다 —
     // 스모크의 짝도 key가 아니라 그 화면을 가리키는 리터럴이다.
     const pairedCase = persistenceId === 'documents-api'
       ? /const documentCase = \{ screen: '기업 자료실', persistenceId: 'documents-api' \}/
@@ -271,11 +289,13 @@ test('all UI contracts stay paired to the same persistence target exercised by l
         ? /const wikiCase = \{ screen: '문서', persistenceId: 'wiki-api' \}/
         : persistenceId === 'approval-api'
           ? /const approvalCase = \{ screen: '결재 · AI 제안', persistenceId: 'approval-api' \}/
-          : new RegExp(`screen: '${escape(screen)}', key: '${escape(persistenceId)}'`)
+          : persistenceId === 'meeting-api'
+            ? /const meetingCase = \{ screen: '회의록', persistenceId: 'meeting-api' \}/
+            : new RegExp(`screen: '${escape(screen)}', key: '${escape(persistenceId)}'`)
     assert.match(apiSmoke, pairedCase, `${screen} UI target ${persistenceId} is not the lifecycle target`)
   }
   for (const marker of ['CREATE', 'RESTART/PERSIST', 'UPDATE', 'RESTART/UPDATE-PERSIST', 'DELETE', 'FINAL RESTART/EMPTY']) {
-    const dynamicCount = '\\$\\{workspaceCases\\.length \\+ 3\\}\\/\\$\\{workspaceCases\\.length \\+ 3\\}'
+    const dynamicCount = '\\$\\{workspaceCases\\.length \\+ 4\\}\\/\\$\\{workspaceCases\\.length \\+ 4\\}'
     assert.match(apiSmoke, new RegExp(`t\\.diagnostic\\(\\\`${marker.replace('/', '\\/')} ${dynamicCount} PASS`), `missing dynamic lifecycle marker: ${marker}`)
   }
   assert.ok((apiSmoke.match(/await withRuntimeApp\(/g) ?? []).length >= 4, 'create/update/delete must each cross isolated app/store restarts')
