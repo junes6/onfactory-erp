@@ -1265,6 +1265,58 @@ function isConversationVisibleToMember(conversation, account, accounts) {
   return typeof conversation.memberId === 'string' && identityIds.includes(conversation.memberId)
 }
 
+/**
+ * 이 사람이 이 대화를 지울 수 있는가. 읽기 가시성과는 다른 물음이라 술어를 따로 둔다 —
+ * 관리자에게 삭제를 허용하는 근거는 테넌트 소속이지 "그 방을 읽을 수 있다"가 아니다.
+ * 읽기 술어를 재사용하면 관리자가 목록에서 보는 그룹·팀 방을 지우지 못해,
+ * 참여자가 모두 나간 방이 제품 경로로 회수할 수 없는 행으로 남는다.
+ *
+ * 1:1(direct)은 그대로 참여자만 지운다. 관리자에게 남의 1:1을 지울 권한을 새로 주면
+ * 권한 표면이 넓어진다 — 여기서 넓히려는 것은 회사 채널의 회수이지 사적 대화가 아니다.
+ * 개발운영진 지원 채널은 이 술어로 넓어지지 않는다 — 라우트의 403보다 먼저,
+ * 여기서도 읽기 가시성 쪽으로 되돌린다(관리자가 남의 지원 이력을 열람·삭제할 길을 만들지 않는다).
+ */
+function isConversationDeletableBy(conversation, account, accounts) {
+  if (conversationLifecycle(conversation) !== 'active') return false
+  if (conversation?.type !== 'direct'
+    && !isDeveloperSupportConversation(conversation)
+    && account?.role === 'tenant-admin'
+    && account.tenantId) return true
+  return isConversationVisibleToMember(conversation, account, accounts)
+}
+
+/**
+ * 그룹·팀 방에 아직 남은 사람이 있는가. 방을 나가면 그 사람이 hiddenFor에 들어간다.
+ * 명단(participantIds)이 없는 시드 팀 채널은 팀명으로 사람이 묶이므로 "비었다"고 말할 수 없다 —
+ * 판정을 못 하면 남아 있다고 본다(방을 닫는 쪽이 되돌릴 수 없는 방향이다).
+ * 1:1은 여기서 다루지 않는다: 나간 1:1은 세대(generation) 규칙이 따로 접고 다시 편다.
+ */
+function hasRemainingParticipant(conversation) {
+  if (conversation?.type === 'direct') return true
+  if (!Array.isArray(conversation?.participantIds)) return true
+  const hidden = new Set(conversation.hiddenFor ?? [])
+  return conversation.participantIds.some((id) => !hidden.has(id))
+}
+
+/**
+ * 닫힌 방의 묘비. 삭제 라우트와 '마지막 사람이 나갔다' 두 자리가 같은 함수를 부른다 —
+ * 같은 모양이라고 주석에 적는 것과 같은 함수를 부르는 것은 다르다.
+ * 본문은 남기지 않는다. 방이 닫힌 뒤에도 메시지가 저장소에 남으면 그게 곧 회수하지 못한 이력이다.
+ */
+function closedConversationTombstone(conversation, at, hiddenIds = []) {
+  return {
+    ...conversation,
+    lifecycle: 'deleted',
+    closedAt: at,
+    deletedAt: at,
+    hiddenFor: Array.from(new Set([...(conversation.hiddenFor ?? []), ...hiddenIds])),
+    unread: 0,
+    lastMessage: '',
+    lastTime: '',
+    messages: [],
+  }
+}
+
 function normalizeAdminConversations(previousData, nextData) {
   if (!Array.isArray(previousData) || !Array.isArray(nextData) || nextData.length > 2_000) return null
   const seen = new Set()
@@ -5899,21 +5951,28 @@ export function createApp(options = {}) {
       response.status(403).json({ error: { code: 'SYSTEM_CONVERSATION_IMMUTABLE', message: '개발운영진 지원 채널은 요청 이력 보호를 위해 나갈 수 없습니다.' } })
       return
     }
-    const conversation = { ...previous, hiddenFor: Array.from(new Set([...(previous.hiddenFor ?? []), request.auth.id])) }
+    const left = { ...previous, hiddenFor: Array.from(new Set([...(previous.hiddenFor ?? []), request.auth.id])) }
+    // 마지막 사람이 나간 그룹·팀 방은 그 자리에서 닫는다. 열어 둔 채 두면 참여자가 없어
+    // 아무도 들어갈 수 없는 방이 되고, 그 대화 행과 메시지는 저장소에 계속 남는다.
+    // 고아를 관리자 삭제로 뒤늦게 치우기보다 애초에 만들지 않는 쪽이다.
+    const closed = !hasRemainingParticipant(left)
+    const conversation = closed ? closedConversationTombstone(left, new Date().toISOString()) : left
     try {
       await commitConversationData(request.auth.tenantId, conversations.map((item) => item.id === conversation.id ? conversation : item), request.auth.id)
     } catch {
       response.status(500).json({ error: { code: 'MESSENGER_LEAVE_FAILED', message: '대화방 나가기를 저장하지 못했습니다.' } })
       return
     }
-    response.json({ left: true, conversationId: conversation.id })
+    response.json({ left: true, conversationId: conversation.id, closed })
   })
 
   app.delete('/api/messenger/conversations/:id', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const conversations = Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []
     const target = conversations.find((conversation) => conversation?.id === request.params.id)
-    if (!target || !isConversationVisibleToMember(target, request.auth, accounts)) {
+    // 읽기 가시성이 아니라 삭제 술어로 거른다. 관리자는 자기가 참여하지 않은 그룹·팀 방도
+    // 지울 수 있어야 한다 — 목록에는 보이는데 지울 수 없으면 그 행은 아무도 회수하지 못한다.
+    if (!target || !isConversationDeletableBy(target, request.auth, accounts)) {
       response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '삭제할 대화를 찾을 수 없습니다.' } })
       return
     }
@@ -5927,22 +5986,14 @@ export function createApp(options = {}) {
         && legacyConversationParticipantIds(target).some((id) => accountIdentityIds(account, accounts).includes(id)))
       : []
     const canonicalParticipantIds = participantAccounts.map((account) => account.id)
-    const tombstone = {
+    const tombstone = closedConversationTombstone({
       ...target,
       ...(target.type === 'direct' && canonicalParticipantIds.length === 2 ? {
         participantIds: canonicalParticipantIds,
         lineageId: target.lineageId || directLineageId(canonicalParticipantIds[0], canonicalParticipantIds[1]),
         generation: Number.isInteger(target.generation) ? target.generation : 1,
       } : {}),
-      lifecycle: 'deleted',
-      closedAt: deletedAt,
-      deletedAt,
-      hiddenFor: Array.from(new Set([...(target.hiddenFor ?? []), ...canonicalParticipantIds])),
-      unread: 0,
-      lastMessage: '',
-      lastTime: '',
-      messages: [],
-    }
+    }, deletedAt, canonicalParticipantIds)
     try {
       await commitConversationData(request.auth.tenantId, conversations.map((conversation) => conversation.id === target.id ? tombstone : conversation), request.auth.id)
     } catch {

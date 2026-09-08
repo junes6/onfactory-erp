@@ -459,3 +459,101 @@ test('게스트는 초대된 프로젝트의 채널(projectId 있는 방)에만 
     assert.equal((await forbidden.json()).error.code, 'PROJECT_EDITOR_REQUIRED')
   })
 })
+
+// ─────────────────── 고아 방 회수 (관리자 삭제 · 마지막 이탈) ───────────────────
+
+/** 관리자가 참여하지 않은 그룹방. 셋 다 관리자가 아닌 사람이 만들고 관리자는 초대받지 않는다. */
+async function roomWithoutAdmin(origin, park, oh) {
+  const room = await makeRoom(origin, park.headers, { name: '관리자 없는 방', participantIds: [oh.account.id] })
+  const sent = await send(origin, park.headers, room.id, { text: '남는 말' })
+  assert.equal(sent.status, 201)
+  return room
+}
+
+test('회사 관리자는 자기가 참여하지 않은 그룹방을 목록에서 볼 뿐 아니라 지울 수 있다', async () => {
+  await withApp(async (origin) => {
+    const admin = await signIn(origin, ADMIN)
+    const park = await signIn(origin, PARK)
+    const oh = await signIn(origin, OH)
+    const room = await roomWithoutAdmin(origin, park, oh)
+
+    // (1) 목록에는 보인다 — 관리자의 저장소 조회에는 구성원 가시성 필터가 걸리지 않는다.
+    const listed = await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: admin.headers })).json()
+    assert.ok(listed.data.some((item) => item.id === room.id), '관리자 목록에 그룹방이 보여야 한다')
+
+    // (3) 그런데 들어갈 길은 없다 — 초대 라우트도 같은 읽기 가시성 술어로 방을 먼저 찾으므로
+    // 관리자에게는 방 자체가 없는 것으로 보인다. 이 문은 닫힌 채로 둔다:
+    // 관리자가 남의 방에 스스로 들어가 대화를 읽는 길을 여는 것은 회수와 다른 이야기다.
+    const inviteSelf = await fetch(`${origin}/api/messenger/conversations/${room.id}/participants`, {
+      method: 'POST', headers: admin.headers, body: JSON.stringify({ participantIds: [admin.account.id] }),
+    })
+    assert.equal(inviteSelf.status, 404, '관리자가 남의 방에 스스로 들어가는 길은 열지 않는다')
+
+    // (2) 그러므로 삭제는 방에 들어가지 않고도 되어야 한다. 보이는데 못 지우면 그 행은 아무도 회수할 수 없다.
+    const deleted = await fetch(`${origin}/api/messenger/conversations/${room.id}`, { method: 'DELETE', headers: admin.headers })
+    assert.equal(deleted.status, 204, await deleted.text())
+
+    const raw = (await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: admin.headers })).json()).data
+    const tombstone = raw.find((item) => item.id === room.id)
+    assert.equal(tombstone.lifecycle, 'deleted')
+    assert.deepEqual(tombstone.messages, [], '삭제된 방은 메시지를 남기지 않는다')
+    const seenByPark = await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: park.headers })).json()
+    assert.ok(!seenByPark.data.some((item) => item.id === room.id), '참여자 목록에서도 사라진다')
+  })
+})
+
+test('관리자라도 남의 1:1 대화는 지울 수 없다 — 삭제 권한을 넓히되 1:1까지 열지는 않는다', async () => {
+  await withApp(async (origin) => {
+    const admin = await signIn(origin, ADMIN)
+    const park = await signIn(origin, PARK)
+    const oh = await signIn(origin, OH)
+    const opened = await fetch(`${origin}/api/messenger/conversations/direct`, {
+      method: 'POST', headers: park.headers, body: JSON.stringify({ participantId: oh.account.id }),
+    })
+    assert.equal(opened.status, 201)
+    const direct = (await opened.json()).conversation
+
+    const deleted = await fetch(`${origin}/api/messenger/conversations/${direct.id}`, { method: 'DELETE', headers: admin.headers })
+    assert.equal(deleted.status, 404, '남의 1:1 대화는 관리자에게도 없는 것으로 보여야 한다')
+    const raw = (await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: admin.headers })).json()).data
+    assert.equal(raw.find((item) => item.id === direct.id).lifecycle ?? 'active', 'active')
+  })
+})
+
+test('마지막 참여자가 나가면 그 자리에서 방이 닫힌다 — 아무도 못 지우는 방을 애초에 만들지 않는다', async () => {
+  await withApp(async (origin) => {
+    const admin = await signIn(origin, ADMIN)
+    const park = await signIn(origin, PARK)
+    const oh = await signIn(origin, OH)
+    const room = await roomWithoutAdmin(origin, park, oh)
+
+    const leave = (who) => fetch(`${origin}/api/messenger/conversations/${room.id}/leave`, { method: 'POST', headers: who.headers })
+    assert.equal((await leave(oh)).status, 200)
+    const midway = (await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: admin.headers })).json()).data
+    assert.equal(midway.find((item) => item.id === room.id).lifecycle ?? 'active', 'active', '아직 박지현이 남아 있다')
+
+    assert.equal((await leave(park)).status, 200)
+    const raw = (await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: admin.headers })).json()).data
+    const closed = raw.find((item) => item.id === room.id)
+    assert.equal(closed.lifecycle, 'deleted', '마지막 사람이 나간 방은 닫힌다')
+    assert.deepEqual(closed.messages, [], '삭제 라우트가 만드는 것과 같은 모양의 묘비다')
+  })
+})
+
+test('넓어진 삭제 권한은 개발운영진 지원 채널로 새지 않는다', async () => {
+  await withApp(async (origin) => {
+    const admin = await signIn(origin, ADMIN)
+    const oh = await signIn(origin, OH)
+    const opened = await fetch(`${origin}/api/messenger/conversations/direct`, {
+      method: 'POST', headers: oh.headers, body: JSON.stringify({ participantId: 'SYS-DEVELOPER-OPS' }),
+    })
+    assert.equal(opened.status, 201)
+    const support = (await opened.json()).conversation
+    assert.equal(support.systemChannel, 'developer-support')
+
+    const deleted = await fetch(`${origin}/api/messenger/conversations/${support.id}`, { method: 'DELETE', headers: admin.headers })
+    assert.equal(deleted.status, 404, '남의 지원 이력은 관리자에게도 없는 것으로 보여야 한다')
+    const raw = (await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: admin.headers })).json()).data
+    assert.ok(!raw.some((item) => item.id === support.id), '관리자 조회에도 남의 지원 채널은 실리지 않는다')
+  })
+})
