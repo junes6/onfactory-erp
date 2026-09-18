@@ -49,6 +49,14 @@ export const NOTIFICATION_TYPES = Object.freeze({
   // 검토 자료: 올린 사람이 [검토 요청 보내기]를 눌렀을 때 한 번, 마감 하루 전에 아직 반응하지 않은 사람에게 한 번.
   'material-review': { label: '검토 요청', pushByDefault: true, page: 'wiki' },
   'material-due': { label: '의견 마감 알림', pushByDefault: true, page: 'wiki' },
+  // 휴가: 신청하면 결재자에게, 결정하면 신청자에게. 전에는 둘 다 알림이 없어 인사 화면 탭 안에만 쌓였다.
+  'leave-requested': { label: '휴가 결재 요청', pushByDefault: true, page: 'people' },
+  'leave-decided': { label: '휴가 결재 결과', pushByDefault: true, page: 'people' },
+  // 업무일지: 결재 요청은 관리자 전원에게 가므로 매일 여러 건이다 — 기본 푸시는 끄고 알림함에만 둔다.
+  'journal-submitted': { label: '업무일지 결재 요청', pushByDefault: false, page: 'journal' },
+  'journal-reviewed': { label: '업무일지 결재 결과', pushByDefault: true, page: 'journal' },
+  // 직원이 문서·회의록·메신저에서 올린 제안이 승인·반려됐다. 올린 사람이 결과를 몰랐다.
+  'proposal-decided': { label: '올린 제안의 결과', pushByDefault: false, page: 'ai' },
 })
 
 export const NOTIFICATION_TYPE_IDS = Object.freeze(Object.keys(NOTIFICATION_TYPES))

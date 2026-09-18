@@ -1170,7 +1170,8 @@ html[data-theme='dark'] {
 .tenant-scope-note { min-height: 42px; display: flex; align-items: center; gap: var(--space-8); padding: var(--space-8) var(--space-12); border: none; border-radius: var(--radius-8); color: var(--side-muted); background: transparent; font-size: var(--font-13); font-weight: var(--weight-medium); }
 
 /* People, leave approval and account provisioning */
-.people-overview-strip { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: var(--space-8); margin-bottom: var(--space-12); }
+/* 관리자 요약은 세 칸(구성원·휴가 결재·계정 승인). 같은 숫자를 두 번 보이던 두 번째 계정 승인 칸은 뺐다. */
+.people-overview-strip { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: var(--space-8); margin-bottom: var(--space-12); }
 .people-overview-strip.self-service { grid-template-columns: repeat(2,minmax(0,1fr)); }
 .people-overview-strip > div, .people-overview-strip > button { min-width: 0; min-height: 86px; display: flex; align-items: center; gap: var(--space-12); padding: var(--space-12) var(--space-16); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); box-shadow: var(--shadow-none); text-align: left; }
 .people-overview-strip > button { cursor: pointer; }
@@ -1184,8 +1185,9 @@ html[data-theme='dark'] {
 .people-overview-strip p span { grid-column: 1 / -1; color: var(--muted); font-size: var(--font-15); }
 .people-overview-strip p strong { font-size: var(--font-22); }
 .people-overview-strip p small { display: flex; align-items: center; color: var(--muted); font-size: var(--font-13); white-space: nowrap; }
-.people-tabs { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-12); padding: var(--space-4); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
-.people-tabs button { min-height: 43px; display: flex; align-items: center; justify-content: center; gap: var(--space-8); padding: var(--space-0) var(--space-16); border: none; border-radius: var(--radius-8); color: var(--muted); background: transparent; font-size: var(--font-15); font-weight: var(--weight-medium); cursor: pointer; }
+/* 탭 이름은 한 줄이다 — 1280px에서 '구성 / 원'처럼 음절 단위로 끊겼다. 넘치면 탭 줄 안에서만 가로로 민다. */
+.people-tabs { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-12); padding: var(--space-4); overflow-x: auto; border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.people-tabs button { flex: 0 0 auto; white-space: nowrap; min-height: 43px; display: flex; align-items: center; justify-content: center; gap: var(--space-8); padding: var(--space-0) var(--space-16); border: none; border-radius: var(--radius-8); color: var(--muted); background: transparent; font-size: var(--font-15); font-weight: var(--weight-medium); cursor: pointer; }
 .people-tabs button[aria-selected='true'] { color: var(--forest); background: var(--forest-soft); }
 .people-tabs em { min-width: 21px; height: 21px; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-blue); font-size: var(--font-13); font-style: normal; }
 .people-content-card { overflow: hidden; border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); box-shadow: var(--shadow-none); }
@@ -1543,7 +1545,7 @@ html[data-theme='dark'] .journal-feedback.blue { border-color: var(--color-blue)
 
 @media (max-width: 1320px) {
   .home-dashboard-grid { grid-template-columns: minmax(0,1.45fr) 330px; }
-  .people-overview-strip { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .people-overview-strip { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .people-directory-list article { grid-template-columns: auto minmax(150px,1fr) minmax(190px,1fr) auto auto; }
   .people-directory-list article > div:nth-of-type(3) { display: none; }
 }

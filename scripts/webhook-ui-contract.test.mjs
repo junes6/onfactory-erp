@@ -160,7 +160,8 @@ test('출처 배지를 누르면 관리자만 외부 연동 탭으로 가고, �
   assert.match(appRoute, /const WEBHOOK_ENDPOINT_RE = \/\^WHK-\//)
   assert.match(webhookRoutes, /export const newEndpointId = \(\) => `WHK-/)
   assert.match(app, /if \(plan\.peopleTab\) setPeopleInitialTab\(plan\.peopleTab\)/)
-  assert.match(app, /useState<'members' \| 'accounts' \| 'performance' \| 'integrations' \| null>\(null\)/)
+  // P1-2에서 휴가 알림이 여는 '휴가' 탭이 더해졌다.
+  assert.match(app, /useState<'members' \| 'accounts' \| 'performance' \| 'integrations' \| 'leave' \| null>\(null\)/)
   // 지우지 않으면 그 뒤로는 사이드바로 들어와도 늘 외부 연동이 먼저 열린다.
   assert.match(app, /if \(nextPage !== 'people'\) setPeopleInitialTab\(null\)/)
 })

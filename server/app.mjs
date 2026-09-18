@@ -338,6 +338,28 @@ function hasWorkOriginShape(value) {
 }
 
 /** 제안 종류 → 사람이 읽는 출처. 배지 문구와 되짚어 갈 곳을 함께 만든다. */
+/**
+ * 이 사람이 이 제안을 볼 수 있는가. 규범 제안(principle)은 그 사람의 판단 기록이라 주인만 본다 —
+ * 개인 코어 화면은 "다른 사람에게는 보이지 않습니다"라고 약속한다. 나머지는 관리자 큐의 것이다.
+ */
+function proposalVisibleTo(proposal, auth) {
+  if (proposal?.kind !== 'principle') return true
+  return String(proposal.payload?.ownerAccountId ?? '') === String(auth?.id ?? '')
+}
+
+/** [수정 후 승인]에서 고칠 수 있는 칸. 목록에 없는 키(주인·근거·출처 id 등)는 버린다. */
+const PROPOSAL_EDITABLE_FIELDS = Object.freeze({
+  principle: ['statement'],
+  'document-classification': ['category', 'tags'],
+  task: ['title', 'description', 'owner', 'ownerId', 'due', 'priority', 'category'],
+})
+
+function editableProposalFields(kind, payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return {}
+  const allowed = PROPOSAL_EDITABLE_FIELDS[kind] ?? PROPOSAL_EDITABLE_FIELDS.task
+  return Object.fromEntries(allowed.filter((key) => Object.hasOwn(payload, key)).map((key) => [key, payload[key]]))
+}
+
 function workOriginFromProposal(proposal) {
   const detail = String(proposal?.evidence ?? '').split('\n')[0].slice(0, 120)
   const label = proposal?.kind === 'sentinel-task' ? '센티널 경고'
@@ -3384,7 +3406,7 @@ export function createApp(options = {}) {
    */
   const announceProposal = (tenantId, proposal) => {
     notifyProposal(tenantId, proposal)
-    events.publish(tenantId, 'proposal', { pending: proposalsOf(tenantId).filter((item) => item?.status === 'pending').length, added: proposal.id })
+    events.publish(tenantId, 'proposal', { pending: pendingProposalCount(tenantId), added: proposal.id })
   }
   /**
    * `announce:false`면 저장소에만 넣고 알리지 않는다 — 커밋이 실패하면 제안 행은 되돌아가지만
@@ -3477,7 +3499,7 @@ export function createApp(options = {}) {
 
   const proposalGuards = [requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity]
   app.get('/api/proposals', ...proposalGuards, (request, response) => {
-    const proposals = [...proposalsOf(request.auth.tenantId)].sort((left, right) => {
+    const proposals = proposalsOf(request.auth.tenantId).filter((item) => proposalVisibleTo(item, request.auth)).sort((left, right) => {
       const pending = Number(right.status === 'pending') - Number(left.status === 'pending')
       return pending || String(right.createdAt).localeCompare(String(left.createdAt))
     })
@@ -3491,7 +3513,7 @@ export function createApp(options = {}) {
 
   app.post('/api/proposals/evaluate', ...proposalGuards, (request, response) => {
     const result = runSentinel(request.auth.tenantId)
-    response.json({ ...result, pendingCount: proposalsOf(request.auth.tenantId).filter((item) => item.status === 'pending').length })
+    response.json({ ...result, pendingCount: visiblePendingCount(request.auth.tenantId, request.auth) })
   })
 
   app.post('/api/proposals/:id/decide', ...proposalGuards, async (request, response) => {
@@ -3508,6 +3530,11 @@ export function createApp(options = {}) {
       return
     }
     const proposal = proposals[index]
+    // 규범 제안은 그 사람의 판단 기록이다 — 다른 관리자에게는 없는 제안이다(존재도 알리지 않는다).
+    if (!proposalVisibleTo(proposal, request.auth)) {
+      response.status(404).json({ error: { code: 'PROPOSAL_NOT_FOUND', message: '제안을 찾을 수 없습니다.' } })
+      return
+    }
     if (proposal.status !== 'pending') {
       response.status(409).json({ error: { code: 'PROPOSAL_ALREADY_DECIDED', message: '이미 처리된 제안입니다.' } })
       return
@@ -3524,12 +3551,14 @@ export function createApp(options = {}) {
     let finalPayload = proposal.payload
 
     if (decision !== 'reject') {
-      const edits = decision === 'edit' && request.body?.payload && typeof request.body.payload === 'object' ? request.body.payload : {}
+      // 고칠 수 있는 칸은 종류마다 정해져 있다. 전에는 받은 것을 그대로 합쳐, 규범 제안의 주인(ownerAccountId)을
+      // 바꿔 **아무 계정(다른 고객사 포함)의 개인 코어에** 규범을 써 넣을 수 있었다.
+      const edits = decision === 'edit' ? editableProposalFields(proposal.kind, request.body?.payload) : {}
       finalPayload = { ...proposal.payload, ...edits }
       decisionDiff = decision === 'edit' ? diffProposalPayload(proposal.payload, finalPayload) : null
       if (proposal.kind === 'principle') {
-        // 규범 카드는 업무를 만들지 않는다. 결정한 사람의 개인 코어에만 확정된다.
-        const ownerId = String(finalPayload.ownerAccountId ?? request.auth.id)
+        // 규범 카드는 업무를 만들지 않는다. 결정한 사람(= 그 규범의 주인, 위에서 확인했다)의 개인 코어에만 확정된다.
+        const ownerId = request.auth.id
         const core = personalCoreOf(workspaceStore, ownerId)
         const confirmed = normalizePrinciple({
           statement: finalPayload.statement,
@@ -3563,6 +3592,13 @@ export function createApp(options = {}) {
         const owner = finalPayload.ownerId
           ? accounts.find((account) => account.id === finalPayload.ownerId && account.tenantId === tenantId)
           : uniqueTenantAccountByName(accounts, tenantId, String(finalPayload.owner ?? '')) ?? null
+        // 담당자 이름을 적었는데 이 회사에서 한 사람으로 찾지 못하면 멈춘다. 전에는 승인한 사람에게
+        // 조용히 배정해, 승인자는 남의 일이 자기 목록에 생긴 것을 나중에야 알았다.
+        const namedOwner = String(finalPayload.owner ?? '').trim()
+        if (!owner && (finalPayload.ownerId || namedOwner)) {
+          response.status(409).json({ error: { code: 'PROPOSAL_OWNER_UNMATCHED', message: `담당자 '${namedOwner || finalPayload.ownerId}'을(를) 이 회사에서 한 사람으로 찾지 못했습니다. [수정 후 승인]에서 담당자를 고르거나 비워 두면 본인에게 배정됩니다.` } })
+          return
+        }
         const ownerAccount = owner ?? { id: request.auth.id, name: request.auth.name }
         const dueIso = Number.isFinite(Date.parse(finalPayload.due)) ? new Date(Date.parse(finalPayload.due)).toISOString() : new Date(Date.now() + 2 * 24 * 60 * 60 * 1_000).toISOString()
         const workItem = {
@@ -3658,8 +3694,16 @@ export function createApp(options = {}) {
     }
     scheduleSentinel(tenantId)
     webhookDispatch.kick(tenantId)
+    // 승인으로 생긴 업무도 사람이 지시한 업무와 같은 사건이다 — 담당자에게 알리고, 열린 화면이 다시 읽는다.
+    // 전에는 웹훅만 보내 담당자는 새로 고치기 전까지 몰랐다.
+    if (resultRef?.type === 'work-item') {
+      notifyNewAssignments(request.auth, previousEffectRecord?.data, tenantStore['work-items']?.data)
+      events.publish(tenantId, 'work', { key: 'work-items', taskId: resultRef.id })
+    }
+    notifyProposalDecided(tenantId, decided, request.auth)
+    events.publish(tenantId, 'proposal', { pending: pendingProposalCount(tenantId) })
     const principleQueued = evaluatePrincipleCandidates(tenantId, request.auth, new Date(now))
-    response.json({ proposal: decided, resultRef, principleQueued, stats: approvalStatistics(nextProposals), pendingCount: proposalsOf(tenantId).filter((item) => item.status === 'pending').length })
+    response.json({ proposal: decided, resultRef, principleQueued, stats: approvalStatistics(nextProposals), pendingCount: visiblePendingCount(tenantId, request.auth) })
   })
 
   // ------------------------------------------------------------------
@@ -3916,7 +3960,7 @@ export function createApp(options = {}) {
       response.status(500).json({ error: { code: 'LENS_TASK_WRITE_FAILED', message: '승인 큐에 저장하지 못했습니다.' } })
       return
     }
-    response.status(201).json({ queued, skipped: prepared.length - queued, pendingCount: proposalsOf(request.auth.tenantId).filter((item) => item.status === 'pending').length })
+    response.status(201).json({ queued, skipped: prepared.length - queued, pendingCount: visiblePendingCount(request.auth.tenantId, request.auth) })
   })
 
   // ------------------------------------------------------------------
@@ -3992,7 +4036,7 @@ export function createApp(options = {}) {
     commitWorkspaceStore,
     // 옮긴 제안은 결정된 것뿐이라 대기 수는 그대로지만, 관리자 화면이 낡은 목록을 들고 있지 않도록 한 번 알린다.
     publish: (tenantId, key) => {
-      if (key === PROPOSALS_KEY) events.publish(tenantId, 'proposal', { pending: proposalsOf(tenantId).filter((item) => item?.status === 'pending').length })
+      if (key === PROPOSALS_KEY) events.publish(tenantId, 'proposal', { pending: pendingProposalCount(tenantId) })
     },
   })
   app.locals.overflowSweeper = overflowSweeper
@@ -4183,6 +4227,51 @@ export function createApp(options = {}) {
   }
 
   /**
+   * 업무일지가 새로 결재 요청 상태가 되면 관리자(결재할 수 있는 사람)에게 알린다. 작성자 자신은 뺀다.
+   * 일지 제출은 일반 저장 문 하나로만 들어오므로 여기 한 곳에서 이전 값과 비교한다.
+   */
+  const notifyJournalSubmissions = (auth, previousData, nextData) => {
+    const before = new Map((Array.isArray(previousData) ? previousData : []).map((journal) => [journal?.id, journal?.status]))
+    const submitted = (Array.isArray(nextData) ? nextData : []).filter((journal) => journal?.id && journal.status === '결재요청' && before.get(journal.id) !== '결재요청')
+    if (!submitted.length) return
+    const reviewers = tenantAdminIds(auth.tenantId).filter((id) => id !== auth.id)
+    notify(auth.tenantId, reviewers.flatMap((recipientId) => submitted.slice(0, 5).map((journal) => ({
+      type: 'journal-submitted', recipientId, actorId: auth.id,
+      title: `업무일지 결재 요청: ${journal.author || auth.name} · ${journal.date}`,
+      body: String(journal.completed ?? '').split('\n')[0].slice(0, 120),
+      page: 'journal', focusId: journal.id, source: { kind: 'journal', id: journal.id, label: '업무일지' },
+    }))))
+  }
+
+  /**
+   * 직원이 올린 제안(문서·회의록·메신저·렌즈)이 결정되면 올린 사람에게 결과를 알린다.
+   * 시스템이 만든 제안(센티널·기회·규범)은 올린 사람이 없으므로 건너뛴다.
+   */
+  const notifyProposalDecided = (tenantId, decided, auth) => {
+    // 올린 사람: 문서·회의록·검토 자료는 createdBy가 그 직원이고, 메신저 지시 문형은 감지기(ai:…)가 올리므로
+    // 그 말을 한 사람(payload.requesterId)이다.
+    const isMember = (id) => Boolean(id) && accounts.some((account) => account.id === id && account.tenantId === tenantId)
+    const proposerId = [decided?.createdBy, decided?.payload?.requesterId].map((id) => String(id ?? '')).find(isMember) ?? ''
+    if (!proposerId || proposerId === auth.id) return
+    const outcome = decided.status === 'rejected' ? '반려' : decided.status === 'edited' ? '수정 후 승인' : '승인'
+    const origin = workOriginFromProposal(decided)
+    const toTask = decided.resultRef?.type === 'work-item'
+    notify(tenantId, [{
+      type: 'proposal-decided', recipientId: proposerId, actorId: auth.id,
+      title: `올린 제안이 ${outcome}됐습니다: ${String(decided.summary ?? '').slice(0, 80)}`,
+      body: decided.comment ? String(decided.comment).split('\n')[0].slice(0, 120) : `${auth.name}님이 결정했습니다.`,
+      page: origin.page === 'wiki' ? 'wiki' : toTask ? 'tasks' : 'ai',
+      focusId: origin.page === 'wiki' ? origin.focusId : toTask ? decided.resultRef.id : '',
+      source: { kind: 'proposal', id: decided.id, label: '올린 제안' },
+    }])
+  }
+
+  /** 대기 중인 제안 수(모두가 보는 것만 — 규범 제안은 그 주인의 것이라 전체 배지에 세지 않는다). */
+  const pendingProposalCount = (tenantId) => proposalsOf(tenantId).filter((item) => item?.status === 'pending' && item.kind !== 'principle').length
+  /** 이 사람이 보는 대기 수(자기 규범 제안 포함). */
+  const visiblePendingCount = (tenantId, auth) => proposalsOf(tenantId).filter((item) => item?.status === 'pending' && proposalVisibleTo(item, auth)).length
+
+  /**
    * "이 계정이 지금도 이 방을 볼 수 있는가" — 방의 본문을 방 밖으로 옮기는 세 자리가 함께 쓰는 한 벌.
    * 멘션 알림 · 스레드 답글 알림 · 승격 자료의 명단(messenger-rooms.mjs의 conversationVisibleTo)이
    * 이 함수 하나만 부른다. 같은 물음에 술어가 셋이면 그중 하나만 차원을 덜 읽어도 그 자리로 샌다
@@ -4286,7 +4375,11 @@ export function createApp(options = {}) {
     const type = proposal.kind === 'sentinel-task' ? 'sentinel-warning'
       : proposal.kind === 'opportunity' ? 'opportunity-new'
         : 'proposal-pending'
-    notify(tenantId, tenantAdminIds(tenantId).map((recipientId) => ({
+    // 규범 제안은 그 사람의 판단 기록이다 — 관리자 전원이 아니라 주인 한 사람에게만 알린다.
+    const recipients = proposal.kind === 'principle'
+      ? [String(proposal.payload?.ownerAccountId ?? '')].filter(Boolean)
+      : tenantAdminIds(tenantId)
+    notify(tenantId, recipients.map((recipientId) => ({
       type,
       recipientId,
       actorId: null,
@@ -5524,6 +5617,11 @@ export function createApp(options = {}) {
       throw error
     }
     webhookDispatch.kick(tenantId)
+    // 반복 규칙이 찍어 낸 업무도 담당자에게 알린다(담당자별 한 건으로 묶는다). 전에는 웹훅만 보냈다.
+    if (created.length) {
+      notify(tenantId, bundleAssignmentDrafts(created, { actorId: null, actorName: '반복 업무' }))
+      events.publish(tenantId, 'work', { key: 'work-items' })
+    }
     return { created, rules, capBlocked }
   }
 
@@ -6675,6 +6773,15 @@ export function createApp(options = {}) {
       response.status(500).json({ error: { code: 'LEAVE_WRITE_FAILED', message: '휴가 신청을 저장하지 못했습니다.' } })
       return
     }
+    // 결재자에게 알린다. 전에는 인사 화면의 탭 안에만 쌓여, 결재자가 들어가 보기 전까지 아무도 몰랐다.
+    if (approver.id !== request.auth.id) {
+      notify(request.auth.tenantId, [{
+        type: 'leave-requested', recipientId: approver.id, actorId: request.auth.id,
+        title: `휴가 결재 요청: ${request.auth.name} · ${leave.type}`,
+        body: [leave.period, Number.isFinite(leave.days) ? `${leave.days}일` : ''].filter(Boolean).join(' · '),
+        page: 'people', focusId: `leave:${leave.id}`, source: { kind: 'leave', id: leave.id, label: '휴가' },
+      }])
+    }
     response.status(201).json({ leave, updatedAt: record.updatedAt, version: workspaceRecordVersion(record) })
   })
 
@@ -6880,6 +6987,15 @@ export function createApp(options = {}) {
       return
     }
     webhookDispatch.kick(request.auth.tenantId)
+    const leaveRequesterId = resolvedLegacyOwnerId(target, 'requesterId', 'name', request.auth.tenantId, accounts)
+    if (leaveRequesterId && leaveRequesterId !== request.auth.id) {
+      notify(request.auth.tenantId, [{
+        type: 'leave-decided', recipientId: leaveRequesterId, actorId: request.auth.id,
+        title: `휴가가 ${status === '승인' ? '승인' : '반려'}됐습니다: ${target.type}`,
+        body: [target.period, `${request.auth.name}님이 처리했습니다.`].filter(Boolean).join(' · '),
+        page: 'people', focusId: `leave:${target.id}`, source: { kind: 'leave', id: target.id, label: '휴가' },
+      }])
+    }
     response.json({
       leave: nextData.find((leave) => leave?.id === request.params.id),
       leaveManagement: nextLeaveManagement,
@@ -7703,6 +7819,15 @@ export function createApp(options = {}) {
       return
     }
     webhookDispatch.kick(request.auth.tenantId)
+    const journalAuthorId = resolvedLegacyOwnerId(next, 'authorId', 'author', request.auth.tenantId, accounts)
+    if (journalAuthorId && journalAuthorId !== request.auth.id) {
+      notify(request.auth.tenantId, [{
+        type: 'journal-reviewed', recipientId: journalAuthorId, actorId: request.auth.id,
+        title: `업무일지가 ${status === '승인' ? '승인' : '반려'}됐습니다: ${next.date}`,
+        body: comment ? comment.split('\n')[0].slice(0, 120) : `${request.auth.name}님이 처리했습니다.`,
+        page: 'journal', focusId: next.id, source: { kind: 'journal', id: next.id, label: '업무일지' },
+      }])
+    }
     response.json({ journal: next, review, updatedAt: now, version: workspaceRecordVersion(record) })
   })
 
@@ -8503,6 +8628,7 @@ export function createApp(options = {}) {
     // 새로 배정된 업무와 새 멘션은 이 경로로만 들어온다. 이전 값과 비교해야 "새 것"을 알 수 있다.
     if (key === 'work-items') { notifyNewAssignments(request.auth, rowsBeforeWrite, record.data); events.publish(request.auth.tenantId, 'work', { key, version }) }
     if (key === 'messenger-conversations') { notifyMentions(request.auth, rowsBeforeWrite, record.data); events.publish(request.auth.tenantId, 'message', { key, version }) }
+    if (key === 'daily-journals') notifyJournalSubmissions(request.auth, rowsBeforeWrite, record.data)
     response.json({ updatedAt: record.updatedAt, version })
   })
 
@@ -9073,6 +9199,25 @@ export function createApp(options = {}) {
     run: async ({ now }) => {
       const { reminded } = await reviewMaterials.remindDue(now)
       return { detail: reminded ? `${reminded}명에게 알렸습니다.` : '알릴 사람이 없었습니다.' }
+    },
+  })
+
+  scheduler.register({
+    id: 'work-rules',
+    label: '반복 업무 만들기',
+    // 전에는 누군가 업무 목록을 열 때만 만들어져, 아무도 앱을 열지 않은 날에는 그날의 반복 업무도 담당자 알림도 없었다.
+    description: '도래한 반복 업무를 제시간에 만들고 담당자에게 알립니다.',
+    spec: { every: 'hour', minute: 1 },
+    run: async () => {
+      let created = 0
+      let failed = 0
+      for (const tenantId of tenantIdsForSchedule()) {
+        try { created += (await materializeDueWorkRules(tenantId, 'system:work-rules')).created.length } catch (error) {
+          failed += 1
+          console.error('[work-rules] 반복 업무를 만들지 못했습니다', { tenantId, message: error?.message })
+        }
+      }
+      return { detail: `${created ? `${created}건을 만들었습니다.` : '만들 반복 업무가 없었습니다.'}${failed ? ` 실패 ${failed}곳.` : ''}` }
     },
   })
 

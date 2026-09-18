@@ -906,7 +906,6 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
         <div><span className="people-overview-icon green"><Users size={21} /></span><p><span>등록 구성원</span><strong>{peopleRows.length}명</strong><small>승인된 회사 계정</small></p></div>
         <button type="button" onClick={() => setTab('leave')}><span className="people-overview-icon amber"><CalendarDays size={21} /></span><p><span>휴가 결재</span><strong>{pendingLeaves}건</strong><small>확인하기 <ChevronRight size={14} /></small></p></button>
         <button type="button" onClick={() => setTab('accounts')}><span className="people-overview-icon blue"><UserCheck size={21} /></span><p><span>계정 승인</span><strong>{pendingAccounts}건</strong><small>확인하기 <ChevronRight size={14} /></small></p></button>
-        <div><span className="people-overview-icon violet"><ShieldCheck size={21} /></span><p><span>계정 승인</span><strong>{pendingAccounts}명</strong><small>관리자 확인 대기</small></p></div>
       </> : <>
         <div><span className="people-overview-icon green"><CalendarDays size={21} /></span><p><span>내 휴가 신청</span><strong>{visibleLeaves.length}건</strong><small>전체 신청 내역</small></p></div>
         <button type="button" onClick={() => setTab('leave')}><span className="people-overview-icon amber"><Clock3 size={21} /></span><p><span>승인 대기</span><strong>{pendingLeaves}건</strong><small>결재 상태 확인 <ChevronRight size={14} /></small></p></button>

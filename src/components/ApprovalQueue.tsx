@@ -318,7 +318,10 @@ function ShortcutConfirmDialog({ proposal, decision, busy, onCancel, onConfirm }
 function ProposalEditDialog({ proposal, busy, onClose, onSubmit }: { proposal: Proposal; busy: boolean; onClose: () => void; onSubmit: (payload: Record<string, unknown>, reason?: string) => void }) {
   const [reason, setReason] = useState('')
   const isDocument = proposal.kind === 'document-classification'
+  // 규범 제안은 업무를 만들지 않는다 — 고칠 것은 규범 문장 하나다(전에는 업무 칸이 떠서 문장을 고칠 수 없었다).
+  const isPrinciple = proposal.kind === 'principle'
   const payload = proposal.payload as Record<string, string>
+  const [statement, setStatement] = useState(String(payload.statement ?? proposal.summary ?? ''))
   const [title, setTitle] = useState(String(payload.title ?? ''))
   const [owner, setOwner] = useState(String(payload.owner ?? ''))
   const [due, setDue] = useState(() => {
@@ -339,6 +342,7 @@ function ProposalEditDialog({ proposal, busy, onClose, onSubmit }: { proposal: P
       <form onSubmit={(event) => {
         event.preventDefault()
         if (isDocument) { onSubmit({ category: category.trim(), tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean) }, reason.trim()); return }
+        if (isPrinciple) { onSubmit({ statement: statement.trim() }, reason.trim()); return }
         onSubmit({
           title: title.trim(),
           owner: owner.trim(),
@@ -348,7 +352,9 @@ function ProposalEditDialog({ proposal, busy, onClose, onSubmit }: { proposal: P
         }, reason.trim())
       }}>
         <p className="approval-edit-evidence"><ShieldAlert size={15} /> 근거: {proposal.evidence}</p>
-        {isDocument ? <>
+        {isPrinciple ? <>
+          <label className="form-field full"><span>규범 문장</span><textarea value={statement} rows={3} maxLength={300} onChange={(event) => setStatement(event.target.value)} autoFocus required /></label>
+        </> : isDocument ? <>
           <label className="form-field full"><span>분류</span><input value={category} onChange={(event) => setCategory(event.target.value)} autoFocus required /></label>
           <label className="form-field full"><span>태그 (쉼표로 구분)</span><input value={tags} onChange={(event) => setTags(event.target.value)} /></label>
         </> : <>

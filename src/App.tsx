@@ -2098,7 +2098,7 @@ export default function App() {
   const [profileOpen, setProfileOpen] = useState(false)
   /** 인사·조직을 어느 탭으로 열라는 '이번 한 번'의 부탁. 값이 남아 있으면 그 세션 내내
    *  사이드바로 들어와도 그 탭이 먼저 열린다 — PeopleOperationsPage가 마운트마다 다시 적용하기 때문이다. */
-  const [peopleInitialTab, setPeopleInitialTab] = useState<'members' | 'accounts' | 'performance' | 'integrations' | null>(null)
+  const [peopleInitialTab, setPeopleInitialTab] = useState<'members' | 'accounts' | 'performance' | 'integrations' | 'leave' | null>(null)
   const isTenantAdmin = account?.role === 'tenant-admin' && Boolean(account.tenantId)
   useEffect(() => {
     if (!isTenantAdmin || !workspaceScope) { setPendingProposals(0); return }

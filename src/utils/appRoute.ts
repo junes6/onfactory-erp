@@ -19,8 +19,8 @@ export type OpenPlan = {
   wikiFocusId?: string
   materialFocusId?: string
   projectFocusId?: string
-  /** 인사·조직에서 처음 열 탭(외부 연동 중지 알림 → 외부 연동). */
-  peopleTab?: 'integrations'
+  /** 인사·조직에서 처음 열 탭(외부 연동 중지 → 외부 연동, 휴가 결재 요청·결과 → 휴가). */
+  peopleTab?: 'integrations' | 'leave'
 }
 
 /** '<방|company>:<notice|thread|message>:<id>' — 공지·메신저 메시지·스레드를 가리키는 focusId의 모양. */
@@ -31,7 +31,7 @@ const MATERIAL_PREFIX = 'material:'
 
 /**
  * 어디를 열지 정한다. **판정은 page보다 id의 모양이 먼저다** — 결재 문서·메신저 메시지는
- * 어느 page로 와도 그 자리에서만 뜻이 있다(notificationFocusTarget의 규칙을 넓혔다).
+ * 어느 page로 와도 그 자리에서만 뜻이 있다(예전 알림 전용 규칙을 모든 입구로 넓혔다).
  */
 export function planOpen(page: string | null | undefined, focusId: string | null | undefined): OpenPlan {
   const target = String(page ?? '').trim()
@@ -43,6 +43,8 @@ export function planOpen(page: string | null | undefined, focusId: string | null
   if (target === 'wiki' && id) return { page: 'wiki', wikiFocusId: id }
   if (target === 'projects' && id) return { page: 'projects', projectFocusId: id }
   if (target === 'people' && WEBHOOK_ENDPOINT_RE.test(id)) return { page: 'people', peopleTab: 'integrations' }
+  // 휴가 알림(신청·결과): '휴가' 탭 — 결재 대기 목록과 내 신청이 함께 있는 자리다('휴가 정책·원장'이 아니다).
+  if (target === 'people' && id.startsWith('leave:')) return { page: 'people', peopleTab: 'leave' }
   // 업무 id는 업무 화면에서만 연다. 다른 화면으로 가는 링크의 id를 업무 자리에 넣으면
   // 나중에 업무 화면에 들어갈 때 엉뚱한 업무가 펼쳐진다.
   if (target === 'tasks' && id) return { page: 'tasks', workFocusId: id }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, BellOff, BellRing, CalendarClock, CheckCircle2, ClipboardCheck, Hourglass, Layers, ListChecks, Megaphone, MessageCircle, MessagesSquare, Moon, Radar, Settings2, ShieldAlert, Smartphone, Sparkles, Webhook } from 'lucide-react'
+import { AlertTriangle, BellOff, BellRing, CalendarCheck, CalendarClock, CheckCircle2, ClipboardCheck, Hourglass, Layers, ListChecks, Megaphone, MessageCircle, MessagesSquare, Moon, NotebookPen, Palmtree, Radar, Settings2, ShieldAlert, Smartphone, Sparkles, Webhook } from 'lucide-react'
 import { formatDateTime, formatListDateTime } from '../utils/dateTime'
 import { Button, IconButton } from './ui/Button'
 import './NotificationCenter.css'
@@ -17,6 +17,11 @@ export type NotificationType =
   | 'calendar-reauth'
   | 'material-review'
   | 'material-due'
+  | 'leave-requested'
+  | 'leave-decided'
+  | 'journal-submitted'
+  | 'journal-reviewed'
+  | 'proposal-decided'
 
 export type AppNotification = {
   id: string
@@ -81,6 +86,11 @@ const typeIcon: Record<NotificationType, typeof ListChecks> = {
   'calendar-reauth': CalendarClock,
   'material-review': Layers,
   'material-due': Hourglass,
+  'leave-requested': Palmtree,
+  'leave-decided': CalendarCheck,
+  'journal-submitted': NotebookPen,
+  'journal-reviewed': NotebookPen,
+  'proposal-decided': ClipboardCheck,
 }
 
 const typeTone: Record<NotificationType, string> = {
@@ -100,6 +110,11 @@ const typeTone: Record<NotificationType, string> = {
   'calendar-reauth': 'amber',
   'material-review': 'blue',
   'material-due': 'amber',
+  'leave-requested': 'amber',
+  'leave-decided': 'green',
+  'journal-submitted': 'blue',
+  'journal-reviewed': 'green',
+  'proposal-decided': 'violet',
 }
 
 /** base64url 공개키 → Uint8Array. 브라우저 구독 API가 요구하는 형식이다. */
