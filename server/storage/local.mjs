@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 
@@ -48,6 +48,15 @@ export function createLocalStorage({ rootDirectory }) {
           notFound.code = 'STORAGE_NOT_FOUND'
           throw notFound
         }
+        throw error
+      }
+    },
+    /** 원본이 있는가. 참조 확인은 바이트가 아니라 존재만 본다 — 저장마다 첨부 전체를 읽으면 저장이 느려진다. */
+    async exists(key) {
+      try {
+        return (await stat(localPath(resolvedRoot, key))).isFile()
+      } catch (error) {
+        if (error?.code === 'ENOENT') return false
         throw error
       }
     },

@@ -50,6 +50,23 @@ export async function getTenantDocument(storage, document, tenantId) {
   }
 }
 
+/**
+ * 원본이 저장소에 있는가. 바이트를 읽지 않는다(로컬 stat, S3 HEAD).
+ * `exists`가 없는 저장소(시험용 대역 등)는 예전처럼 읽어서 확인한다 — 판정은 같고 비용만 다르다.
+ */
+export async function tenantDocumentExists(storage, document, tenantId) {
+  const target = requireStorage(storage)
+  const key = documentStorageKey(document, tenantId)
+  if (typeof target.exists === 'function') return target.exists(key)
+  try {
+    await target.get(key)
+    return true
+  } catch (error) {
+    if (error?.code === 'STORAGE_NOT_FOUND') return false
+    throw error
+  }
+}
+
 export async function deleteTenantDocument(storage, document, tenantId) {
   return requireStorage(storage).delete(documentStorageKey(document, tenantId))
 }

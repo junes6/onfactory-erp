@@ -130,7 +130,7 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
     try {
       const response = await fetch(`/api/ai/conversations/${id}`, { headers: { 'x-workspace-identity': workspaceScope } })
       if (!response.ok) { setMessages([welcomeMessage()]); return }
-      const body = await response.json() as { conversation: { messages: ChatMessage[]; scope: { kind: string; label: string }; summary: string; promoted?: { kind: string; messageId: string }[] } }
+      const body = await response.json() as { conversation: { messages: ChatMessage[]; scope: { kind: string; label: string }; summary: string; droppedMessages?: number; promoted?: { kind: string; messageId: string }[] } }
       setMessages(body.conversation.messages.length ? body.conversation.messages : [welcomeMessage()])
       setConversationScope(body.conversation.scope ?? { kind: 'all', label: '전체' })
       const marks: Record<string, string[]> = {}
@@ -138,7 +138,10 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
         marks[stamp.messageId] = [...(marks[stamp.messageId] ?? []), stamp.kind]
       }
       setPromotedBy(marks)
-      if (body.conversation.summary) setFoldedNote('앞부분은 요약으로 접혀 있습니다. 원문은 이 대화에 그대로 남아 있습니다.')
+      // 사실대로 말한다: 400건을 넘긴 대화에서는 가장 오래된 몇 건이 요약으로만 남는다(서버가 센 수).
+      const dropped = Number(body.conversation.droppedMessages) || 0
+      if (dropped > 0) setFoldedNote(`가장 오래된 ${dropped}건은 요약으로만 남아 있습니다. 나머지 원문은 이 대화에 그대로 있습니다.`)
+      else if (body.conversation.summary) setFoldedNote('앞부분은 요약으로 접어 AI에게 보냅니다. 원문은 이 대화에 그대로 남아 있습니다.')
     } catch {
       setMessages([welcomeMessage()])
     }

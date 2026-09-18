@@ -27,7 +27,7 @@ import {
   GUEST_ROLE, GUEST_READ_KEYS, createGuestActivityRecorder, createGuestRouteGate, guestScopeOf, guestWorkItemViolation,
   isGuestWorkItem, maskEmail, registerGuestRoutes, usageMetadataFor,
 } from './guest-access.mjs'
-import { registerAiConversationRoutes, CONVERSATIONS_KEY as AI_CONVERSATIONS_KEY, autoTitle, buildContext, messagesToFold, extractiveSummary, MAX_MESSAGE_LENGTH as AI_MAX_MESSAGE_LENGTH } from './ai-conversations.mjs'
+import { registerAiConversationRoutes, CONVERSATIONS_KEY as AI_CONVERSATIONS_KEY, autoTitle, buildContext, migrateLegacyFolds, pendingFold, trimStoredMessages, extractiveSummary, MAX_MESSAGE_LENGTH as AI_MAX_MESSAGE_LENGTH } from './ai-conversations.mjs'
 import {
   advanceRuleDate as advanceSchedule,
   applyHolidayPolicy,
@@ -102,6 +102,7 @@ import {
   platformEvidenceSignedUrl,
   putPlatformEvidence,
   putTenantDocument,
+  tenantDocumentExists,
   tenantDocumentSignedUrl,
 } from './document-storage-service.mjs'
 import { createStorage } from './storage/index.mjs'
@@ -1197,6 +1198,22 @@ function isDeveloperSupportConversation(conversation) {
   return conversation?.systemChannel === DEVELOPER_SUPPORT_CHANNEL
 }
 
+/**
+ * 한 행만 바꾸는 쓰기를 **최신 배열 위에** 다시 얹는다. 라우트가 배열을 읽은 뒤 await(첨부 확인 등)를 거치면
+ * 그 사이에 다른 요청이 같은 키를 썼을 수 있다 — 잡아 둔 옛 배열로 통째로 덮으면 그 쓰기가 사라진다.
+ * - 목록이 그대로면 옛 배열에서 그 행만 바꾼다.
+ * - 목록은 바뀌었지만 **이 행은 그대로면** 최신 배열에서 그 행만 바꾼다(다른 사람의 새 행을 지키며).
+ * - 이 행 자체가 바뀌었거나 사라졌으면 null — 부르는 쪽이 409로 돌려보낸다.
+ */
+export function rebaseRowWrite(latestRecord, previousRecord, previousRow, nextRow) {
+  const pick = (record) => (Array.isArray(record?.data) ? record.data : [])
+  if (latestRecord === previousRecord) return pick(previousRecord).map((row) => (row === previousRow ? nextRow : row))
+  const latest = pick(latestRecord)
+  const index = latest.findIndex((row) => row?.id === previousRow?.id)
+  if (index < 0 || !isDeepStrictEqual(latest[index], previousRow)) return null
+  return latest.map((row, rowIndex) => (rowIndex === index ? nextRow : row))
+}
+
 function hasDeveloperSupportConversationIntegrity(conversation) {
   if (!isDeveloperSupportConversation(conversation)) {
     return conversation?.supportRequesterId === undefined && conversation?.supportTicketId === undefined
@@ -2074,15 +2091,24 @@ export function createApp(options = {}) {
     }
   }
   // 2026-09-18: 1:1 대화 원문이 승인 큐·관리자 알림에 이미 쌓여 있다면 거둔다(두 번 돌려도 같다).
+  // 같은 자리에서 AI 대화를 새 접기 규칙(원문을 지우지 않는다)으로 옮긴다 — 옛 판이 이미 지운 건수를 사실대로 적는다.
   if (options.skipStartupMigrations !== true) {
+    let foldsMigrated = 0
+    for (const tenantStore of Object.values(workspaceStore.tenants ?? {})) {
+      const record = tenantStore?.['ai-conversations']
+      if (!Array.isArray(record?.data)) continue
+      const migrated = migrateLegacyFolds(record.data)
+      if (migrated.changed) { tenantStore['ai-conversations'] = { ...record, data: migrated.conversations }; foldsMigrated += migrated.changed }
+    }
     const redaction = redactDirectMessageProposals(workspaceStore)
-    if (redaction.changed) {
+    if (redaction.changed || foldsMigrated) {
       try {
         const startupCommit = commitWorkspaceStore()
         if (startupCommit && typeof startupCommit.then === 'function') {
           startupCommit.catch((error) => console.error('[dm-privacy] 원문 정리를 저장하지 못했습니다', { message: error?.message }))
         }
-        console.log(`[dm-privacy] 1:1 대화 출처 제안 ${redaction.proposals}건 · 알림 ${redaction.notifications}건에서 원문을 거뒀습니다.`)
+        if (redaction.changed) console.log(`[dm-privacy] 1:1 대화 출처 제안 ${redaction.proposals}건 · 알림 ${redaction.notifications}건에서 원문을 거뒀습니다.`)
+        if (foldsMigrated) console.log(`[ai-conversations] 대화 ${foldsMigrated}건을 새 접기 규칙(원문 보존)으로 옮겼습니다.`)
       } catch (error) {
         console.error('[dm-privacy] 원문 정리를 저장하지 못했습니다', { message: error?.message })
       }
@@ -2445,9 +2471,10 @@ export function createApp(options = {}) {
     const results = await Promise.all(ids.map(async (id) => {
       const document = byId.get(id)
       if (!canReadDocument(document, account)) return false
+      // 원본이 있는지만 본다(로컬 stat·S3 HEAD). 전에는 저장할 때마다 배열에 걸린 첨부 원본을 **통째로** 읽었다 —
+      // 업무 목록 한 번 저장에 첨부 수십 개를 디스크에서 읽고, 그 동안 경합 구간이 길어졌다.
       try {
-        await getTenantDocument(documentStorage, document, account.tenantId)
-        return true
+        return await tenantDocumentExists(documentStorage, document, account.tenantId)
       } catch {
         return false
       }
@@ -7665,8 +7692,15 @@ export function createApp(options = {}) {
       response.status(400).json({ error: { code: 'INVALID_WORK_ITEM', message: '업무 처리 데이터 형식을 확인해 주세요.' } })
       return
     }
-    const nextData = [...previousData]
-    nextData[index] = next
+    // 증빙 확인(await) 동안 다른 요청이 업무 목록을 바꿨을 수 있다. 잡아 둔 옛 배열로 덮으면 그 사이에
+    // 생긴 업무가 사라진다(감사 실측: 대표가 만든 새 업무가 200을 받고도 없어졌다). **최신 목록 위에** 이 한 줄만 바꾼다.
+    // 이 업무 자체가 그 사이에 바뀌었으면 판정의 전제가 무너졌으므로 409로 돌려보낸다.
+    const latestRecord = workspaceStore.tenants[request.auth.tenantId]?.['work-items']
+    const nextData = rebaseRowWrite(latestRecord, previousRecord, previous, next)
+    if (!nextData) {
+      response.status(409).json({ error: { code: 'WORK_ITEM_CHANGED', message: '방금 다른 사람이 이 업무를 바꿨습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.' } })
+      return
+    }
     const record = { data: nextData, updatedAt: now, updatedBy: request.auth.id }
     tenantStore['work-items'] = record
     workspaceStore.tenants[request.auth.tenantId] = tenantStore
@@ -8287,6 +8321,16 @@ export function createApp(options = {}) {
         return
       }
     }
+    // 버전 확인과 이 줄 사이에 await(첨부 참조 확인)가 있다. 그 사이에 다른 요청이 같은 키를 썼다면
+    // 같은 If-Match를 든 두 요청이 모두 통과해 뒤의 것이 앞의 것을 지운다(감사 실측: 둘 다 200, 한쪽만 남음).
+    // 쓰기 직전에 한 번 더 본다 — 바뀌었으면 409, 화면은 최신 값을 다시 읽는다.
+    if (workspaceStore.tenants[request.auth.tenantId]?.[key] !== currentRecord) {
+      response.status(409).json({
+        error: { code: 'WORKSPACE_VERSION_CONFLICT', message: '다른 사용자가 먼저 변경했습니다. 최신 데이터를 불러왔으니 내용을 확인한 뒤 다시 저장해 주세요.' },
+        currentVersion: workspaceRecordVersion(workspaceStore.tenants[request.auth.tenantId]?.[key]),
+      })
+      return
+    }
     const record = {
       data: nextData,
       updatedAt: new Date().toISOString(),
@@ -8540,21 +8584,25 @@ export function createApp(options = {}) {
       .find((item) => item.id === conversationId && item.ownerId === auth.id && !item.deletedAt) ?? null
   }
 
-  /** 길어진 대화의 앞부분을 한 덩이 요약으로 접는다. */
-  const summarizeFolded = async (folded) => {
-    if (!client) return extractiveSummary(folded)
+  /**
+   * 길어진 대화의 앞부분을 한 덩이 요약으로 접는다. **누적**이다 — 앞선 요약을 함께 넣어 새로 접힌 부분을
+   * 덧붙인다. 전에는 새 요약이 옛 요약을 보지 않아 두 번째 접기부터 첫 대화가 요약에서 사라졌다.
+   */
+  const summarizeFolded = async (folded, previousSummary = '') => {
+    if (!client) return extractiveSummary(folded, previousSummary)
     try {
+      const earlier = String(previousSummary ?? '').trim()
       const result = await client.messages.create({
         model,
-        max_tokens: 400,
-        system: '아래 대화의 앞부분을 한국어 5줄 이내로 요약한다. 오간 말에 없는 내용은 넣지 않는다. 결정된 것과 남은 질문을 우선 담는다.',
-        messages: [{ role: 'user', content: folded.map((message) => `${message.role === 'user' ? '질문' : '답'}: ${message.content}`).join('\n\n').slice(0, 12_000) }],
+        max_tokens: 500,
+        system: '지금까지의 요약과 그 뒤에 이어진 대화를 합쳐 한국어 6줄 이내의 요약 하나로 만든다. 오간 말에 없는 내용은 넣지 않는다. 결정된 것과 남은 질문을 우선 담고, 앞선 요약의 결정은 뒤집히지 않았다면 남긴다.',
+        messages: [{ role: 'user', content: `${earlier ? `[지금까지의 요약]\n${earlier}\n\n[이어진 대화]\n` : ''}${folded.map((message) => `${message.role === 'user' ? '질문' : '답'}: ${message.content}`).join('\n\n')}`.slice(0, 14_000) }],
       })
       const text = (result.content ?? []).map((block) => (block?.type === 'text' ? block.text : '')).join('').trim()
-      return text || extractiveSummary(folded)
+      return text || extractiveSummary(folded, previousSummary)
     } catch {
       // 요약에 실패했다고 대화를 잃을 수는 없다. 지어내지 않는 방식으로 대신한다.
-      return extractiveSummary(folded)
+      return extractiveSummary(folded, previousSummary)
     }
   }
 
@@ -8569,16 +8617,18 @@ export function createApp(options = {}) {
     const index = conversations.findIndex((item) => item.id === conversation.id)
     if (index < 0) return null
 
-    const next = { ...conversations[index], messages: [...conversations[index].messages, asked, answered] }
-    if (next.titleSource !== 'manual' && next.title === '새 대화') next.title = autoTitle(asked.content)
+    const draft = { ...conversations[index], messages: [...conversations[index].messages, asked, answered] }
+    if (draft.titleSource !== 'manual' && draft.title === '새 대화') draft.title = autoTitle(asked.content)
 
-    const folded = messagesToFold(next)
-    if (folded) {
-      next.summary = await summarizeFolded(folded)
-      next.summarizedThrough = folded.length
-      // 접은 앞부분은 대화에서 지운다. 지우지 않으면 저장 용량이 끝없이 는다.
-      next.messages = next.messages.slice(folded.length)
+    // 요약은 누적이고 원문은 지우지 않는다(감사 ai-02). 저장 상한(400건)을 넘길 때만, 요약이 이미 덮은
+    // 가장 오래된 것부터 떼어 내고 그 수를 남긴다 — 화면이 그 사실을 그대로 말한다.
+    let next = draft
+    const fold = pendingFold(next)
+    if (fold) {
+      next.summary = await summarizeFolded(fold.messages, next.summary)
+      next.summarizedThrough = fold.to
     }
+    next = trimStoredMessages(next)
     next.updatedAt = new Date().toISOString()
 
     const tenantStore = workspaceStore.tenants[auth.tenantId] ??= {}

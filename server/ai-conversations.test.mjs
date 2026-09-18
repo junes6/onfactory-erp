@@ -79,7 +79,7 @@ test('모델 없이 만드는 요약은 오간 말에서만 뽑는다', () => {
   ])
   assert.match(summary, /금속검출기 시험편/)
   assert.match(summary, /Fe 2\.0mm/)
-  assert.match(summary, /앞부분 2건/)
+  assert.match(summary, /원문은 대화에 그대로 남아 있습니다/)
 })
 
 test('검색은 낱말이 모두 들어간 대화만 남긴다', () => {
@@ -134,4 +134,53 @@ test('범위는 아는 값만 받는다', () => {
   assert.deepEqual(normalizeScope({ kind: '아무거나' }), { kind: 'all', id: '', label: '전체' })
   assert.deepEqual(normalizeScope({ kind: 'file', id: 'DOC-1', label: '견적서.pdf' }), { kind: 'file', id: 'DOC-1', label: '견적서.pdf' })
   assert.equal(normalizeScope({ kind: 'project', id: 'P1' }).label, '프로젝트')
+})
+
+// ---------------------------------------------------------------------------
+// 2026-09-18 감사 ai-02: 접어도 원문은 지우지 않는다 · 요약은 누적이다
+// ---------------------------------------------------------------------------
+
+test('길어진 대화를 접어도 원문은 남는다 — 요약은 summarizedThrough까지를 덮고, 몇 건 모일 때까지 다시 접지 않는다', async () => {
+  const { pendingFold, trimStoredMessages, FOLD_BATCH, MAX_STORED_MESSAGES } = await import('./ai-conversations.mjs')
+  const long = '라'.repeat(2_000)
+  const messages = Array.from({ length: 20 }, (_, index) => message(index % 2 === 0 ? 'user' : 'assistant', long, index))
+  const first = pendingFold({ messages, summarizedThrough: 0 })
+  assert.equal(first.from, 0)
+  assert.equal(first.to, 20 - KEEP_RECENT_MESSAGES)
+  // 요약을 적은 뒤 한 턴(2건)이 더해져도 바로 다시 접지 않는다 — FOLD_BATCH가 모일 때까지.
+  const later = [...messages, message('user', long, 20), message('assistant', long, 21)]
+  assert.equal(pendingFold({ messages: later, summarizedThrough: first.to }), null)
+  const muchLater = [...later, ...Array.from({ length: FOLD_BATCH }, (_, index) => message(index % 2 === 0 ? 'user' : 'assistant', long, 22 + index))]
+  const second = pendingFold({ messages: muchLater, summarizedThrough: first.to })
+  assert.equal(second.from, first.to, '새로 덮을 것은 앞선 요약 다음부터다')
+  // 저장 상한 안에서는 한 건도 지우지 않는다.
+  assert.equal(trimStoredMessages({ messages: muchLater, summarizedThrough: second.to }).messages.length, muchLater.length)
+  // 상한을 넘기면 요약이 덮은 것만 떼어 내고 그 수를 남긴다.
+  const huge = Array.from({ length: MAX_STORED_MESSAGES + 5 }, (_, index) => message('user', '짧음', index))
+  const trimmed = trimStoredMessages({ messages: huge, summarizedThrough: 3 })
+  assert.equal(trimmed.messages.length, huge.length - 3, '요약이 덮지 않은 것은 떼어 내지 않는다')
+  assert.equal(trimmed.droppedMessages, 3)
+  assert.equal(trimmed.summarizedThrough, 0)
+})
+
+test('모델 없는 요약도 누적이다 — 앞선 요약의 질문을 잃지 않는다', () => {
+  const first = extractiveSummary([message('user', '금속검출기 시험편은?', 0), message('assistant', 'Fe 2.0mm', 1)])
+  const second = extractiveSummary([message('user', 'HACCP 서류는 언제까지?', 2), message('assistant', '9월 말', 3)], first)
+  assert.match(second, /금속검출기 시험편/)
+  assert.match(second, /HACCP 서류/)
+})
+
+test('옛 판으로 접힌 대화는 이미 지워진 건수를 사실대로 옮겨 적는다 — 두 번 돌려도 같다', async () => {
+  const { migrateLegacyFolds, FOLD_VERSION } = await import('./ai-conversations.mjs')
+  const legacy = [
+    { id: 'A', summary: '앞부분 요약', summarizedThrough: 12, messages: [message('user', 'x', 0)] },
+    { id: 'B', summary: '', summarizedThrough: 0, messages: [] },
+    { id: 'C', foldVersion: FOLD_VERSION, summary: 's', summarizedThrough: 4, droppedMessages: 0, messages: [] },
+  ]
+  const first = migrateLegacyFolds(legacy)
+  assert.equal(first.changed, 2)
+  assert.deepEqual({ through: first.conversations[0].summarizedThrough, dropped: first.conversations[0].droppedMessages }, { through: 0, dropped: 12 })
+  assert.equal(first.conversations[1].droppedMessages, 0)
+  assert.equal(first.conversations[2], legacy[2], '새 판은 건드리지 않는다')
+  assert.equal(migrateLegacyFolds(first.conversations).changed, 0)
 })

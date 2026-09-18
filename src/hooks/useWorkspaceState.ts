@@ -73,6 +73,12 @@ function emitWorkspaceFailure(key: string, status: number | undefined, message: 
   if (status === 401) window.dispatchEvent(new CustomEvent('onfactory:auth-expired', { detail }))
 }
 
+/**
+ * keepalive를 붙여도 되는 본문 크기(UTF-8 바이트). 한글 한 글자는 3바이트라 글자 수로 재면 한도를 넘긴다. 브라우저 한도는 진행 중인
+ * keepalive 요청 **합계** 64KB라, 한도의 절반쯤에서 끊어 두 건이 겹쳐도 넘지 않게 한다.
+ */
+export const KEEPALIVE_BODY_LIMIT = 30_000
+
 /** 이 훅이 브라우저에 남기는 업무 데이터 캐시의 접두사. 한 곳에서만 정한다. */
 export const WORKSPACE_CACHE_PREFIX = 'onfactory-workspace:'
 
@@ -174,6 +180,7 @@ export function useWorkspaceState<T>(
   const writeVersionRef = useRef(0)
   const serverVersionRef = useRef<string | null>(null)
   const pendingWritesRef = useRef<Set<PendingWrite>>(new Set())
+  const writeQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const hydrationWaitersRef = useRef<Set<HydrationWaiter>>(new Set())
 
   // Hide the previous scope's state immediately. The effect below commits this
@@ -206,6 +213,7 @@ export function useWorkspaceState<T>(
     const pendingWrite: PendingWrite = { controller, identity: writeIdentity }
     pendingWritesRef.current.add(pendingWrite)
     try {
+      const body = JSON.stringify({ data: nextValue })
       const response = await fetch(`/api/workspace/${encodeURIComponent(key)}`, {
         method: 'PUT',
         headers: {
@@ -213,8 +221,11 @@ export function useWorkspaceState<T>(
           ...(serverVersionRef.current ? { 'if-match': `"${serverVersionRef.current}"` } : {}),
           ...(normalizedScope ? { 'x-workspace-identity': normalizedScope } : {}),
         },
-        body: JSON.stringify({ data: nextValue }),
-        keepalive: true,
+        body,
+        // keepalive는 본문 64KB(진행 중인 keepalive 요청 합계)를 넘으면 브라우저가 **보내지도 않고** 실패시킨다.
+        // 업무 150건쯤, 사진 한 장 든 제품 목록이면 이미 넘는다 — 사람은 "서버에 연결하지 못했다"는 거짓 문장을 봤다.
+        // 작은 저장에만 붙여, 탭을 닫는 순간의 저장이 끊기지 않게 하는 이점만 남긴다.
+        keepalive: new TextEncoder().encode(body).length < KEEPALIVE_BODY_LIMIT,
         signal: controller.signal,
       })
       if (!response.ok) {
@@ -312,7 +323,14 @@ export function useWorkspaceState<T>(
       return { ok: true, persisted: false }
     }
     const version = ++writeVersionRef.current
-    return writeValue(nextValue, { previousValue: currentValue, version })
+    /**
+     * 같은 키의 저장은 한 줄로 세운다. 전에는 두 번 연달아 고치면 두 요청이 같은 If-Match를 들고 동시에 나가,
+     * 뒤의 것이 **자기 자신과** 충돌(409)해 방금 한 수정이 사라지고 "다른 사용자가 먼저 변경했습니다"라는
+     * 틀린 문장이 떴다. 앞 저장이 끝나 서버 버전을 받은 뒤에, 그 시점의 **최신 값**을 보낸다.
+     */
+    const queued = writeQueueRef.current.then(() => writeValue(valueRef.current, { previousValue: currentValue, version }))
+    writeQueueRef.current = queued.catch(() => undefined)
+    return queued
   }, [cacheKey, enabled, identity, key, writeValue])
 
   useEffect(() => {

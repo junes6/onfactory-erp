@@ -80,6 +80,7 @@ export function newConversation({ id, ownerId, tenantId, scope, now }) {
     messages: [],
     summary: '',
     summarizedThrough: 0,
+    foldVersion: FOLD_VERSION,
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
@@ -139,6 +140,78 @@ export function buildContext(conversation, budget = CONTEXT_TOKEN_BUDGET) {
  * 상한을 넘겼을 때만, 최근 것을 남기고 앞부분을 넘긴다. 넘길 것이 없으면
  * null을 돌려주어 호출 쪽이 요약을 만들지 않게 한다.
  */
+/**
+ * 요약이 한 번에 새로 덮을 최소 건수. 요약은 모델 호출이라 한 턴마다 부르면 비용이 대화 길이만큼 는다 —
+ * 몇 건이 모일 때까지 기다린다(그 사이의 몇 건은 모델 컨텍스트에서만 빠지고 원문은 남는다).
+ */
+export const FOLD_BATCH = 6
+
+/**
+ * 이번에 요약이 **새로** 덮어야 할 메시지. 원문은 지우지 않는다(2026-09-18 감사 ai-02).
+ *
+ * 전에는 접은 앞부분을 저장소에서 지웠다 — 한글로 4천 자쯤이면 7번째 턴에 앞 6건이 영구 삭제됐고,
+ * 새 요약이 옛 요약을 입력으로 받지 않아 두 번째 접기부터 첫 대화가 요약에서도 사라졌다.
+ * 그런데 화면은 "원문은 이 대화에 그대로 남아 있습니다"라고 말했다.
+ * 이제 요약은 `summarizedThrough`까지를 덮는 **누적** 요약이고, 원문은 저장 상한(400건)까지 그대로 남는다.
+ * @returns {{ from: number, to: number, messages: object[] } | null}
+ */
+export function pendingFold(conversation, budget = CONTEXT_TOKEN_BUDGET) {
+  const all = Array.isArray(conversation?.messages) ? conversation.messages : []
+  const total = all.reduce((sum, message) => sum + estimateTokens(message.content), 0)
+  if (total <= budget && all.length <= MAX_STORED_MESSAGES) return null
+  const to = Math.max(0, all.length - KEEP_RECENT_MESSAGES)
+  const from = Math.min(Math.max(0, Number(conversation?.summarizedThrough) || 0), to)
+  const fresh = all.slice(from, to)
+  if (!fresh.length) return null
+  // 이미 요약이 있으면 몇 건 모일 때까지 기다린다. 처음 접을 때는 바로 접는다(모델 한도를 넘기지 않게).
+  if (from > 0 && fresh.length < FOLD_BATCH) return null
+  return { from, to, messages: fresh }
+}
+
+/**
+ * 저장 상한을 넘긴 앞부분만 떼어 낸다 — **요약이 이미 덮은 것만**. 떼어 낸 수는 `droppedMessages`에 쌓아
+ * 화면이 "가장 오래된 N건은 요약으로만 남아 있습니다"라고 사실대로 말하게 한다.
+ */
+export function trimStoredMessages(conversation) {
+  const all = Array.isArray(conversation?.messages) ? conversation.messages : []
+  if (all.length <= MAX_STORED_MESSAGES) return conversation
+  const covered = Math.max(0, Number(conversation?.summarizedThrough) || 0)
+  const drop = Math.min(all.length - MAX_STORED_MESSAGES, covered)
+  if (!drop) return conversation
+  return {
+    ...conversation,
+    messages: all.slice(drop),
+    summarizedThrough: covered - drop,
+    droppedMessages: (Number(conversation?.droppedMessages) || 0) + drop,
+  }
+}
+
+/** 접기 규칙의 판. 2부터 `summarizedThrough`는 "지금 남은 메시지 중 요약이 덮은 앞부분의 수"다. */
+export const FOLD_VERSION = 2
+
+/**
+ * 옛 판(1)으로 저장된 대화를 새 뜻으로 옮긴다. 옛 판은 접은 만큼을 **지우고** 그 수를 `summarizedThrough`에
+ * 적었다 — 남은 메시지는 요약이 덮지 않았고, 적힌 수는 이미 사라진 건수다. 그 사실을 `droppedMessages`로 옮겨
+ * 화면이 "가장 오래된 N건은 요약으로만 남아 있습니다"라고 말하게 한다. 두 번 돌려도 같다.
+ * @returns {{ conversations: object[], changed: number }}
+ */
+export function migrateLegacyFolds(conversations) {
+  let changed = 0
+  const next = (Array.isArray(conversations) ? conversations : []).map((conversation) => {
+    if (!conversation || typeof conversation !== 'object' || conversation.foldVersion === FOLD_VERSION) return conversation
+    changed += 1
+    const removed = conversation.summary ? Math.max(0, Number(conversation.summarizedThrough) || 0) : 0
+    return {
+      ...conversation,
+      summarizedThrough: 0,
+      droppedMessages: (Number(conversation.droppedMessages) || 0) + removed,
+      foldVersion: FOLD_VERSION,
+    }
+  })
+  return { conversations: next, changed }
+}
+
+/** @deprecated pendingFold를 쓴다. 남은 호출부(시험)를 위해 같은 판정을 돌려준다. */
 export function messagesToFold(conversation, budget = CONTEXT_TOKEN_BUDGET) {
   const all = Array.isArray(conversation?.messages) ? conversation.messages : []
   const total = all.reduce((sum, message) => sum + estimateTokens(message.content), 0)
@@ -153,13 +226,16 @@ export function messagesToFold(conversation, budget = CONTEXT_TOKEN_BUDGET) {
  * 데모 모드이거나 요약 호출이 실패했을 때 쓴다. 지어내지 않고 실제 오간 말에서
  * 뽑기만 한다 — 요약이랍시고 없는 말을 넣으면 다음 대화가 그 위에서 굴러간다.
  */
-export function extractiveSummary(messages) {
+export function extractiveSummary(messages, previousSummary = '') {
   const questions = messages.filter((message) => message.role === 'user').map((message) => message.content.replace(/\s+/gu, ' ').trim())
   const answers = messages.filter((message) => message.role === 'assistant').map((message) => message.content.replace(/\s+/gu, ' ').trim())
   const lines = []
-  if (questions.length) lines.push(`물어본 것: ${questions.slice(0, 5).map((text) => text.slice(0, 80)).join(' / ')}`)
+  // 누적 요약: 앞선 요약의 "물어본 것" 줄을 이어 붙인다. 지우면 첫 대화가 요약에서도 사라진다.
+  const earlier = String(previousSummary ?? '').split('\n').find((line) => line.startsWith('물어본 것: '))?.slice('물어본 것: '.length) ?? ''
+  const asked = [...(earlier ? earlier.split(' / ') : []), ...questions.map((text) => text.slice(0, 80))]
+  if (asked.length) lines.push(`물어본 것: ${asked.slice(-8).join(' / ')}`)
   if (answers.length) lines.push(`마지막 답: ${answers[answers.length - 1].slice(0, 300)}`)
-  lines.push(`(앞부분 ${messages.length}건을 이렇게 접었습니다. 원문은 대화에 그대로 남아 있습니다.)`)
+  lines.push('(앞부분을 이렇게 접어 AI에게 보냅니다. 원문은 대화에 그대로 남아 있습니다.)')
   return lines.join('\n')
 }
 

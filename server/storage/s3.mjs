@@ -67,6 +67,18 @@ export function createS3Storage(options) {
         throw error
       }
     },
+    /** 원본이 있는가(HEAD). 참조 확인이 저장마다 객체 전체를 내려받지 않게 한다. */
+    async exists(key) {
+      const normalized = normalizeStorageKey(key)
+      const { client, HeadObjectCommand } = await resources()
+      try {
+        await client.send(new HeadObjectCommand({ Bucket: bucket, Key: normalized }))
+        return true
+      } catch (error) {
+        if (error?.name === 'NotFound' || error?.name === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404) return false
+        throw error
+      }
+    },
     async delete(key) {
       const normalized = normalizeStorageKey(key)
       const { client, DeleteObjectCommand } = await resources()
