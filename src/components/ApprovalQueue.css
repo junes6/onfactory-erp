@@ -49,3 +49,7 @@ html[data-theme='dark'] .approval-actions .approve { background: var(--color-suc
 
 .approval-evidence { display: inline-flex; align-items: center; gap: var(--space-4); margin-top: var(--space-4); padding: var(--space-0); border: none; color: var(--color-primary); background: transparent; font-size: var(--font-11); cursor: pointer; }
 .approval-evidence:hover { text-decoration: underline; }
+/* 승인률 카드 접기 — 한 줄 요약만 보이고, 누르면 결정이 쌓인 유형의 카드가 펼쳐진다. */
+.approval-stats-fold { margin-bottom: var(--space-16); }
+.approval-stats-fold > summary { min-height: 44px; display: flex; align-items: center; padding: var(--space-0) var(--space-4); color: var(--muted); font-size: var(--font-13); cursor: pointer; }
+.approval-stats-fold[open] > summary { margin-bottom: var(--space-8); }

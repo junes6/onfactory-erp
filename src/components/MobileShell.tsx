@@ -66,7 +66,7 @@ export function MobileTabBar({ active, onChange, taskCount, chatUnread, alertCou
 export function nextActionLabel(status: WorkItem['status']) {
   if (status === '업무요청') return '착수'
   if (status === '수행중') return '완료 보고'
-  if (status === '결재대기') return '결재 보기'
+  if (status === '결재대기') return '확인하기'
   return '보기'
 }
 

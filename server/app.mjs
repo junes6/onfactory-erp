@@ -6191,6 +6191,20 @@ export function createApp(options = {}) {
    * 닫아 둔 사이 온 말이 배지에 오르지 않았다. 대화 본문은 내려보내지 않는다.
    * 세는 규칙은 화면(unreadForConversation)과 같다: 볼 수 있는 방의 본채널 말 중 내가 보내지도 읽지도 않은 것.
    */
+  /**
+   * 결재 화면 머리의 '지금 내가 확인할 것' 중 서버만 아는 수 — 업무일지 결재 요청, 휴가 결재 대기.
+   * (업무 완료 확인·전자결재·AI 제안은 화면이 이미 안다.) 관리자가 아니면 0이다 — 결재하는 사람이 관리자다.
+   */
+  app.get('/api/inbox/summary', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+    if (!request.auth.tenantId || request.auth.role !== 'tenant-admin') { response.json({ journals: 0, leaves: 0 }); return }
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
+    const journals = (Array.isArray(tenantStore['daily-journals']?.data) ? tenantStore['daily-journals'].data : [])
+      .filter((journal) => journal?.status === '결재요청' && journal.authorId !== request.auth.id).length
+    const leaves = (Array.isArray(tenantStore['leave-requests']?.data) ? tenantStore['leave-requests'].data : [])
+      .filter((leave) => leave?.status === '결재대기' && (!leave.approverId || leave.approverId === request.auth.id)).length
+    response.json({ journals, leaves })
+  })
+
   app.get('/api/messenger/unread', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
     const conversations = workspaceStore.tenants[request.auth.tenantId]?.['messenger-conversations']?.data
     let unread = 0
@@ -8204,7 +8218,8 @@ export function createApp(options = {}) {
     if (action === 'submit') {
       notify(request.auth.tenantId, [{
         type: 'approval-requested', recipientId: next.requesterId, actorId: request.auth.id,
-        title: `결재 요청: ${next.title}`,
+        // 전자결재의 '결재 요청'과 도착 화면이 다르다 — 업무는 '확인 요청'으로 부른다.
+        title: `확인 요청: ${next.title}`,
         body: `${request.auth.name}님이 완료 보고를 올렸습니다.`,
         page: 'tasks', focusId: next.id,
         source: { kind: 'work-item', id: next.id, label: '업무' },

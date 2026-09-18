@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import {
   AlertTriangle, Archive, ArrowDownToLine, ArrowRight, ArrowUpFromLine, BarChart3, BookOpen, Boxes, Building2, Check,
   CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCheck, Clock3,
@@ -58,7 +58,7 @@ import { isWorkOverdue, projectBarLabel, scheduleBlockReason, workPeriodLabel, S
 import type { ScheduleResult } from './utils/workTimeline'
 import { activeFilterCount, applyWorkFilters, DEFAULT_WORK_SORT, EMPTY_WORK_FILTERS, readStoredWorkView, sortWorkItems, writeStoredWorkView, type WorkFilters, type WorkSort } from './utils/workViews'
 import { boardDropAction, boardDropTargets, type BoardDrop } from './utils/workBoardDrop'
-import { brandLabelForIndustry, industrySurface, navigationForIndustry, resolveIndustry, routeLabel, routesForIndustry, type TenantRouteId } from './modules/registry'
+import { brandLabelForIndustry, industrySurface, navigationForIndustry, resolveIndustry, routeLabel, routesForIndustry, type TenantRouteId, NAV_GROUP_ORDER, navGroupOf } from './modules/registry'
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
 import { WorkspaceNavigationEditButton, WorkspaceNavigationEditor, usePersonalNavigation } from './components/WorkspaceNavigation'
@@ -704,7 +704,7 @@ function WorkReviewModal({ item, industryType, workspaceScope, initialMode, onTo
   const valid = mode === 'approve' || comment.trim().length >= 2
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section ref={dialogRef} className="modal-card workflow-modal" role="dialog" aria-modal="true" aria-labelledby="review-modal-title">
-      <header><div><span className="eyebrow">WORK REVIEW</span><h2 id="review-modal-title">{mode === 'approve' ? '결재 승인' : '수정 요청'}</h2><p>{item.title}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
+      <header><div><span className="eyebrow">WORK REVIEW</span><h2 id="review-modal-title">{mode === 'approve' ? '완료 확인' : '보완 요청'}</h2><p>{item.title}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" onClick={onClose}><X size={21} /></IconButton></header>
       <form onSubmit={async (event) => { event.preventDefault(); if (!valid) return; setBusy(true); const message = comment.trim(); if (await onSubmit(mode, message, mode === 'request-changes' ? message : undefined)) onClose(); else setBusy(false) }}>
         <div className="workflow-submission-preview"><strong>담당자 완료 보고</strong><p>{item.completion?.summary || '레거시 업무로 완료내용이 등록되지 않았습니다.'}</p>{item.completion?.evidence.map((file) => file.id.startsWith('DOC-') ? <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={14} /> {file.name} · {file.size}</button> : <span key={file.id}><Paperclip size={14} /> {file.name} · {file.size}</span>)}</div>
         <div className="workflow-review-decision" role="radiogroup" aria-label="검토 결정"><button type="button" role="radio" aria-checked={mode === 'approve'} onClick={() => { setMode('approve'); setComment('') }}><Check size={16} /> 승인</button><button type="button" role="radio" aria-checked={mode === 'request-changes'} onClick={() => { setMode('request-changes'); setComment('') }}>수정 요청</button></div>
@@ -1057,10 +1057,11 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
     fields: Object.fromEntries(definitions.map((definition) => [definition.key, definition.label])),
   }), [filterOwners, projectNames, filterOrigins, definitions])
   const columns: Array<{ status: WorkItem['status']; label: string; hint: string; tone: string; icon: typeof ListChecks }> = [
-    { status: '업무요청', label: '요청됨', hint: '담당자 수락 대기', tone: 'request', icon: ClipboardCheck },
-    { status: '수행중', label: '진행 중', hint: '수행 후 완료 보고', tone: 'progress', icon: PlayCircle },
-    { status: '결재대기', label: '결재 대기', hint: '요청자 검토·승인', tone: 'review', icon: ShieldCheck },
-    { status: '결재완료', label: '완료', hint: '승인 후 기록 보관', tone: 'done', icon: CheckCircle2 },
+    // 칼럼 이름은 상태 이름과 같다(workStatusLabel 한 벌) — 같은 단계가 칼럼에서는 '결재 대기', 배지에서는 '확인 기다리는 중'이었다.
+    { status: '업무요청', label: workStatusLabel('업무요청'), hint: '담당자가 시작하기 전', tone: 'request', icon: ClipboardCheck },
+    { status: '수행중', label: workStatusLabel('수행중'), hint: '끝나면 완료 보고', tone: 'progress', icon: PlayCircle },
+    { status: '결재대기', label: workStatusLabel('결재대기'), hint: '지시한 사람이 확인', tone: 'review', icon: ShieldCheck },
+    { status: '결재완료', label: workStatusLabel('결재완료'), hint: '확인을 마친 업무', tone: 'done', icon: CheckCircle2 },
   ]
   /** 칼럼 머리 숫자는 그 단계에 있는 업무를 전부 센다(자식 포함). 요약줄과 같은 집합을 세야 두 숫자가 어긋나지 않는다. */
   const stageCount = (status: WorkItem['status']) => scoped.filter((item) => item.status === status).length
@@ -1078,7 +1079,7 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
   /** 차단 사유(blocked)는 누르기 전에 보여 준다. 눌러 보고서야 안 된다는 것을 아는 버튼은 막다른 길이다. */
   const primaryAction = (item: WorkItem): { label: string; run: () => void; blocked?: string } | null => {
     // 카드·목록의 '검토하기'에는 방향의 의도가 없다 — 사람이 아직 아무 쪽도 고르지 않았으므로 승인으로 연다(지금까지의 동작 그대로).
-    if (item.requesterId === currentUserId && item.status === '결재대기') return { label: '검토하기', run: () => setDialog({ type: 'review', item, decision: 'approve' }) }
+    if (item.requesterId === currentUserId && item.status === '결재대기') return { label: '확인하기', run: () => setDialog({ type: 'review', item, decision: 'approve' }) }
     if (item.ownerId === currentUserId && item.status === '업무요청') return { label: '업무 시작', run: () => void onTransition(item.id, 'accept') }
     if (item.ownerId === currentUserId && item.status === '수행중') {
       // 진행률·차단은 필터와 무관한 사실이므로 보이는 집합(scoped)이 아니라 items 전체로 센다.
@@ -1324,7 +1325,7 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
   }
 
   return <div className="content-page workflow-page">
-    <PageHeader eyebrow="WORKFLOW" title="업무지시 · 결재" description="지시부터 수행·검토·승인까지, 업무가 어느 단계에 있는지 보드에서 바로 확인합니다." action={canAssignTasks ? <div className="page-action-row"><Button tone="secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Repeat2 size={18} /> 반복 업무</Button><Button tone="primary" type="button" onClick={onCreate}><Plus size={18} /> 새 업무 지시</Button></div> : <StatusBadge className="status-pill" tone="neutral">내 업무 수행</StatusBadge>} />
+    <PageHeader eyebrow="WORKFLOW" title="업무" description="지시부터 수행·검토·승인까지, 업무가 어느 단계에 있는지 보드에서 바로 확인합니다." action={canAssignTasks ? <div className="page-action-row"><Button tone="secondary" type="button" onClick={() => setDialog({ type: 'rule' })}><Repeat2 size={18} /> 반복 업무</Button><Button tone="primary" type="button" onClick={onCreate}><Plus size={18} /> 새 업무 지시</Button></div> : <StatusBadge className="status-pill" tone="neutral">내 업무 수행</StatusBadge>} />
 
     <div className="workflow-board-toolbar">
       <div className="workflow-board-tabs" role="tablist" aria-label="업무 화면 전환">
@@ -2253,6 +2254,21 @@ export default function App() {
    */
   const isGuestSession = account?.role === 'tenant-guest'
   const tenantDataEnabled = authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange && !isGuestSession
+  // 결재 화면 머리의 '지금 내가 확인할 것' 중 서버만 아는 수(업무일지·휴가). 결재 화면을 열 때 센다.
+  const [inboxSummary, setInboxSummary] = useState({ journals: 0, leaves: 0 })
+  useEffect(() => {
+    if (!tenantDataEnabled || page !== 'approvals') return
+    let active = true
+    fetch('/api/inbox/summary', { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { journals?: number; leaves?: number } | null) => { if (active && body) setInboxSummary({ journals: body.journals ?? 0, leaves: body.leaves ?? 0 }) })
+      .catch(() => undefined)
+    return () => { active = false }
+  }, [tenantDataEnabled, page, workspaceScope])
+  // 고른 메뉴가 사이드바 아래로 잘려 보이지 않던 것(1280x800에서 8개만 보였다) — 고르면 보이는 자리로.
+  useEffect(() => {
+    document.querySelector('.nav-list button.active')?.scrollIntoView({ block: 'nearest' })
+  }, [page])
   // 메신저 안 읽은 수는 서버가 센다(/api/messenger/unread — 대화 본문은 받지 않는다). 전에는 서랍을 열 때만 세어,
   // 닫아 둔 사이 온 말이 배지에 오르지 않았다. 말이 몰려와도 한 번만 묻도록 잠깐 모았다가 부른다.
   const messengerUnreadTimerRef = useRef<number | null>(null)
@@ -2699,6 +2715,17 @@ export default function App() {
     { id: 'audit', label: '지원 세션 · 감사', icon: ShieldCheck },
   ]
   const nav = mode === 'tenant' ? personalizedTenantNav : platformNav
+  // 묶음 순서(내 일·함께·회사·업종)로 세우되 묶음 안에서는 사람이 정한 순서를 지킨다. 운영자 콘솔은 묶지 않는다.
+  const industryGroupLabel = brandLabelForIndustry(account?.industryType).replace(/\s*(ERP|워크스페이스)$/, '') || '업종'
+  const groupedNav = (() => {
+    if (mode !== 'tenant') return nav.map((item) => ({ item, group: '' }))
+    const order = [...NAV_GROUP_ORDER, industryGroupLabel]
+    const sorted = [...nav].sort((left, right) => order.indexOf(navGroupOf(left.id, industryGroupLabel)) - order.indexOf(navGroupOf(right.id, industryGroupLabel)))
+    return sorted.map((item, index) => {
+      const group = navGroupOf(item.id, industryGroupLabel)
+      return { item, group: index === 0 || navGroupOf(sorted[index - 1].id, industryGroupLabel) !== group ? group : '' }
+    })
+  })()
 
   const searchResults = useMemo(() => {
     const value = query.trim().toLowerCase()
@@ -3279,6 +3306,11 @@ export default function App() {
         onOpenEvidence={(page, focusId) => openTarget(page, focusId)}
         onPendingChange={setPendingProposals}
         onWaitingChange={handleApprovalSummary}
+        elsewhere={{ tasks: scopedWorkItems.filter((item) => item.status === '결재대기' && item.requesterId === account?.id).length, ...inboxSummary }}
+        onOpenElsewhere={(kind) => {
+          if (kind === 'leaves') { setPeopleInitialTab('leave'); navigate('people'); return }
+          navigate(kind === 'journals' ? 'journal' : 'tasks')
+        }}
       />
       case 'meetings':
       case 'wiki': return <DocumentsHub
@@ -3342,9 +3374,9 @@ export default function App() {
         )}
         <nav className="nav-list">
           <div className="nav-caption-row"><span className="nav-caption">{mode === 'platform' ? 'PLATFORM CONTROL' : 'WORKSPACE'}</span>{mode === 'tenant' && <WorkspaceNavigationEditButton onClick={() => setNavEditorOpen(true)} />}</div>
-          {nav.map((item) => {
+          {groupedNav.map(({ item, group }) => {
             const Icon = item.icon
-            return <button type="button" key={item.id} className={page === item.id ? 'active' : ''} aria-label={item.label} aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><Icon size={20} /><span>{item.label}</span>{item.badge !== undefined && <em>{item.badge}</em>}</button>
+            return <Fragment key={item.id}>{group && <span className="nav-group-caption" role="presentation">{group}</span>}<button type="button" className={page === item.id ? 'active' : ''} aria-label={item.label} aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><Icon size={20} /><span>{item.label}</span>{item.badge !== undefined && <em>{item.badge}</em>}</button></Fragment>
           })}
         </nav>
         <div className="sidebar-bottom">

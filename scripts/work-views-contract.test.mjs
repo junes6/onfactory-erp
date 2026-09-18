@@ -331,7 +331,8 @@ test('8. WorkPage는 네 보기를 그리고, 카드 이동은 전이 라우트�
   assert.equal(count(workPage, /setFilters\(EMPTY_WORK_FILTERS\)/g), 4)
   assert.match(workPage, /setViewMode\(\(current\) => current === 'rules'/)
   assert.match(workPage, /isTopLevelIn\(item, scopedIds\)/)
-  for (const label of ['요청됨', '진행 중', '결재 대기', '완료']) assert.ok(workPage.includes(`label: '${label}'`))
+  // UI-3: 칼럼 이름 = 상태 이름(workStatusLabel 한 벌).
+  for (const status of ['업무요청', '수행중', '결재대기', '결재완료']) assert.ok(workPage.includes(`label: workStatusLabel('${status}')`), status)
   // 놓기 전에 답한다: 같은 표를 dragOver와 drop 양쪽이 지난다.
   assert.ok(count(workPage, /boardDropAction\(/g) >= 3)
   // 정렬은 저장된 보기에서만 오는 값이 아니다 — 화면에서 고를 수 있어야 한다.

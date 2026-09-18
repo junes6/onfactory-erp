@@ -24,8 +24,9 @@ test('업무 내부 상태는 쉬운 표시 문구로 변환한다', () => {
 })
 
 test('보드는 4단계 칼럼과 카드별 기본 행동 버튼 하나를 제공한다', () => {
-  for (const label of ['요청됨', '진행 중', '결재 대기', '완료']) assert.match(workPageSource, new RegExp(`label: '${label}'`))
-  for (const label of ['업무 시작', '완료 보고', '보완 후 재제출', '검토하기']) assert.match(workPageSource, new RegExp(`'${label}'`))
+  // UI-3: 칼럼 이름은 상태 이름 한 벌(workStatusLabel)이다 — 같은 단계가 칼럼에서는 '결재 대기', 배지에서는 '확인 기다리는 중'이었다.
+  for (const status of ['업무요청', '수행중', '결재대기', '결재완료']) assert.ok(workPageSource.includes(`label: workStatusLabel('${status}')`), status)
+  for (const label of ['업무 시작', '완료 보고', '보완 후 재제출', '확인하기']) assert.match(workPageSource, new RegExp(`'${label}'`))
   assert.match(workPageSource, /event\.stopPropagation\(\); action\.run\(\)/)
   assert.match(stylesSource, /\.workflow-board \{ display: grid; grid-template-columns: repeat\(4,minmax\(0,1fr\)\)/)
   assert.match(stylesSource, /\.workflow-card-action \{/)

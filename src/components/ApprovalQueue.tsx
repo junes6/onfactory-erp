@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUpRight, BookOpen, Check, ClipboardCheck, FilePlus2, FileText, Keyboard, Layers, MessageCircle, MessagesSquare, Pencil, Radar, RefreshCw, Settings2, ShieldAlert, Sparkles, Users, X } from 'lucide-react'
+import { ArrowUpRight, BookOpen, Check, ClipboardCheck, FilePlus2, FileText, Keyboard, Layers, MessageCircle, MessagesSquare, Pencil, Radar, RefreshCw, Settings2, ShieldAlert, Sparkles, Users, X, ArrowRight } from 'lucide-react'
 import { formatDateTime } from '../utils/dateTime'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ApprovalQueue.css'
@@ -85,7 +85,10 @@ function evidenceTarget(proposal: Proposal): { page: string; focusId: string; la
   return null
 }
 
-export function ApprovalQueue({ account, workspaceScope, focusId, onToast, onOpenTask, onOpenEvidence, onPendingChange, onWaitingChange }: {
+/** 이 화면 밖에서 처리하는, 내가 확인할 것들(업무 완료 확인·업무일지·휴가). 0이면 그리지 않는다. */
+export type ElsewhereInbox = { tasks: number; journals: number; leaves: number }
+
+export function ApprovalQueue({ account, workspaceScope, focusId, onToast, onOpenTask, onOpenEvidence, onPendingChange, onWaitingChange, elsewhere, onOpenElsewhere }: {
   account: ApprovalAccount
   workspaceScope?: string
   /** 알림·푸시가 지목한 결재 문서. 전자결재 섹션이 마운트하자마자 그 문서를 연다. */
@@ -96,6 +99,8 @@ export function ApprovalQueue({ account, workspaceScope, focusId, onToast, onOpe
   onPendingChange?: (count: number) => void
   /** 결재 대기와 결과 확인은 다른 사실이라 갈라서 올린다 — 부르는 쪽이 두 문장으로 말할 수 있게. */
   onWaitingChange?: (summary: { waiting: number; decided: number }) => void
+  elsewhere?: ElsewhereInbox
+  onOpenElsewhere?: (kind: keyof ElsewhereInbox) => void
 }) {
   const [data, setData] = useState<QueueResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -221,6 +226,16 @@ export function ApprovalQueue({ account, workspaceScope, focusId, onToast, onOpe
       </div>
     </header>
 
+    {/*
+      지금 내가 확인할 것 중 다른 화면에서 처리하는 것. 전에는 직원이 완료 보고를 올려도 이 화면은
+      "지금 결재할 문서가 없습니다"라고만 말해, 확인할 것이 두 메뉴로 갈라져 있었다(감사). 처리하는 자리는 그대로 두고 길만 모은다.
+    */}
+    {elsewhere && onOpenElsewhere && (elsewhere.tasks + elsewhere.journals + elsewhere.leaves) > 0 && <nav className="approval-elsewhere" aria-label="다른 화면에서 확인할 것">
+      <strong>지금 내가 확인할 것</strong>
+      {elsewhere.tasks > 0 && <Button tone="secondary" size="sm" type="button" onClick={() => onOpenElsewhere('tasks')}>업무 완료 확인 {elsewhere.tasks}건 <ArrowRight size={15} /></Button>}
+      {elsewhere.journals > 0 && <Button tone="secondary" size="sm" type="button" onClick={() => onOpenElsewhere('journals')}>업무일지 결재 {elsewhere.journals}건 <ArrowRight size={15} /></Button>}
+      {elsewhere.leaves > 0 && <Button tone="secondary" size="sm" type="button" onClick={() => onOpenElsewhere('leaves')}>휴가 결재 {elsewhere.leaves}건 <ArrowRight size={15} /></Button>}
+    </nav>}
     {/* 결재가 먼저, AI 제안이 뒤. 결재 대기·완료를 위한 별도 화면을 만들지 않고 같은 큐 안에 둔다. */}
     <ApprovalDocumentSection
       account={account}
@@ -235,13 +250,15 @@ export function ApprovalQueue({ account, workspaceScope, focusId, onToast, onOpe
       onModalChange={setApprovalModalOpen}
     />
 
-    {isAdmin && <section className="approval-stats" aria-label="유형별 최근 4주 승인률">
-      {stats.map((stat) => <article key={stat.kind}>
+    {/* 승인률 카드는 접어 둔다 — 대부분 '아직 데이터 없음'인 카드 아홉 장이 정작 검토할 목록을 화면 아래로 밀어냈다(감사).
+        결정이 쌓인 유형만 보인다. 하나도 없으면 아예 그리지 않는다. */}
+    {isAdmin && stats.some((stat) => stat.total > 0) && <details className="approval-stats-fold"><summary>AI 제안 유형별 승인률(최근 4주) 보기</summary><section className="approval-stats" aria-label="유형별 최근 4주 승인률">
+      {stats.filter((stat) => stat.total > 0).map((stat) => <article key={stat.kind}>
         <StatusBadge className="status-pill" tone={metaFor(stat.kind).tone}>{metaFor(stat.kind).label}</StatusBadge>
         <strong>{stat.approvalRate === null ? '아직 데이터 없음' : `${stat.approvalRate}%`}</strong>
         <small>{stat.total ? `최근 ${stat.windowDays}일 승인 ${stat.approved + stat.edited} · 거절 ${stat.rejected}` : `최근 ${stat.windowDays}일 결정 없음`}</small>
       </article>)}
-    </section>}
+    </section></details>}
 
     {isAdmin && <section className="panel approval-panel">
       <div className="approval-toolbar">

@@ -784,6 +784,11 @@ html[data-theme='dark'] .nav-list button.active em { background: var(--color-pri
 }
 .nav-list::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .nav-list button { min-height: 44px; }
+/* 사이드바 묶음 이름(내 일·함께·회사·업종) — 누르는 것이 아니라 읽는 것이다. */
+.nav-group-caption { display: block; margin: var(--space-12) var(--space-0) var(--space-4); padding: var(--space-0) var(--space-12); color: var(--color-sidebar-muted); font-size: var(--font-11); font-weight: var(--weight-medium); letter-spacing: .04em; }
+.nav-caption-row + .nav-group-caption { margin-top: var(--space-4); }
+.approval-elsewhere { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); margin-bottom: var(--space-16); padding: var(--space-12) var(--space-16); border: var(--hairline) solid var(--color-warning); border-radius: var(--radius-8); background: var(--color-warning-soft); }
+.approval-elsewhere > strong { margin-right: var(--space-4); font-size: var(--font-15); }
 
 .topbar { height: 68px; padding-inline: var(--space-24); }
 .global-search { height: 42px; }

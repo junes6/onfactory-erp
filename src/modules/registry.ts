@@ -57,7 +57,9 @@ export type AssistantExperience = {
 const routeNavigation: Readonly<Record<TenantRouteId, NavigationModuleItem>> = {
   ai: { id: 'ai', label: 'AI 업무허브', icon: Sparkles },
   schedule: { id: 'schedule', label: '일정관리', icon: CalendarDays },
-  tasks: { id: 'tasks', label: '업무지시 · 결재', icon: ListChecks },
+  // '결재'가 두 메뉴(업무지시 · 결재 / 결재 · AI 제안)에 동시에 있었다(감사). 업무의 마지막 단계는 '확인'으로 부르고,
+  // '결재'라는 말은 승인 큐 한 메뉴에만 남긴다(별도 화면을 만들지 않는다는 결정은 그대로 — approval-ui-contract).
+  tasks: { id: 'tasks', label: '업무', icon: ListChecks },
   approvals: { id: 'approvals', label: '결재 · AI 제안', icon: ClipboardCheck },
   journal: { id: 'journal', label: '일일업무일지', icon: NotebookPen },
   projects: { id: 'projects', label: '프로젝트', icon: FolderKanban },
@@ -75,6 +77,21 @@ const routeNavigation: Readonly<Record<TenantRouteId, NavigationModuleItem>> = {
   'it-projects': { id: 'it-projects', label: '프로젝트', icon: FolderKanban },
   'it-deliverables': { id: 'it-deliverables', label: '산출물', icon: FileStack },
   'it-contracts': { id: 'it-contracts', label: '계약 · 거래처', icon: FileSignature },
+}
+
+/**
+ * 사이드바 묶음. 18개 메뉴가 한 줄로 늘어서 1280x800에서 8개만 보였고 찾기 어려웠다(감사).
+ * 묶음 안의 순서는 사람이 정한 순서(메뉴 편집)를 따르고, 묶음 순서는 이 표를 따른다. 업종 모듈은 업종 이름 묶음이다.
+ */
+export const NAV_GROUP_ORDER = ['내 일', '함께', '회사'] as const
+const NAV_GROUP_OF: Readonly<Record<string, (typeof NAV_GROUP_ORDER)[number]>> = {
+  ai: '내 일', tasks: '내 일', approvals: '내 일', schedule: '내 일', journal: '내 일', judgement: '내 일',
+  wiki: '함께', projects: '함께', documents: '함께', meetings: '함께',
+  people: '회사', finance: '회사', ip: '회사',
+}
+/** 메뉴 하나의 묶음 이름. 코어에 없는 것(업종 모듈)은 업종 이름. */
+export function navGroupOf(id: string, industryLabel: string): string {
+  return NAV_GROUP_OF[id] ?? industryLabel
 }
 
 const foodAssistant = {

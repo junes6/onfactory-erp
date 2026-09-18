@@ -563,7 +563,7 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, c
       <header className="page-heading business-page-head">
         <div>
           <div className="page-kicker">Product control</div>
-          <h1>제품 통합관리</h1>
+          <h1>제품관리</h1>
           <p>{canManage ? `${companyName}의 제품 기준정보와 표시 필수항목, 재고를 제품별로 관리합니다.` : '제품 기준정보, 표시 필수항목과 재고를 업무에 필요한 범위에서 조회합니다.'}</p>
         </div>
         {canManage && <div className="heading-actions">
@@ -1519,7 +1519,7 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
       <header className="page-heading business-page-head">
         <div>
           <div className="page-kicker">Commerce hub</div>
-          <h1>판매채널 통합</h1>
+          <h1>판매채널</h1>
           <p>{companyName}의 판매채널 목록과 출고 주문을 관리합니다. 주문 수와 판매수량은 이 화면에 등록하거나 CSV로 올린 출고 주문에서 셉니다.</p>
         </div>
         {canManage && <div className="heading-actions">
