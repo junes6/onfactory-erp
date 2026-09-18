@@ -92,7 +92,10 @@ test('알림 한 줄: 보통 알림은 저절로 닫히고(멈춤 가능), 실�
   const failure = new RegExp(toast.match(/const FAILURE_TEXT = \/(.+)\/u/)[1], 'u')
   for (const text of ['증빙 파일을 다운로드하지 못했습니다.', '업무 처리 서버에 연결할 수 없습니다.', '정리에 실패했습니다.']) assert.ok(failure.test(text), text)
   for (const text of ['업무를 시작했습니다.', '저장했습니다.', '검토 요청을 보냈습니다.']) assert.ok(!failure.test(text), text)
-  assert.match(read('src/App.tsx'), /if \(typeof value === 'string'\) \{ setToastMessage\(toastFromText\(value\)\); return \}/)
+  const app = read('src/App.tsx')
+  assert.match(app, /if \(typeof value === 'string'\) \{ setToastMessage\(toastFromText\(value\)\); return \}/)
+  // 닫는 시각은 Toast 한 곳에서만 정한다 — App이 따로 타이머를 걸면 되돌리기·실패 알림이 잘린다.
+  assert.doesNotMatch(app, /setTimeout\(\(\) => setToast\(''\)/)
 })
 
 test('휴대폰 더보기: 매일 쓰는 화면을 사이드바에서 골라 담고, 다른 화면으로 가면 닫힌다', () => {

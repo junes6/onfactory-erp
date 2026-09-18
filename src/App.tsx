@@ -2478,11 +2478,8 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  useEffect(() => {
-    if (!toast) return
-    const timer = window.setTimeout(() => setToast(''), 3200)
-    return () => window.clearTimeout(timer)
-  }, [toast])
+  // 알림 한 줄을 언제 닫을지는 Toast가 정한다(보통 7초·멈춤 가능, 되돌리기 5초, 실패는 남김).
+  // 전에는 여기서 모든 알림을 3.2초 뒤 닫아 5초 되돌리기가 잘리고 실패 문장도 사라졌다.
 
   useEffect(() => {
     document.body.classList.toggle('no-scroll', Boolean(taskDraft || supportTenant || messengerOpen || settingsOpen || navEditorOpen || (isMobile && mobileNav)))
