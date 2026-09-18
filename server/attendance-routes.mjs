@@ -5,6 +5,13 @@ const DEFAULT_STANDARD_START_TIME = '09:00'
 const MAX_ATTENDANCE_RECORDS = 20_000
 
 const validStandardStartTime = (value) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(value ?? ''))
+const validClockTime = validStandardStartTime
+const MAX_SHIFT_MS = 24 * 60 * 60 * 1_000
+/** 본인이 적는 퇴근 시각은 출근 뒤 16시간 안 — 그보다 긴 근무는 거의 언제나 잘못 적은 것이다(관리자는 24시간까지). */
+const MAX_SELF_SHIFT_MS = 16 * 60 * 60 * 1_000
+const MAX_CORRECTIONS = 20
+const CORRECTION_KINDS = new Set(['self-missed-clock-out', 'admin'])
+const CORRECTION_FIELDS = new Set(['clockInAt', 'clockOutAt'])
 const validIsoUtc = (value) => typeof value === 'string'
   && Number.isFinite(Date.parse(value))
   && new Date(value).toISOString() === value
@@ -21,6 +28,49 @@ function seoulParts(value) {
 export function seoulAttendanceDate(value = new Date()) {
   const { year, month, day } = seoulParts(value)
   return `${year}-${month}-${day}`
+}
+
+/**
+ * 정정 한 번. 근태는 급여·노무의 근거라 **누가·언제·무엇을·왜** 바꿨는지 기록에 남긴다(이전값 포함).
+ * 전에는 기록을 고치는 길 자체가 없었다(감사 work-15).
+ */
+function normalizeCorrection(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const at = String(value.at ?? '')
+  const byId = String(value.byId ?? '').trim()
+  const byName = String(value.byName ?? '').trim()
+  const field = String(value.field ?? '')
+  const before = value.before == null || value.before === '' ? null : String(value.before)
+  const after = String(value.after ?? '')
+  const reason = String(value.reason ?? '').trim()
+  const kind = String(value.kind ?? '')
+  if (!validIsoUtc(at) || !byId || byId.length > 120 || byName.length > 80 || !CORRECTION_FIELDS.has(field)
+    || (before !== null && !validIsoUtc(before)) || !validIsoUtc(after) || reason.length > 200 || !CORRECTION_KINDS.has(kind)) return null
+  return { at, byId, byName, field, before, after, reason, kind }
+}
+
+/**
+ * 그 근무일의 'HH:MM'(서울)을 UTC로. 출근 시각보다 이르면 다음 날 새벽 퇴근(야간 근무)으로 읽는다.
+ * 출근에서 maxShiftMs를 넘거나 지금보다 늦으면 거절한다(null).
+ */
+function clockOutOnWorkDate(record, time, now, maxShiftMs = MAX_SELF_SHIFT_MS) {
+  if (!validClockTime(time)) return null
+  let at = Date.parse(`${record.workDate}T${time}:00+09:00`)
+  const started = Date.parse(record.clockInAt)
+  if (at < started) at += MAX_SHIFT_MS
+  if (at - started > maxShiftMs || at > now.getTime()) return null
+  return new Date(at).toISOString()
+}
+
+/** 퇴근을 빠뜨린 날에 하는 말. 시각을 적었는데 받지 못했으면 왜인지까지 말한다. */
+function missedClockOutMessage(record, typed) {
+  const day = monthDayLabel(record.workDate)
+  if (!typed) return `${day} 퇴근을 찍지 않았습니다. 그날 퇴근한 시각을 적어 주세요.`
+  return `적은 퇴근 시각(${typed})은 ${day} 출근 뒤 16시간 안이어야 하고 지금보다 늦을 수 없습니다. 다시 적어 주세요. 더 긴 근무였다면 관리자에게 정정을 요청해 주세요.`
+}
+
+function monthDayLabel(workDate) {
+  return `${Number(workDate.slice(5, 7))}월 ${Number(workDate.slice(8, 10))}일`
 }
 
 function normalizeAttendanceRecord(value) {
@@ -40,7 +90,10 @@ function normalizeAttendanceRecord(value) {
     || !/^\d{4}-\d{2}-\d{2}$/.test(workDate) || !validIsoUtc(clockInAt)
     || (clockOutAt && (!validIsoUtc(clockOutAt) || Date.parse(clockOutAt) < Date.parse(clockInAt)))
     || !validStandardStartTime(standardStartTime) || !validIsoUtc(createdAt) || !validIsoUtc(updatedAt)) return null
-  return { id, accountId, employeeName, team, workDate, clockInAt, clockOutAt, standardStartTime, createdAt, updatedAt }
+  if (value.corrections !== undefined && (!Array.isArray(value.corrections) || value.corrections.length > MAX_CORRECTIONS)) return null
+  const corrections = (value.corrections ?? []).map(normalizeCorrection)
+  if (corrections.some((correction) => !correction)) return null
+  return { id, accountId, employeeName, team, workDate, clockInAt, clockOutAt, standardStartTime, createdAt, updatedAt, ...(corrections.length ? { corrections } : {}) }
 }
 
 export function normalizeAttendanceState(value) {
@@ -154,10 +207,22 @@ export function registerAttendanceRoutes({
       response.status(409).json({ error: { code: 'ATTENDANCE_ALREADY_CLOCKED_IN', message: existing.clockOutAt ? '오늘 출퇴근 기록이 이미 완료되었습니다.' : '이미 출근 처리되어 있습니다.' } })
       return
     }
+    let records = state.records
     const previouslyOpen = state.records.find((record) => record.accountId === employee.id && !record.clockOutAt)
     if (previouslyOpen) {
-      response.status(409).json({ error: { code: 'ATTENDANCE_CLOCK_OUT_REQUIRED', message: `${previouslyOpen.workDate} 출근 기록의 퇴근을 먼저 처리해 주세요.` } })
-      return
+      // 퇴근을 빠뜨린 날이 있다. 전에는 여기서 막히고, 누를 수 있는 단추는 그 날에 '지금'을 찍어 24시간 넘는 근무를
+      // 만드는 [퇴근하기]뿐이었다(감사 work-15). 그날 퇴근한 시각을 함께 받으면 닫고 바로 출근한다.
+      const typed = String(request.body?.previousClockOutTime ?? '').trim()
+      const closedAt = clockOutOnWorkDate(previouslyOpen, typed, occurredAt)
+      if (!closedAt) {
+        response.status(409).json({ error: { code: 'ATTENDANCE_CLOCK_OUT_REQUIRED', message: missedClockOutMessage(previouslyOpen, typed), openRecord: { id: previouslyOpen.id, workDate: previouslyOpen.workDate, clockInAt: previouslyOpen.clockInAt } } })
+        return
+      }
+      const correctedAt = occurredAt.toISOString()
+      records = records.map((record) => record.id === previouslyOpen.id ? {
+        ...record, clockOutAt: closedAt, updatedAt: correctedAt,
+        corrections: [...(record.corrections ?? []), { at: correctedAt, byId: employee.id, byName: employee.name, field: 'clockOutAt', before: null, after: closedAt, reason: '퇴근 누락 — 다음 출근 때 본인이 시각을 적음', kind: 'self-missed-clock-out' }].slice(-MAX_CORRECTIONS),
+      } : record)
     }
     const now = occurredAt.toISOString()
     const attendanceRecord = {
@@ -172,7 +237,7 @@ export function registerAttendanceRoutes({
       createdAt: now,
       updatedAt: now,
     }
-    const nextState = { ...state, records: [attendanceRecord, ...state.records] }
+    const nextState = { ...state, records: [attendanceRecord, ...records] }
     try {
       const committed = await commitState(request.auth, nextState)
       response.status(201).json({ data: publicState(nextState, request.auth), record: attendanceRecord, version: workspaceRecordVersion(committed) })
@@ -196,18 +261,69 @@ export function registerAttendanceRoutes({
       response.status(409).json({ error: { code: 'ATTENDANCE_CLOCK_IN_REQUIRED', message: '퇴근 처리할 열린 출근 기록이 없습니다.' } })
       return
     }
-    const now = clock().toISOString()
+    const instant = clock()
+    const now = instant.toISOString()
     if (Date.parse(now) < Date.parse(openRecord.clockInAt)) {
       response.status(409).json({ error: { code: 'ATTENDANCE_TIME_INVALID', message: '퇴근 시각은 출근 시각보다 빠를 수 없습니다.' } })
       return
     }
-    const nextRecord = { ...openRecord, clockOutAt: now, updatedAt: now }
+    // 지난 날의 열린 기록에 '지금'을 찍으면 20~30시간 근무가 된다. 그날 퇴근한 시각을 받는다.
+    const missed = openRecord.workDate < seoulAttendanceDate(instant) && instant.getTime() - Date.parse(openRecord.clockInAt) > MAX_SHIFT_MS / 2
+    let nextRecord = { ...openRecord, clockOutAt: now, updatedAt: now }
+    if (missed) {
+      const typed = String(request.body?.clockOutTime ?? '').trim()
+      const closedAt = clockOutOnWorkDate(openRecord, typed, instant)
+      if (!closedAt) {
+        response.status(409).json({ error: { code: 'ATTENDANCE_MISSED_CLOCK_OUT', message: missedClockOutMessage(openRecord, typed), openRecord: { id: openRecord.id, workDate: openRecord.workDate, clockInAt: openRecord.clockInAt } } })
+        return
+      }
+      nextRecord = {
+        ...openRecord, clockOutAt: closedAt, updatedAt: now,
+        corrections: [...(openRecord.corrections ?? []), { at: now, byId: employee.id, byName: employee.name, field: 'clockOutAt', before: null, after: closedAt, reason: '퇴근 누락 — 본인이 시각을 적음', kind: 'self-missed-clock-out' }].slice(-MAX_CORRECTIONS),
+      }
+    }
     const nextState = { ...state, records: state.records.map((record) => record.id === openRecord.id ? nextRecord : record) }
     try {
       const committed = await commitState(request.auth, nextState)
       response.json({ data: publicState(nextState, request.auth), record: nextRecord, version: workspaceRecordVersion(committed) })
     } catch {
       response.status(500).json({ error: { code: 'ATTENDANCE_WRITE_FAILED', message: '퇴근 시간을 저장하지 못했습니다.' } })
+    }
+  })
+
+  /**
+   * 관리자 정정. 사유는 필수이고, 바꾼 칸마다 이전값·새값·정정자·사유가 기록에 남는다 — 직원은 자기 기록에서 그 사실을 본다.
+   */
+  app.patch('/api/attendance/records/:id', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
+    const state = requireTenantState(request, response)
+    if (!state) return
+    const target = state.records.find((record) => record.id === request.params.id)
+    if (!target) { response.status(404).json({ error: { code: 'ATTENDANCE_RECORD_NOT_FOUND', message: '출퇴근 기록을 찾을 수 없습니다.' } }); return }
+    const reason = String(request.body?.reason ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 200)
+    if (reason.length < 2) { response.status(400).json({ error: { code: 'ATTENDANCE_REASON_REQUIRED', message: '정정 사유를 적어 주세요. 사유는 직원의 기록에 함께 남습니다.' } }); return }
+    const instant = clock()
+    const clockInTime = String(request.body?.clockInTime ?? '').trim()
+    const clockOutTime = String(request.body?.clockOutTime ?? '').trim()
+    if (clockInTime && !validClockTime(clockInTime)) { response.status(400).json({ error: { code: 'ATTENDANCE_TIME_INVALID', message: '출근 시각을 00:00~23:59 형식으로 적어 주세요.' } }); return }
+    const clockInAt = clockInTime ? new Date(Date.parse(`${target.workDate}T${clockInTime}:00+09:00`)).toISOString() : target.clockInAt
+    if (Date.parse(clockInAt) > instant.getTime()) { response.status(400).json({ error: { code: 'ATTENDANCE_TIME_INVALID', message: '출근 시각이 지금보다 늦을 수 없습니다.' } }); return }
+    const clockOutAt = clockOutTime ? clockOutOnWorkDate({ ...target, clockInAt }, clockOutTime, instant, MAX_SHIFT_MS) : target.clockOutAt
+    if (clockOutTime && !clockOutAt) { response.status(400).json({ error: { code: 'ATTENDANCE_TIME_INVALID', message: '퇴근 시각은 출근 뒤 24시간 안이고 지금보다 이르게 적어 주세요.' } }); return }
+    if (clockOutAt && Date.parse(clockOutAt) < Date.parse(clockInAt)) { response.status(400).json({ error: { code: 'ATTENDANCE_TIME_INVALID', message: '퇴근 시각은 출근 시각보다 빠를 수 없습니다.' } }); return }
+    const at = instant.toISOString()
+    const byName = accounts.find((account) => account.id === request.auth.id)?.name ?? request.auth.name ?? ''
+    const changes = [
+      clockInAt !== target.clockInAt ? { at, byId: request.auth.id, byName, field: 'clockInAt', before: target.clockInAt, after: clockInAt, reason, kind: 'admin' } : null,
+      clockOutAt && clockOutAt !== target.clockOutAt ? { at, byId: request.auth.id, byName, field: 'clockOutAt', before: target.clockOutAt, after: clockOutAt, reason, kind: 'admin' } : null,
+    ].filter(Boolean)
+    if (!changes.length) { response.status(400).json({ error: { code: 'ATTENDANCE_NO_CHANGE', message: '바뀐 시각이 없습니다.' } }); return }
+    const nextRecord = { ...target, clockInAt, clockOutAt, updatedAt: at, corrections: [...(target.corrections ?? []), ...changes].slice(-MAX_CORRECTIONS) }
+    const nextState = { ...state, records: state.records.map((record) => record.id === target.id ? nextRecord : record) }
+    try {
+      const committed = await commitState(request.auth, nextState)
+      response.json({ data: publicState(nextState, request.auth), record: nextRecord, version: workspaceRecordVersion(committed) })
+    } catch {
+      response.status(500).json({ error: { code: 'ATTENDANCE_WRITE_FAILED', message: '정정한 시각을 저장하지 못했습니다.' } })
     }
   })
 

@@ -78,3 +78,27 @@
   .attendance-time-cell::before { content: attr(data-label); color: var(--muted); font-size: var(--font-11); }
   .attendance-policy { grid-template-columns: 1fr; align-items: stretch; }
 }
+/* P1-9: 퇴근을 빠뜨린 날 — 그날 퇴근 시각을 적고 바로 출근 */
+.attendance-missed { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-12); padding: var(--space-16); border: var(--hairline) solid var(--color-warning); border-radius: var(--radius-8); background: var(--color-warning-soft); }
+.attendance-missed-icon { color: var(--color-warning-ink); }
+.attendance-missed strong { font-size: var(--font-15); }
+.attendance-missed p { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--ink); font-size: var(--font-13); }
+.attendance-missed label { display: grid; gap: var(--space-4); font-size: var(--font-13); color: var(--muted); }
+.attendance-missed input { min-height: 44px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--ink); }
+.attendance-missed-actions { display: flex; flex-wrap: wrap; gap: var(--space-8); }
+.attendance-status-cell { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
+.attendance-corrected { padding: var(--space-0) var(--space-4); border-radius: var(--radius-8); color: var(--color-violet-ink); background: var(--color-gray-100); font-size: var(--font-11); font-weight: var(--weight-medium); cursor: help; }
+.attendance-correction-times { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-12); }
+.attendance-correction label { display: grid; gap: var(--space-4); color: var(--muted); font-size: var(--font-13); }
+.attendance-correction :is(input, textarea) { min-height: 44px; padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--ink); }
+.attendance-correction-reason { margin-top: var(--space-12); }
+.attendance-correction-history { margin-top: var(--space-12); font-size: var(--font-13); color: var(--muted); }
+.attendance-correction-history ul { margin: var(--space-8) var(--space-0) var(--space-0); padding-left: var(--space-16); }
+.attendance-correction-error { color: var(--color-danger); font-size: var(--font-13); }
+.attendance-correction footer { display: flex; justify-content: flex-end; gap: var(--space-8); margin-top: var(--space-16); }
+@media (max-width: 760px) {
+  .attendance-missed { grid-template-columns: auto minmax(0, 1fr); }
+  .attendance-missed label, .attendance-missed-actions { grid-column: 1 / -1; }
+  .attendance-missed-actions .ui-button { flex: 1; }
+  .attendance-correction-times { grid-template-columns: 1fr; }
+}
