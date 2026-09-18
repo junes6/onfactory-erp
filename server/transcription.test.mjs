@@ -142,14 +142,14 @@ test('오디오는 text 어댑터가 받지 않는다 — accepts와 transcribe�
 })
 
 test('알 수 없는 TRANSCRIPTION_PROVIDER는 부팅에서 드러난다 — 조용히 none이 되지 않는다', () => {
-  assert.deepEqual([...TRANSCRIPTION_PROVIDERS], ['none', 'text'])
+  assert.deepEqual([...TRANSCRIPTION_PROVIDERS], ['none', 'text', 'whisper'])
   assert.throws(
-    () => createTranscription({ env: { TRANSCRIPTION_PROVIDER: 'whisper' }, fetchImpl: explodingFetch }),
+    () => createTranscription({ env: { TRANSCRIPTION_PROVIDER: 'vosk' }, fetchImpl: explodingFetch }),
     (error) => {
       assert.ok(error instanceof TranscriptionError)
       assert.equal(error.code, 'TRANSCRIPTION_PROVIDER_UNKNOWN')
       assert.equal(error.status, 500)
-      assert.ok(error.message.includes('whisper'))
+      assert.ok(error.message.includes('vosk'))
       return true
     },
   )
@@ -502,4 +502,125 @@ test('looksLikeSpeech는 거절 문구를 고르는 데만 쓰고, 무엇을 읽
   assert.equal(looksLikeSpeech({}), false)
   // 판정은 한 곳이다: 녹음처럼 보여도 읽을 수 있는 형식이면 읽는다.
   assert.equal(createTranscription({ env: {}, fetchImpl: explodingFetch }).accepts('text/vtt', '회의.vtt'), true)
+})
+
+// ---------------------------------------------------------------------------
+// whisper — OpenAI 호환 `/v1/audio/transcriptions` 규격
+// ---------------------------------------------------------------------------
+
+/** 벤더를 흉내 낸다. 받은 요청을 적어 두고, 지정한 응답을 돌려준다. */
+function fakeVendor(reply) {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    const form = init.body
+    const file = form.get('file')
+    calls.push({
+      url: String(url),
+      authorization: init.headers?.authorization ?? '',
+      model: form.get('model'),
+      language: form.get('language'),
+      responseFormat: form.get('response_format'),
+      fileName: file?.name,
+      fileType: file?.type,
+      fileBytes: file ? (await file.arrayBuffer()).byteLength : 0,
+    })
+    return typeof reply === 'function' ? reply() : reply
+  }
+  return { calls, fetchImpl }
+}
+const jsonReply = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+const WHISPER_ENV = { TRANSCRIPTION_PROVIDER: 'whisper', TRANSCRIPTION_API_KEY: 'sk-test-0000' }
+
+test('whisper는 녹음을 규격대로 보내고 받은 말을 전사 결과로 돌려준다', async () => {
+  const vendor = fakeVendor(jsonReply({ text: '김지훈: 라벨 시안은 A안으로 갑시다.\n박서연: 금요일까지 인쇄소에 넘기겠습니다.', duration: 12.5 }))
+  const transcription = createTranscription({ env: WHISPER_ENV, fetchImpl: vendor.fetchImpl })
+  assert.equal(transcription.name, 'whisper')
+  assert.equal(transcription.acceptsAudio, true)
+  assert.equal(transcription.acceptsTranscript, true)
+  assert.equal(transcription.accepts('audio/webm', '회의.webm'), true)
+  // 윈도는 .m4a에 MIME을 안 준다 — 이름으로 알아본다.
+  assert.equal(transcription.accepts('', '회의.m4a'), true)
+  assert.equal(transcription.accepts('application/pdf', '회의.pdf'), false)
+
+  const result = await transcription.transcribe({ body: Buffer.from([1, 2, 3, 4]), mime: '', filename: '9월 회의.m4a' })
+  assert.equal(result.text, '김지훈: 라벨 시안은 A안으로 갑시다.\n박서연: 금요일까지 인쇄소에 넘기겠습니다.')
+  assert.equal(result.provider, 'whisper')
+  assert.equal(result.model, 'whisper-1')
+  assert.equal(result.durationMs, 12_500)
+  assert.equal(result.characters, countCharacters(result.text))
+  assert.equal(result.unreadCharacters, 0)
+
+  const [call] = vendor.calls
+  assert.equal(call.url, 'https://api.openai.com/v1/audio/transcriptions')
+  assert.equal(call.authorization, 'Bearer sk-test-0000')
+  assert.equal(call.model, 'whisper-1')
+  assert.equal(call.language, 'ko')
+  assert.equal(call.responseFormat, 'json')
+  assert.equal(call.fileName, '9월 회의.m4a')
+  assert.equal(call.fileType, 'audio/mp4')
+  assert.equal(call.fileBytes, 4)
+})
+
+test('whisper도 원문 파일은 벤더에 보내지 않고 text 규칙으로 읽는다', async () => {
+  const transcription = createTranscription({ env: WHISPER_ENV, fetchImpl: explodingFetch })
+  const result = await transcription.transcribe({ body: Buffer.from(VTT, 'utf8'), mime: 'text/vtt', filename: '회의.vtt' })
+  assert.equal(result.provider, 'text')
+  assert.equal(result.text, '안녕하세요. 회의 시작하겠습니다.\n\n네, 라벨 시안부터 보겠습니다.')
+})
+
+test('사내 전사 서버는 키 없이도 붙고, 모델·언어·주소는 설정을 따른다', async () => {
+  const vendor = fakeVendor(jsonReply({ text: '회의를 시작합니다.' }))
+  const transcription = createTranscription({
+    env: { TRANSCRIPTION_PROVIDER: 'whisper', TRANSCRIPTION_ENDPOINT: 'http://10.0.0.5:8000/v1/audio/transcriptions', TRANSCRIPTION_MODEL: 'large-v3', TRANSCRIPTION_LANGUAGE: 'ko' },
+    fetchImpl: vendor.fetchImpl,
+  })
+  const result = await transcription.transcribe({ body: Buffer.from([9, 9]), mime: 'audio/webm', filename: 'rec.webm' })
+  assert.equal(result.text, '회의를 시작합니다.')
+  assert.equal(vendor.calls[0].url, 'http://10.0.0.5:8000/v1/audio/transcriptions')
+  assert.equal(vendor.calls[0].authorization, '')
+  assert.equal(vendor.calls[0].model, 'large-v3')
+})
+
+test('공개 주소인데 키가 없으면 부팅에서 드러난다', () => {
+  assert.throws(
+    () => createTranscription({ env: { TRANSCRIPTION_PROVIDER: 'whisper' }, fetchImpl: explodingFetch }),
+    (error) => error instanceof TranscriptionError && error.code === 'TRANSCRIPTION_KEY_MISSING' && error.status === 500,
+  )
+})
+
+test('25MB를 넘는 녹음은 보내지 않고 이유를 말한다 — 녹음은 보관된다', async () => {
+  const transcription = createTranscription({ env: WHISPER_ENV, fetchImpl: explodingFetch })
+  await assert.rejects(
+    () => transcription.transcribe({ body: Buffer.alloc(25 * 1024 * 1024 + 1), mime: 'audio/webm', filename: 'long.webm' }),
+    (error) => error.code === 'MEETING_RECORDING_TOO_LARGE' && error.status === 413 && /그대로 보관/.test(error.message),
+  )
+})
+
+test('벤더의 실패는 상태 코드로 사람의 말을 고르고, 벤더 본문을 그대로 옮기지 않는다', async () => {
+  const cases = [
+    [401, 'TRANSCRIPTION_VENDOR_AUTH', 503],
+    [429, 'TRANSCRIPTION_RATE_LIMITED', 503],
+    [400, 'MEETING_SOURCE_UNSUPPORTED', 415],
+    [500, 'TRANSCRIPTION_VENDOR_FAILED', 502],
+  ]
+  for (const [status, code, mapped] of cases) {
+    const vendor = fakeVendor(jsonReply({ error: { message: 'Incorrect API key provided: sk-live-SECRET' } }, status))
+    const transcription = createTranscription({ env: WHISPER_ENV, fetchImpl: vendor.fetchImpl })
+    await assert.rejects(
+      () => transcription.transcribe({ body: Buffer.from([1]), mime: 'audio/webm', filename: 'a.webm' }),
+      (error) => {
+        assert.equal(error.code, code)
+        assert.equal(error.status, mapped)
+        assert.ok(!error.message.includes('SECRET'), '벤더 응답에 섞인 키 조각을 사람에게 보이지 않는다')
+        return true
+      },
+    )
+  }
+})
+
+test('연결이 안 되면 502, 무음이면 빈 회의록을 성공이라 부르지 않는다', async () => {
+  const down = createTranscription({ env: WHISPER_ENV, fetchImpl: async () => { throw new TypeError('fetch failed') } })
+  await assert.rejects(() => down.transcribe({ body: Buffer.from([1]), mime: 'audio/webm', filename: 'a.webm' }), (error) => error.code === 'TRANSCRIPTION_UNREACHABLE' && error.status === 502)
+  const silent = createTranscription({ env: WHISPER_ENV, fetchImpl: fakeVendor(jsonReply({ text: '  ​ ' })).fetchImpl })
+  await assert.rejects(() => silent.transcribe({ body: Buffer.from([1]), mime: 'audio/webm', filename: 'a.webm' }), (error) => error.code === 'MEETING_TRANSCRIPT_EMPTY')
 })

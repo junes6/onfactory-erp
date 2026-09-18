@@ -192,10 +192,18 @@ export type TranscriptionStatus = {
  * 연결이 없으면 없다고 쓰고, 오늘 실제로 되는 길(원문 업로드)을 그 자리에서 알려 준다.
  * 세 갈래는 서로 다른 사실이라 문장도 셋이다(규칙 11).
  */
-export function transcriptionNotice(status: TranscriptionStatus | null): string {
+/**
+ * 서버에 음성 전사는 없지만 **이 브라우저가 받아쓸 수 있을 때**의 안내. 「녹음은 보관만 된다」고만 쓰면
+ * 바로 옆 「녹음 시작」이 받아쓰기로 글을 만드는 사실과 어긋난다(규칙 3). 이미 만든 녹음 파일은
+ * 여전히 글이 되지 않으므로 그 사실도 함께 말한다.
+ */
+export const DICTATION_AVAILABLE_NOTE = '서버 음성 전사는 연결되지 않았습니다. 「녹음 시작」에서 받아쓰기를 켜면 말하는 동안 글자로 옮겨 요약과 할 일까지 만듭니다. 이미 만들어 둔 녹음 파일(.m4a 등)은 자료실에 보관만 됩니다.'
+
+export function transcriptionNotice(status: TranscriptionStatus | null, dictation = false): string {
   if (!status) return ''
   if (status.acceptsAudio) return ''
   if (status.acceptsTranscript) {
+    if (dictation) return DICTATION_AVAILABLE_NOTE
     return '음성 전사 연결이 아직 설정되지 않았습니다. 회의록 원문(.txt·.vtt·.srt·.md)을 올리면 요약과 할 일 추출은 그대로 됩니다. 녹음 파일은 자료실에 보관되기만 합니다.'
   }
   return '음성 전사 연결이 아직 설정되지 않았습니다. 지금은 회의록 원문 파일도 읽지 못합니다 — 관리자가 TRANSCRIPTION_PROVIDER를 text로 켜면 원문(.txt·.vtt·.srt·.md)에서 요약과 할 일을 뽑습니다. 올린 파일은 그때까지 자료실에 그대로 보관됩니다.'
@@ -210,11 +218,12 @@ export function transcriptionNotice(status: TranscriptionStatus | null): string 
  *
  * 모르는 것(`null`)은 없는 것이 아니다 — 그때는 아래 안내도 비어 있으므로 갈릴 문장이 없다.
  */
-export function meetingHeadline(status: TranscriptionStatus | null): string {
+export function meetingHeadline(status: TranscriptionStatus | null, dictation = false): string {
   if (!status || status.acceptsAudio) {
     return '회의 녹음이나 회의록 원문을 올리면 요약·결정 사항·할 일을 뽑아 문서로 만듭니다. 할 일은 승인 큐에 제안으로 올라갑니다.'
   }
   if (status.acceptsTranscript) {
+    if (dictation) return '회의를 받아쓰며 녹음하거나 회의록 원문을 올리면 요약·결정 사항·할 일을 뽑아 문서로 만듭니다. 할 일은 승인 큐에 제안으로 올라갑니다.'
     return '회의록 원문을 올리면 요약·결정 사항·할 일을 뽑아 문서로 만듭니다. 녹음 파일은 자료실에 보관됩니다. 할 일은 승인 큐에 제안으로 올라갑니다.'
   }
   return '회의 녹음과 회의록 원문을 자료실에 보관합니다. 음성 전사 연결이 켜지면 여기에서 요약·결정 사항·할 일을 뽑아 문서로 만듭니다.'

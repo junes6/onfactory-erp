@@ -1763,3 +1763,59 @@ test('50. 참석자 상한은 export된 한 수에서 나온다 — 그 수를 �
     assert.deepEqual(store.tenants[TENANT]['meeting-notes'].data[0].participantIds.length, MAX_PARTICIPANTS)
   })
 })
+
+// ---------------------------------------------------------------------------
+// 녹음 → 전사 → 회의록 문서 → 승인 큐 (2026-09-18: 음성 경로 완성)
+// ---------------------------------------------------------------------------
+
+test('43. 녹음만 올려도 whisper 전사를 거쳐 회의록 문서와 업무 제안이 생긴다', async () => {
+  const store = freshStore()
+  const vendorCalls = []
+  const transcription = createTranscription({
+    env: { TRANSCRIPTION_PROVIDER: 'whisper', TRANSCRIPTION_API_KEY: 'sk-test' },
+    fetchImpl: async (url, init) => {
+      const file = init.body.get('file')
+      vendorCalls.push({ url: String(url), name: file.name, type: file.type, bytes: (await file.arrayBuffer()).byteLength })
+      return new Response(JSON.stringify({ text: TRANSCRIPT, duration: 61.2 }), { status: 200, headers: { 'content-type': 'application/json' } })
+    },
+  })
+  const { app } = buildApp(store, { transcription })
+  await withServer(app, async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const listed = await admin.call('GET', '/api/meetings')
+    assert.equal(listed.body.transcription.acceptsAudio, true, '화면이 「녹음도 글이 된다」고 말할 근거')
+    const recording = await admin.upload({ name: '9월 품질 회의.webm', mime: 'audio/webm', body: 'OPUS-BYTES', tags: ['meeting-recording'] })
+    const created = await admin.call('POST', '/api/meetings', { title: '9월 품질 회의', recordingDocumentId: recording.id })
+    assert.equal(created.status, 201, JSON.stringify(created.body))
+
+    const processed = await admin.call('POST', `/api/meetings/${created.body.meeting.id}/process`, { aiPolicy: 'active' })
+    assert.equal(processed.status, 200, JSON.stringify(processed.body))
+    assert.equal(processed.body.meeting.status, 'done')
+    assert.equal(vendorCalls.length, 1, '녹음은 벤더에 한 번 간다')
+    assert.equal(vendorCalls[0].type, 'audio/webm')
+    assert.ok(processed.body.documentId.startsWith('WDOC-'), '회의록 문서가 만들어져야 한다')
+    assert.ok(processed.body.queued >= 1, `할 일이 승인 큐에 올라야 한다 — ${JSON.stringify(processed.body)}`)
+    const queue = await admin.call('GET', '/api/proposals')
+    const tasks = queue.body.proposals.filter((row) => row.kind === 'meeting-task')
+    assert.ok(tasks.length >= 1)
+    assert.ok(tasks.every((row) => row.payload.documentId === processed.body.documentId))
+  })
+})
+
+test('44. 브라우저 받아쓰기 — 녹음과 원문(.vtt)을 함께 올리면 원문을 읽고, 벤더는 부르지 않는다', async () => {
+  const store = freshStore()
+  const { app } = buildApp(store)
+  const vtt = ['WEBVTT', '', '00:00:01.000 --> 00:00:05.000', ...TRANSCRIPT.split('\n').filter(Boolean).slice(0, 1), '', ...TRANSCRIPT.split('\n').filter(Boolean).slice(1).flatMap((line, index) => [`00:00:${String(10 + index * 5).padStart(2, '0')}.000 --> 00:00:${String(14 + index * 5).padStart(2, '0')}.000`, line, ''])].join('\n')
+  await withServer(app, async (origin) => {
+    const admin = await login(origin, ADMIN.email)
+    const recording = await admin.upload({ name: '9월 품질 회의.webm', mime: 'audio/webm', body: 'OPUS-BYTES', tags: ['meeting-recording'] })
+    const dictation = await admin.upload({ name: '9월 품질 회의 받아쓰기.vtt', mime: 'text/vtt', body: vtt, tags: ['meeting-recording'] })
+    const created = await admin.call('POST', '/api/meetings', { title: '9월 품질 회의', recordingDocumentId: recording.id, transcriptDocumentId: dictation.id })
+    assert.equal(created.status, 201, JSON.stringify(created.body))
+    const processed = await admin.call('POST', `/api/meetings/${created.body.meeting.id}/process`, { aiPolicy: 'active' })
+    assert.equal(processed.status, 200, JSON.stringify(processed.body))
+    assert.equal(processed.body.meeting.status, 'done')
+    assert.ok(processed.body.queued >= 1)
+    assert.ok(!processed.body.meeting.transcriptPreview?.includes('-->'), '타임코드는 걷히고 말만 남는다')
+  })
+})

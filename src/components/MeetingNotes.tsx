@@ -44,6 +44,7 @@ import {
   transcriptTruncatedNote,
   transcriptionNotice,
 } from '../utils/meetingNotes'
+import { dictationSupported } from '../utils/speechDictation'
 import { MeetingRecorder } from './MeetingRecorder'
 import { StatusBadge } from './StatusBadge'
 import { Button, IconButton } from './ui/Button'
@@ -138,7 +139,8 @@ export function MeetingNotesPage({ workspaceScope, currentUserId, isAdmin, onOpe
   const [detail, setDetail] = useState<MeetingDetail | null>(null)
   const [detailError, setDetailError] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
-  const [pendingSource, setPendingSource] = useState<PendingSource | null>(null)
+  // 녹음과 받아쓴 원문이 함께 올 수 있다(브라우저 받아쓰기). 종류마다 하나씩이다.
+  const [pendingSources, setPendingSources] = useState<PendingSource[]>([])
   const [consent, setConsent] = useState<{ meeting: Meeting; message: string; audience: string } | null>(null)
 
   const headers = useMemo(() => (workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined), [workspaceScope])
@@ -233,15 +235,17 @@ export function MeetingNotesPage({ workspaceScope, currentUserId, isAdmin, onOpe
     void loadDetail(detailId)
   }, [detailId, loadDetail])
 
-  const createMeeting = async (title: string, source: PendingSource) => {
+  const createMeeting = async (title: string, sources: PendingSource[]) => {
+    const transcriptSource = sources.find((source) => source.kind === 'transcript')
+    const recordingSource = sources.find((source) => source.kind === 'recording')
     const response = await fetch('/api/meetings', {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify({
         title,
-        ...(source.kind === 'transcript'
-          ? { transcriptDocumentId: source.documentId }
-          : { recordingDocumentId: source.documentId }),
+        // 둘 다 있으면 서버는 원문을 먼저 읽는다(녹음은 원본으로 함께 남는다).
+        ...(transcriptSource ? { transcriptDocumentId: transcriptSource.documentId } : {}),
+        ...(recordingSource ? { recordingDocumentId: recordingSource.documentId } : {}),
       }),
     })
     const body = await response.json() as { meeting?: Meeting; error?: { message?: string } }
@@ -249,10 +253,10 @@ export function MeetingNotesPage({ workspaceScope, currentUserId, isAdmin, onOpe
     setMeetings((current) => [body.meeting!, ...current])
     setTotal((current) => current + 1)
     setCreateOpen(false)
-    setPendingSource(null)
+    setPendingSources([])
     // 다음에 누를 곳을 말하기 전에 **그것이 지금 되는지** 먼저 본다 — 되지 않는 설정에서
     // 「「AI로 정리」를 누르면」은 같은 화면 위쪽의 안내와 정면으로 어긋난다(규칙 3·11).
-    onToast(meetingCreatedToast(transcription, source.kind === 'transcript' ? 'transcript' : 'recording'))
+    onToast(meetingCreatedToast(transcription, transcriptSource ? 'transcript' : 'recording'))
     void loadDocuments()
   }
 
@@ -384,7 +388,9 @@ export function MeetingNotesPage({ workspaceScope, currentUserId, isAdmin, onOpe
     }
   }
 
-  const notice = transcriptionNotice(transcription)
+  // 이 브라우저가 녹음하면서 받아쓸 수 있는가. 안내 문장과 녹음 버튼이 같은 사실을 본다.
+  const canDictate = useMemo(() => dictationSupported(), [])
+  const notice = transcriptionNotice(transcription, canDictate)
   const detailMeeting = detail?.meeting ?? null
 
   return (
@@ -395,7 +401,7 @@ export function MeetingNotesPage({ workspaceScope, currentUserId, isAdmin, onOpe
           <h1>회의록</h1>
           {/* 이 문장과 아래 `.meeting-provider-note`는 **한 술어**를 본다 — 하나가 「문서로 만듭니다」인데
               다른 하나가 「원문 파일도 읽지 못합니다」이면 한 화면이 한 사실을 갈라 말한다(규칙 3·11). */}
-          <p>{meetingHeadline(transcription)}</p>
+          <p>{meetingHeadline(transcription, canDictate)}</p>
         </div>
         <div className="page-header-actions">
           <Button tone="primary" type="button" onClick={() => setCreateOpen(true)}><FileText size={17} /> 새 회의</Button>
@@ -404,7 +410,7 @@ export function MeetingNotesPage({ workspaceScope, currentUserId, isAdmin, onOpe
             workspaceScope={workspaceScope}
             disabled={loading}
             onToast={onToast}
-            onRecorded={(source) => { setPendingSource(source); setCreateOpen(true) }}
+            onRecorded={(sources) => { setPendingSources(sources); setCreateOpen(true) }}
           />
           <Button tone="quiet" type="button" onClick={() => { void load(); void loadDocuments() }}><RefreshCw size={17} /> 새로고침</Button>
         </div>
@@ -483,9 +489,9 @@ export function MeetingNotesPage({ workspaceScope, currentUserId, isAdmin, onOpe
       {createOpen && (
         <MeetingCreateDialog
           workspaceScope={workspaceScope}
-          pendingSource={pendingSource}
+          pendingSources={pendingSources}
           onToast={onToast}
-          onClose={() => { setCreateOpen(false); setPendingSource(null) }}
+          onClose={() => { setCreateOpen(false); setPendingSources([]) }}
           onCreate={createMeeting}
         />
       )}
@@ -530,19 +536,19 @@ export function MeetingNotesPage({ workspaceScope, currentUserId, isAdmin, onOpe
  * 올린 파일은 자료실에 「회의녹음」 분류로 보관되고, AI 처리 수준은 **서버가** 「보관만」으로 정한다.
  * 그 사실을 올리기 전에 말한다 — 나중에 「AI로 정리」에서 동의를 묻는 이유가 여기서 정해진다.
  */
-function MeetingCreateDialog({ workspaceScope, pendingSource, onToast, onClose, onCreate }: {
+function MeetingCreateDialog({ workspaceScope, pendingSources, onToast, onClose, onCreate }: {
   workspaceScope?: string
-  pendingSource: PendingSource | null
+  pendingSources: PendingSource[]
   onToast: (message: string) => void
   onClose: () => void
-  onCreate: (title: string, source: PendingSource) => Promise<void>
+  onCreate: (title: string, sources: PendingSource[]) => Promise<void>
 }) {
   const [title, setTitle] = useState('')
-  const [source, setSource] = useState<PendingSource | null>(pendingSource)
+  const [sources, setSources] = useState<PendingSource[]>(pendingSources)
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
 
-  useEffect(() => { if (pendingSource) setSource(pendingSource) }, [pendingSource])
+  useEffect(() => { if (pendingSources.length) setSources(pendingSources) }, [pendingSources])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose() }
@@ -559,12 +565,9 @@ function MeetingCreateDialog({ workspaceScope, pendingSource, onToast, onClose, 
         summary: '회의 원본 자료',
         tags: [MEETING_SOURCE_TAG],
       })
-      setSource({
-        documentId: stored.id,
-        name: stored.name,
-        sizeLabel: stored.size,
-        kind: isTranscriptFileName(file.name) ? 'transcript' : 'recording',
-      })
+      const kind: PendingSource['kind'] = isTranscriptFileName(file.name) ? 'transcript' : 'recording'
+      // 종류마다 하나. 같은 종류를 다시 고르면 바꾼다(녹음 하나 + 원문 하나까지).
+      setSources((current) => [...current.filter((item) => item.kind !== kind), { documentId: stored.id, name: stored.name, sizeLabel: stored.size, kind }])
       // 제목을 아직 적지 않았으면 파일 이름을 첫 제안으로 둔다. 사람이 그대로 두거나 고친다.
       setTitle((current) => current || file.name.replace(/\.[^.]+$/, ''))
     } catch (cause) {
@@ -578,10 +581,10 @@ function MeetingCreateDialog({ workspaceScope, pendingSource, onToast, onClose, 
   const submit = async () => {
     if (busy) return
     if (!title.trim()) { onToast('회의 제목을 입력해 주세요.'); return }
-    if (!source) { onToast('녹음 파일이나 회의록 원문 파일을 하나는 지정해 주세요.'); return }
+    if (!sources.length) { onToast('녹음 파일이나 회의록 원문 파일을 하나는 지정해 주세요.'); return }
     setBusy(true)
     try {
-      await onCreate(title.trim(), source)
+      await onCreate(title.trim(), sources)
     } catch (cause) {
       onToast(cause instanceof Error ? cause.message : '회의를 만들지 못했습니다.')
     } finally {
@@ -603,12 +606,13 @@ function MeetingCreateDialog({ workspaceScope, pendingSource, onToast, onClose, 
           </label>
           <div className="form-field">
             <span>원본 파일</span>
-            {source ? (
-              <p className="meeting-source-picked">
+            {sources.map((source) => (
+              <p className="meeting-source-picked" key={source.documentId}>
                 {source.kind === 'transcript' ? <FileText size={16} aria-hidden="true" /> : <FileAudio size={16} aria-hidden="true" />}
                 {source.name} · {source.sizeLabel} · {source.kind === 'transcript' ? '회의록 원문' : '녹음'}
               </p>
-            ) : (
+            ))}
+            {sources.length < 2 && (
               <input
                 ref={fileRef}
                 type="file"

@@ -1,16 +1,35 @@
-// 회의 음성 전사 어댑터 — 자리만 열어 둔다.
+// 회의 음성 전사 어댑터.
 //
-// 실제 음성 벤더는 아직 정해지지 않았다. 어느 벤더를, 어떤 요금으로, 회의 음성이 어느 나라에서
-// 처리되는지(회의 음성은 개인정보다)는 사용자만 정할 수 있다. 그래서 오늘 출하하는 구현은 둘뿐이다.
+// 어느 벤더를, 어떤 요금으로, 회의 음성이 어느 나라에서 처리되는지(회의 음성은 개인정보다)는
+// 사용자만 정할 수 있다. 그래서 벤더를 박아 두지 않고 **규격**을 하나 받는다.
 //
-//   none — 아무것도 전사하지 않는다. 부르면 "설정되지 않았다"고 분명히 답한다.
-//   text — 사람이 올린 회의록 원문(.txt·.vtt·.srt·.md)에서 말만 남긴다.
+//   none    — 아무것도 전사하지 않는다. 부르면 "설정되지 않았다"고 분명히 답한다.
+//   text    — 사람이 올린 회의록 원문(.txt·.vtt·.srt·.md)에서 말만 남긴다. (기본값)
+//   whisper — OpenAI 호환 `/v1/audio/transcriptions` 규격으로 녹음을 글로 옮긴다.
+//             OpenAI(whisper-1·gpt-4o-transcribe)뿐 아니라 같은 규격을 여는 사내 서버
+//             (faster-whisper 계열)에도 붙는다 — 음성을 회사 밖으로 내보내지 않는 길이 열려 있다.
+//             원문 파일도 그대로 받는다(text와 같은 규칙).
 //
 // 비어 있는 자리를 되는 것처럼 보이게 만들지 않는다. 가짜 전사 결과를 지어내지 않고,
 // 키가 없으면 그 사실을 그대로 답한다.
+//
+// 브라우저 받아쓰기(녹음하는 동안 브라우저 음성 인식이 글자로 옮기는 것)는 서버 어댑터가 아니다 —
+// 화면이 녹음과 함께 원문(.vtt)을 올리고, 서버는 그 원문을 text 규칙으로 읽는다.
 
 /** 오늘 출하하는 구현. 이 목록에 없는 값은 부팅에서 드러난다(조용히 none으로 떨어뜨리지 않는다). */
-export const TRANSCRIPTION_PROVIDERS = Object.freeze(['none', 'text'])
+export const TRANSCRIPTION_PROVIDERS = Object.freeze(['none', 'text', 'whisper'])
+
+/** whisper 규격의 기본 주소·모델. 사내 서버를 쓰면 TRANSCRIPTION_ENDPOINT만 바꾼다. */
+export const WHISPER_DEFAULT_ENDPOINT = 'https://api.openai.com/v1/audio/transcriptions'
+export const WHISPER_DEFAULT_MODEL = 'whisper-1'
+/**
+ * 한 번에 보낼 수 있는 녹음 크기. OpenAI 규격의 상한(25MB)이다. 더 큰 파일을 잘라 보내려면
+ * 오디오를 다시 인코딩해야 하는데(서버에 ffmpeg가 없다), 반쯤 자른 컨테이너는 벤더가 거절한다.
+ * 넘으면 보내지 않고 그 사실을 말한다.
+ */
+export const WHISPER_MAX_BYTES = 25 * 1024 * 1024
+/** 한 녹음을 기다리는 시간. 40분 회의가 벤더에서 1~3분 걸린다. */
+export const WHISPER_TIMEOUT_MS = 10 * 60 * 1_000
 
 // 회의록 원문으로 읽을 수 있는 파일 형식. 두 갈래를 나눠 두는 것이 이 모듈의 핵심이다 —
 // 큐(자막) 파일에만 헤더·큐 번호·타임코드를 걷어내는 규칙을 걸고, 평문·마크다운에는 걸지 않는다.
@@ -258,14 +277,128 @@ export function transcriptFromCues(text) {
  */
 export const DEFAULT_TRANSCRIPTION_PROVIDER = 'text'
 
+/** 녹음 파일의 MIME. 윈도가 MIME을 안 주는 확장자는 이름으로 채운다(벤더는 형식을 보고 디코더를 고른다). */
+const SPEECH_MIME_BY_EXTENSION = Object.freeze({
+  '.m4a': 'audio/mp4', '.mp4': 'audio/mp4', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.webm': 'audio/webm',
+  '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.aac': 'audio/aac', '.flac': 'audio/flac', '.mov': 'video/quicktime', '.amr': 'audio/amr',
+})
+
+/**
+ * OpenAI 호환 전사. 원문 파일은 text 규칙으로 읽고(네트워크를 부르지 않는다), 녹음만 벤더에 보낸다.
+ * 벤더가 무엇을 답했는지는 **그대로 옮기지 않는다** — 상태 코드로 사람의 말을 고른다.
+ * 응답 본문에는 키 일부나 내부 주소가 섞여 올 수 있다.
+ */
+function whisperTranscription({ env, fetchImpl, text }) {
+  const apiKey = String(env.TRANSCRIPTION_API_KEY ?? '').trim()
+  const endpoint = String(env.TRANSCRIPTION_ENDPOINT ?? '').trim() || WHISPER_DEFAULT_ENDPOINT
+  const model = String(env.TRANSCRIPTION_MODEL ?? '').trim() || WHISPER_DEFAULT_MODEL
+  const language = String(env.TRANSCRIPTION_LANGUAGE ?? 'ko').trim()
+  // 사내 서버(http://…)는 키 없이 열려 있을 수 있다. 공개 주소에 키가 없으면 부팅에서 드러낸다.
+  if (!apiKey && /^https:\/\/api\.openai\.com\//.test(endpoint)) {
+    throw new TranscriptionError(
+      'TRANSCRIPTION_KEY_MISSING',
+      'TRANSCRIPTION_PROVIDER=whisper 인데 TRANSCRIPTION_API_KEY가 비어 있습니다. 키를 넣거나 사내 전사 서버 주소(TRANSCRIPTION_ENDPOINT)를 지정해 주세요.',
+      500,
+    )
+  }
+  try { new URL(endpoint) } catch {
+    throw new TranscriptionError('TRANSCRIPTION_ENDPOINT_INVALID', `TRANSCRIPTION_ENDPOINT가 주소가 아닙니다: ${endpoint}`, 500)
+  }
+
+  const speechMime = (mime, filename) => {
+    const type = mimeName(mime)
+    if (type.startsWith('audio/') || type.startsWith('video/')) return type
+    return SPEECH_MIME_BY_EXTENSION[extensionName(filename)] ?? 'application/octet-stream'
+  }
+
+  return {
+    name: 'whisper',
+    acceptsAudio: true,
+    acceptsTranscript: true,
+    model,
+    mimeTypes: [...TRANSCRIPT_MIME_TYPES, 'audio/*'],
+    extensions: [...TRANSCRIPT_EXTENSIONS, ...SPEECH_EXTENSIONS],
+    accepts: (mime, filename) => transcriptFormatOf({ mime, filename }) !== null || looksLikeSpeech({ mime, filename }),
+    async transcribe({ body, mime, filename } = {}) {
+      // 원문 파일은 벤더에 보내지 않는다 — 이미 글이다.
+      if (transcriptFormatOf({ mime, filename })) return text.transcribe({ body, mime, filename })
+      if (!looksLikeSpeech({ mime, filename })) {
+        throw new TranscriptionError('MEETING_SOURCE_UNSUPPORTED', '이 형식은 녹음이나 회의록 원문으로 읽을 수 없습니다. 녹음(M4A·MP3·WAV·WEBM) 또는 TXT·VTT·SRT 파일을 올려 주세요.', 415)
+      }
+      const isBytes = Buffer.isBuffer(body) || body instanceof Uint8Array
+      if (!isBytes || !body.length) {
+        throw new TranscriptionError('MEETING_SOURCE_UNREADABLE', '녹음 파일의 내용을 읽지 못했습니다. 파일을 다시 올려 주세요.', 400)
+      }
+      if (body.length > WHISPER_MAX_BYTES) {
+        throw new TranscriptionError(
+          'MEETING_RECORDING_TOO_LARGE',
+          `녹음이 ${Math.ceil(body.length / 1024 / 1024)}MB라 한 번에 글로 옮길 수 있는 25MB를 넘습니다. 녹음을 나눠 올리거나 회의록 원문을 올려 주세요. 녹음은 자료실에 그대로 보관됩니다.`,
+          413,
+        )
+      }
+      const form = new FormData()
+      const name = String(filename ?? '').split(/[\\/]/).pop() || 'meeting-recording.webm'
+      form.append('file', new Blob([body], { type: speechMime(mime, filename) }), name)
+      form.append('model', model)
+      if (language) form.append('language', language)
+      form.append('response_format', 'json')
+
+      const started = Date.now()
+      let response
+      try {
+        response = await fetchImpl(endpoint, {
+          method: 'POST',
+          headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+          body: form,
+          signal: AbortSignal.timeout(WHISPER_TIMEOUT_MS),
+        })
+      } catch (error) {
+        const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError'
+        throw new TranscriptionError(
+          timedOut ? 'TRANSCRIPTION_TIMEOUT' : 'TRANSCRIPTION_UNREACHABLE',
+          timedOut ? '음성 전사가 10분 안에 끝나지 않았습니다. 잠시 뒤 다시 시도해 주세요.' : '음성 전사 서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
+          timedOut ? 504 : 502,
+        )
+      }
+      if (!response.ok) {
+        const status = Number(response.status)
+        if (status === 401 || status === 403) {
+          throw new TranscriptionError('TRANSCRIPTION_VENDOR_AUTH', '음성 전사 키가 거절되었습니다. 관리자가 TRANSCRIPTION_API_KEY를 확인해야 합니다.', 503)
+        }
+        if (status === 413) throw new TranscriptionError('MEETING_RECORDING_TOO_LARGE', '녹음이 너무 커서 전사 서버가 받지 않았습니다. 녹음을 나눠 올려 주세요.', 413)
+        if (status === 429) throw new TranscriptionError('TRANSCRIPTION_RATE_LIMITED', '음성 전사 사용량이 잠시 몰렸습니다. 몇 분 뒤 다시 시도해 주세요.', 503)
+        if (status === 400 || status === 415) throw new TranscriptionError('MEETING_SOURCE_UNSUPPORTED', '전사 서버가 이 녹음 형식을 읽지 못했습니다. M4A·MP3·WAV로 다시 올려 주세요.', 415)
+        throw new TranscriptionError('TRANSCRIPTION_VENDOR_FAILED', `음성 전사 서버가 실패로 답했습니다(${status}). 잠시 뒤 다시 시도해 주세요.`, 502)
+      }
+      let payload = null
+      try { payload = await response.json() } catch { payload = null }
+      const spoken = normalizeSource(typeof payload?.text === 'string' ? payload.text : '').trim()
+      if (!spoken) {
+        // 소리는 있는데 말이 없었다(무음·잡음). 빈 회의록을 성공이라 부르지 않는다.
+        throw new TranscriptionError('MEETING_TRANSCRIPT_EMPTY', '녹음에서 알아들을 수 있는 말을 찾지 못했습니다. 마이크 입력을 확인해 주세요.', 400)
+      }
+      const sourceCharacters = countCharacters(spoken)
+      const clipped = clipCharacters(spoken, MAX_TRANSCRIPT_CHARS).toWellFormed()
+      return {
+        text: clipped,
+        durationMs: Number.isFinite(Number(payload?.duration)) ? Math.round(Number(payload.duration) * 1_000) : 0,
+        elapsedMs: Date.now() - started,
+        provider: 'whisper',
+        model,
+        format: 'speech',
+        characters: countCharacters(clipped),
+        sourceCharacters,
+        unreadCharacters: Math.max(0, sourceCharacters - countCharacters(clipped)),
+        bytes: Buffer.byteLength(clipped, 'utf8'),
+      }
+    },
+  }
+}
+
 export function createTranscription({ env = process.env, fetchImpl = fetch } = {}) {
   const name = String(env.TRANSCRIPTION_PROVIDER ?? DEFAULT_TRANSCRIPTION_PROVIDER).trim() || DEFAULT_TRANSCRIPTION_PROVIDER
 
   if (!TRANSCRIPTION_PROVIDERS.includes(name)) {
-    // 실제 음성 벤더 자리(구현하지 않는다):
-    //   if (name === 'whisper') return httpTranscription({ endpoint: env.TRANSCRIPTION_ENDPOINT,
-    //     apiKey: env.TRANSCRIPTION_API_KEY, model: env.TRANSCRIPTION_MODEL, fetchImpl })
-    // (그래서 `fetchImpl`은 오늘 아무도 부르지 않는다. 벤더가 정해지면 위 자리에서 쓴다.)
     // 알 수 없는 값을 조용히 none으로 떨어뜨리지 않는다 — 설정 실수는 부팅에서 드러나야 한다.
     throw new TranscriptionError(
       'TRANSCRIPTION_PROVIDER_UNKNOWN',
@@ -294,6 +427,12 @@ export function createTranscription({ env = process.env, fetchImpl = fetch } = {
     }
   }
 
+  if (name === 'whisper') return whisperTranscription({ env, fetchImpl, text: textTranscription() })
+  return textTranscription()
+}
+
+/** 사람이 올린 회의록 원문을 읽는 구현. whisper도 원문 파일은 이 규칙으로 읽는다(판정을 두 벌로 만들지 않는다). */
+function textTranscription() {
   return {
     name: 'text',
     acceptsAudio: false,

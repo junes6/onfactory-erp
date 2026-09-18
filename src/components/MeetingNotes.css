@@ -37,6 +37,11 @@
 .meeting-recorder-dot { width: 9px; height: 9px; display: inline-block; border-radius: var(--radius-8); background: var(--color-danger); }
 .meeting-recorder-meter { width: 96px; height: 4px; display: inline-block; overflow: hidden; border-radius: var(--radius-8); background: var(--color-gray-200); }
 .meeting-recorder-meter-fill { height: 4px; display: block; background: var(--color-danger); }
+/* 받아쓰기 — 녹음 전 선택지와 녹음 중 실시간 자막. 자막은 한 줄 전폭으로 크게 보인다(말이 글이 되는 것을 눈으로 확인). */
+.meeting-recorder-dictation { display: flex; align-items: center; gap: var(--space-8); color: var(--color-warning-ink); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
+.meeting-recorder-dictation input { width: 20px; height: 20px; margin: var(--space-0); accent-color: var(--color-primary); }
+.meeting-recorder-caption { flex-basis: 100%; display: grid; gap: var(--space-4); margin: var(--space-0); color: var(--ink); font-size: var(--font-15); line-height: 1.5; overflow-wrap: anywhere; }
+.meeting-recorder-caption span { color: var(--color-danger-ink); font-size: var(--font-11); font-weight: var(--weight-medium); }
 
 /* 상세 */
 .meeting-detail-modal { width: min(760px, 100%); }

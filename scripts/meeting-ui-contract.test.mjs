@@ -186,7 +186,11 @@ test('전사 연결이 없으면 그렇다고 쓴다 — 가짜 진행 표시를
   assert.match(nothing, /지금은 회의록 원문 파일도 읽지 못합니다/)
   assert.equal(ready, '', '벤더가 붙으면 안내를 감춘다')
   // 화면이 이 문장을 실제로 그린다.
-  assert.match(meetingNotesTsx, /const notice = transcriptionNotice\(transcription\)/)
+  assert.match(meetingNotesTsx, /const notice = transcriptionNotice\(transcription, canDictate\)/)
+  // 브라우저가 받아쓸 수 있으면 「녹음은 보관만」이라고 쓰지 않는다 — 옆의 녹음 버튼이 글을 만든다.
+  const dictating = transcriptionNotice({ provider: 'text', acceptsAudio: false, acceptsTranscript: true, mimeTypes: [], extensions: [] }, true)
+  assert.match(dictating, /받아쓰기를 켜면 말하는 동안 글자로 옮겨 요약과 할 일까지 만듭니다/)
+  assert.equal(transcriptionNotice({ provider: 'whisper', acceptsAudio: true, acceptsTranscript: true, mimeTypes: [], extensions: [] }, true), '')
   assert.match(meetingNotesTsx, /\{notice && <p className="meeting-provider-note">/)
   // 녹음 버튼은 벤더가 없거나 **모를 때** 곧바로 녹음하지 않고 먼저 그 사실을 말한다(시험 46).
   assert.match(meetingRecorderTsx, /if \(!transcription \|\| !transcription\.acceptsAudio\) setPhase\('confirm'\)/)
@@ -613,7 +617,10 @@ test('58. 되지 않을 일에 동의를 받지 않는다 — 전사 연결이 �
 
   // 헤더 한 줄과 아래 안내가 한 술어를 본다 — 하나가 「문서로 만듭니다」인데 다른 하나가
   // 「원문 파일도 읽지 못합니다」이면 한 화면이 한 사실을 갈라 말한다.
-  assert.match(meetingNotesTsx, /\{meetingHeadline\(transcription\)\}/)
+  assert.match(meetingNotesTsx, /\{meetingHeadline\(transcription, canDictate\)\}/)
+  // 받아쓰기가 되는 브라우저에서는 헤더도 「녹음은 보관만」이라 하지 않는다 — 아래 안내와 같은 술어다.
+  assert.match(meetingHeadline(text, true), /받아쓰며 녹음하거나/)
+  assert.equal(meetingHeadline(none, true), meetingHeadline(none), '원문도 못 읽는 설정에서는 받아쓰기도 글이 되지 못한다')
   assert.notEqual(meetingHeadline(none), meetingHeadline(text))
   assert.doesNotMatch(meetingHeadline(none), /^회의 녹음이나 회의록 원문을 올리면/)
   assert.match(meetingHeadline(none), /전사 연결이 켜지면/)

@@ -24,14 +24,27 @@ import {
   type TranscriptionStatus,
   recordingConfirmNote,
 } from '../utils/meetingNotes'
+import {
+  DICTATION_ON_LABEL,
+  DICTATION_PRIVACY_NOTE,
+  type DictationSession,
+  cuesToVtt,
+  dictationFileName,
+  dictationSupported,
+  startDictation,
+} from '../utils/speechDictation'
 import { Button } from './ui/Button'
+
+/** 올라간 회의 원본 한 개. 받아쓰기를 켰으면 녹음과 받아쓴 원문(.vtt) 둘이 함께 온다. */
+export type RecordedSource = { documentId: string; name: string; sizeLabel: string; kind: 'recording' | 'transcript' }
 
 /**
  * 회의 녹음 — 마이크에서 파일까지.
  *
- * **되지 않는 일을 되는 것처럼 그리지 않는다.** 오늘 실제로 되는 것은 「소리를 파일로 만들어
- * 자료실에 보관하는 것」까지다. 음성 전사 벤더가 붙기 전에는 그 파일에서 글이 나오지 않으므로,
- * 녹음을 시작하기 전에 그 사실을 먼저 말하고 사람이 알고 누르게 한다.
+ * **되지 않는 일을 되는 것처럼 그리지 않는다.** 서버에 음성 전사(whisper)가 붙어 있으면 녹음이 곧
+ * 글이 된다. 붙어 있지 않으면 두 길이다: 브라우저가 받아쓸 수 있으면 녹음하는 **동안** 말을 글자로
+ * 받아 원문(.vtt)으로 함께 올리고(소리가 어디로 가는지 먼저 말한다), 그마저 안 되면 녹음은 보관만
+ * 된다는 사실을 먼저 말하고 사람이 알고 누르게 한다.
  *
  * 브라우저가 녹음 자체를 지원하지 않으면 버튼을 **그리지 않는다** — 눌러야 안 된다는 것을
  * 알게 되는 버튼은 버튼이 아니다.
@@ -46,8 +59,11 @@ export function MeetingRecorder({ transcription, workspaceScope, disabled, onToa
   workspaceScope?: string
   disabled?: boolean
   onToast: (message: string) => void
-  /** 올라간 녹음 파일. 회의를 실제로 만드는 것은 부모의 「새 회의」 대화상자다(제목은 사람이 정한다). */
-  onRecorded: (source: { documentId: string; name: string; sizeLabel: string; kind: 'recording' }) => void
+  /**
+   * 올라간 녹음 파일(과 받아쓴 원문). 회의를 실제로 만드는 것은 부모의 「새 회의」 대화상자다(제목은 사람이 정한다).
+   * 받아쓴 원문이 있으면 서버는 그것을 먼저 읽는다 — 음성 벤더가 없어도 요약·할 일까지 간다.
+   */
+  onRecorded: (sources: RecordedSource[]) => void
 }) {
   const [phase, setPhase] = useState<'idle' | 'confirm' | 'requesting' | 'recording' | 'saving'>('idle')
   const [elapsed, setElapsed] = useState(0)
@@ -66,6 +82,16 @@ export function MeetingRecorder({ transcription, workspaceScope, disabled, onToa
    * 「취소」·언마운트·새 시도가 앞선 시도를 **한 번에** 무효로 만든다.
    */
   const attemptRef = useRef(0)
+  /**
+   * 받아쓰기. 서버가 녹음을 글로 옮기지 못하고(acceptsAudio=false) 원문은 읽을 수 있을 때(acceptsTranscript)만
+   * 선택지가 있다 — 서버 벤더가 있으면 받아쓰기는 소리를 한 번 더 밖으로 보낼 뿐이다.
+   * 기본값은 켜짐이지만 **녹음 시작 전 확인 단계에서 어디로 소리가 가는지 말하고** 사람이 끌 수 있다.
+   */
+  const canDictate = dictationSupported() && Boolean(transcription?.acceptsTranscript) && !transcription?.acceptsAudio
+  const [dictate, setDictate] = useState(true)
+  const dictationRef = useRef<DictationSession | null>(null)
+  const [dictating, setDictating] = useState(false)
+  const [caption, setCaption] = useState<{ cues: number; lastFinal: string; interim: string }>({ cues: 0, lastFinal: '', interim: '' })
 
   // 이 브라우저가 만들 수 있는 형식. 한 번만 재고, 없으면 버튼 자리에 이유를 쓴다.
   const [mimeType] = useState(() => pickRecorderMime())
@@ -75,6 +101,7 @@ export function MeetingRecorder({ transcription, workspaceScope, disabled, onToa
     // 스트림은 이 정리보다 늦게 도착하므로, 시도 번호를 밀어 **진행 중인 모든 시도**가 그때 놓게 한다.
     attemptRef.current += 1
     sessionRef.current?.stop()
+    dictationRef.current?.stop()
     stopStream(streamRef.current)
   }, [])
 
@@ -90,6 +117,9 @@ export function MeetingRecorder({ transcription, workspaceScope, disabled, onToa
     stopStream(streamRef.current)
     streamRef.current = null
     sessionRef.current = null
+    const cues = dictationRef.current?.stop() ?? []
+    dictationRef.current = null
+    setDictating(false)
     if (autoStopped) onToast(RECORDING_AUTO_STOPPED_MESSAGE)
     if (!blob.size) {
       setPhase('idle')
@@ -108,14 +138,33 @@ export function MeetingRecorder({ transcription, workspaceScope, disabled, onToa
         summary: '회의 녹음 원본',
         tags: [MEETING_SOURCE_TAG],
       })
-      onRecorded({ documentId: stored.id, name: stored.name, sizeLabel: stored.size, kind: 'recording' })
-      onToast('녹음을 자료실에 보관했습니다. 회의 제목을 정하면 회의가 만들어집니다.')
+      const sources: RecordedSource[] = [{ documentId: stored.id, name: stored.name, sizeLabel: stored.size, kind: 'recording' }]
+      if (cues.length) {
+        // 받아쓴 원문은 녹음과 같은 분류·태그로 나란히 둔다. 서버가 AI 처리 수준을 '보관만'으로 정하는 것도 같다.
+        const transcript = new File([cuesToVtt(cues)], dictationFileName(name), { type: 'text/vtt' })
+        try {
+          const storedTranscript = await uploadDocumentAttachment(transcript, {
+            workspaceScope,
+            category: MEETING_SOURCE_CATEGORY,
+            summary: '회의 받아쓰기 원문',
+            tags: [MEETING_SOURCE_TAG],
+          })
+          sources.push({ documentId: storedTranscript.id, name: storedTranscript.name, sizeLabel: storedTranscript.size, kind: 'transcript' })
+        } catch (cause) {
+          onToast(cause instanceof Error ? `받아쓴 원문을 저장하지 못했습니다 — ${cause.message}` : '받아쓴 원문을 저장하지 못했습니다.')
+        }
+      }
+      onRecorded(sources)
+      onToast(sources.length > 1
+        ? `녹음과 받아쓴 원문(${cues.length}마디)을 자료실에 보관했습니다. 회의 제목을 정하면 회의가 만들어집니다.`
+        : '녹음을 자료실에 보관했습니다. 회의 제목을 정하면 회의가 만들어집니다.')
     } catch (cause) {
       onToast(cause instanceof Error ? cause.message : '녹음 파일을 저장하지 못했습니다.')
     } finally {
       setPhase('idle')
       setElapsed(0)
       setBytes(0)
+      setCaption({ cues: 0, lastFinal: '', interim: '' })
     }
   }
 
@@ -147,6 +196,12 @@ export function MeetingRecorder({ transcription, workspaceScope, disabled, onToa
         onFinish: ({ blob, autoStopped }) => { void finish(blob, autoStopped) },
         onError: (message) => { onToast(message) },
       })
+      // 받아쓰기는 녹음 세션이 잡힌 **뒤에** 켠다 — 타임코드의 0초가 녹음 파일의 0초와 같아야 한다.
+      if (canDictate && dictate) {
+        setCaption({ cues: 0, lastFinal: '', interim: '' })
+        dictationRef.current = startDictation({ startedAt: startedAtRef.current, onUpdate: setCaption, onNotice: onToast })
+        setDictating(Boolean(dictationRef.current))
+      }
       // 「그만」이 멈출 세션이 이미 있는 상태에서만 녹음 표시를 켠다.
       setPhase('recording')
     } catch (cause) {
@@ -198,6 +253,12 @@ export function MeetingRecorder({ transcription, workspaceScope, disabled, onToa
           disabled={phase === 'saving'}
           onClick={() => sessionRef.current?.stop()}
         ><Square size={15} /> 그만</Button>
+        {dictating && (
+          <p className="meeting-recorder-caption" aria-live="polite">
+            <span>받아쓰기 {caption.cues}마디</span>
+            {caption.interim || caption.lastFinal || '말씀을 기다리는 중입니다…'}
+          </p>
+        )}
       </div>
     )
   }
@@ -205,10 +266,18 @@ export function MeetingRecorder({ transcription, workspaceScope, disabled, onToa
   if (phase === 'confirm') {
     return (
       <div className="meeting-recorder-confirm" role="group" aria-label="녹음 시작 확인">
-        <p>{recordingConfirmNote(transcription)}</p>
+        {canDictate ? (
+          <>
+            <label className="meeting-recorder-dictation">
+              <input type="checkbox" checked={dictate} onChange={(event) => setDictate(event.target.checked)} />
+              <span>{DICTATION_ON_LABEL}</span>
+            </label>
+            <p>{dictate ? `받아쓴 글로 요약과 할 일을 만듭니다. ${DICTATION_PRIVACY_NOTE}` : recordingConfirmNote(transcription)}</p>
+          </>
+        ) : <p>{recordingConfirmNote(transcription)}</p>}
         <div className="meeting-recorder-confirm-actions">
           <Button tone="ghost" size="sm" type="button" onClick={() => setPhase('idle')}>취소</Button>
-          <Button tone="secondary" size="sm" type="button" onClick={() => void begin()}><Mic size={15} /> 알고도 녹음</Button>
+          <Button tone="secondary" size="sm" type="button" onClick={() => void begin()}><Mic size={15} /> {canDictate && dictate ? '녹음 시작' : '알고도 녹음'}</Button>
         </div>
       </div>
     )
@@ -219,7 +288,7 @@ export function MeetingRecorder({ transcription, workspaceScope, disabled, onToa
       tone="secondary"
       type="button"
       disabled={disabled}
-      title={transcription?.acceptsAudio ? undefined : recordingConfirmNote(transcription)}
+      title={transcription?.acceptsAudio || canDictate ? undefined : recordingConfirmNote(transcription)}
       // 벤더가 없으면 곧바로 녹음하지 않는다 — 무엇이 되고 무엇이 안 되는지 먼저 말하고,
       // 사람이 그것을 읽은 뒤에 시작한다. **모르는 쪽도 안전한 쪽으로 떨어진다**: 목록 요청이
       // 실패하면 `transcription`은 null로 남는데, 그때 확인을 건너뛰면 사람은 40분을 녹음한 뒤에야
