@@ -41,6 +41,8 @@ import { createTranscription } from './transcription.mjs'
 import { conversationIdOfDocument, privateConversationOfDocument, redactDirectMessageProposals } from './messenger-privacy.mjs'
 import { ARCHIVE_PAGE_LIMIT, createArchive } from './archive.mjs'
 import { DELETED_ROW_KEYS, DELETED_ROWS_COLLECTION, envelopesFor, registerDeletedRowRoutes, removedRows } from './deleted-rows.mjs'
+import { streamWorkspaceExport } from './workspace-export.mjs'
+import { safeArchiveSegment } from './stored-zip.mjs'
 import { createOverflowSweeper, pageHotAndArchive } from './archive-sweeps.mjs'
 import { MATERIALS_KEY, registerMaterialRoutes } from './review-materials.mjs'
 import { WORK_ARCHIVE_AFTER_DAYS, WORK_ARCHIVE_PRESSURE, registerWorkArchiveRoutes } from './work-archive.mjs'
@@ -3236,6 +3238,59 @@ export function createApp(options = {}) {
         return
       }
       response.status(500).json({ error: { code: 'TAX_EVIDENCE_EXPORT_FAILED', message: '세무사 전달 묶음을 만들지 못했습니다.' } })
+    }
+  })
+
+  /**
+   * 고객사 전체 내보내기(감사 data-core-13). 2분짜리 한 번 쓰는 내려받기 주소를 주고, 브라우저는 그 주소를 링크로 연다 —
+   * 큰 묶음을 화면 메모리(fetch→blob)에 담지 않고 곧장 디스크로 받는다. 무엇을 담고 빼는지는 workspace-export.mjs.
+   */
+  const exportTickets = new Map()
+  app.post('/api/export/workspace', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, (request, response) => {
+    if (!request.auth.tenantId || !documentStorage) { response.status(503).json({ error: { code: 'DOCUMENT_STORAGE_UNAVAILABLE', message: '파일 저장소가 설정되지 않았습니다.' } }); return }
+    const nowMs = Date.now()
+    for (const [token, ticket] of exportTickets) if (ticket.expiresAt < nowMs) exportTickets.delete(token)
+    const token = randomBytes(24).toString('base64url')
+    exportTickets.set(token, { tenantId: request.auth.tenantId, accountId: request.auth.id, expiresAt: nowMs + 120_000 })
+    response.json({ url: `/api/export/workspace/download?ticket=${token}`, expiresInSeconds: 120 })
+  })
+  app.get('/api/export/workspace/download', requireAuth, requireTenantAdmin, async (request, response) => {
+    const token = String(request.query.ticket ?? '')
+    const ticket = exportTickets.get(token)
+    exportTickets.delete(token)
+    if (!ticket || ticket.expiresAt < Date.now() || ticket.tenantId !== request.auth.tenantId || ticket.accountId !== request.auth.id) {
+      response.status(410).json({ error: { code: 'EXPORT_TICKET_EXPIRED', message: '내려받기 주소가 만료됐습니다. [전체 내보내기]를 다시 눌러 주세요.' } })
+      return
+    }
+    const tenantId = request.auth.tenantId
+    const tenantName = platformTenant(tenantId)?.name ?? '회사'
+    const now = new Date()
+    const fileName = safeArchiveSegment(`${tenantName}_전체자료_${seoulDateKey(now)}.zip`, 'company_export.zip')
+    response.setHeader('content-type', 'application/zip')
+    response.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`)
+    response.setHeader('cache-control', 'private, no-store')
+    response.setHeader('x-content-type-options', 'nosniff')
+    const write = (chunk) => new Promise((resolve, reject) => {
+      if (response.destroyed) { reject(new Error('연결이 끊겼습니다.')); return }
+      if (response.write(chunk)) resolve()
+      else response.once('drain', resolve)
+    })
+    try {
+      const summary = await streamWorkspaceExport({
+        write, tenantStore: workspaceStore.tenants[tenantId] ?? {}, tenantName, exportedBy: request.auth.name, now,
+        getDocument: (document) => getTenantDocument(documentStorage, document, tenantId),
+      })
+      response.end()
+      appendPlatformAudit(workspaceStore.platform, {
+        tenantId, event: '고객사 전체 내보내기',
+        scope: `영역 ${summary.keys}개 · 파일 ${summary.files}개${summary.missing ? ` · 원본 없음 ${summary.missing}개` : ''} · ${(summary.bytes / 1024 / 1024).toFixed(1)}MB`,
+        actor: request.auth.operatorMode ? `운영자 ${request.auth.operatorMode.operatorName}` : request.auth.name,
+        reference: tenantId,
+      })
+      scheduleAuditCommit()
+    } catch (error) {
+      console.error('[workspace-export] 내보내기를 끝내지 못했습니다', { tenantId, message: error?.message })
+      response.destroy(error)
     }
   })
 

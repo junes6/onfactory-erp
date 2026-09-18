@@ -97,3 +97,68 @@ export function createStoredZip(entries) {
   end.writeUInt16LE(0, 20)
   return Buffer.concat([...localParts, centralDirectory, end])
 }
+
+/**
+ * 흘려 쓰는 ZIP(무압축). 회사 전체 내보내기처럼 큰 묶음을 한 버퍼에 담지 않는다 — 파일 하나씩 CRC를 재고 곧바로
+ * `write`로 흘려보낸다(메모리는 가장 큰 파일 하나만큼). zip64 없이 항목 65,535개·전체 4GB 안.
+ * `write(buffer)`는 값을 돌려주지 않거나 Promise를 돌려준다(응답의 흐름 제어를 기다리게 할 수 있다).
+ */
+export function createZipWriter(write) {
+  const central = []
+  let offset = 0
+  let count = 0
+  const add = async (name, content, modifiedAt) => {
+    const body = Buffer.isBuffer(content) ? content : Buffer.from(content ?? '')
+    const path = String(name ?? '')
+    if (!path || /(?:^|\/)\.\.(?:\/|$)|[\0\r\n]/.test(path) || path.startsWith('/') || /^[A-Za-z]:/.test(path)) throw new TypeError('안전하지 않은 ZIP 파일 경로입니다.')
+    if (count >= 65_535) throw new RangeError('ZIP 항목은 65,535개까지 만들 수 있습니다.')
+    if (offset + body.length + 1_048_576 > 0xffffffff) throw new RangeError('ZIP 전체 크기는 4GB를 넘을 수 없습니다.')
+    const nameBytes = Buffer.from(path, 'utf8')
+    const checksum = crc32(body)
+    const stamp = dosTimestamp(modifiedAt ? new Date(modifiedAt) : undefined)
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(0x04034b50, 0)
+    local.writeUInt16LE(20, 4)
+    local.writeUInt16LE(0x0800, 6)
+    local.writeUInt16LE(0, 8)
+    local.writeUInt16LE(stamp.time, 10)
+    local.writeUInt16LE(stamp.date, 12)
+    local.writeUInt32LE(checksum, 14)
+    local.writeUInt32LE(body.length, 18)
+    local.writeUInt32LE(body.length, 22)
+    local.writeUInt16LE(nameBytes.length, 26)
+    local.writeUInt16LE(0, 28)
+    await write(local)
+    await write(nameBytes)
+    if (body.length) await write(body)
+    const header = Buffer.alloc(46)
+    header.writeUInt32LE(0x02014b50, 0)
+    header.writeUInt16LE(20, 4)
+    header.writeUInt16LE(20, 6)
+    header.writeUInt16LE(0x0800, 8)
+    header.writeUInt16LE(0, 10)
+    header.writeUInt16LE(stamp.time, 12)
+    header.writeUInt16LE(stamp.date, 14)
+    header.writeUInt32LE(checksum, 16)
+    header.writeUInt32LE(body.length, 20)
+    header.writeUInt32LE(body.length, 24)
+    header.writeUInt16LE(nameBytes.length, 28)
+    header.writeUInt32LE(offset, 42)
+    central.push(header, nameBytes)
+    offset += local.length + nameBytes.length + body.length
+    count += 1
+  }
+  const finish = async () => {
+    const directory = Buffer.concat(central)
+    const end = Buffer.alloc(22)
+    end.writeUInt32LE(0x06054b50, 0)
+    end.writeUInt16LE(count, 8)
+    end.writeUInt16LE(count, 10)
+    end.writeUInt32LE(directory.length, 12)
+    end.writeUInt32LE(offset, 16)
+    await write(directory)
+    await write(end)
+    return offset + directory.length + end.length
+  }
+  return { add, finish, get count() { return count } }
+}

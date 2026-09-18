@@ -375,9 +375,12 @@ type SettingsDrawerProps = {
   onAccentChange: (value: AccentChoice) => void
   onEasyModeChange: (value: EasyModeChoice) => void
   onLogout: () => void
+  /** 회사 관리자에게만: 회사 데이터 전체 내보내기(ZIP). 없으면 칸을 그리지 않는다. */
+  onExportCompany?: () => Promise<void>
 }
 
-export function SettingsDrawer({ open, onClose, profileName, profileRole, companyName, theme, fontSize, accent, easyMode, onThemeChange, onFontSizeChange, onAccentChange, onEasyModeChange, onLogout, onEditProfile, guestMode = false }: SettingsDrawerProps) {
+export function SettingsDrawer({ open, onClose, profileName, profileRole, companyName, theme, fontSize, accent, easyMode, onThemeChange, onFontSizeChange, onAccentChange, onEasyModeChange, onLogout, onEditProfile, guestMode = false, onExportCompany }: SettingsDrawerProps) {
+  const [exporting, setExporting] = useState(false)
   const drawerRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
@@ -436,6 +439,11 @@ export function SettingsDrawer({ open, onClose, profileName, profileRole, compan
           <button type="button" aria-pressed={easyMode === 'standard'} onClick={() => onEasyModeChange('standard')}>기본 화면</button>
           <button type="button" aria-pressed={easyMode === 'easy'} onClick={() => onEasyModeChange('easy')}>쉬운 화면</button>
         </div>
+      </section>}
+      {/* 회사 데이터 전체 내보내기(감사 data-core-13). 전에는 회사가 자기 데이터를 통째로 가져갈 길이 없었다. */}
+      {!guestMode && onExportCompany && <section className="setting-section">
+        <div className="setting-section-title"><Download size={19} /><div><h3>회사 데이터 내보내기</h3><p>업무·결재·일정·문서·대장과 자료실 원본 파일을 ZIP 하나로 받습니다. 표는 엑셀로 열리는 CSV도 함께 들어 있습니다. 1:1 대화와 개인 기록(AI 대화·내 할 일·알림)은 담지 않습니다.</p></div></div>
+        <Button tone="secondary" type="button" disabled={exporting} onClick={async () => { setExporting(true); try { await onExportCompany() } finally { setExporting(false) } }}><Download size={17} /> {exporting ? '묶는 중…' : '전체 내보내기(ZIP)'}</Button>
       </section>}
       {/* 게스트 셸은 헤더에 로그아웃이 이미 있다. 같은 버튼을 한 화면에 두 번 두지 않는다. */}
       {!guestMode && <footer><button className="settings-logout" type="button" onClick={onLogout}><LogIn size={18} /> 로그아웃</button></footer>}

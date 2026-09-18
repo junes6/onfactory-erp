@@ -2406,6 +2406,22 @@ export default function App() {
     setToastMessage(value)
   }
   const toast = toastMessage?.text ?? ''
+  /**
+   * 회사 데이터 전체 내보내기: 서버가 2분짜리 한 번 쓰는 주소를 주고, 그 주소를 링크로 열어 브라우저가 곧장 파일로 받는다
+   * (큰 묶음을 화면 메모리에 담지 않는다).
+   */
+  const exportCompanyData = async () => {
+    try {
+      const response = await fetch('/api/export/workspace', { method: 'POST', headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+      const body = await response.json() as { url?: string; error?: { message?: string } }
+      if (!response.ok || !body.url) throw new Error(body.error?.message || '내보내기를 시작하지 못했습니다.')
+      const anchor = document.createElement('a')
+      anchor.href = body.url
+      anchor.rel = 'noopener'
+      anchor.click()
+      setToast('회사 데이터를 묶어 내려받기 시작했습니다. 파일이 크면 몇 분 걸릴 수 있습니다.')
+    } catch (error) { setToast(error instanceof Error ? error.message : '내보내기를 시작하지 못했습니다.') }
+  }
   // 저장소가 읽기 전용으로 기동됐는지(STORE_READ_ONLY) — 모든 화면 상단에 고정 배너로 알린다.
   const [storeStatus, setStoreStatus] = useState<{ kind: string; readOnly: boolean; fallbackReason: string | null } | null>(null)
   const [theme, setTheme] = useState<ThemeChoice>(() => (window.localStorage.getItem('onfactory-theme') as ThemeChoice | null) ?? 'light')
@@ -3504,7 +3520,7 @@ export default function App() {
         </div>
       )}
       {lensTarget && <LensPanel target={lensTarget} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} onClose={() => setLensTarget(null)} onToast={setToast} onPendingChange={setPendingProposals} />}
-      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? BRAND.name} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
+      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} onExportCompany={account?.role === 'tenant-admin' ? exportCompanyData : undefined} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? BRAND.name} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
       {profileOpen && account && <ProfileEditor account={account} onClose={() => setProfileOpen(false)} onToast={setToast} onSaved={(next) => { setAccount((current) => current ? { ...current, ...next } as AuthAccount : current) }} />}
       <WorkspaceNavigationEditor open={navEditorOpen} source={tenantNavSource} preferences={tenantNavPreferences} onChange={setTenantNavPreferences} onClose={() => setNavEditorOpen(false)} />
       {taskDraft !== null && <TaskModal initialText={taskDraft.title} initialDescription={taskDraft.completionCriteria} initialParentId={taskDraft.parentId} items={scopedWorkItems} requesterName={account?.name ?? '사용자'} requesterId={account?.id ?? ''} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} onClose={() => setTaskDraft(null)} onSave={saveTask} />}
