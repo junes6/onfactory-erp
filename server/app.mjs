@@ -48,6 +48,7 @@ import { isScheduleInstant, scheduleArrayViolation, registerWorkItemScheduleRout
 import { registerWikiRoutes } from './wiki.mjs'
 // R16-M: 회의록. 전사 어댑터와 라우트 한 벌. 어댑터는 오늘 none·text 둘뿐이고, 벤더가 없으면 그 사실을 503으로 답한다.
 import { createTranscription } from './transcription.mjs'
+import { conversationIdOfDocument, privateConversationOfDocument, redactDirectMessageProposals } from './messenger-privacy.mjs'
 import { registerMeetingNoteRoutes } from './meeting-notes.mjs'
 import { CUSTOM_FIELD_KEY, customFieldViolation, hasWorkFieldValuesShape, registerCustomFieldRoutes } from './custom-fields.mjs'
 import { registerSavedViewRoutes } from './saved-views.mjs'
@@ -88,7 +89,7 @@ import { registerSupportProgramRoutes } from './support-program-routes.mjs'
 import { createSupportProgramService } from './support-program-service.mjs'
 import {
   APPROVAL_WINDOW_DAYS, AUTOMATION_POLICIES_KEY, PROPOSALS_KEY, approvalStatistics, diffProposalPayload,
-  evaluateSentinel, newProposalId, proposeDocumentClassification, proposeTaskFromMessage,
+  estimateDue, evaluateSentinel, instructionTitle, isInstructionMessage, newProposalId, proposeDocumentClassification, proposeTaskFromMessage,
 } from './proposal-engine.mjs'
 import { CONSENT_TERMS_VERSION, buildConsentRecord, consentIsCurrent, publicConsentTerms } from './policies/consent-terms.mjs'
 import {
@@ -271,7 +272,9 @@ const MESSAGE_FIELDS = ['id', 'senderId', 'senderName', 'text', 'time']
 // threadRootId: 이 메시지가 붙은 스레드의 루트 메시지 id(답글일 때만). 깊이 1단이다.
 // replyCount·lastReplyAt: 루트에만 붙는 집계. 본채널은 이 두 값으로 '답글 N개 · 시각' 한 줄만 그린다.
 // sharedFromThreadId: [채널에 공유]로 본채널에 올라온 요약이 어느 스레드에서 왔는지.
-const MESSAGE_OPTIONAL_FIELDS = ['readBy', 'createdAt', 'attachments', 'replyTo', 'reactions', 'editedAt', 'deletedAt', 'deletedBy', 'senderRole', 'threadRootId', 'replyCount', 'lastReplyAt', 'sharedFromThreadId']
+// taskSuggestion·taskCreated (2026-09-18): 1:1에서 지시 문형을 감지하면 관리자 승인 큐가 아니라 **받는 사람**에게
+// 그 자리에서 「내 업무로 받기」를 제안한다. 원문은 대화 참여자 밖으로 나가지 않는다.
+const MESSAGE_OPTIONAL_FIELDS = ['readBy', 'createdAt', 'attachments', 'replyTo', 'reactions', 'editedAt', 'deletedAt', 'deletedBy', 'senderRole', 'threadRootId', 'replyCount', 'lastReplyAt', 'sharedFromThreadId', 'taskSuggestion', 'taskCreated']
 const CONVERSATION_OPTIONAL_FIELDS = [
   'memberId', 'participantIds', 'hiddenFor', 'lineageId', 'generation', 'lifecycle', 'closedAt', 'deletedAt',
   'systemChannel', 'supportRequesterId', 'supportTicketId',
@@ -1180,6 +1183,14 @@ function hasMessageShape(value) {
     // 답글은 스레드의 루트가 될 수 없다 — 스레드 안의 스레드를 만들면 본채널 요약이 무엇을 세는지 알 수 없어진다.
     && !(value.threadRootId !== undefined && (value.replyCount !== undefined || value.lastReplyAt !== undefined || value.sharedFromThreadId !== undefined))
     && !(value.replyCount === undefined && value.lastReplyAt !== undefined)
+    && (value.taskSuggestion === undefined || (hasExactFields(value.taskSuggestion, ['title', 'due', 'reason', 'recipientId'])
+      && typeof value.taskSuggestion.title === 'string' && value.taskSuggestion.title.length > 0 && value.taskSuggestion.title.length <= 120
+      && typeof value.taskSuggestion.due === 'string' && !Number.isNaN(Date.parse(value.taskSuggestion.due))
+      && typeof value.taskSuggestion.reason === 'string' && value.taskSuggestion.reason.length <= 80
+      && typeof value.taskSuggestion.recipientId === 'string' && value.taskSuggestion.recipientId.length > 0))
+    && (value.taskCreated === undefined || (hasExactFields(value.taskCreated, ['workItemId', 'by', 'at'])
+      && typeof value.taskCreated.workItemId === 'string' && typeof value.taskCreated.by === 'string'
+      && typeof value.taskCreated.at === 'string' && !Number.isNaN(Date.parse(value.taskCreated.at))))
 }
 
 function isDeveloperSupportConversation(conversation) {
@@ -1262,7 +1273,9 @@ function isConversationVisibleToMember(conversation, account, accounts) {
   }
   if (conversation?.type !== 'direct') return false
   if (Array.isArray(conversation.participantIds)) return conversation.participantIds.some((id) => identityIds.includes(id))
-  return typeof conversation.memberId === 'string' && identityIds.includes(conversation.memberId)
+  // 참여자 목록이 없는 옛 1:1(memberId만 있다)은 관리자와 그 직원의 대화였다 — 양쪽 모두 참여자다.
+  // 2026-09-18부터 관리자에게도 이 판정을 건다. 옛 규칙(memberId만 보기)으로 두면 관리자가 자기 대화를 잃는다.
+  return legacyConversationParticipantIds(conversation).some((id) => identityIds.includes(id))
 }
 
 /**
@@ -2060,6 +2073,21 @@ export function createApp(options = {}) {
       console.error('[work-item-migration] Failed to persist account IDs', { message: error?.message })
     }
   }
+  // 2026-09-18: 1:1 대화 원문이 승인 큐·관리자 알림에 이미 쌓여 있다면 거둔다(두 번 돌려도 같다).
+  if (options.skipStartupMigrations !== true) {
+    const redaction = redactDirectMessageProposals(workspaceStore)
+    if (redaction.changed) {
+      try {
+        const startupCommit = commitWorkspaceStore()
+        if (startupCommit && typeof startupCommit.then === 'function') {
+          startupCommit.catch((error) => console.error('[dm-privacy] 원문 정리를 저장하지 못했습니다', { message: error?.message }))
+        }
+        console.log(`[dm-privacy] 1:1 대화 출처 제안 ${redaction.proposals}건 · 알림 ${redaction.notifications}건에서 원문을 거뒀습니다.`)
+      } catch (error) {
+        console.error('[dm-privacy] 원문 정리를 저장하지 못했습니다', { message: error?.message })
+      }
+    }
+  }
 
   const app = express()
   app.disable('x-powered-by')
@@ -2286,7 +2314,25 @@ export function createApp(options = {}) {
     }
     if (isDeveloperSupportDocument(document)) return document.uploadedById === account.id
       || (document.visibility === 'restricted' && Array.isArray(document.allowedUserIds) && document.allowedUserIds.includes(account.id))
-    if (account.role === 'tenant-admin' || document.uploadedById === account.id) return true
+    if (document.uploadedById === account.id) return true
+    // 대화에 붙은 파일은 그 대화를 볼 수 있는 사람이 연다 — 실제로 그 대화의 메시지에 붙어 있을 때만.
+    // (전에는 받는 사람이 열 수 없었다: 첨부가 올린 사람 전용으로 저장되고 보낼 때 열람 명단을 넓히지 않았다.)
+    // 방에 나중에 들어온 사람은 그 방의 지난 첨부도 열고, 방에서 나간 사람은 더는 열지 못한다.
+    const attachedConversationId = conversationIdOfDocument(document)
+    if (attachedConversationId) {
+      const rooms = workspaceStore.tenants[account.tenantId]?.['messenger-conversations']?.data
+      const room = Array.isArray(rooms) ? rooms.find((item) => item?.id === attachedConversationId) : null
+      if (room && isConversationVisibleToMember(room, account, accounts)
+        && (room.messages ?? []).some((message) => !message?.deletedAt && Array.isArray(message?.attachments) && message.attachments.some((attachment) => attachment?.id === document.id))) return true
+    }
+    // 1:1 대화에 붙은 파일은 관리자라도 그 대화의 참여자가 아니면 열 수 없다(가입 동의: DM은 열람 대상이 아니다).
+    if (account.role === 'tenant-admin') {
+      const direct = privateConversationOfDocument(document, workspaceStore.tenants[account.tenantId]?.['messenger-conversations']?.data)
+      if (!direct) return true
+      const identityIds = accountIdentityIds(account, accounts)
+      return legacyConversationParticipantIds(direct).some((id) => identityIds.includes(id))
+        || (document.visibility === 'restricted' && Array.isArray(document.allowedUserIds) && document.allowedUserIds.some((id) => identityIds.includes(id)))
+    }
     if (document.visibility === 'all') return true
     if (document.visibility === 'department') return Array.isArray(document.departments) && document.departments.includes(account.team)
     return document.visibility === 'restricted' && Array.isArray(document.allowedUserIds) && document.allowedUserIds.includes(account.id)
@@ -5752,6 +5798,102 @@ export function createApp(options = {}) {
     response.json({ conversation })
   })
 
+  /**
+   * 1:1 대화의 지시 문형 → **받는 사람에게** 「내 업무로 받기」 제안(2026-09-18).
+   *
+   * 예전에는 원문이 관리자 승인 큐와 관리자 알림으로 갔다 — 가입 동의(1:1은 열람 대상이 아니다)를 어긴다.
+   * 이제 제안은 그 메시지 위에만 붙고, 메시지는 대화 참여자만 읽는다. 업무가 되려면 받는 사람이 직접 눌러야 한다
+   * (AI가 감지하고 사람이 확정한다). 지원 채널·자기 자신에게 쓴 말·받는 사람을 알 수 없는 방에는 붙이지 않는다.
+   */
+  const directTaskSuggestion = (conversation, auth, text, createdAt) => {
+    if (conversation?.type !== 'direct' || isDeveloperSupportConversation(conversation)) return {}
+    if (!isInstructionMessage(text)) return {}
+    const identityIds = accountIdentityIds(auth, accounts)
+    const recipientId = legacyConversationParticipantIds(conversation).find((id) => !identityIds.includes(id))
+    const recipient = recipientId ? accounts.find((account) => account.tenantId === auth.tenantId && accountIdentityIds(account, accounts).includes(recipientId)) : null
+    if (!recipient) return {}
+    const due = estimateDue(text, new Date(createdAt))
+    return { taskSuggestion: { title: instructionTitle(text).slice(0, 120), due: due.dueIso, reason: String(due.reason ?? '').slice(0, 80), recipientId: recipient.id } }
+  }
+
+  app.post('/api/messenger/conversations/:id/messages/:messageId/task', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
+    const conversations = Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []
+    const conversation = conversations.find((item) => item?.id === request.params.id)
+    if (!conversation || !isConversationVisibleToMember(conversation, request.auth, accounts)) {
+      response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '참여 중인 대화를 찾을 수 없습니다.' } })
+      return
+    }
+    const message = conversation.messages.find((item) => item?.id === request.params.messageId)
+    if (!message || message.deletedAt || !message.taskSuggestion) {
+      response.status(404).json({ error: { code: 'TASK_SUGGESTION_NOT_FOUND', message: '업무로 받을 수 있는 메시지가 아닙니다.' } })
+      return
+    }
+    if (!accountIdentityIds(request.auth, accounts).includes(message.taskSuggestion.recipientId)) {
+      response.status(403).json({ error: { code: 'TASK_SUGGESTION_NOT_RECIPIENT', message: '요청을 받은 사람만 이 메시지를 업무로 받을 수 있습니다.' } })
+      return
+    }
+    if (message.taskCreated) {
+      response.status(409).json({ error: { code: 'TASK_ALREADY_CREATED', message: '이미 업무로 받은 메시지입니다.', workItemId: message.taskCreated.workItemId } })
+      return
+    }
+    const title = String(request.body?.title ?? '').trim().slice(0, 120) || message.taskSuggestion.title
+    const dueInput = String(request.body?.due ?? '').trim()
+    const due = dueInput && !Number.isNaN(Date.parse(dueInput)) ? new Date(Date.parse(dueInput)).toISOString() : message.taskSuggestion.due
+    const now = new Date().toISOString()
+    const current = Array.isArray(tenantStore['work-items']?.data) ? tenantStore['work-items'].data : []
+    const workItem = {
+      id: newWorkItemId(current),
+      title,
+      // 업무 설명에는 그 한 마디만 옮긴다 — 받는 사람이 스스로 업무로 만든 말이다. 대화 나머지는 대화에 남는다.
+      description: String(message.text).slice(0, 2_000),
+      owner: request.auth.name,
+      ownerId: request.auth.id,
+      requestedBy: message.senderName,
+      requesterId: message.senderId,
+      due,
+      priority: /긴급|급히|asap|지금 바로/i.test(message.text) ? '긴급' : '보통',
+      status: '업무요청',
+      category: '일반',
+      createdAt: now,
+      origin: { kind: 'messenger', label: '1:1 대화에서 받음', detail: String(conversation.name ?? '').slice(0, 120), page: 'messenger', focusId: conversation.id },
+    }
+    const normalized = normalizeAdminWorkItems([workItem], request.auth.tenantId, operatorAwareAccounts(request.auth))
+    if (!normalized) { response.status(400).json({ error: { code: 'INVALID_WORK_ITEM', message: '업무 정보를 확인해 주세요.' } }); return }
+    const previousWork = tenantStore['work-items']
+    const previousConversations = tenantStore['messenger-conversations']
+    const nextConversation = {
+      ...conversation,
+      messages: conversation.messages.map((item) => (item.id === message.id ? { ...item, taskCreated: { workItemId: normalized[0].id, by: request.auth.id, at: now } } : item)),
+    }
+    tenantStore['work-items'] = { data: prependWithinCap(current, normalized[0], 1_000), updatedAt: now, updatedBy: request.auth.id }
+    tenantStore['messenger-conversations'] = { ...previousConversations, data: conversations.map((item) => (item.id === conversation.id ? nextConversation : item)), updatedAt: now, updatedBy: request.auth.id }
+    try {
+      await commitWorkspaceStore()
+    } catch {
+      tenantStore['work-items'] = previousWork
+      tenantStore['messenger-conversations'] = previousConversations
+      response.status(500).json({ error: { code: 'TASK_WRITE_FAILED', message: '업무를 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } })
+      return
+    }
+    events.publish(request.auth.tenantId, 'work', { key: 'work-items' })
+    events.publish(request.auth.tenantId, 'message', { key: 'messenger-conversations', conversationId: conversation.id })
+    // 요청한 사람에게 "받았다"는 사실을 알린다. 원문은 싣지 않는다(업무 제목만).
+    try {
+      notify(request.auth.tenantId, [{
+        type: 'task-assigned',
+        recipientId: message.senderId,
+        actorId: request.auth.id,
+        title: `${request.auth.name}님이 요청을 업무로 받았습니다`,
+        body: normalized[0].title,
+        page: 'tasks',
+        focusId: normalized[0].id,
+        source: { kind: 'work-item', id: normalized[0].id, label: '업무' },
+      }])
+    } catch { /* 알림 실패가 업무 생성을 되돌리지 않는다 */ }
+    response.status(201).json({ workItem: normalized[0], conversation: nextConversation })
+  })
+
   app.post('/api/messenger/conversations/:id/messages', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     const text = String(request.body?.text ?? '').trim()
     if (!text || text.length > 4_000) {
@@ -5823,6 +5965,7 @@ export function createApp(options = {}) {
       ...(attachments.length ? { attachments } : {}),
       ...(replyTo ? { replyTo } : {}),
       ...(threadRootId ? { threadRootId } : {}),
+      ...(!threadRootId ? directTaskSuggestion(previous, request.auth, text, createdAt) : {}),
     }
     const conversation = threadRootId
       ? {
@@ -5933,12 +6076,9 @@ export function createApp(options = {}) {
     try {
       // 스레드는 조용한 곁방이다 — 승격은 [업무로] 단추가 한다. 답글 한 줄이 지시 문형이라는 이유로
       // 그 스레드에 없던 관리자 전원에게 승인 큐 알림이 울리면 "참여자에게만 간다"는 문장이 깨진다.
-      if (!message.threadRootId) {
-        const recipientIds = (Array.isArray(conversation.participantIds) ? conversation.participantIds : []).filter((id) => id !== request.auth.id)
-        const recipients = conversation.type === 'direct'
-          ? recipientIds.map((id) => accounts.find((account) => account.id === id && account.tenantId === request.auth.tenantId)).filter(Boolean).map((account) => ({ id: account.id, name: account.name }))
-          : []
-        enqueueProposal(request.auth.tenantId, proposeTaskFromMessage({ message, conversation, recipients }))
+      // 1:1 대화는 관리자 승인 큐로 보내지 않는다 — 제안에는 원문이 실리고 관리자 전원에게 알림이 간다(가입 동의 위반).
+      if (!message.threadRootId && conversation.type !== 'direct') {
+        enqueueProposal(request.auth.tenantId, proposeTaskFromMessage({ message, conversation, recipients: [] }))
       }
     } catch { /* 제안 실패가 메시지 전송을 막지 않는다 */ }
     // 이 두 줄이 없어서, 화면이 쓰는 전송 경로로 보낸 메시지는 상대에게 실시간으로 닿지도
@@ -7871,6 +8011,17 @@ export function createApp(options = {}) {
     if (key === 'messenger-conversations' && Array.isArray(record?.data)) {
       data = record.data.filter((conversation) => !isDeveloperSupportConversation(conversation)
         || conversation.supportRequesterId === request.auth.id)
+      // 회사 관리자도 자기가 참여한 방만 받는다. 전에는 전 직원의 1:1 원문이 통째로 내려가 브라우저에 캐시됐다
+      // (가입 동의: 1:1 DM은 열람 대상이 아니다). 업무 채널을 감독해야 하면 기록이 남는 감독 열람 경로를 쓴다.
+      // 남의 그룹·팀 방은 **메시지를 뺀 목록 정보만** 준다 — 참여자가 모두 나간 방을 관리자가 회수(삭제)할 수 있어야 하지만,
+      // 그 방의 대화 내용을 기록 없이 읽을 수 있어서는 안 된다. 남의 1:1은 목록에도 없다.
+      if (request.auth.role === 'tenant-admin') {
+        data = data.flatMap((conversation) => {
+          if (isConversationVisibleToMember(conversation, request.auth, accounts)) return [conversation]
+          if (conversation?.type === 'direct' || !isConversationDeletableBy(conversation, request.auth, accounts)) return []
+          return [{ ...conversation, messages: [], metadataOnly: true }]
+        })
+      }
     }
     let parents = null
     if (request.auth.role === 'tenant-member' && Array.isArray(record?.data)) {

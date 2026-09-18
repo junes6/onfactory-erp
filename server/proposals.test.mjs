@@ -114,13 +114,29 @@ test('document upload and instruction message land in the approval queue; approv
     const uploaded = await readJson(upload)
     assert.equal(upload.status, 201, JSON.stringify(uploaded))
 
-    // 2) 메신저 지시 문형 → 업무 제안
-    const room = await readJson(await fetch(`${origin}/api/messenger/conversations/direct`, { method: 'POST', headers: jsonHeaders(admin.cookie), body: JSON.stringify({ participantId: 'USR-SUNSEA-PARK' }) }))
+    // 2) 업무 채널(그룹방)의 지시 문형 → 관리자 승인 큐의 업무 제안
+    const room = await readJson(await fetch(`${origin}/api/messenger/conversations/group`, { method: 'POST', headers: jsonHeaders(admin.cookie), body: JSON.stringify({ name: '원가 점검', participantIds: ['USR-SUNSEA-PARK'] }) }))
     assert.ok(room.conversation?.id, JSON.stringify(room))
     const send = await fetch(`${origin}/api/messenger/conversations/${room.conversation.id}/messages`, { method: 'POST', headers: jsonHeaders(admin.cookie), body: JSON.stringify({ text: '내일까지 8월 원가표 정리해 주세요' }) })
     assert.equal(send.status, 201)
     const chat = await fetch(`${origin}/api/messenger/conversations/${room.conversation.id}/messages`, { method: 'POST', headers: jsonHeaders(admin.cookie), body: JSON.stringify({ text: '수고했어요' }) })
     assert.equal(chat.status, 201)
+
+    // 2-1) 1:1의 지시 문형은 승인 큐로 가지 않는다(가입 동의: 1:1은 열람 대상이 아니다).
+    //      대신 받는 사람의 말풍선 위에 「내 업무로 받기」가 붙고, 받는 사람만 누를 수 있다.
+    const direct = await readJson(await fetch(`${origin}/api/messenger/conversations/direct`, { method: 'POST', headers: jsonHeaders(admin.cookie), body: JSON.stringify({ participantId: 'USR-SUNSEA-PARK' }) }))
+    const dm = await readJson(await fetch(`${origin}/api/messenger/conversations/${direct.conversation.id}/messages`, { method: 'POST', headers: jsonHeaders(admin.cookie), body: JSON.stringify({ text: '금요일까지 거래처 견적서 보내 주세요' }) }))
+    assert.equal(dm.message.taskSuggestion.recipientId, 'USR-SUNSEA-PARK')
+    assert.match(dm.message.taskSuggestion.title, /거래처 견적서/)
+    const bySender = await fetch(`${origin}/api/messenger/conversations/${direct.conversation.id}/messages/${dm.message.id}/task`, { method: 'POST', headers: jsonHeaders(admin.cookie), body: '{}' })
+    assert.equal(bySender.status, 403, '보낸 사람이 대신 받을 수는 없다')
+    const accepted = await readJson(await fetch(`${origin}/api/messenger/conversations/${direct.conversation.id}/messages/${dm.message.id}/task`, { method: 'POST', headers: jsonHeaders(member.cookie), body: '{}' }))
+    assert.equal(accepted.workItem.ownerId, 'USR-SUNSEA-PARK')
+    assert.equal(accepted.workItem.requesterId, 'USR-SUNSEA-ADMIN')
+    assert.equal(accepted.workItem.origin.kind, 'messenger')
+    assert.equal(accepted.conversation.messages.find((item) => item.id === dm.message.id).taskCreated.workItemId, accepted.workItem.id)
+    const twice = await fetch(`${origin}/api/messenger/conversations/${direct.conversation.id}/messages/${dm.message.id}/task`, { method: 'POST', headers: jsonHeaders(member.cookie), body: '{}' })
+    assert.equal(twice.status, 409, '한 말은 한 번만 업무가 된다')
 
     // 큐 조회 (관리자만)
     const memberQueue = await fetch(`${origin}/api/proposals`, { headers: { cookie: member.cookie } })
@@ -132,8 +148,10 @@ test('document upload and instruction message land in the approval queue; approv
     assert.equal(documentProposal.payload.category, '식품안전·인증')
     assert.ok(documentProposal.confidence >= .85)
     assert.ok(taskProposal, '지시 문형 제안이 큐에 있어야 한다')
-    assert.equal(queue.proposals.filter((item) => item.kind === 'task-from-message').length, 1, '일반 대화는 제안하지 않는다')
-    assert.equal(taskProposal.payload.ownerId, 'USR-SUNSEA-PARK')
+    assert.equal(queue.proposals.filter((item) => item.kind === 'task-from-message').length, 1, '일반 대화와 1:1 대화는 승인 큐에 제안하지 않는다')
+    assert.ok(!queue.proposals.some((item) => JSON.stringify(item).includes('거래처 견적서')), '1:1 원문이 승인 큐 어디에도 없다')
+    // 그룹방에서는 담당자를 짐작하지 않는다 — 수정 승인에서 사람이 정한다.
+    assert.equal(taskProposal.payload.ownerId, null)
     assert.equal(queue.pendingCount, 2)
 
     // generic PUT으로는 변경 불가
@@ -147,9 +165,9 @@ test('document upload and instruction message land in the approval queue; approv
     assert.equal(documents.find((item) => item.id === uploaded.document.id).category, '식품안전·인증')
 
     // ✏ 수정 승인 → diff 저장 + 업무 생성
-    const edit = await readJson(await fetch(`${origin}/api/proposals/${taskProposal.id}/decide`, { method: 'POST', headers: jsonHeaders(admin.cookie), body: JSON.stringify({ decision: 'edit', payload: { title: '8월 원가표 정리 및 검토', priority: '높음' } }) }))
+    const edit = await readJson(await fetch(`${origin}/api/proposals/${taskProposal.id}/decide`, { method: 'POST', headers: jsonHeaders(admin.cookie), body: JSON.stringify({ decision: 'edit', payload: { title: '8월 원가표 정리 및 검토', priority: '높음', owner: '박지현', ownerId: 'USR-SUNSEA-PARK' } }) }))
     assert.equal(edit.proposal.status, 'edited', JSON.stringify(edit))
-    assert.deepEqual(Object.keys(edit.proposal.decisionDiff).sort(), ['priority', 'title'])
+    assert.deepEqual(Object.keys(edit.proposal.decisionDiff).sort(), ['owner', 'ownerId', 'priority', 'title'])
     assert.equal(edit.proposal.decisionDiff.title.after, '8월 원가표 정리 및 검토')
     assert.equal(edit.resultRef.type, 'work-item')
     const workItems = store.tenants['TENANT-SUNSEA']['work-items'].data

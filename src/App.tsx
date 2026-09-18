@@ -58,7 +58,7 @@ import { brandLabelForIndustry, industrySurface, navigationForIndustry, resolveI
 import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
 import { WorkspaceNavigationEditButton, WorkspaceNavigationEditor, usePersonalNavigation } from './components/WorkspaceNavigation'
-import { useWorkspaceState } from './hooks/useWorkspaceState'
+import { clearWorkspaceCaches, useWorkspaceState } from './hooks/useWorkspaceState'
 import { deleteDocumentAttachments, uploadDocumentAttachments } from './utils/documentAttachments'
 import { CompletionModal, useDialogFocus } from './components/CompletionModal'
 import { GuestWorkspace } from './components/GuestWorkspace'
@@ -2011,6 +2011,9 @@ function SupportSessionModal({ tenant, tickets, onClose, onCreate }: {
 
 export default function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>('checking')
+  // 로그아웃·세션 만료·다른 탭의 로그아웃 — 어느 길로 나가든 브라우저에 남은 회사 데이터 캐시를 지운다.
+  // 공용 PC에서 다음 사람이 업무·메신저·휴가 기록을 읽지 못하게 한다(세션 없이 연 첫 화면도 같다).
+  useEffect(() => { if (authStatus === 'signed-out') clearWorkspaceCaches() }, [authStatus])
   const [account, setAccount] = useState<AuthAccount | null>(null)
   /**
    * 게스트 초대 링크(?guestInvite=<token>)로 들어왔는가. SPA에 라우터가 없어 쿼리로 받는다.
@@ -2923,7 +2926,7 @@ export default function App() {
     setSupportTenant(null)
     setPlatformFocusId(undefined)
     setNotificationFeed(null)
-    setMessengerUnread(4)
+    setMessengerUnread(0)
     setToast('')
     setAccount(null)
     setMode('tenant')

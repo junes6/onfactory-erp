@@ -73,6 +73,29 @@ function emitWorkspaceFailure(key: string, status: number | undefined, message: 
   if (status === 401) window.dispatchEvent(new CustomEvent('onfactory:auth-expired', { detail }))
 }
 
+/** 이 훅이 브라우저에 남기는 업무 데이터 캐시의 접두사. 한 곳에서만 정한다. */
+export const WORKSPACE_CACHE_PREFIX = 'onfactory-workspace:'
+
+/**
+ * 브라우저에 남은 회사 업무 데이터 캐시를 모두 지운다. 로그아웃·세션 만료·다른 탭의 로그아웃에서 부른다.
+ * 전에는 로그아웃해도 업무·일지·메신저·휴가·세무 데이터가 평문으로 남아, 공용 PC의 다음 사람이 읽을 수 있었다.
+ * 지운 키 수를 돌려준다(시험이 잰다).
+ */
+export function clearWorkspaceCaches(storage: Pick<Storage, 'length' | 'key' | 'removeItem'> | null = typeof window === 'undefined' ? null : window.localStorage): number {
+  if (!storage) return 0
+  try {
+    const keys: string[] = []
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index)
+      if (key && key.startsWith(WORKSPACE_CACHE_PREFIX)) keys.push(key)
+    }
+    for (const key of keys) storage.removeItem(key)
+    return keys.length
+  } catch {
+    return 0
+  }
+}
+
 function readCache<T>(cacheKey: string | null, initialValue: T, validate?: (value: unknown) => value is T): T {
   if (!cacheKey || typeof window === 'undefined') return initialValue
 
@@ -133,7 +156,7 @@ export function useWorkspaceState<T>(
 ): [T, WorkspaceStateSetter<T>] {
   const { enabled = true, seedWhenEmpty = true, scope, validate, reloadToken = 0 } = options
   const normalizedScope = scope?.trim() || null
-  const cacheKey = normalizedScope ? `onfactory-workspace:${normalizedScope}:${key}` : null
+  const cacheKey = normalizedScope ? `${WORKSPACE_CACHE_PREFIX}${normalizedScope}:${key}` : null
   const identity = useMemo(
     () => JSON.stringify([enabled, seedWhenEmpty, normalizedScope, key, reloadToken]),
     [enabled, key, normalizedScope, reloadToken, seedWhenEmpty],

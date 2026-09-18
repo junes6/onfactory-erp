@@ -1734,7 +1734,10 @@ test('sales channel health requires a channel secret contract, redacts connector
 })
 
 test('messenger direct rooms keep one conversation, record reads, and enforce leave/delete permissions while leave calendars stay private', async () => {
-  await withServer(createApp({ apiKey: '' }), async (origin) => {
+  // 원본 검사는 저장소 객체로 한다. 2026-09-18부터 관리자의 일반 조회는 자기가 참여한 방만 준다(1:1 사생활).
+  const store = { version: 2, tenants: {}, platform: {}, accountApprovals: {}, accountCredentials: {}, invitedAccounts: [], passwordResetRequests: [], guestGrants: [] }
+  const rawRooms = () => store.tenants['TENANT-SUNSEA']['messenger-conversations'].data
+  await withServer(createApp({ apiKey: '', initialWorkspaceStore: store, onWorkspaceStoreChange: () => {} }), async (origin) => {
     const admin = await login(origin, 'admin@sunsea.co.kr')
     const member = await login(origin, 'taesik.oh@sunsea.co.kr')
     const otherTenant = await login(origin, 'admin@pohangcoop.co.kr')
@@ -1812,8 +1815,7 @@ test('messenger direct rooms keep one conversation, record reads, and enforce le
 
     const activeRooms = await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: { cookie: member.cookie } })
     assert.deepEqual((await activeRooms.json()).data.map((conversation) => conversation.id), [reopened.conversation.id])
-    const rawAfterReopen = await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: { cookie: admin.cookie } })
-    const rawAfterReopenData = (await rawAfterReopen.json()).data
+    const rawAfterReopenData = rawRooms()
     assert.equal(rawAfterReopenData.find((conversation) => conversation.id === firstRoom.conversation.id).lifecycle, 'closed')
     assert.equal(rawAfterReopenData.filter((conversation) => conversation.lifecycle === 'active').length, 1)
 
@@ -1874,8 +1876,7 @@ test('messenger direct rooms keep one conversation, record reads, and enforce le
     assert.equal(JSON.stringify(afterDelete.conversation).includes('생산 계획을 확인해 주세요.'), false)
     assert.equal(JSON.stringify(afterDelete.conversation).includes('새 대화에서 다시 시작합니다.'), false)
 
-    const rawAfterDelete = await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: { cookie: admin.cookie } })
-    const rawAfterDeleteData = (await rawAfterDelete.json()).data
+    const rawAfterDeleteData = rawRooms()
     const deletedTombstone = rawAfterDeleteData.find((conversation) => conversation.id === reopened.conversation.id)
     assert.equal(deletedTombstone.lifecycle, 'deleted')
     assert.deepEqual(deletedTombstone.messages, [])
@@ -1894,7 +1895,10 @@ test('messenger direct rooms keep one conversation, record reads, and enforce le
       body: JSON.stringify({ text: '스레드 답글', threadRootId: threadRoot.id }),
     })
     assert.equal(sendThreadReply.status, 201)
-    const currentRaw = (await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: { cookie: admin.cookie } })).json()).data
+    const currentRaw = structuredClone(rawRooms())
+    // 관리자가 받는 목록은 자기가 참여한 방뿐이다 — 종료된 방의 묘비는 목록에 없다.
+    const adminListed = (await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: { cookie: admin.cookie } })).json()).data
+    assert.ok(adminListed.every((conversation) => (conversation.lifecycle ?? 'active') === 'active'))
     const forgedSenderData = structuredClone(currentRaw)
     const forgedActive = forgedSenderData.find((conversation) => conversation.id === afterDelete.conversation.id)
     forgedActive.messages.at(-1).senderName = '위조 발신자'

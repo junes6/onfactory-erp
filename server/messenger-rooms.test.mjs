@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -33,8 +34,14 @@ async function signIn(origin, who) {
 async function withApp(run) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'messenger-rooms-'))
   try {
-    const app = createApp({ apiKey: '', workspaceStoreFile: path.join(directory, 'state.json'), documentUploadDirectory: path.join(directory, 'documents') })
-    await withServer(app, run)
+    const file = path.join(directory, 'state.json')
+    const app = createApp({ apiKey: '', workspaceStoreFile: file, documentUploadDirectory: path.join(directory, 'documents') })
+    /**
+     * 저장된 방 원본. 2026-09-18부터 관리자의 일반 조회는 **자기가 참여한 방**(과 남의 그룹방 목록 정보)만 준다 —
+     * 전 직원의 1:1 원문을 내려주던 길을 닫았다. 그래서 묘비·수명 상태 같은 원본 검사는 저장 파일을 직접 읽는다.
+     */
+    const stored = () => JSON.parse(readFileSync(file, 'utf8')).tenants['TENANT-SUNSEA']['messenger-conversations'].data
+    await withServer(app, (origin) => run(origin, { stored }))
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
@@ -471,15 +478,18 @@ async function roomWithoutAdmin(origin, park, oh) {
 }
 
 test('회사 관리자는 자기가 참여하지 않은 그룹방을 목록에서 볼 뿐 아니라 지울 수 있다', async () => {
-  await withApp(async (origin) => {
+  await withApp(async (origin, { stored }) => {
     const admin = await signIn(origin, ADMIN)
     const park = await signIn(origin, PARK)
     const oh = await signIn(origin, OH)
     const room = await roomWithoutAdmin(origin, park, oh)
 
-    // (1) 목록에는 보인다 — 관리자의 저장소 조회에는 구성원 가시성 필터가 걸리지 않는다.
+    // (1) 목록에는 보인다 — 다만 **메시지를 뺀 목록 정보만**. 회수(삭제)할 수 있어야 하지만 내용을 기록 없이 읽어서는 안 된다.
     const listed = await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: admin.headers })).json()
-    assert.ok(listed.data.some((item) => item.id === room.id), '관리자 목록에 그룹방이 보여야 한다')
+    const listedRoom = listed.data.find((item) => item.id === room.id)
+    assert.ok(listedRoom, '관리자 목록에 그룹방이 보여야 한다')
+    assert.deepEqual(listedRoom.messages, [], '남의 방 대화 내용은 관리자에게도 내려가지 않는다')
+    assert.equal(listedRoom.metadataOnly, true)
 
     // (3) 그런데 들어갈 길은 없다 — 초대 라우트도 같은 읽기 가시성 술어로 방을 먼저 찾으므로
     // 관리자에게는 방 자체가 없는 것으로 보인다. 이 문은 닫힌 채로 둔다:
@@ -493,8 +503,7 @@ test('회사 관리자는 자기가 참여하지 않은 그룹방을 목록에�
     const deleted = await fetch(`${origin}/api/messenger/conversations/${room.id}`, { method: 'DELETE', headers: admin.headers })
     assert.equal(deleted.status, 204, await deleted.text())
 
-    const raw = (await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: admin.headers })).json()).data
-    const tombstone = raw.find((item) => item.id === room.id)
+    const tombstone = stored().find((item) => item.id === room.id)
     assert.equal(tombstone.lifecycle, 'deleted')
     assert.deepEqual(tombstone.messages, [], '삭제된 방은 메시지를 남기지 않는다')
     const seenByPark = await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: park.headers })).json()
@@ -503,7 +512,7 @@ test('회사 관리자는 자기가 참여하지 않은 그룹방을 목록에�
 })
 
 test('관리자라도 남의 1:1 대화는 지울 수 없다 — 삭제 권한을 넓히되 1:1까지 열지는 않는다', async () => {
-  await withApp(async (origin) => {
+  await withApp(async (origin, { stored }) => {
     const admin = await signIn(origin, ADMIN)
     const park = await signIn(origin, PARK)
     const oh = await signIn(origin, OH)
@@ -515,13 +524,15 @@ test('관리자라도 남의 1:1 대화는 지울 수 없다 — 삭제 권한�
 
     const deleted = await fetch(`${origin}/api/messenger/conversations/${direct.id}`, { method: 'DELETE', headers: admin.headers })
     assert.equal(deleted.status, 404, '남의 1:1 대화는 관리자에게도 없는 것으로 보여야 한다')
-    const raw = (await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: admin.headers })).json()).data
-    assert.equal(raw.find((item) => item.id === direct.id).lifecycle ?? 'active', 'active')
+    assert.equal(stored().find((item) => item.id === direct.id).lifecycle ?? 'active', 'active')
+    // 남의 1:1은 관리자 목록에도 없다(가입 동의: 1:1 DM은 열람 대상이 아니다).
+    const listed = (await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: admin.headers })).json()).data
+    assert.ok(!listed.some((item) => item.id === direct.id), '관리자 일반 조회에 남의 1:1이 실리지 않는다')
   })
 })
 
 test('마지막 참여자가 나가면 그 자리에서 방이 닫힌다 — 아무도 못 지우는 방을 애초에 만들지 않는다', async () => {
-  await withApp(async (origin) => {
+  await withApp(async (origin, { stored }) => {
     const admin = await signIn(origin, ADMIN)
     const park = await signIn(origin, PARK)
     const oh = await signIn(origin, OH)
@@ -529,12 +540,11 @@ test('마지막 참여자가 나가면 그 자리에서 방이 닫힌다 — 아
 
     const leave = (who) => fetch(`${origin}/api/messenger/conversations/${room.id}/leave`, { method: 'POST', headers: who.headers })
     assert.equal((await leave(oh)).status, 200)
-    const midway = (await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: admin.headers })).json()).data
+    const midway = stored()
     assert.equal(midway.find((item) => item.id === room.id).lifecycle ?? 'active', 'active', '아직 박지현이 남아 있다')
 
     assert.equal((await leave(park)).status, 200)
-    const raw = (await (await fetch(`${origin}/api/workspace/messenger-conversations`, { headers: admin.headers })).json()).data
-    const closed = raw.find((item) => item.id === room.id)
+    const closed = stored().find((item) => item.id === room.id)
     assert.equal(closed.lifecycle, 'deleted', '마지막 사람이 나간 방은 닫힌다')
     assert.deepEqual(closed.messages, [], '삭제 라우트가 만드는 것과 같은 모양의 묘비다')
   })

@@ -2179,3 +2179,12 @@ html[data-theme='dark'] :is(.journal-file-block,.journal-comment-composer textar
   font-size: var(--font-13);
   color: var(--color-warning-ink);
 }
+
+/* 1:1 업무 요청 제안(2026-09-18) — 받는 사람의 말풍선 아래에만 뜬다. 누르면 내 업무가 된다. */
+.messenger-task-chip { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-8); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--color-primary-soft); border-radius: var(--radius-8); background: var(--color-primary-soft); color: var(--ink); font-size: var(--font-13); }
+.messenger-task-chip span { display: grid; gap: var(--space-4); min-width: 0; flex: 1 1 180px; }
+.messenger-task-chip strong { color: var(--color-blue-deep); font-size: var(--font-13); }
+.messenger-task-chip small { overflow-wrap: anywhere; color: var(--subtle); font-size: var(--font-11); }
+.messenger-task-chip.is-done { color: var(--color-success-ink); border-color: var(--color-success-soft); background: var(--color-success-soft); }
+.messenger-task-chip.is-note { border: none; background: transparent; padding: var(--space-0); color: var(--subtle); font-size: var(--font-11); }
+.messenger-message.mine .messenger-task-chip { justify-content: flex-end; }

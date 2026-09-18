@@ -242,6 +242,12 @@ type ChatMessage = {
   sharedFromThreadId?: string
   /** 보낸 사람의 신원 종류. 'system'은 수신 웹훅이 올린 말이다(R16-L). */
   senderRole?: string
+  /**
+   * 1:1에서 지시 문형을 감지했을 때 서버가 붙인다. 관리자 승인 큐가 아니라 **받는 사람**에게만
+   * 「내 업무로 받기」로 보인다 — 원문은 대화 밖으로 나가지 않는다(2026-09-18).
+   */
+  taskSuggestion?: { title: string; due: string; reason: string; recipientId: string }
+  taskCreated?: { workItemId: string; by: string; at: string }
 }
 
 type Conversation = {
@@ -368,6 +374,8 @@ export function MessengerDrawer({
   const [query, setQuery] = useState('')
   const [message, setMessage] = useState('')
   const [messageSending, setMessageSending] = useState(false)
+  // 「내 업무로 받기」를 누른 메시지. 두 번 눌러 업무가 두 벌 생기지 않게 누르는 동안 막는다(서버도 409로 막는다).
+  const [acceptingTaskId, setAcceptingTaskId] = useState('')
   const [attachmentUploading, setAttachmentUploading] = useState(false)
   const [pendingAttachments, setPendingAttachments] = useState<Record<string, StoredDocumentAttachment[]>>({})
   const attachmentInputRef = useRef<HTMLInputElement>(null)
@@ -888,6 +896,30 @@ export function MessengerDrawer({
     const exists = current.some((item) => item.id === next.id)
     return exists ? current.map((item) => item.id === next.id ? next : item) : [next, ...current]
   }, { persist: false })
+
+  /** 1:1에서 받은 요청을 내 업무로 만든다. 요청한 사람이 요청자, 내가 담당자다. */
+  const acceptTaskSuggestion = async (message: ChatMessage) => {
+    if (!selectedId || acceptingTaskId) return
+    setAcceptingTaskId(message.id)
+    try {
+      const response = await fetch(`/api/messenger/conversations/${encodeURIComponent(selectedId)}/messages/${encodeURIComponent(message.id)}/task`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}) },
+        body: '{}',
+      })
+      const body = await response.json().catch(() => null) as { conversation?: Conversation; workItem?: { title?: string }; error?: { message?: string } } | null
+      if (!response.ok || !body?.conversation) {
+        onToast(body?.error?.message ?? '업무로 만들지 못했습니다.')
+        return
+      }
+      await replaceConversationLocally(body.conversation)
+      onToast(`「${body.workItem?.title ?? message.taskSuggestion?.title ?? '업무'}」을(를) 내 업무로 받았습니다. 업무 화면에서 확인하세요.`)
+    } catch {
+      onToast('메신저 서버에 연결하지 못했습니다.')
+    } finally {
+      setAcceptingTaskId('')
+    }
+  }
 
   const chooseConversation = async (id: string) => {
     if (!myConversations.some((item) => item.id === id)) return
@@ -1439,6 +1471,23 @@ export function MessengerDrawer({
               onEdit={() => setEditing({ id: item.id, text: item.text, inThread })}
               onDelete={() => removeMessage(item.id)}
             />
+          )}
+          {item.taskSuggestion && !removed && !inThread && (
+            item.taskCreated
+              ? <p className="messenger-task-chip is-done"><CheckCircle2 size={15} aria-hidden="true" /> 업무로 받음</p>
+              : currentIdentityIds.includes(item.taskSuggestion.recipientId)
+                ? (
+                  <div className="messenger-task-chip" role="group" aria-label="업무 요청 제안">
+                    <span>
+                      <strong>업무 요청으로 보여요</strong>
+                      <small>{item.taskSuggestion.title} · 마감 {formatDateLabel(item.taskSuggestion.due, false, true)}</small>
+                    </span>
+                    <Button tone="primary" size="sm" disabled={acceptingTaskId === item.id} onClick={() => void acceptTaskSuggestion(item)}>
+                      {acceptingTaskId === item.id ? '만드는 중…' : '내 업무로 받기'}
+                    </Button>
+                  </div>
+                )
+                : mine ? <p className="messenger-task-chip is-note">받는 사람에게 「업무로 받기」가 제안됐습니다</p> : null
           )}
           <ReactionRow reactions={item.reactions} currentIdentityIds={currentIdentityIds} onToggle={(emoji) => toggleReaction(item.id, emoji)} />
           {item.attachments && item.attachments.length > 0 && (
