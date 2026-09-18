@@ -3139,3 +3139,8 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
 .journal-save-line { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
 .journal-save-line small { color: var(--muted); font-size: var(--font-11); }
 .toast.is-error { border-color: var(--color-danger-soft); background: var(--color-danger-soft); color: var(--color-danger-ink); }
+/* 나눠 싣는 화면을 처음 열 때 */
+.page-loading { min-height: 240px; display: flex; align-items: center; justify-content: center; gap: var(--space-8); color: var(--muted); font-size: var(--font-15); }
+.page-loading-dot { width: 10px; height: 10px; border-radius: var(--radius-8); background: var(--color-primary); animation: page-loading-pulse 1s ease-in-out infinite; }
+@keyframes page-loading-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .page-loading-dot { animation: none; } }

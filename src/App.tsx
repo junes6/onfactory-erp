@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import {
   AlertTriangle, Archive, ArrowDownToLine, ArrowRight, ArrowUpFromLine, BarChart3, BookOpen, Boxes, Building2, Check,
   CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCheck, Clock3,
@@ -13,29 +13,22 @@ import Toast, { toastFromText, type ToastMessage } from './components/ui/Toast'
 import { MobileMoreSheet, MobileTabBar, MobileTaskList, MobileToday, mobileMoreItems, TODAY_TASK_LIMIT, type MobileTab } from './components/MobileShell'
 import { ChatBubbleIcon, NotificationBellIcon, BrandMark } from './components/AppIcons'
 import { GuestAcceptPage, LoginPage, PasswordChangePage, ProfileEditor, SettingsDrawer, type AccentChoice, type EasyModeChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
-import { ProjectSpacesPage } from './components/ProjectSpaces'
-import { TaxAssetsPage } from './components/TaxAssets'
-import { IpRightsPage } from './components/IpRights'
-import { ProductManagement, SalesChannels } from './components/BusinessPages'
-import { BillingDashboard } from './components/BillingDashboard'
-import { CompanyLibrary } from './components/CompanyLibrary'
-import { WikiPage } from './components/wiki/WikiPage'
-// R16-M4: 회의록. 녹음·전사·요약은 문서 편집과 성격이 다른 흐름이라 화면을 따로 둔다.
-import { MeetingNotesPage } from './components/MeetingNotes'
-import { DocumentsHub, type DocumentsTab } from './components/DocumentsHub'
-import { MaterialsPage } from './components/materials/MaterialsPage'
+// 화면은 처음 열 때 받는다(src/lazyPages.tsx) — 첫 화면에 필요 없는 공장·세무·콘솔까지 한 파일로 받던 것을 나눴다.
+// R16-M4: 회의록(MeetingNotesPage)은 녹음·전사·요약이 문서 편집과 성격이 다른 흐름이라 화면을 따로 둔다.
+import {
+  ApprovalQueue, BillingDashboard, CompanyLibrary, ComplianceCenter, DocumentsHub, FactoryManagement, GuestWorkspace, IpRightsPage,
+  ItServicesPage, LensPanel, MaterialsPage, MeetingNotesPage, PeopleOperationsPage, PersonalCorePage, PlatformConsole, ProductManagement,
+  ProjectSpacesPage, SalesChannels, TaxAssetsPage, WikiPage, prefetchPages,
+} from './lazyPages'
+import type { DocumentsTab } from './components/DocumentsHub'
 import { DailyJournalPage, MessengerDrawer, parseMessengerFocus, SchedulePage, type MessengerFocus } from './components/CollaborationSuite'
 import { CALENDAR_CALLBACK_MESSAGES } from './components/CalendarConnection'
-import { ComplianceCenter } from './components/ComplianceCenter'
 import {
   DashboardLayoutButton, FrequentFilesWidget, QuickLinksWidget, defaultDashboardWidgets,
   useDashboardPreferences, widgetClass, type DashboardWidgetPreference,
 } from './components/DashboardWorkspace'
-import { FactoryManagement } from './components/FactoryManagement'
 import './components/InventoryEnhancements.css'
-import { PeopleOperationsPage } from './components/PeopleOperations'
-import { ItServicesPage, type ItServicesView } from './components/ItServices'
-import { ApprovalQueue } from './components/ApprovalQueue'
+import type { ItServicesView } from './components/ItServices'
 import { SupportProgramsWidget } from './components/SupportProgramsWidget'
 import { PersonalTodoWidget } from './components/PersonalTodoWidget'
 import { IndustryProvider } from './modules/IndustryContext'
@@ -59,14 +52,13 @@ import type { ScheduleResult } from './utils/workTimeline'
 import { activeFilterCount, applyWorkFilters, DEFAULT_WORK_SORT, EMPTY_WORK_FILTERS, readStoredWorkView, sortWorkItems, writeStoredWorkView, type WorkFilters, type WorkSort } from './utils/workViews'
 import { boardDropAction, boardDropTargets, type BoardDrop } from './utils/workBoardDrop'
 import { brandLabelForIndustry, industrySurface, navigationForIndustry, resolveIndustry, routeLabel, routesForIndustry, type TenantRouteId, NAV_GROUP_ORDER, navGroupOf } from './modules/registry'
-import PlatformConsole, { type PlatformSection } from './components/PlatformConsole'
+import type { PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
 import { WorkspaceNavigationEditButton, WorkspaceNavigationEditor, usePersonalNavigation } from './components/WorkspaceNavigation'
 import { clearWorkspaceCaches, useWorkspaceState } from './hooks/useWorkspaceState'
 import { deleteDocumentAttachments, uploadDocumentAttachments } from './utils/documentAttachments'
 import { CompletionModal, useDialogFocus } from './components/CompletionModal'
 import { activityText, TaskCancelDialog, TaskComments, TaskEditDialog, TaskManageActions } from './components/WorkTaskDialogs'
-import { GuestWorkspace } from './components/GuestWorkspace'
 import { formatDateLabel, formatDateTime, formatMonthLabel, formatWorkDue, formatWorkRuleRun, seoulDateInputValue, seoulDateTimeInputValue, seoulLocalToUtcIso, seoulTimeOf, toIsoUtc } from './utils/dateTime'
 import { workStatusLabel, workStatusTone } from './utils/workStatus'
 import { childrenOf, isSubtask, isTopLevelIn, parentCandidates, parentTitleOf, progressLabel, subtaskBlockMessage, subtaskBlockReason, subtaskProgress, type ParentRef } from './utils/workTree'
@@ -75,9 +67,8 @@ import {
   type Tenant, type WorkEvidence, type WorkItem, type WorkRule,
 } from './domainData'
 import { Button, IconButton } from './components/ui/Button'
-import { LensPanel, type LensTarget } from './components/LensPanel'
+import type { LensTarget } from './components/LensPanel'
 import { DailyDigest } from './components/DailyDigest'
-import { PersonalCorePage } from './components/PersonalCorePage'
 import { BRAND } from './brand'
 
 type TenantPage = 'ai' | 'schedule' | 'tasks' | 'approvals' | 'journal' | 'projects' | 'finance' | 'ip' | 'judgement' | 'products' | 'inventory' | 'factory' | 'sales' | 'people' | 'wiki' | 'documents' | 'meetings' | 'compliance' | 'it-projects' | 'it-deliverables' | 'it-contracts'
@@ -245,6 +236,11 @@ function SharedCalendarPreview({ onOpen, events }: { onOpen: () => void; events:
       <Button tone="secondary" full type="button" onClick={onOpen}><CalendarDays size={17} /> 일정 등록</Button>
     </div>
   </section>
+}
+
+/** 화면을 처음 열 때(나눠 싣는 화면) 잠깐 보이는 자리. 빈 화면 대신 무엇을 하는 중인지 말한다. */
+function PageLoading() {
+  return <div className="page-loading" role="status" aria-live="polite"><span className="page-loading-dot" aria-hidden="true" /> 화면을 불러오는 중…</div>
 }
 
 const dashboardWidgetLabels: Record<DashboardWidgetPreference['id'], string> = {
@@ -2103,6 +2099,8 @@ export default function App() {
   // 로그아웃·세션 만료·다른 탭의 로그아웃 — 어느 길로 나가든 브라우저에 남은 회사 데이터 캐시를 지운다.
   // 공용 PC에서 다음 사람이 업무·메신저·휴가 기록을 읽지 못하게 한다(세션 없이 연 첫 화면도 같다).
   useEffect(() => { if (authStatus === 'signed-out') clearWorkspaceCaches() }, [authStatus])
+  // 로그인한 뒤 한가할 때 나머지 화면을 미리 받아 둔다(데스크톱만 — src/lazyPages.tsx).
+  useEffect(() => { if (authStatus === 'signed-in') prefetchPages() }, [authStatus])
   const [account, setAccount] = useState<AuthAccount | null>(null)
   /**
    * 게스트 초대 링크(?guestInvite=<token>)로 들어왔는가. SPA에 라우터가 없어 쿼리로 받는다.
@@ -3382,7 +3380,7 @@ export default function App() {
      * 개인 설정·프로필·토스트만 같은 부품을 공유한다.
      */
     return <>
-      <GuestWorkspace account={account} workspaceScope={workspaceScope} notificationFeed={notificationFeed} onReloadNotifications={loadNotifications} onLogout={logout} onToast={setToast} onOpenSettings={() => setSettingsOpen(true)} />
+      <Suspense fallback={<PageLoading />}><GuestWorkspace account={account} workspaceScope={workspaceScope} notificationFeed={notificationFeed} onReloadNotifications={loadNotifications} onLogout={logout} onToast={setToast} onOpenSettings={() => setSettingsOpen(true)} /></Suspense>
       <SettingsDrawer open={settingsOpen} guestMode onClose={() => setSettingsOpen(false)} profileName={account.name} profileRole={`게스트 · ${account.guestScope?.orgName || account.team || '외부 거래처'}`} companyName={account.tenantName ?? BRAND.name} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
       {profileOpen && <ProfileEditor account={account} onClose={() => setProfileOpen(false)} onToast={setToast} onSaved={(next) => { setAccount((current) => current ? { ...current, ...next } as AuthAccount : current) }} />}
       {toastMessage && <Toast message={toastMessage} onClose={() => setToastMessage(null)} />}
@@ -3467,7 +3465,7 @@ export default function App() {
             </div>
           </div>
         </header>
-        <main id="main-content" className="main-content" tabIndex={-1}>{phoneShell ? renderMobileTab() : renderPage()}</main>
+        <main id="main-content" className="main-content" tabIndex={-1}><Suspense fallback={<PageLoading />}>{phoneShell ? renderMobileTab() : renderPage()}</Suspense></main>
       </div>
 
       {phoneShell && (
@@ -3519,7 +3517,7 @@ export default function App() {
           </aside>
         </div>
       )}
-      {lensTarget && <LensPanel target={lensTarget} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} onClose={() => setLensTarget(null)} onToast={setToast} onPendingChange={setPendingProposals} />}
+      {lensTarget && <Suspense fallback={null}><LensPanel target={lensTarget} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} onClose={() => setLensTarget(null)} onToast={setToast} onPendingChange={setPendingProposals} /></Suspense>}
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} onExportCompany={account?.role === 'tenant-admin' ? exportCompanyData : undefined} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? BRAND.name} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
       {profileOpen && account && <ProfileEditor account={account} onClose={() => setProfileOpen(false)} onToast={setToast} onSaved={(next) => { setAccount((current) => current ? { ...current, ...next } as AuthAccount : current) }} />}
       <WorkspaceNavigationEditor open={navEditorOpen} source={tenantNavSource} preferences={tenantNavPreferences} onChange={setTenantNavPreferences} onClose={() => setNavEditorOpen(false)} />
