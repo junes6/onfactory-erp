@@ -111,3 +111,15 @@ test('휴대폰 더보기: 매일 쓰는 화면을 사이드바에서 골라 담
   assert.match(app, /items=\{mobileMoreItems\(personalizedTenantNav\)\}/)
   assert.match(app, /setMessengerOpen\(false\); setMoreSheetOpen\(false\) \}/)
 })
+
+test('나이 든 사람·작은 화면: 글자 크기는 상단에서 한 번에, 키우면 영문 장식 머리글이 사라지고, 휴대폰 입력칸은 16px', () => {
+  const app = read('src/App.tsx')
+  assert.match(app, /const NEXT_FONT_SIZE: Record<FontChoice, FontChoice> = \{ standard: 'large', large: 'extra', extra: 'standard' \}/)
+  assert.match(app, /className="top-icon-button font-size-trigger"/)
+  assert.match(app, /document\.documentElement\.dataset\.plainLabels = fontSize !== 'standard' \|\| easyMode === 'easy' \? 'on' : 'off'/)
+  assert.match(styles, /html\[data-plain-labels='on'\] :is\(\.eyebrow,[^)]*\.nav-caption\) \{ display: none; \}/)
+  assert.match(styles, /input:not\(\[type='checkbox'\]\):not\(\[type='radio'\]\):not\(\[type='range'\]\), select, textarea \{ font-size: var\(--font-15\) !important; \}/)
+  // 상단 단추 안의 글자는 빨간 수 배지가 아니다.
+  assert.match(styles, /\.top-icon-button > span:not\(\.ai-trigger-label\):not\(\.font-size-glyph\):not\(\.font-size-label\) \{/)
+  assert.match(tokens, /--color-sidebar-muted: color-mix\(in srgb, var\(--color-white\) 76%, transparent\);/)
+})

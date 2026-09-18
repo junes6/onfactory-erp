@@ -95,6 +95,9 @@ type SupportSessionRequest = { tenantId: string; ticketId: string; scope: string
 
 // R16-I4: 'approvals'를 직원에게 연다 — 자기 전자결재를 보는 화면이 여기 하나뿐이기 때문이다.
 // AI 제안(관리자 전용 라우트)은 화면이 role로 감춘다.
+/** 상단 [글자 크기]가 도는 순서와 이름(설정 화면과 같은 세 단계). */
+const NEXT_FONT_SIZE: Record<FontChoice, FontChoice> = { standard: 'large', large: 'extra', extra: 'standard' }
+const FONT_SIZE_LABEL: Record<FontChoice, string> = { standard: '보통', large: '크게', extra: '아주 크게' }
 const tenantMemberPages = new Set<PageId>(['ai', 'schedule', 'tasks', 'approvals', 'journal', 'projects', 'finance', 'ip', 'products', 'inventory', 'factory', 'people', 'wiki', 'documents', 'meetings', 'compliance', 'it-projects', 'it-deliverables', 'it-contracts'])
 const AUTH_SYNC_KEY = 'onfactory-auth-sync'
 const emptyWorkItems: WorkItem[] = []
@@ -2614,6 +2617,9 @@ export default function App() {
       // 다른 업무 화면의 글자·버튼·그리드를 일괄 확대하면 기능과 맥락이
       // 화면 아래로 밀리므로 기본 배치를 그대로 유지한다.
       document.documentElement.dataset.easyMode = easyHomeActive ? 'on' : 'off'
+      // 글자를 키웠거나 쉬운 화면을 고른 사람에게는 모든 화면에서 영문 장식 머리글(WORKFLOW·APPROVALS…)을 감춘다.
+      // 배치는 그대로 두고(위 결정) 읽을 것만 줄인다 — 전에는 50여 곳의 영문 라벨이 쉬운 화면 밖에서 그대로였다(감사).
+      document.documentElement.dataset.plainLabels = fontSize !== 'standard' || easyMode === 'easy' ? 'on' : 'off'
     }
     applyPreferences()
     media.addEventListener('change', applyPreferences)
@@ -3419,6 +3425,8 @@ export default function App() {
               })}</div>}
             </div>
             )}
+            {/* 글자 크기: 보통 → 크게 → 아주 크게. 전에는 작은 톱니(개인 설정) 안에만 있었다(감사). 휴대폰은 더보기 › 설정에서. */}
+            <button type="button" className="top-icon-button font-size-trigger" aria-label={`글자 크기: ${FONT_SIZE_LABEL[fontSize]}. 누르면 ${FONT_SIZE_LABEL[NEXT_FONT_SIZE[fontSize]]}`} title="글자 크기" onClick={() => { const next = NEXT_FONT_SIZE[fontSize]; setFontSize(next); setToast(`글자 크기를 '${FONT_SIZE_LABEL[next]}'(으)로 바꿨습니다.`) }}><span aria-hidden="true" className="font-size-glyph">가<small>가</small></span><span className="font-size-label">{FONT_SIZE_LABEL[fontSize]}</span></button>
             {tenantDataEnabled && <button type="button" className={'top-icon-button ai-trigger ' + (aiDrawerOpen ? 'active' : '')} aria-label="AI에게 묻기" aria-expanded={aiDrawerOpen} onClick={() => { setAiDrawerMounted(true); setAiDrawerOpen((value) => !value); setNotificationsOpen(false); setMoreSheetOpen(false) }}><Sparkles size={20} /><span className="ai-trigger-label">AI에게 묻기</span></button>}
             {mode === 'tenant' && <button type="button" className={'top-icon-button messenger-trigger ' + (messengerOpen ? 'active' : '')} aria-label={`사내 메신저 열기, 읽지 않은 대화 ${messengerUnread}개`} aria-controls="company-messenger" aria-expanded={messengerOpen} onClick={() => { setMessengerOpen((value) => !value); setNotificationsOpen(false) }}><ChatBubbleIcon />{messengerUnread > 0 && <span>{messengerUnread}</span>}</button>}
             <div className="notification-wrap" ref={notificationWrapRef}>

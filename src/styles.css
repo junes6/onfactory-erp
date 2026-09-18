@@ -184,9 +184,14 @@ html[data-theme='dark'] .nav-list button.active em { background: var(--color-pri
 /* [AI에게 묻기]는 글자까지 보인다 — 반짝이 아이콘 하나로는 무엇인지 알 수 없다. 좁은 화면에서만 아이콘으로 접는다. */
 .top-icon-button.ai-trigger { width: auto; display: inline-flex; align-items: center; gap: var(--space-8); padding: var(--space-0) var(--space-12); color: var(--forest-dark); }
 .ai-trigger-label { font-size: var(--font-13); font-weight: var(--weight-medium); white-space: nowrap; }
+/* [글자 크기] — 큰 '가'와 작은 '가', 옆에 지금 크기 이름. 좁은 화면에서는 감춘다(더보기 › 설정). */
+.top-icon-button.font-size-trigger { width: auto; display: inline-flex; align-items: center; gap: var(--space-8); padding: var(--space-0) var(--space-12); }
+.font-size-glyph { display: inline-flex; align-items: baseline; font-size: var(--font-15); font-weight: var(--weight-medium); line-height: 1; }
+.font-size-glyph small { font-size: var(--font-11); }
+.font-size-label { font-size: var(--font-13); font-weight: var(--weight-medium); white-space: nowrap; }
 .top-icon-button:hover, .top-icon-button.active { color: var(--forest); border-color: var(--color-blue-soft); background: var(--forest-soft); }
 /* 읽지 않은 수 배지. [AI에게 묻기]의 글자는 배지가 아니다. */
-.top-icon-button > span:not(.ai-trigger-label) {
+.top-icon-button > span:not(.ai-trigger-label):not(.font-size-glyph):not(.font-size-label) {
   position: absolute; z-index: 2; top: -7px; right: -7px; min-width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
   padding: var(--space-0) var(--space-4); border: var(--hairline) solid var(--surface); border-radius: var(--radius-8); color: var(--color-white); background: var(--color-danger); font-size: var(--font-11); font-weight: var(--weight-medium); line-height: 18px; white-space: nowrap;
 }
@@ -2664,6 +2669,8 @@ html[data-theme='dark'] :is(.workflow-card,.workflow-drawer,.workflow-column-mor
    v5: 쉬운 화면 모드 — 큰 글자·큰 버튼·영문 라벨 숨김
    ===================================================================== */
 html[data-easy-mode='on'] body { line-height: 1.65; }
+/* 글자를 키운 사람(또는 쉬운 화면): 모든 화면에서 영문 장식 머리글을 감춘다 — 배치는 그대로, 읽을 것만 줄인다. */
+html[data-plain-labels='on'] :is(.eyebrow,.collab-kicker,.page-kicker,.factory-page__kicker,.billing-section-kicker,.auth-overline,.nav-caption) { display: none; }
 html[data-easy-mode='on'] :is(.eyebrow,.collab-kicker,.page-kicker,.factory-page__kicker,.billing-section-kicker,.auth-overline,.nav-caption) { display: none; }
 html[data-easy-mode='on'] .nav-list button { min-height: 54px; }
 html[data-easy-mode='on'] .app-shell :is(input,select,textarea) { min-height: 50px; }
@@ -3092,6 +3099,9 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
   .app-shell:has(.mobile-tabbar) .toast { bottom: calc(56px + env(safe-area-inset-bottom) + var(--space-12)); }
   /* 닫기 버튼도 손가락 과녁(44px)에 맞춘다 — 실패 알림은 이 버튼으로만 닫힌다. */
   .toast > button { width: 44px; height: 44px; }
+  /* 입력칸 글자는 16px(--font-15) 아래로 내리지 않는다 — 14px 칸 30여 곳에서 iOS가 입력할 때 화면을 확대했다(감사). */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea { font-size: var(--font-15) !important; }
+  .top-icon-button.font-size-trigger { display: none; }
   /* 손가락 과녁 최소 크기. 공용 버튼의 크기는 Button.css에서 함께 올린다. */
   .mobile-line-list button.mobile-line-open { min-height: 44px; }
   /* 390px에서 가로로 밀리지 않게 한다. 넘치는 표는 표 안에서만 스크롤한다. */

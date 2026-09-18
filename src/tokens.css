@@ -82,8 +82,9 @@
   /* 워크스페이스(테넌트) 사이드바 — 포인트 컬러를 어둡게 눌러 만든다. 글자 토큰은 테마와 무관하게 밝은 계열. */
   --color-sidebar-base: #0E1A26;
   --color-sidebar: color-mix(in srgb, var(--color-primary) 64%, var(--color-sidebar-base));
-  --color-sidebar-text: color-mix(in srgb, var(--color-white) 92%, transparent);
-  --color-sidebar-muted: color-mix(in srgb, var(--color-white) 62%, transparent);
+  /* 사이드바 글자: 초록·청록 포인트 위에서 보조 글자가 4.5:1에 못 미쳤다(감사) — 한 단계 밝힌다. */
+  --color-sidebar-text: color-mix(in srgb, var(--color-white) 96%, transparent);
+  --color-sidebar-muted: color-mix(in srgb, var(--color-white) 76%, transparent);
   --color-sidebar-line: color-mix(in srgb, var(--color-white) 16%, transparent);
   --color-sidebar-raised: color-mix(in srgb, var(--color-white) 10%, transparent);
   --color-sidebar-raised-strong: color-mix(in srgb, var(--color-white) 18%, transparent);
