@@ -3,6 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { SEALED_PATTERN } from './secret-box.mjs'
 import { bundleAssignmentDrafts } from './notifications.mjs'
 import { NOTIFICATION_CHANNEL_IDS } from './notification-delivery.mjs'
+import { WORK_ITEMS_FULL } from './work-item-tree.mjs'
 
 /**
  * 외부 연동 — 받는 웹훅·보내는 웹훅·봉인된 비밀.
@@ -724,7 +725,9 @@ export function registerWebhookRoutes({
     if (!normalized) { response.status(400).json({ error: { code: 'WEBHOOK_TASK_INVALID', message: '업무 정보를 확인해 주세요.' } }); return }
     const previousRecord = tenantStore['work-items']
     const previousDeliveries = tenantStore[WEBHOOK_DELIVERIES_KEY]
-    tenantStore['work-items'] = { data: prependWithinCap(current, normalized[0], 1_000), updatedAt: workItem.createdAt, updatedBy: `webhook:${endpoint.id}` }
+    const nextWork = prependWithinCap(current, normalized[0])
+    if (!nextWork) { response.status(409).json({ error: WORK_ITEMS_FULL }); return }
+    tenantStore['work-items'] = { data: nextWork, updatedAt: workItem.createdAt, updatedBy: `webhook:${endpoint.id}` }
     // 받은 업무가 다시 발신 사건이 된다. 상태 변경과 배송 행은 한 커밋이고, 실패하면 함께 되돌아간다.
     dispatch.queueWebhookDeliveries(tenantId, 'work.created', {
       aggregateId: normalized[0].id, actor: null, occurredAt: workItem.createdAt,

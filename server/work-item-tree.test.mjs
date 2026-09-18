@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { bundleAssignmentDrafts } from './notifications.mjs'
 import {
-  CLOSED_STATUSES, MAX_TREE_DEPTH, openSubtaskCount, parentRefsFor, prependWithinCap, projectKeyOf, subtaskProgress, withParent, workItemTreeViolation,
+  CLOSED_STATUSES, MAX_TREE_DEPTH, WORK_ITEMS_CAP, WORK_ITEMS_FULL, openSubtaskCount, parentRefsFor, prependWithinCap, projectKeyOf, subtaskProgress, withParent, workItemTreeViolation,
 } from './work-item-tree.mjs'
 
 /**
@@ -125,17 +125,14 @@ test('10. bundleAssignmentDrafts는 받는 사람마다 한 건, 상위가 대�
   assert.deepEqual(two.map((draft) => draft.recipientId).sort(), ['U-OH', 'U-PARK'], 'ownerId 없는 행은 제외')
 })
 
-test('11. 상한에서 잘릴 때 자식을 가진 상위는 남기고 자식 없는 행부터 자른다', () => {
-  // 왜: 꼬리에서 상위가 잘리면 그 자식은 고아가 되고, 그 뒤로 관리자의 평범한 저장이 통째로 막힌다.
+test('11. 상한에 닿으면 지우지 않고 거절한다 — 넘친 만큼 오래된 업무를 말없이 지우던 것을 막는다', () => {
+  // 왜: 배열 끝에는 반복 규칙이 붙인 최근 업무가 있다. 자르면 아직 시작도 안 한 업무가 사라진다(감사 work-01).
   const current = [row('P'), row('C1', { parentId: 'P' }), row('T1'), row('T2')]
-  const kept = prependWithinCap(current, row('NEW'), 4)
-  assert.deepEqual(kept.map((item) => item.id), ['NEW', 'P', 'C1', 'T1'], '자식 없는 꼬리(T2)가 잘린다')
-  assert.equal(workItemTreeViolation(kept, current), null, '잘린 뒤에도 트리는 성립한다')
-
-  const tight = prependWithinCap([row('P'), row('C1', { parentId: 'P' })], row('NEW'), 2)
-  assert.deepEqual(tight.map((item) => item.id), ['NEW', 'P'], '자를 안전한 행이 없으면 예전대로 뒤에서 자르되 새 업무는 지킨다')
-
+  assert.equal(prependWithinCap(current, row('NEW'), 4), null, '상한이면 null — 부르는 쪽이 409로 답한다')
+  assert.equal(current.length, 4, '들어온 배열은 그대로다')
   const roomy = prependWithinCap([row('A')], row('NEW'), 10)
   assert.deepEqual(roomy.map((item) => item.id), ['NEW', 'A'], '상한 안에서는 그대로 앞에 붙는다')
+  assert.equal(WORK_ITEMS_CAP, 1_000)
+  assert.match(WORK_ITEMS_FULL.message, /보관함/, '무엇을 하면 되는지 같은 문장에서 말한다')
   assert.equal(MAX_TREE_DEPTH, 2, '깊이 상한은 화면 문구의 출처다')
 })

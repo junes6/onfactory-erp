@@ -480,6 +480,7 @@ export function registerAiConversationRoutes({
         title: String(request.body?.title ?? '').trim(),
       })
     } catch (error) {
+      if (error?.status === 409 && error?.code) { response.status(409).json({ error: { code: error.code, message: error.message } }); return }
       response.status(500).json({ error: { code: 'PROMOTION_FAILED', message: error?.message || '올리지 못했습니다.' } })
       return
     }

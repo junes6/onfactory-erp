@@ -740,6 +740,8 @@ export function registerMessengerRoomRoutes({
         response.status(409).json({ error: { code: 'THREAD_ALREADY_PROMOTED', message: error.message } })
         return
       }
+      // 업무 목록이 상한에 닿았으면 409와 그 문장(보관함 안내)을 그대로 옮긴다.
+      if (error?.status === 409 && error?.code) { response.status(409).json({ error: { code: error.code, message: error.message } }); return }
       response.status(500).json({ error: { code: 'PROMOTION_FAILED', message: error?.message || '올리지 못했습니다.' } })
       return
     }

@@ -54,26 +54,26 @@ export function newWorkItemId(existing = []) {
   return id
 }
 
+/** 진행 중 업무 목록의 상한. 넘으면 **지우지 않고 거절한다** — 끝난 업무는 매일 보관함으로 옮겨져 자리가 난다. */
+export const WORK_ITEMS_CAP = 1_000
+
+/** 상한에 닿았을 때 사람에게 하는 말. 무엇을 하면 되는지(보관함)를 같은 문장에서 말한다. */
+export const WORK_ITEMS_FULL = Object.freeze({
+  code: 'WORK_ITEMS_FULL',
+  message: '진행 중인 업무가 1,000건에 닿아 새 업무를 더할 수 없습니다. 끝난 업무는 매일 새벽 보관함으로 옮겨집니다 — 업무 화면의 [보관함]에서 지금 바로 옮길 수도 있습니다.',
+})
+
 /**
- * 상한을 지키며 새 업무 한 건을 목록 앞에 붙인다.
+ * 새 업무 한 건을 목록 앞에 붙인다. 상한에 닿았으면 null — 부르는 쪽이 409(WORK_ITEMS_FULL)로 답한다.
  *
- * 왜 그냥 slice(0, cap)이 아닌가: 꼬리에서 잘린 행이 자식을 가진 상위였다면 그 자식들은 고아가 되고,
- * 그 뒤로는 관리자의 평범한 저장이 통째로 SUBTASK_PARENT_NOT_FOUND에 막힌다. 사람이 손댄 적 없는
- * 자리에서 막다른 길이 생기는 셈이라, 잘라야 한다면 자식이 없는 행부터 자른다.
+ * 전에는 넘친 만큼 **가장 오래된 행을 말없이 지웠다**(2026-09-18 감사 work-01). 배열 끝에는 반복 규칙이 붙인
+ * 최근 업무가 있어, AI 제안 하나를 승인하면 아직 시작도 안 한 반복 업무가 사라졌다. 이제 지우지 않는다.
+ * 자리는 보관(server/archive.mjs)이 만든다: 끝난 업무를 먼저 보관함에 쓰고, 쓰기가 성공한 뒤에만 여기서 뺀다.
  */
-export function prependWithinCap(current, item, cap) {
-  const next = [item, ...current]
-  if (next.length <= cap) return next
-  const parentIds = new Set(next.filter(isSubtask).map((row) => row.parentId))
-  const kept = []
-  let overflow = next.length - cap
-  for (let index = next.length - 1; index >= 0; index -= 1) {
-    const row = next[index]
-    if (overflow > 0 && index > 0 && !parentIds.has(row?.id)) { overflow -= 1; continue }
-    kept.unshift(row)
-  }
-  // 꼬리가 전부 자식을 가진 상위라면(현실에선 거의 없다) 예전대로 뒤에서 자른다 — 새 업무는 지키고.
-  return kept.length > cap ? kept.slice(0, cap) : kept
+export function prependWithinCap(current, item, cap = WORK_ITEMS_CAP) {
+  const list = Array.isArray(current) ? current : []
+  if (list.length >= cap) return null
+  return [item, ...list]
 }
 
 /** 진행률. 자식이 없으면 null — '0%'를 만들지 않는다(없는 것은 없다고 보인다). */

@@ -1,6 +1,7 @@
 import { AI_LEVEL_LABELS, aiLevelLowered, aiLevelOf, aiMayList, aiMayReadBody, normalizeAiLevel } from './ai-policy.mjs'
 import { GUEST_ROLE, guestWorkItemViolation } from './guest-access.mjs'
 import { AUTOMATION_POLICIES_KEY, PROPOSALS_KEY } from './proposal-engine.mjs'
+import { WORK_ITEMS_FULL } from './work-item-tree.mjs'
 import {
   ARCHIVE_RETENTION_DAYS, BLOCK_ID_RE, LINK_ID_PREFIX, MAX_BLOCKS_PER_DOCUMENT, MAX_DOCUMENTS_PER_TENANT, MAX_ICON, MAX_OPS_PER_BATCH,
   MAX_SUMMARY, MAX_TITLE, PRESENCE_MIN_INTERVAL_MS, PRESENCE_TTL_MS,
@@ -1646,7 +1647,9 @@ export function registerWikiRoutes({
         const tenantStore = tenantStoreOf(auth.tenantId)
         const previousWork = tenantStore[WORK_ITEMS_KEY]
         const current = Array.isArray(previousWork?.data) ? previousWork.data : []
-        tenantStore[WORK_ITEMS_KEY] = { data: prependWithinCap(current, normalized[0], 1_000), updatedAt: now, updatedBy: auth.id }
+        const nextWork = prependWithinCap(current, normalized[0])
+        if (!nextWork) { fail(response, 409, WORK_ITEMS_FULL.code, WORK_ITEMS_FULL.message); return }
+        tenantStore[WORK_ITEMS_KEY] = { data: nextWork, updatedAt: now, updatedBy: auth.id }
         // 업무 생성과 블록 역링크 스탬프는 한 커밋에 들어간다 — 갈라지면 업무는 있는데
         // 문서에서 되짚을 수 없거나, 링크는 있는데 업무가 없는 상태가 남는다.
         const nextDocument = {

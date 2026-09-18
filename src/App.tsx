@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import {
-  AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, BarChart3, BookOpen, Boxes, Building2, Check,
+  AlertTriangle, Archive, ArrowDownToLine, ArrowRight, ArrowUpFromLine, BarChart3, BookOpen, Boxes, Building2, Check,
   CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCheck, Clock3,
   Database, Factory, FileClock, FileText, Headphones, Home, Layers3, ListChecks, LockKeyhole, Menu,
   NotebookPen, Package, Paperclip, PauseCircle, PlayCircle, Plus, Repeat2, Search, Settings2, ShieldCheck, ShoppingCart,
@@ -45,6 +45,7 @@ import { ParentChip, SubtaskProgressBar, SubtaskRows } from './components/Subtas
 import { ViewSwitcher, type WorkViewMode } from './components/ViewSwitcher'
 import { WorkTimeline } from './components/WorkTimeline'
 import { WorkListView } from './components/WorkListView'
+import { WorkArchiveDialog } from './components/WorkArchiveDialog'
 import { WorkCalendarView } from './components/WorkCalendarView'
 import { WorkFilterBar } from './components/WorkFilterBar'
 import { SavedViewMenu } from './components/SavedViewMenu'
@@ -831,6 +832,8 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
    */
   const [activeViewId, setActiveViewId] = useState('')
   const [boardDragMode, setBoardDragMode] = useState(false)
+  // 끝난 업무의 보관함. 진행 중 목록이 1,000건에서 거절될 때 자리를 만드는 곳이기도 하다.
+  const [archiveOpen, setArchiveOpen] = useState(false)
   const [dragCardId, setDragCardId] = useState('')
   const [dragOver, setDragOver] = useState<{ status: WorkItem['status']; drop: BoardDrop } | null>(null)
   const [dragStatus, setDragStatus] = useState('')
@@ -1311,6 +1314,8 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
           if (!next) { setGrabbedId(''); setGrabTarget(null) }
         }}
       >카드 옮기기</Button>}
+      {viewMode !== 'rules' && <Button tone="ghost" size="sm" type="button" onClick={() => setArchiveOpen(true)}><Archive size={15} aria-hidden="true" /> 보관함</Button>}
+      {archiveOpen && <WorkArchiveDialog workspaceScope={workspaceScope} onClose={() => setArchiveOpen(false)} onToast={onToast} />}
       {viewMode !== 'rules' && <div className="workflow-board-summary" aria-label="업무 요약">
         <span className={myActionCount > 0 ? 'is-attention' : ''}><strong>{myActionCount}</strong> 내 처리 필요</span>
         <span className={overdueCount > 0 ? 'is-danger' : ''}><strong>{overdueCount}</strong> 마감 지연</span>

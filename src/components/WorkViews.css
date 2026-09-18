@@ -307,3 +307,21 @@
   .work-calendar-day { min-height: 64px; }
   .work-filter-select { flex: 1 1 140px; }
 }
+
+/* 업무 보관함 — 끝난 업무가 옮겨지는 곳. 목록은 한 줄 원칙(제목 · 담당 · 끝난 날 · 꺼내기). */
+.work-archive-modal { width: min(640px, 100%); }
+.work-archive-modal h2 { display: flex; align-items: center; gap: var(--space-8); }
+.work-archive-body { display: grid; gap: var(--space-12); padding: var(--space-16); }
+.work-archive-search { display: flex; gap: var(--space-8); align-items: center; }
+.work-archive-search label { flex: 1; display: flex; align-items: center; gap: var(--space-8); padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); color: var(--muted); }
+.work-archive-search input { flex: 1; min-width: 0; min-height: 44px; border: none; background: transparent; color: var(--ink); font-size: var(--font-15); }
+.work-archive-search input:focus { outline: none; }
+.work-archive-count { margin: var(--space-0); color: var(--subtle); font-size: var(--font-13); }
+.work-archive-empty { margin: var(--space-0); padding: var(--space-24) var(--space-16); color: var(--muted); font-size: var(--font-13); text-align: center; }
+.work-archive-list { display: grid; margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.work-archive-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding: var(--space-12) var(--space-0); border-top: var(--hairline) solid var(--line); }
+.work-archive-list li:first-child { border-top: none; }
+.work-archive-list li > span { display: grid; gap: var(--space-4); min-width: 0; }
+.work-archive-list strong { overflow: hidden; color: var(--ink); font-size: var(--font-15); text-overflow: ellipsis; white-space: nowrap; }
+.work-archive-list small { color: var(--muted); font-size: var(--font-13); }
+.work-archive-modal > footer { display: flex; justify-content: flex-end; padding: var(--space-12) var(--space-16); border-top: var(--hairline) solid var(--line); }

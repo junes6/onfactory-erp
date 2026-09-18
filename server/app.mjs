@@ -42,13 +42,15 @@ import {
   WORK_RULE_FREQUENCIES as SCHEDULE_FREQUENCIES,
   WORK_RULE_MONTHLY_MODES as SCHEDULE_MONTHLY_MODES,
 } from './work-rule-schedule.mjs'
-import { workItemTreeViolation, openSubtaskCount, parentRefsFor, prependWithinCap, newWorkItemId, registerWorkItemTreeRoutes } from './work-item-tree.mjs'
+import { WORK_ITEMS_CAP, WORK_ITEMS_FULL, workItemTreeViolation, openSubtaskCount, parentRefsFor, prependWithinCap, newWorkItemId, registerWorkItemTreeRoutes } from './work-item-tree.mjs'
 import { isScheduleInstant, scheduleArrayViolation, registerWorkItemScheduleRoutes } from './work-item-schedule.mjs'
 // R16-H: 문서(위키). 라우트·권한·병합·이력이 이 모듈 한 벌 안에 있다 — app.mjs에는 라우트를 새로 쓰지 않는다.
 import { registerWikiRoutes } from './wiki.mjs'
 // R16-M: 회의록. 전사 어댑터와 라우트 한 벌. 어댑터는 오늘 none·text 둘뿐이고, 벤더가 없으면 그 사실을 503으로 답한다.
 import { createTranscription } from './transcription.mjs'
 import { conversationIdOfDocument, privateConversationOfDocument, redactDirectMessageProposals } from './messenger-privacy.mjs'
+import { createArchive } from './archive.mjs'
+import { WORK_ARCHIVE_AFTER_DAYS, WORK_ARCHIVE_PRESSURE, registerWorkArchiveRoutes } from './work-archive.mjs'
 import { registerMeetingNoteRoutes } from './meeting-notes.mjs'
 import { CUSTOM_FIELD_KEY, customFieldViolation, hasWorkFieldValuesShape, registerCustomFieldRoutes } from './custom-fields.mjs'
 import { registerSavedViewRoutes } from './saved-views.mjs'
@@ -1976,6 +1978,10 @@ export function createApp(options = {}) {
     documentUploadDirectory,
   })
   const billingService = options.billingService ?? createBillingService({ repository: createMemoryBillingRepository() })
+  // 보관함 — 상한에서 지우던 기록을 옮겨 두는 곳. 자료실과 같은 파일 저장소(로컬·NAS 또는 S3)를 쓴다.
+  const archive = options.archive ?? createArchive({ storage: documentStorage })
+  /** 업무 보관 라우트가 돌려주는 실행기. 스케줄러가 라우트 등록보다 먼저 선언되므로 나중에 채운다. */
+  let workArchive = null
   const workspaceStore = options.initialWorkspaceStore && typeof options.initialWorkspaceStore === 'object'
     ? options.initialWorkspaceStore
     : readWorkspaceStore(workspaceStoreFile)
@@ -3547,7 +3553,10 @@ export function createApp(options = {}) {
         if (guestViolation) { response.status(400).json({ error: guestViolation }); return }
         previousEffectRecord = tenantStore['work-items']
         const current = Array.isArray(tenantStore['work-items']?.data) ? tenantStore['work-items'].data : []
-        tenantStore['work-items'] = { data: prependWithinCap(current, normalized[0], 1_000), updatedAt: now, updatedBy: request.auth.id }
+        const nextWork = prependWithinCap(current, normalized[0])
+        // 상한이면 지우지 않고 거절한다. 제안은 대기 중으로 남고, 보관함에서 자리를 만든 뒤 다시 승인하면 된다.
+        if (!nextWork) { response.status(409).json({ error: WORK_ITEMS_FULL }); return }
+        tenantStore['work-items'] = { data: nextWork, updatedAt: now, updatedBy: request.auth.id }
         resultRef = { type: 'work-item', id: normalized[0].id }
       }
     }
@@ -4392,6 +4401,28 @@ export function createApp(options = {}) {
   })
   registerDigestJob('morning', { every: 'day', hour: 7 }, '아침 브리핑 생성')
   registerDigestJob('evening', { every: 'day', hour: 18, minute: 30 }, '저녁 브리핑 생성')
+
+  scheduler.register({
+    id: 'archive-sweep',
+    label: '보관함 정리',
+    description: '끝난 지 오래된 업무를 보관함으로 옮겨 진행 중 목록에 자리를 만듭니다. 지우지 않고 옮깁니다.',
+    spec: { every: 'day', hour: 2, minute: 30 },
+    run: async ({ now }) => {
+      if (!workArchive) return { detail: '보관 실행기가 아직 준비되지 않았습니다.' }
+      let archived = 0
+      const failures = []
+      for (const tenantId of tenantIdsForSchedule()) {
+        try {
+          const first = await workArchive.archiveCompletedWorkItems(tenantId, { now, olderThanDays: WORK_ARCHIVE_AFTER_DAYS })
+          archived += first.archived
+          // 목록이 차 가면 7일 지난 완료 업무까지 앞당겨 옮긴다 — 상한에 닿아 거절이 나기 전에.
+          if (first.remaining >= WORK_ARCHIVE_PRESSURE) archived += (await workArchive.archiveCompletedWorkItems(tenantId, { now, olderThanDays: 7 })).archived
+        } catch (error) { failures.push(`${tenantId}: ${error?.message ?? error}`) }
+      }
+      if (failures.length && !archived) throw new Error(`보관 실패 — ${failures.join(' / ')}`)
+      return { detail: `업무 ${archived}건 보관${failures.length ? ` · 실패 ${failures.length}곳` : ''}` }
+    },
+  })
 
   scheduler.register({
     id: 'backup-mirror',
@@ -5352,6 +5383,7 @@ export function createApp(options = {}) {
     const today = koreaDate()
     const generatedAt = new Date().toISOString()
     let changed = false
+    let capBlocked = false
     const rules = rulesRecord.data.map((rule) => {
       if (!hasWorkRuleShape(rule) || !rule.active) return rule
       let occurrence = rule.nextRun
@@ -5359,6 +5391,9 @@ export function createApp(options = {}) {
       let generatedForRule = false
       let rotationIndex = Number.isInteger(rule.rotationIndex) ? rule.rotationIndex : 0
       while (occurrence <= today && iterations < 24) {
+        // 진행 중 업무가 상한이면 이 회차를 만들지 않고 **다음 실행으로 미룬다**(nextRun을 넘기지 않는다).
+        // 전에는 상한 없이 붙였고, 그 뒤 다른 경로가 넘친 만큼 오래된 업무를 지웠다. 보관이 자리를 만들면 따라잡는다.
+        if (tasks.length >= WORK_ITEMS_CAP) { capBlocked = true; break }
         // 공휴일 정책은 만들 때 한 번만 적용한다. 주기는 원래 자리(occurrence)에서 계속 센다.
         const placed = applyHolidayPolicy(occurrence, rule.holidayPolicy ?? 'none')
         if (placed.date) {
@@ -5401,7 +5436,7 @@ export function createApp(options = {}) {
       changed = true
       return { ...rule, nextRun: occurrence, lastGeneratedAt: generatedAt, rotationIndex }
     })
-    if (!changed) return { created, rules }
+    if (!changed) return { created, rules, capBlocked }
 
     const updatedAt = new Date().toISOString()
     tenantStore['work-rules'] = { data: rules, updatedAt, updatedBy: actorId }
@@ -5421,7 +5456,7 @@ export function createApp(options = {}) {
       throw error
     }
     webhookDispatch.kick(tenantId)
-    return { created, rules }
+    return { created, rules, capBlocked }
   }
 
   const commitConversationData = async (tenantId, data, actorId) => {
@@ -5893,7 +5928,9 @@ export function createApp(options = {}) {
       ...conversation,
       messages: conversation.messages.map((item) => (item.id === message.id ? { ...item, taskCreated: { workItemId: normalized[0].id, by: request.auth.id, at: now } } : item)),
     }
-    tenantStore['work-items'] = { data: prependWithinCap(current, normalized[0], 1_000), updatedAt: now, updatedBy: request.auth.id }
+    const nextWork = prependWithinCap(current, normalized[0])
+    if (!nextWork) { response.status(409).json({ error: WORK_ITEMS_FULL }); return }
+    tenantStore['work-items'] = { data: nextWork, updatedAt: now, updatedBy: request.auth.id }
     tenantStore['messenger-conversations'] = { ...previousConversations, data: conversations.map((item) => (item.id === conversation.id ? nextConversation : item)), updatedAt: now, updatedBy: request.auth.id }
     try {
       await commitWorkspaceStore()
@@ -8176,6 +8213,9 @@ export function createApp(options = {}) {
       return
     }
     if (request.auth.role === 'tenant-admin' && key === 'work-items') {
+      // 상한을 넘기는 배열은 모양 오류가 아니라 자리 문제다. 전에는 '업무 데이터 또는 담당 계정 정보를 확인해 주세요'(400)라는
+      // 틀린 문장이 나갔다 — 사람은 담당자를 고치러 가고, 정작 할 일(보관)은 몰랐다.
+      if (Array.isArray(nextData) && nextData.length > WORK_ITEMS_CAP) { response.status(409).json({ error: WORK_ITEMS_FULL }); return }
       nextData = normalizeAdminWorkItems(nextData, request.auth.tenantId, operatorAwareAccounts(request.auth))
       if (!nextData) {
         response.status(400).json({ error: { code: 'INVALID_WORK_ITEMS', message: '업무 데이터 또는 담당 계정 정보를 확인해 주세요.' } })
@@ -8463,7 +8503,9 @@ export function createApp(options = {}) {
     const tenantStore = workspaceStore.tenants[auth.tenantId] ??= {}
     const previous = tenantStore['work-items']
     const current = Array.isArray(previous?.data) ? previous.data : []
-    tenantStore['work-items'] = { data: prependWithinCap(current, normalized[0], 1_000), updatedAt: now, updatedBy: auth.id }
+    const nextWork = prependWithinCap(current, normalized[0])
+    if (!nextWork) throw Object.assign(new Error(WORK_ITEMS_FULL.message), { code: WORK_ITEMS_FULL.code, status: 409 })
+    tenantStore['work-items'] = { data: nextWork, updatedAt: now, updatedBy: auth.id }
     // R16-L: 업무 생성과 배송 행은 한 커밋이다(복원도 함께).
     const previousDeliveries = tenantStore[WEBHOOK_DELIVERIES_KEY]
     queueWebhookDeliveries(auth.tenantId, 'work.created', {
@@ -8855,6 +8897,14 @@ export function createApp(options = {}) {
     app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, commitWorkspaceStore, events,
     hasWorkItemShape, workspaceRecordVersion, scheduleSentinel,
   })
+
+  // 끝난 업무의 보관함. 진행 중 목록(상한 1,000건)에 자리를 만드는 유일한 길이다 — 지우지 않고 옮긴다.
+  workArchive = registerWorkArchiveRoutes({
+    app, requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, workspaceStore, commitWorkspaceStore,
+    archive, events, isMemberWorkItem,
+  })
+  app.locals.archive = archive
+  app.locals.workArchive = workArchive
 
   // R16-I: 양식형 전자결재. 두 키는 WORKSPACE_STORE_KEYS에 등록돼 있지만 generic GET/PUT은
   // 403 APPROVAL_ROUTE_REQUIRED로 닫혀 있고(APPROVAL_ONLY_KEYS), 이 라우트들만 문이 된다.
