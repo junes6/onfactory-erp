@@ -47,3 +47,15 @@ test('구분선은 날짜가 바뀌는 자리에만, 화면에서 고정 "오늘
   assert.match(app, /if \(event\.kind === 'message' \|\| event\.kind === 'resync'\) messengerUnreadRefreshRef\.current\?\.\(\)/)
   assert.match(app, /fetch\('\/api\/messenger\/unread'/)
 })
+
+test('말풍선 동작: 손가락 화면은 [⋯] 하나로 접고, 삭제는 확인을 받고, 대화는 파일로 받을 수 있다', () => {
+  const extras = readFileSync(new URL('../src/components/MessengerExtras.tsx', import.meta.url), 'utf8')
+  assert.match(extras, /window\.matchMedia\('\(hover: none\)'\)\.matches/)
+  assert.match(extras, /if \(touch && !expanded\) \{/)
+  assert.match(extras, /const size = touch \? 'md' : 'sm'/, '펼친 단추는 44px(md)')
+  const suite = readFileSync(new URL('../src/components/CollaborationSuite.tsx', import.meta.url), 'utf8')
+  assert.match(suite, /if \(!window\.confirm\('이 메시지를 삭제할까요\?/)
+  assert.match(suite, /void exportConversation\(activeConversation\.id\) \}\}><Download size=\{17\} \/> 대화 내보내기\(\.txt\)/)
+  assert.match(suite, /먼저 대화 받아 두기/)
+  assert.match(suite, /이전 대화 \{selectedConversation\.archivedMessageCount\}건은 보관함으로 옮겨 두었습니다/)
+})

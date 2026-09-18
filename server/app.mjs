@@ -39,7 +39,7 @@ import { registerWikiRoutes } from './wiki.mjs'
 // R16-M: 회의록. 전사 어댑터와 라우트 한 벌. 어댑터는 오늘 none·text 둘뿐이고, 벤더가 없으면 그 사실을 503으로 답한다.
 import { createTranscription } from './transcription.mjs'
 import { conversationIdOfDocument, privateConversationOfDocument, redactDirectMessageProposals } from './messenger-privacy.mjs'
-import { createArchive } from './archive.mjs'
+import { ARCHIVE_PAGE_LIMIT, createArchive } from './archive.mjs'
 import { createOverflowSweeper, pageHotAndArchive } from './archive-sweeps.mjs'
 import { MATERIALS_KEY, registerMaterialRoutes } from './review-materials.mjs'
 import { WORK_ARCHIVE_AFTER_DAYS, WORK_ARCHIVE_PRESSURE, registerWorkArchiveRoutes } from './work-archive.mjs'
@@ -290,6 +290,8 @@ const CONVERSATION_OPTIONAL_FIELDS = [
   'projectId',
   // 본채널 마지막 말의 시각(ISO). 목록을 최근순으로 세우고 '어제'·'9월 16일'로 표기하는 데 쓴다(P1-3a).
   'lastAt',
+  // 보관함으로 옮긴 옛 말의 수(P1-3b). 방 위에 "이전 대화 N건은 보관함에"를 알린다.
+  'archivedMessageCount',
 ]
 const CONVERSATION_LIFECYCLES = new Set(['active', 'closed', 'deleted'])
 const PLATFORM_TICKET_PRIORITIES = new Set(['P1', 'P2', 'P3'])
@@ -341,6 +343,49 @@ function hasWorkOriginShape(value) {
 }
 
 /** 제안 종류 → 사람이 읽는 출처. 배지 문구와 되짚어 갈 곳을 함께 만든다. */
+/** 대화방 하나의 말 상한(스레드 답글 포함). 닿으면 가장 오래된 쪽을 보관함으로 옮겨 KEEP까지 줄인다(P1-3b). */
+const MESSENGER_ROOM_CAP = 5_000
+const MESSENGER_ROOM_KEEP = 4_000
+
+/**
+ * 대화 내보내기 본문. 날짜마다 머리줄, 말마다 "시:분 이름: 내용", 스레드 답글은 그 말 아래 "  └ " 로 들여 쓴다.
+ * 삭제된 말은 자리만 남기고, 첨부는 파일 이름만 적는다(파일 자체는 자료실에서 받는다).
+ */
+function messengerExportText({ conversation, messages, name, exporter, now }) {
+  const at = (message) => Date.parse(String(message?.createdAt ?? '')) || 0
+  const day = (message) => { const time = at(message); return time ? new Date(time + 9 * 3_600_000).toISOString().slice(0, 10) : '날짜 모름' }
+  const clock = (message) => { const time = at(message); return time ? new Date(time + 9 * 3_600_000).toISOString().slice(11, 16) : String(message?.time ?? '') }
+  const bodyOf = (message) => {
+    if (message?.deletedAt) return '(삭제된 메시지)'
+    const lines = [String(message?.text ?? '').trim()]
+    const files = (Array.isArray(message?.attachments) ? message.attachments : []).map((file) => String(file?.name ?? file?.fileName ?? '첨부')).filter(Boolean)
+    if (files.length) lines.push(`[첨부: ${files.join(', ')}]`)
+    return lines.filter(Boolean).join(' ') + (message?.editedAt ? ' (수정됨)' : '')
+  }
+  const ordered = [...messages].sort((left, right) => at(left) - at(right))
+  const replies = new Map()
+  for (const message of ordered) {
+    if (!message.threadRootId) continue
+    if (!replies.has(message.threadRootId)) replies.set(message.threadRootId, [])
+    replies.get(message.threadRootId).push(message)
+  }
+  const lines = [
+    `${BRAND.name} 메신저 대화 내보내기`,
+    `대화: ${name}`,
+    `내보낸 사람: ${exporter} · ${new Date(now.getTime() + 9 * 3_600_000).toISOString().slice(0, 16).replace('T', ' ')} (한국 시각)`,
+    `말: ${messages.length}건${conversation.archivedMessageCount ? ` (보관함에 옮겨 둔 옛 말 ${conversation.archivedMessageCount}건 포함)` : ''}`,
+    '',
+  ]
+  let currentDay = ''
+  for (const message of ordered) {
+    if (message.threadRootId) continue
+    if (day(message) !== currentDay) { currentDay = day(message); lines.push(`── ${currentDay} ──`) }
+    lines.push(`${clock(message)} ${message.senderName || '알 수 없음'}: ${bodyOf(message)}`)
+    for (const reply of replies.get(message.id) ?? []) lines.push(`  └ ${day(reply)} ${clock(reply)} ${reply.senderName || '알 수 없음'}: ${bodyOf(reply)}`)
+  }
+  return lines.join('\r\n')
+}
+
 /**
  * 이 사람이 이 제안을 볼 수 있는가. 규범 제안(principle)은 그 사람의 판단 기록이라 주인만 본다 —
  * 개인 코어 화면은 "다른 사람에게는 보이지 않습니다"라고 약속한다. 나머지는 관리자 큐의 것이다.
@@ -1300,6 +1345,7 @@ function hasConversationShape(value) {
   if (value.pinnedMessageIds !== undefined && (!Array.isArray(value.pinnedMessageIds) || value.pinnedMessageIds.length > 20 || value.pinnedMessageIds.some((id) => typeof id !== 'string'))) return false
   if (value.mutedFor !== undefined && (!Array.isArray(value.mutedFor) || value.mutedFor.some((id) => typeof id !== 'string'))) return false
   if (value.lastAt !== undefined && (typeof value.lastAt !== 'string' || Number.isNaN(Date.parse(value.lastAt)))) return false
+  if (value.archivedMessageCount !== undefined && (!Number.isInteger(value.archivedMessageCount) || value.archivedMessageCount < 0)) return false
   return hasDeveloperSupportConversationIntegrity(value)
     && Array.isArray(value.messages) && value.messages.every(hasMessageShape)
 }
@@ -6052,6 +6098,88 @@ export function createApp(options = {}) {
   })
 
   /**
+   * 방이 상한에 닿으면 가장 오래된 본채널 말(과 그 스레드 답글 전부)부터 보관함으로 옮겨 MESSENGER_ROOM_KEEP까지 줄인다.
+   * 보관함에 **먼저** 쓰고, 그 뒤에야 방에서 뺀 모양을 돌려준다. 저장(커밋)은 부르는 쪽이 하고, 실패하면 movedIds를 forget한다.
+   * 고정 목록에서 옮긴 말은 뺀다(방에 없는 말을 가리키지 않게). 답장 인용이 옮긴 말을 가리키면 인용 줄만 비는데,
+   * 원문은 [대화 내보내기]로 언제든 받을 수 있다.
+   */
+  const archiveOldestRoomMessages = async (tenantId, conversation, { keepIds = [] } = {}) => {
+    const keep = new Set(keepIds.map((id) => String(id ?? '').trim()).filter(Boolean))
+    const messages = Array.isArray(conversation.messages) ? conversation.messages : []
+    const excess = messages.length - MESSENGER_ROOM_KEEP
+    if (excess <= 0) return { conversation, movedIds: [] }
+    const replies = new Map()
+    for (const message of messages) {
+      if (!message?.threadRootId) continue
+      if (!replies.has(message.threadRootId)) replies.set(message.threadRootId, [])
+      replies.get(message.threadRootId).push(message.id)
+    }
+    const moved = new Set()
+    for (const message of messages) {
+      if (moved.size >= excess) break
+      if (!message?.id || message.threadRootId || keep.has(message.id)) continue
+      moved.add(message.id)
+      for (const replyId of replies.get(message.id) ?? []) moved.add(replyId)
+    }
+    const rows = messages.filter((message) => moved.has(message?.id)).map((message) => ({ ...message, conversationId: conversation.id }))
+    await archive.append(tenantId, 'messenger-messages', rows, { reason: 'room-cap', actor: 'system:messenger' })
+    return {
+      movedIds: [...moved],
+      conversation: {
+        ...conversation,
+        messages: messages.filter((message) => !moved.has(message?.id)),
+        archivedMessageCount: (Number.isInteger(conversation.archivedMessageCount) ? conversation.archivedMessageCount : 0) + rows.length,
+        ...(Array.isArray(conversation.pinnedMessageIds) ? { pinnedMessageIds: conversation.pinnedMessageIds.filter((id) => !moved.has(id)) } : {}),
+      },
+    }
+  }
+
+  /**
+   * 대화 내보내기(.txt). 이 방을 지금 볼 수 있는 사람만 받는다 — 1:1은 두 사람만(가입 동의: 1:1은 열람 대상이 아니다).
+   * 보관함으로 옮긴 옛 말까지 합쳐 시간순으로, 스레드 답글은 그 말 아래 들여 쓴다. 누가 언제 받았는지 감사 기록에 남긴다.
+   */
+  app.get('/api/messenger/conversations/:id/export', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    const tenantId = request.auth.tenantId
+    const conversations = Array.isArray(workspaceStore.tenants[tenantId]?.['messenger-conversations']?.data) ? workspaceStore.tenants[tenantId]['messenger-conversations'].data : []
+    const conversation = conversations.find((item) => item?.id === request.params.id)
+    if (!conversation || !isConversationVisibleToMember(conversation, request.auth, accounts)) {
+      response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '참여 중인 대화를 찾을 수 없습니다.' } })
+      return
+    }
+    const archived = []
+    try {
+      for (let offset = 0; offset < 100_000; offset += ARCHIVE_PAGE_LIMIT) {
+        const page = await archive.list(tenantId, 'messenger-messages', { offset, limit: ARCHIVE_PAGE_LIMIT, filter: (row) => row?.conversationId === conversation.id })
+        archived.push(...page.rows)
+        if (offset + ARCHIVE_PAGE_LIMIT >= page.total) break
+      }
+    } catch (error) {
+      console.error('[messenger] 보관된 옛 대화를 읽지 못했습니다', { message: error?.message })
+    }
+    const seen = new Set()
+    const all = [...archived, ...(Array.isArray(conversation.messages) ? conversation.messages : [])]
+      .filter((message) => message?.id && !seen.has(message.id) && seen.add(message.id))
+    const text = messengerExportText({ conversation, messages: all, name: conversationDisplayName(conversation, request.auth), exporter: request.auth.name, now: new Date() })
+    appendPlatformAudit(workspaceStore.platform, { tenantId, event: '메신저 대화 내보내기', scope: `${conversationDisplayName(conversation, request.auth)} · 말 ${all.length}건`, actor: request.auth.name, reference: conversation.id })
+    scheduleAuditCommit()
+    const fileName = `대화_${conversationDisplayName(conversation, request.auth).replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40)}_${new Date().toISOString().slice(0, 10)}.txt`
+    response.setHeader('content-type', 'text/plain; charset=utf-8')
+    response.setHeader('content-disposition', `attachment; filename="conversation.txt"; filename*=UTF-8''${encodeURIComponent(fileName)}`)
+    response.setHeader('x-content-type-options', 'nosniff')
+    response.send(String.fromCharCode(0xfeff) + text)
+  })
+
+  /** 내보내기 머리에 쓸 방 이름. 1:1은 상대 이름이다(저장된 name은 비어 있거나 두 사람 이름을 담는다). */
+  const conversationDisplayName = (conversation, auth) => {
+    if (conversation?.type === 'direct') {
+      const otherId = (conversation.participantIds ?? []).find((id) => id !== auth.id)
+      const other = accounts.find((account) => account.id === otherId)
+      if (other?.name) return `${other.name}님과의 대화`
+    }
+    return String(conversation?.name || '대화')
+  }
+
+  /**
    * 메신저의 안 읽은 수만. 상단 말풍선·휴대폰 '채팅' 배지가 쓴다 — 전에는 서랍을 열 때만 다시 세어,
    * 닫아 둔 사이 온 말이 배지에 오르지 않았다. 대화 본문은 내려보내지 않는다.
    * 세는 규칙은 화면(unreadForConversation)과 같다: 볼 수 있는 방의 본채널 말 중 내가 보내지도 읽지도 않은 것.
@@ -6209,17 +6337,29 @@ export function createApp(options = {}) {
     }
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const conversations = Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []
-    const previous = conversations.find((conversation) => conversation?.id === request.params.id)
+    let previous = conversations.find((conversation) => conversation?.id === request.params.id)
     if (!previous || !isConversationVisibleToMember(previous, request.auth, accounts)) {
       response.status(404).json({ error: { code: 'CONVERSATION_NOT_FOUND', message: '참여 중인 대화를 찾을 수 없습니다.' } })
       return
     }
     // 답글은 이 상한을 본문과 공유한다. 스레드에 따로 5,000건을 더 주면 방 하나가
     // 사실상 10,000건이 되어 PG 재조립과 백업이 이 방 하나에서 무너진다.
-    if (previous.messages.length >= 5_000) {
-      response.status(409).json({ error: { code: 'MESSENGER_MESSAGE_CAPACITY_REACHED', message: '이 대화의 메시지 보관 한도(스레드 답글 포함 5,000건)에 도달했습니다. 개발운영진에게 보관 처리를 요청해 주세요.' } })
-      return
+    // P1-3b: 전에는 여기서 409로 "개발운영진에게 보관 처리를 요청"하라며 쓰기를 막았다(보관 기능은 없었다).
+    // 이제 가장 오래된 말(과 그 스레드 답글)을 보관함에 먼저 쓰고 방에서 뺀 뒤 이어 쓴다. 보관이 실패하면 그때만 막는다.
+    let archivedMove = null
+    if (previous.messages.length >= MESSENGER_ROOM_CAP) {
+      try {
+        // 지금 답하려는 말·스레드 뿌리는 옮기지 않는다 — 옮기면 이 전송이 '없는 말에 답장'으로 거절된다.
+        archivedMove = await archiveOldestRoomMessages(request.auth.tenantId, previous, { keepIds: [request.body?.threadRootId, request.body?.replyTo] })
+        previous = archivedMove.conversation
+      } catch (error) {
+        console.error('[messenger] 옛 대화를 보관하지 못했습니다', { message: error?.message })
+        response.status(409).json({ error: { code: 'MESSENGER_MESSAGE_CAPACITY_REACHED', message: '이 대화가 보관 한도(스레드 답글 포함 5,000건)에 닿았는데 옛 대화를 보관함으로 옮기지 못했습니다. 잠시 뒤 다시 보내 주세요.' } })
+        return
+      }
     }
+    // 보관은 됐는데 이 전송의 커밋이 실패하면, 보관분을 가린다 — 같은 말이 방과 보관함 두 곳에 보이지 않게.
+    const forgetArchivedMove = () => { if (archivedMove?.movedIds.length) void archive.forget(request.auth.tenantId, 'messenger-messages', archivedMove.movedIds).catch(() => undefined) }
     const attachments = await resolveMessengerAttachments(request.body?.attachments, request.auth)
     if (!attachments) {
       response.status(400).json({ error: { code: 'INVALID_MESSAGE_ATTACHMENTS', message: '첨부파일을 찾을 수 없거나 현재 계정에 열람 권한이 없습니다. 파일을 다시 첨부해 주세요.' } })
@@ -6370,6 +6510,7 @@ export function createApp(options = {}) {
         else delete tenantStore['messenger-conversations']
         workspaceStore.platform.supportTickets = previousTickets
         workspaceStore.platform.auditEvents = previousAudits
+        forgetArchivedMove()
         response.status(500).json({ error: { code: 'SUPPORT_MESSAGE_WRITE_FAILED', message: '메시지와 지원 티켓을 함께 저장하지 못했습니다. 전송되지 않았으니 다시 시도해 주세요.' } })
         return
       }
@@ -6379,6 +6520,7 @@ export function createApp(options = {}) {
     try {
       await commitConversationData(request.auth.tenantId, conversations.map((item) => item.id === conversation.id ? conversation : item), request.auth.id)
     } catch {
+      forgetArchivedMove()
       response.status(500).json({ error: { code: 'MESSENGER_WRITE_FAILED', message: '메시지를 저장하지 못했습니다.' } })
       return
     }

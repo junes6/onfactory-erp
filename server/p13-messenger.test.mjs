@@ -81,3 +81,54 @@ test('1:1 새 말은 상대에게 알리고, 안 읽은 수는 서버가 세며,
     assert.ok(Number.isFinite(Date.parse(saved.lastAt)))
   })
 })
+
+function memoryStorage() {
+  const files = new Map()
+  return {
+    files, backend: 'local',
+    async put(key, body) { files.set(key, Buffer.from(body)); return { key, size: body.length } },
+    async get(key) { const value = files.get(key); if (!value) { const error = new Error('없음'); error.code = 'STORAGE_NOT_FOUND'; throw error } return value },
+    async delete(key) { return files.delete(key) },
+    async getSignedUrl(_key, options = {}) { return options.fallbackUrl ?? null },
+  }
+}
+
+test('방이 5,000건에 닿으면 막지 않고 가장 오래된 말(과 그 스레드 답글)을 보관함으로 옮긴다 — 내보내기에는 옛 말까지 다 있다', async () => {
+  const messages = []
+  for (let index = 0; index < 5_000; index += 1) {
+    const createdAt = new Date(Date.UTC(2026, 0, 1) + index * 60_000).toISOString()
+    messages.push({ id: `m-${index}`, senderId: 'USR-SUNSEA-ADMIN', senderName: '김서원', text: `기록 ${index}`, time: '09:00', createdAt, readBy: ['USR-SUNSEA-ADMIN'] })
+  }
+  // 가장 오래된 말(m-0)에 달린 답글은 뒤쪽(최근)에 있어도 뿌리와 함께 옮겨진다.
+  messages[4_990] = { ...messages[4_990], threadRootId: 'm-0' }
+  const room = {
+    id: 'grp-cap', type: 'team', kind: 'group', name: '생산 기록방', subtitle: '그룹', unread: 0, lastMessage: '기록 4999', lastTime: '09:00',
+    participantIds: ['USR-SUNSEA-ADMIN', 'USR-SUNSEA-OH'], ownerId: 'USR-SUNSEA-ADMIN', pinnedMessageIds: ['m-1', 'm-4999'], messages,
+  }
+  const store = { version: 2, tenants: { 'TENANT-SUNSEA': { 'messenger-conversations': { data: [room], updatedAt: '2026-09-18T00:00:00.000Z', updatedBy: 'seed' } } }, platform: {}, accountApprovals: {}, accountCredentials: {}, invitedAccounts: [], passwordResetRequests: [], guestGrants: [] }
+  const storage = memoryStorage()
+  await withServer(createApp({ apiKey: '', initialWorkspaceStore: store, onWorkspaceStoreChange: () => {}, documentStorage: storage }), async (origin) => {
+    const admin = await login(origin, 'admin@sunsea.co.kr')
+    const member = await login(origin, 'taesik.oh@sunsea.co.kr')
+    const sent = await fetch(`${origin}/api/messenger/conversations/grp-cap/messages`, { method: 'POST', headers: json(admin), body: JSON.stringify({ text: '5,001번째 말' }) })
+    assert.equal(sent.status, 201, await sent.clone().text())
+    const saved = store.tenants['TENANT-SUNSEA']['messenger-conversations'].data.find((item) => item.id === 'grp-cap')
+    assert.ok(saved.messages.length <= 4_001, `방에 ${saved.messages.length}건`)
+    assert.equal(saved.archivedMessageCount, 5_000 - (saved.messages.length - 1))
+    assert.ok(!saved.messages.some((item) => item.id === 'm-0' || item.id === 'm-4990'), '뿌리와 그 답글이 함께 옮겨졌다')
+    assert.ok(saved.messages.some((item) => item.text === '5,001번째 말'))
+    assert.deepEqual(saved.pinnedMessageIds, ['m-4999'], '옮긴 말은 고정 목록에서 뺀다')
+
+    const exported = await fetch(`${origin}/api/messenger/conversations/grp-cap/export`, { headers: { cookie: member } })
+    assert.equal(exported.status, 200)
+    assert.match(exported.headers.get('content-disposition') ?? '', /filename\*=UTF-8''/)
+    const text = await exported.text()
+    assert.match(text, /대화: 생산 기록방/)
+    assert.match(text, /09:00 김서원: 기록 0\r\n  └ .* 김서원: 기록 4990/, '옛 말과 그 스레드 답글이 들여 쓰여 있다')
+    assert.match(text, /김서원: 5,001번째 말/)
+    assert.equal((text.match(/김서원: 기록 \d+/g) ?? []).length, 5_000)
+    const outsider = await login(origin, 'jihyun.park@sunsea.co.kr')
+    assert.equal((await fetch(`${origin}/api/messenger/conversations/grp-cap/export`, { headers: { cookie: outsider } })).status, 404, '참여하지 않은 사람은 받지 못한다')
+    assert.ok((store.platform.auditEvents ?? []).some((event) => event.event === '메신저 대화 내보내기' && event.reference === 'grp-cap'), '누가 받았는지 감사 기록에 남는다')
+  })
+})

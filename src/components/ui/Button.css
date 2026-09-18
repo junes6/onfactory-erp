@@ -83,4 +83,6 @@ html[data-easy-mode='on'] .app-shell .ui-icon-button { width: 48px; height: 48px
 @media (max-width: 768px) {
   .ui-button { min-height: 44px; }
   .ui-button.is-sm { min-height: 44px; }
+  /* 아이콘 단추도 같다 — 전에는 42px·34px(작은 것)로 남아 말풍선 동작·목록의 휴지통을 잘못 누르기 쉬웠다. */
+  .ui-icon-button, .ui-icon-button.is-sm { width: 44px; height: 44px; }
 }

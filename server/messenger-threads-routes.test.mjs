@@ -941,9 +941,14 @@ test('답글은 방의 5,000건 상한을 본문과 나눠 쓴다', async () => 
     const first = await send(origin, admin, 'grp-R1', { text: '4,999번째 다음 답글', threadRootId: 'm-root' })
     assert.equal(first.status, 201, '4,999건일 때는 아직 들어간다')
 
+    // P1-3b: 상한(답글 포함 5,000건)에 닿으면 막지 않고 가장 오래된 말(과 그 답글)을 보관함으로 옮긴 뒤 이어 쓴다.
+    // 지금 답하려는 스레드의 뿌리는 옮기지 않는다 — 옮기면 이 답글이 '없는 뿌리'로 거절된다.
     const overflow = await send(origin, admin, 'grp-R1', { text: '한 건 더', threadRootId: 'm-root' })
-    assert.equal(overflow.status, 409)
-    assert.equal(overflow.body.error.code, 'MESSENGER_MESSAGE_CAPACITY_REACHED')
-    assert.match(overflow.body.error.message, /답글 포함/, '한도를 스레드와 나눠 쓴다는 사실이 문구에 있어야 한다')
+    assert.equal(overflow.status, 201, JSON.stringify(overflow.body))
+    const room = overflow.body.conversation
+    assert.ok(room.messages.length <= 4_002, `방에 ${room.messages.length}건`)
+    assert.ok(room.archivedMessageCount > 0, '옮긴 수가 방에 남는다')
+    assert.ok(room.messages.some((message) => message.id === 'm-root'), '답하던 스레드의 뿌리는 방에 남는다')
+    assert.ok(room.messages.some((message) => message.text === '한 건 더'))
   })
 })

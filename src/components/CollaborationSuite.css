@@ -1994,6 +1994,9 @@ html[data-theme='dark'] :is(.journal-file-block,.journal-comment-composer textar
 @media (hover: none) {
   .messenger-message-actions { opacity: 1; }
 }
+/* 손가락 화면에서 [⋯]로 펼친 단추 줄 — 44px 단추가 한 줄에 다 안 들어가면 다음 줄로 */
+.messenger-message-actions.is-expanded { flex-wrap: wrap; gap: var(--space-4); }
+.messenger-archived-note { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--space-8); margin: var(--space-8) var(--space-0); color: var(--muted); font-size: var(--font-13); }
 .messenger-reaction-picker {
   position: absolute;
   bottom: calc(100% + 4px);

@@ -263,6 +263,8 @@ type Conversation = {
   lastTime: string
   /** 본채널 마지막 말의 시각(ISO). 목록 정렬과 '어제'·'9월 16일' 표기에 쓴다. 예전 방에는 없다. */
   lastAt?: string
+  /** 보관함으로 옮긴 옛 말의 수(방이 5,000건에 닿을 때마다 오래된 쪽을 옮긴다). */
+  archivedMessageCount?: number
   messages: ChatMessage[]
   hiddenFor?: string[]
   lineageId?: string
@@ -1261,9 +1263,39 @@ export function MessengerDrawer({
     window.setTimeout(() => node.classList.remove('is-focused'), 1_600)
   }
 
-  const removeMessage = (messageId: string) =>
+  const removeMessage = (messageId: string) => {
+    // 전에는 누르자마자 지웠다 — 작은 휴지통을 잘못 누르면 모든 참여자에게서 그 말이 사라졌다.
+    if (!window.confirm('이 메시지를 삭제할까요?\n모든 참여자에게 "삭제된 메시지"로 바뀌고, 되돌릴 수 없습니다.')) return
     void callRoom(`/messages/${encodeURIComponent(messageId)}`, { method: 'DELETE' }, '메시지를 삭제하지 못했습니다.')
       .then((body) => { if (body) onToast('메시지를 삭제했습니다. 자리는 "삭제된 메시지"로 남습니다.') })
+  }
+
+  /** 대화를 .txt로 내려받는다(보관함으로 옮긴 옛 말 포함). 서버가 참여자만 허락하고 감사 기록에 남긴다. */
+  const exportConversation = async (conversationId: string) => {
+    try {
+      const response = await fetch(`/api/messenger/conversations/${encodeURIComponent(conversationId)}/export`, { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: { message?: string } } | null
+        throw new Error(body?.error?.message ?? '대화를 내보내지 못했습니다.')
+      }
+      const encoded = (response.headers.get('content-disposition') ?? '').match(/filename\*=UTF-8''([^;]+)/)?.[1]
+      const fileName = encoded ? decodeURIComponent(encoded) : 'conversation.txt'
+      const url = URL.createObjectURL(await response.blob())
+      try {
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.download = fileName
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+      } finally {
+        window.setTimeout(() => URL.revokeObjectURL(url), 0)
+      }
+      onToast('대화를 파일로 내려받았습니다.')
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : '대화를 내보내지 못했습니다.')
+    }
+  }
 
   const submitEdit = async () => {
     if (!editing?.text.trim()) return
@@ -1663,6 +1695,7 @@ export function MessengerDrawer({
                   <button type="button" aria-label="대화방 관리" aria-expanded={showConversationMenu} onClick={() => setShowConversationMenu((current) => !current)}><MoreHorizontal size={20} /></button>
                   {showConversationMenu && (
                     <div className="messenger-room-menu">
+                      <button type="button" onClick={() => { setShowConversationMenu(false); void exportConversation(activeConversation.id) }}><Download size={17} /> 대화 내보내기(.txt)</button>
                       {!readOnlyRooms && activeConversation.kind === 'group' && (activeConversation.ownerId === currentUserId || canManage) && (
                         <button type="button" onClick={() => { setGroupDialog('manage'); setShowConversationMenu(false) }}><Users size={17} /> 방 이름·참여자 관리</button>
                       )}
@@ -1739,6 +1772,13 @@ export function MessengerDrawer({
             )}
 
             <div className="messenger-messages" aria-live="polite">
+              {/* 방이 5,000건에 닿으면 가장 오래된 말을 보관함으로 옮긴다 — 사라진 것이 아니라는 것을 그 자리에서 말한다. */}
+              {Boolean(selectedConversation.archivedMessageCount) && hiddenMessageCount === 0 && (
+                <div className="messenger-archived-note" role="note">
+                  <span>이전 대화 {selectedConversation.archivedMessageCount}건은 보관함으로 옮겨 두었습니다.</span>
+                  <Button tone="quiet" size="sm" onClick={() => void exportConversation(selectedConversation.id)}><Download size={15} /> 전체 대화 받기</Button>
+                </div>
+              )}
               {hiddenMessageCount > 0 && (
                 <div className="messenger-load-older">
                   <Button tone="quiet" size="sm" onClick={() => setVisibleCount((count) => count + MESSAGE_WINDOW)}>
@@ -2032,6 +2072,7 @@ export function MessengerDrawer({
           pending={conversationActionPending}
           onConfirm={() => void performConversationAction()}
           onClose={() => { if (!conversationActionPending) setConversationAction(null) }}
+          onExport={() => void exportConversation(activeConversation.id)}
         />
       )}
     </div>
@@ -2045,6 +2086,7 @@ function ConversationActionDialog({
   pending,
   onConfirm,
   onClose,
+  onExport,
 }: {
   action: 'leave' | 'delete'
   conversationName: string
@@ -2052,6 +2094,8 @@ function ConversationActionDialog({
   pending: boolean
   onConfirm: () => void
   onClose: () => void
+  /** 지우기 전에 대화를 파일로 받아 둘 수 있게 한다(삭제는 되돌릴 수 없다). */
+  onExport?: () => void
 }) {
   const dialogRef = useOverlayFocus(true, onClose)
   const deleting = action === 'delete'
@@ -2075,7 +2119,7 @@ function ConversationActionDialog({
           </div>
         </div>
         <footer className="collab-dialog-footer">
-          <span />
+          {deleting && onExport ? <Button tone="ghost" type="button" onClick={onExport} disabled={pending}><Download size={16} /> 먼저 대화 받아 두기</Button> : <span />}
           <div>
             <Button tone="ghost" type="button" onClick={onClose} disabled={pending}>취소</Button>
             <Button tone={deleting ? 'danger' : 'primary'} type="button" data-autofocus onClick={onConfirm} disabled={pending}>{pending ? '처리 중…' : deleting ? '삭제 확정' : '나가기'}</Button>

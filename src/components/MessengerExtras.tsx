@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, CornerUpLeft, Hash, MessagesSquare, Pencil, Pin, PinOff, Search, SmilePlus, Trash2, UserMinus, UserPlus, X } from 'lucide-react'
+import { Check, CornerUpLeft, Hash, MessagesSquare, MoreHorizontal, Pencil, Pin, PinOff, Search, SmilePlus, Trash2, UserMinus, UserPlus, X } from 'lucide-react'
 
 import { Button, IconButton } from './ui/Button'
 
@@ -92,6 +92,14 @@ export function MessageActionBar({
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const pickerRef = useRef<HTMLDivElement>(null)
+  /**
+   * 손가락 화면(마우스 올리기가 없는 기기)에서는 전에 답장·스레드·반응·고정·수정·삭제 여섯 개(34px)가 모든 말풍선 아래
+   * 늘 떠 있어, 화면이 단추로 덮이고 잘못 누르기 쉬웠다. 이제 [⋯] 하나만 두고, 누르면 44px 단추로 펼친다.
+   */
+  const touch = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(hover: none)').matches
+  const [expanded, setExpanded] = useState(false)
+  const size = touch ? 'md' : 'sm'
+  const collapse = () => { if (touch) setExpanded(false) }
 
   useEffect(() => {
     if (!pickerOpen) return undefined
@@ -108,18 +116,26 @@ export function MessageActionBar({
     }
   }, [pickerOpen])
 
+  if (touch && !expanded) {
+    return (
+      <div className="messenger-message-actions" ref={pickerRef}>
+        <IconButton tone="quiet" aria-label="이 메시지로 할 일(답장·반응·수정·삭제)" aria-expanded={false} onClick={() => setExpanded(true)}><MoreHorizontal size={18} /></IconButton>
+      </div>
+    )
+  }
   return (
-    <div className="messenger-message-actions" ref={pickerRef}>
-      <IconButton tone="quiet" size="sm" aria-label="답장" onClick={onReply}><CornerUpLeft size={15} /></IconButton>
-      {onOpenThread && <IconButton tone="quiet" size="sm" aria-label="스레드 열기" onClick={onOpenThread}><MessagesSquare size={15} /></IconButton>}
-      <IconButton tone="quiet" size="sm" aria-label="반응 남기기" aria-expanded={pickerOpen} onClick={() => setPickerOpen((open) => !open)}><SmilePlus size={15} /></IconButton>
-      {canPin && pinnable && <IconButton tone="quiet" size="sm" aria-label={pinned ? '고정 해제' : '고정'} onClick={onPin}>{pinned ? <PinOff size={15} /> : <Pin size={15} />}</IconButton>}
-      {canEdit && <IconButton tone="quiet" size="sm" aria-label="메시지 수정" onClick={onEdit}><Pencil size={15} /></IconButton>}
-      {canDelete && <IconButton tone="quiet" size="sm" aria-label="메시지 삭제" onClick={onDelete}><Trash2 size={15} /></IconButton>}
+    <div className={`messenger-message-actions${touch ? ' is-expanded' : ''}`} ref={pickerRef}>
+      <IconButton tone="quiet" size={size} aria-label="답장" onClick={() => { onReply(); collapse() }}><CornerUpLeft size={15} /></IconButton>
+      {onOpenThread && <IconButton tone="quiet" size={size} aria-label="스레드 열기" onClick={() => { onOpenThread(); collapse() }}><MessagesSquare size={15} /></IconButton>}
+      <IconButton tone="quiet" size={size} aria-label="반응 남기기" aria-expanded={pickerOpen} onClick={() => setPickerOpen((open) => !open)}><SmilePlus size={15} /></IconButton>
+      {canPin && pinnable && <IconButton tone="quiet" size={size} aria-label={pinned ? '고정 해제' : '고정'} onClick={() => { onPin(); collapse() }}>{pinned ? <PinOff size={15} /> : <Pin size={15} />}</IconButton>}
+      {canEdit && <IconButton tone="quiet" size={size} aria-label="메시지 수정" onClick={() => { onEdit(); collapse() }}><Pencil size={15} /></IconButton>}
+      {canDelete && <IconButton tone="quiet" size={size} aria-label="메시지 삭제" onClick={() => { onDelete(); collapse() }}><Trash2 size={15} /></IconButton>}
+      {touch && <IconButton tone="quiet" size={size} aria-label="메시지 메뉴 닫기" onClick={() => { setExpanded(false); setPickerOpen(false) }}><X size={15} /></IconButton>}
       {pickerOpen && (
         <div className="messenger-reaction-picker" role="menu" aria-label="반응 고르기">
           {QUICK_REACTIONS.map((emoji) => (
-            <button key={emoji} type="button" role="menuitem" aria-label={`${emoji} 반응`} onClick={() => { onReact(emoji); setPickerOpen(false) }}>
+            <button key={emoji} type="button" role="menuitem" aria-label={`${emoji} 반응`} onClick={() => { onReact(emoji); setPickerOpen(false); collapse() }}>
               <span aria-hidden="true">{emoji}</span>
             </button>
           ))}

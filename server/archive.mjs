@@ -36,6 +36,8 @@ export const ARCHIVE_COLLECTIONS = Object.freeze({
   'project-posts': '프로젝트 글',
   opportunities: '외부 기회',
   'platform-actions': '운영 조치',
+  // P1-3b: 5,000건에 닿은 대화방의 가장 오래된 말(과 그 스레드 답글). 행마다 conversationId가 붙어 있다.
+  'messenger-messages': '메신저 옛 대화',
 })
 
 export class ArchiveError extends Error {
