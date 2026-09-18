@@ -1,4 +1,4 @@
-import { seoulDateInputValue } from './dateTime.ts'
+import { seoulDateInputValue, seoulTimeOf } from './dateTime.ts'
 
 /**
  * 메신저의 날짜·시각 표기. 전에는 모든 방 위에 날짜와 무관하게 '오늘'이 붙고, 목록 시각은 시:분만 있어
@@ -42,7 +42,7 @@ export function listTimeLabel(iso: string | undefined, fallback = '', now = new 
   if (!day) return fallback
   const offset = dayOffset(day, now)
   if (offset === 0) {
-    return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(String(iso)))
+    return seoulTimeOf(new Date(String(iso)), fallback)
   }
   if (offset === 1) return '어제'
   const [year, month, date] = day.split('-').map(Number)
