@@ -252,7 +252,7 @@ const dashboardWidgetLabels: Record<DashboardWidgetPreference['id'], string> = {
   ai: 'AI 업무 대화',
   files: '자주 찾는 파일',
   schedule: '공유 일정',
-  todo: 'To Do List',
+  todo: '내 할 일',
   activity: '지금 회사에서',
   work: '다음 업무',
   links: '업무 바로가기',
@@ -362,8 +362,13 @@ function AIHome({ workItems, products, salesChannels, itProjects, itContracts, c
         .filter((channel) => ['주의', '오류'].includes(channel.status))
         .map((channel) => ({ title: `${channel.name} 연결 상태를 확인해 주세요`, detail: `현재 채널 상태가 ${channel.status}로 보고됐습니다.`, page: 'sales' as PageId })),
     ]
-  const urgentWork = openWork.filter((item) => item.priority === '긴급')
-  const attentionCount = moduleAlerts.length + urgentWork.length
+  // 마감이 지난 업무는 반드시 주의로 올린다. 전에는 '긴급' 우선순위만 세어, 같은 화면의 할 일 목록이 '2일 지남'이라고
+  // 쓰는데 '중요 알림'은 '긴급 점검 항목이 없습니다'라고 했다(감사 live-ui-06). 확인을 기다리는 업무(결재대기)는 담당의 몫을 마쳤다.
+  const nowMs = Date.now()
+  const overdueWork = openWork.filter((item) => item.status !== '결재대기' && Number.isFinite(Date.parse(item.due)) && Date.parse(item.due) < nowMs)
+    .sort((left, right) => Date.parse(left.due) - Date.parse(right.due))
+  const urgentWork = openWork.filter((item) => item.priority === '긴급' && !overdueWork.includes(item))
+  const attentionCount = moduleAlerts.length + overdueWork.length + urgentWork.length
   const headlineValue = surface.headlineChip.metric === 'active-projects'
     ? itProjects.filter((project) => ['수주 확정', '진행 중', '검수'].includes(project.status)).length
     : salesChannels.reduce((sum, channel) => sum + (Number.isFinite(channel.orders) ? channel.orders : 0), 0)
@@ -371,7 +376,10 @@ function AIHome({ workItems, products, salesChannels, itProjects, itContracts, c
     ? itProjects.length > 0 || itContracts.length > 0
     : products.length > 0 || salesChannels.length > 0
   const operatingDataAvailable = moduleDataAvailable || calendarEvents.length > 0 || workItems.length > 0
-  const dashboardAlert = moduleAlerts[0]
+  const dashboardAlert = (overdueWork[0]
+    ? { title: overdueWork.length === 1 ? `마감이 지난 업무: ${overdueWork[0].title}` : `마감이 지난 업무 ${overdueWork.length}건`, detail: `${overdueWork[0].title} · ${formatWorkDue(overdueWork[0].due)} 마감이었습니다 · ${overdueWork[0].owner} · ${workStatusLabel(overdueWork[0].status)}`, page: 'tasks' as PageId }
+    : undefined)
+    ?? moduleAlerts[0]
     ?? (urgentWork[0]
       ? { title: urgentWork[0].title, detail: `${formatWorkDue(urgentWork[0].due)} 마감 · ${workStatusLabel(urgentWork[0].status)}`, page: 'tasks' as PageId }
       : operatingDataAvailable
@@ -450,7 +458,7 @@ function AIHome({ workItems, products, salesChannels, itProjects, itContracts, c
     } else if (preference.id === 'schedule') {
       content = <SharedCalendarPreview events={calendarEvents} onOpen={() => onNavigate('schedule')} />
     } else if (preference.id === 'todo') {
-      content = <PersonalTodoWidget workspaceScope={workspaceScope} onNavigate={onNavigate} onToast={onToast} />
+      content = <PersonalTodoWidget workspaceScope={workspaceScope} onNavigate={onNavigate} onToast={onToast} workItems={workItems} currentUserId={currentUserId} onOpenTask={onOpenTask} onAdvanceTask={onAdvanceTask} />
     } else if (preference.id === 'activity') {
       content = <ActivityFeed workspaceScope={workspaceScope} onOpen={(page, focusId) => { if (focusId) onOpenTask?.(focusId); onNavigate(page as PageId) }} />
     } else if (preference.id === 'links') {
@@ -472,7 +480,7 @@ function AIHome({ workItems, products, salesChannels, itProjects, itContracts, c
         </div>
       </section>
     } else {
-      content = <section className={'priority-alert-bar dashboard-section-card ' + (!operatingDataAvailable ? 'setup' : attentionCount === 0 || !canAssignTasks ? 'neutral' : '')}>
+      content = <section className={'priority-alert-bar dashboard-section-card ' + (!operatingDataAvailable ? 'setup' : attentionCount === 0 || (!canAssignTasks && overdueWork.length === 0) ? 'neutral' : '')}>
         <header className="dashboard-section-header"><div className="dashboard-section-title"><span className="dashboard-section-icon"><AlertTriangle size={18} /></span><h2>중요 알림</h2></div><Button tone="quiet" type="button" onClick={onOpenAlerts}>전체 보기 <ArrowRight size={15} /></Button></header>
         <div className="priority-alert-content"><span className="priority-alert-icon"><AlertTriangle size={20} /></span><div><strong>{dashboardAlert.title}</strong><p>{dashboardAlert.detail}</p></div><Button tone="ghost" size="sm" type="button" onClick={() => onNavigate(dashboardAlert.page)}>{!operatingDataAvailable ? '초기 설정' : '상세 확인'} <ArrowRight size={15} /></Button></div>
       </section>
@@ -565,7 +573,8 @@ function AIHome({ workItems, products, salesChannels, itProjects, itContracts, c
         <button type="button" className="tile-violet" onClick={() => onNavigate('journal')}><NotebookPen size={30} /><strong>업무일지</strong><span>오늘 일지 쓰기</span></button>
         <button type="button" className="tile-green" onClick={() => onNavigate('people')}><Users size={30} /><strong>휴가 · 인사</strong><span>휴가 신청하기</span></button>
       </div>
-      <PersonalTodoWidget workspaceScope={workspaceScope} onNavigate={onNavigate} onToast={onToast} />
+      {/* 쉬운 화면은 업무를 아래 큰 목록으로 따로 보인다 — 내 할 일에서는 업무 줄을 빼 두 번 보이지 않는다. */}
+      <PersonalTodoWidget workspaceScope={workspaceScope} onNavigate={onNavigate} onToast={onToast} hideWorkItems />
       <section className="easy-work-list" aria-label="지금 처리할 업무">
         <h2>지금 처리할 업무</h2>
         {myWork.length === 0

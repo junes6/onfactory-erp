@@ -4158,7 +4158,12 @@ export function createApp(options = {}) {
       return
     }
     if (stored) {
-      response.json({ digest: stored, edition: requestedEdition, date: requestedDate, isToday: true, history: digestSummaries(history) })
+      // 만든 뒤 달라진 것. 전에는 아침에 만든 '볼 것이 없습니다'를 제안·경고가 쌓인 오후까지 그대로 보였다(감사 live-ui-06).
+      // 지금 데이터로 다시 그려 보고, 저장된 판에 없는 줄의 수만 알린다 — 저장된 판은 바꾸지 않는다(사람이 [다시 만들기]).
+      const fresh = buildDigest(workspaceStore.tenants[tenantId] ?? {}, { now, edition: requestedEdition, generatedBy: '' })
+      const known = new Set((stored.lines ?? []).map((entry) => entry?.text))
+      const changedSince = fresh.lines.filter((entry) => !known.has(entry.text)).length
+      response.json({ digest: stored, edition: requestedEdition, date: requestedDate, isToday: true, history: digestSummaries(history), changedSince })
       return
     }
     const digest = buildDigest(workspaceStore.tenants[tenantId] ?? {}, { now, edition: requestedEdition, generatedBy: request.auth.name })

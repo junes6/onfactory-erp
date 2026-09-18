@@ -21,3 +21,5 @@
   .daily-digest-lines button { grid-column: 1 / -1; justify-self: start; }
   .daily-digest-text { white-space: normal; }
 }
+/* 만든 뒤 달라진 것이 있으면 알린다 — 오래된 '볼 것이 없습니다'가 오후까지 남지 않게. */
+.daily-digest-stale { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); margin: var(--space-8) var(--space-0) var(--space-0); color: var(--ink); font-size: var(--font-13); font-weight: var(--weight-medium); }

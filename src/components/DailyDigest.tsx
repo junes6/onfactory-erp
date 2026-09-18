@@ -9,7 +9,7 @@ export type DigestRef = { type: 'work-item' | 'page'; id?: string; page?: string
 export type DigestLine = { id: string; kind: string; text: string; ref: DigestRef }
 export type Digest = { id: string; date: string; edition: DigestEdition; lines: DigestLine[]; generatedAt: string; generatedBy: string }
 type DigestSummary = { id: string; date: string; edition: DigestEdition; lineCount: number }
-type DigestResponse = { digest: Digest | null; edition: DigestEdition; date: string; isToday: boolean; history: DigestSummary[] }
+type DigestResponse = { digest: Digest | null; edition: DigestEdition; date: string; isToday: boolean; history: DigestSummary[]; /** 만든 뒤 달라진 줄의 수(오늘 판만). */ changedSince?: number }
 
 const EDITION_LABEL: Record<DigestEdition, string> = { morning: '아침 브리핑', evening: '저녁 브리핑' }
 
@@ -75,6 +75,7 @@ export function DailyDigest({ workspaceScope, onToast, onOpenTask, onNavigate }:
         <span className="daily-digest-kicker"><Icon size={14} /> {EDITION_LABEL[state.edition]}</span>
         <h2 id="daily-digest-title">{formatDateLabel(state.date, true, true)}</h2>
         {digest && <small>{formatShortDateTime(digest.generatedAt)} 기준</small>}
+        {state.isToday && (state.changedSince ?? 0) > 0 && <p className="daily-digest-stale" role="status">이 브리핑을 만든 뒤 달라진 것이 {state.changedSince}가지 있습니다. <Button tone="primary" size="sm" type="button" disabled={busy} onClick={() => void regenerate()}><RefreshCw size={14} /> 지금 기준으로 다시 만들기</Button></p>}
       </div>
       <div className="daily-digest-actions">
         {past.length > 0 && <label>
@@ -92,7 +93,8 @@ export function DailyDigest({ workspaceScope, onToast, onOpenTask, onNavigate }:
             {past.slice(0, 30).map((item) => <option key={item.id} value={`${item.date}:${item.edition}`}>{item.date} {EDITION_LABEL[item.edition]}</option>)}
           </select>
         </label>}
-        {state.isToday && <Button tone="ghost" size="sm" disabled={busy} onClick={() => void regenerate()}><RefreshCw size={14} /> {busy ? '만드는 중…' : '다시 생성'}</Button>}
+        {/* 달라진 것이 있으면 아래 알림 줄의 단추 하나로 — 같은 일을 하는 단추를 두 개 두지 않는다. */}
+        {state.isToday && !((state.changedSince ?? 0) > 0) && <Button tone="ghost" size="sm" disabled={busy} onClick={() => void regenerate()}><RefreshCw size={14} /> {busy ? '만드는 중…' : '다시 만들기'}</Button>}
       </div>
     </header>
 

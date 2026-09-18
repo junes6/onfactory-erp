@@ -40,7 +40,8 @@ function line(id, kind, body, ref) {
  */
 function morningLines(tenantStore, todayKey) {
   const lines = []
-  const proposals = rows(tenantStore, 'ai-proposals').filter((item) => item?.status === 'pending')
+  // 규범 제안은 그 사람의 판단 기록이라 주인만 본다 — 대표 브리핑에 그 문장을 싣지 않는다.
+  const proposals = rows(tenantStore, 'ai-proposals').filter((item) => item?.status === 'pending' && item?.kind !== 'principle')
   const oldest = [...proposals].sort((left, right) => String(left.createdAt).localeCompare(String(right.createdAt)))[0]
   if (oldest) {
     lines.push(line('approval', '승인 대기', `승인 대기 ${proposals.length}건 — 가장 오래 기다린 건: ${text(oldest.summary, 60)}`, { type: 'page', page: 'approvals' }))
@@ -50,6 +51,13 @@ function morningLines(tenantStore, todayKey) {
   const dueToday = workItems.filter((item) => item?.status !== '결재완료' && dateKeyOf(item?.due) === todayKey)
   if (dueToday.length) {
     lines.push(line('due-today', '오늘 마감', `오늘 마감 업무 ${dueToday.length}건 — ${text(dueToday[0].title, 50)}${dueToday[0].owner ? ` (${text(dueToday[0].owner, 12)})` : ''}`, { type: 'work-item', id: dueToday[0].id }))
+  }
+
+  // 마감이 지난 업무. 전에는 아침판에 없어, 지난 업무가 쌓여도 '지금 먼저 볼 것이 없습니다'라고 했다(감사 live-ui-06).
+  const overdue = workItems.filter((item) => !['결재완료', '결재대기'].includes(item?.status) && dateKeyOf(item?.due) && dateKeyOf(item.due) < todayKey)
+    .sort((left, right) => String(left.due).localeCompare(String(right.due)))
+  if (overdue.length) {
+    lines.push(line('overdue', '마감 지남', `마감이 지난 업무 ${overdue.length}건 — ${text(overdue[0].title, 50)}${overdue[0].owner ? ` (${text(overdue[0].owner, 12)})` : ''}`, { type: 'work-item', id: overdue[0].id }))
   }
 
   const sentinel = proposals.filter((item) => item?.kind === 'sentinel-task')

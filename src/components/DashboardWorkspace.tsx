@@ -23,9 +23,9 @@ const widgetLabels: Record<DashboardWidgetId, { title: string; description: stri
   summary: { title: '오늘 핵심 현황', description: '주문·확인 업무·AI 알림을 한 줄로 봅니다.' },
   ai: { title: 'AI 업무 대화', description: '질문과 업무 지시를 처리합니다.' },
   schedule: { title: '공유 일정', description: '오늘 일정과 월간 달력을 봅니다.' },
-  todo: { title: 'To Do List', description: '직접 계획하고 AI가 배정 업무를 자동 정리합니다.' },
+  todo: { title: '내 할 일', description: '나에게 온 업무와 직접 적은 할 일을 마감 순으로, 바로 시작·완료 보고까지.' },
   activity: { title: '지금 회사에서', description: '업무·일지·결재·AI 제안이 시간순으로 쌓입니다.' },
-  work: { title: '다음 업무', description: '내가 수행하거나 결재할 업무입니다.' },
+  work: { title: '다음 업무', description: '내 할 일에 이미 담긴 업무를 따로 크게 봅니다.' },
   links: { title: '업무 바로가기', description: '자주 쓰는 외부 사이트를 엽니다.' },
   files: { title: '자주 찾는 파일', description: '자주 내려받는 회사 자료를 바로 엽니다.' },
   support: { title: '정부 지원사업', description: 'K-Startup·기업마당의 공식 모집 공고를 봅니다.' },
@@ -41,7 +41,7 @@ export const defaultDashboardWidgets: DashboardWidgetPreference[] = [
   { id: 'links', visible: true, size: 'half' },
   { id: 'support', visible: true, size: 'wide' },
   { id: 'files', visible: true, size: 'half' },
-  { id: 'work', visible: true, size: 'half' },
+  { id: 'work', visible: false, size: 'half' },
   { id: 'alert', visible: true, size: 'half' },
 ]
 
@@ -73,11 +73,16 @@ export function useDashboardPreferences(scope: string) {
     try {
       const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? 'null')
       const normalized = normalizePreferences(parsed)
-      if (Number(window.localStorage.getItem(versionKey) ?? 0) < 3) {
-        const summary = normalized.find((item) => item.id === 'summary')
-        return summary ? [summary, ...normalized.filter((item) => item.id !== 'summary')] : normalized
+      const version = Number(window.localStorage.getItem(versionKey) ?? 0)
+      let migrated = normalized
+      if (version < 3) {
+        const summary = migrated.find((item) => item.id === 'summary')
+        migrated = summary ? [summary, ...migrated.filter((item) => item.id !== 'summary')] : migrated
       }
-      return normalized
+      // v4: '다음 업무'는 '내 할 일'이 같은 업무를 다음 행동과 함께 보여 주므로 한 번 접는다(감사 live-ui-06).
+      // 사람이 다시 켜면 그대로 둔다 — 이 접기는 판이 오르는 한 번뿐이다.
+      if (version < 4) migrated = migrated.map((item) => item.id === 'work' ? { ...item, visible: false } : item)
+      return migrated
     } catch { return defaultDashboardWidgets.map((item) => ({ ...item })) }
   }
   const [preferences, setPreferences] = useState<DashboardWidgetPreference[]>(read)
@@ -86,7 +91,7 @@ export function useDashboardPreferences(scope: string) {
   useEffect(() => {
     try {
       window.localStorage.setItem(storageKey, JSON.stringify(preferences))
-      window.localStorage.setItem(versionKey, '3')
+      window.localStorage.setItem(versionKey, '4')
     } catch { /* personal preference storage is optional */ }
   }, [preferences, storageKey, versionKey])
 

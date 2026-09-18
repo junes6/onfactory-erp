@@ -114,6 +114,16 @@ test('briefing is admin only, is persisted on first read and past days come from
       // 두 번째 조회는 같은 스냅샷을 돌려준다.
       const second = await (await fetch(`${origin}/api/digest`, { headers })).json()
       assert.equal(second.digest.generatedAt, body.digest.generatedAt)
+      assert.equal(second.changedSince, 0, '만든 뒤 아무것도 바뀌지 않았다')
+
+      // 만든 뒤 마감이 지난 업무가 생기면, 저장된 판은 그대로 두고 '달라진 것'의 수를 알린다.
+      const items = await (await fetch(`${origin}/api/workspace/work-items`, { headers })).json()
+      const late = { id: 'WK-DIGEST-LATE', title: '지난주 납품 서류 정리', description: '완료 기준', category: '일반', owner: '오태식', ownerId: 'USR-SUNSEA-OH', requestedBy: '김서원', requesterId: 'USR-SUNSEA-ADMIN', due: '2026-01-05T09:00:00.000Z', priority: '보통', status: '업무요청' }
+      const saved = await fetch(`${origin}/api/workspace/work-items`, { method: 'PUT', headers: { ...headers, 'if-match': items.version ?? '' }, body: JSON.stringify({ data: [...(items.data ?? []), late] }) })
+      assert.equal(saved.status, 200, await saved.clone().text())
+      const third = await (await fetch(`${origin}/api/digest`, { headers })).json()
+      assert.equal(third.digest.generatedAt, body.digest.generatedAt, '저장된 판은 사람이 다시 만들 때까지 그대로')
+      assert.ok(third.changedSince >= 1, '달라진 것을 알린다')
 
       const regenerated = await fetch(`${origin}/api/digest/regenerate`, { method: 'POST', headers, body: JSON.stringify({}) })
       assert.equal(regenerated.status, 200)
@@ -132,4 +142,15 @@ test('briefing is admin only, is persisted on first read and past days come from
       assert.equal((await forged.json()).error.code, 'DIGEST_ROUTE_REQUIRED')
     })
   } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('아침판은 마감이 지난 업무를 올리고, 남의 규범 제안 문장은 싣지 않는다', () => {
+  const store = storeWithWork()
+  store['ai-proposals'].data.push({ id: 'PRP-9', kind: 'principle', status: 'pending', summary: '거래처 A는 선결제만 받는다', createdAt: '2026-08-20T01:00:00.000Z', payload: { ownerAccountId: 'U-OTHER' } })
+  const digest = buildDigest(store, { now: MORNING })
+  const byId = Object.fromEntries(digest.lines.map((line) => [line.id, line]))
+  assert.match(byId.overdue.text, /마감이 지난 업무 1건 — 기한 지난 라벨 검토 \(박지현\)/)
+  assert.equal(byId.overdue.ref.id, 'WK-4')
+  assert.match(byId.approval.text, /승인 대기 2건/, '규범 제안은 세지 않는다')
+  assert.doesNotMatch(digest.lines.map((line) => line.text).join(' '), /선결제/)
 })

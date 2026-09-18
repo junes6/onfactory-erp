@@ -45,3 +45,8 @@ html[data-theme='dark'] .personal-todo-editor button:last-child { color: var(--i
   .personal-todo-source { display: none; }
   .personal-todo-row { grid-template-columns: auto minmax(0,1fr) auto auto; }
 }
+/* 업무에서 온 줄: 체크 대신 다음 행동. 마감이 지난 날짜는 빨갛게(감사 live-ui-06). */
+.personal-todo-work-dot { width: 32px; display: grid; place-items: center; color: var(--muted); }
+.personal-todo-copy em { font-style: normal; }
+.personal-todo-copy em.is-overdue { color: var(--color-danger); font-weight: var(--weight-medium); }
+.personal-todo-row.is-work .ui-button { flex: none; }
