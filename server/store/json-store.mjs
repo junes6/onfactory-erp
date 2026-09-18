@@ -4,6 +4,7 @@ import {
   fsyncSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   statSync,
@@ -120,6 +121,32 @@ export function writeJsonAtomically(file, serialized, state = {}, { now = new Da
   }
 }
 
+/**
+ * 저장 도중 프로세스가 끊겨(강제 종료·정전) 남은 임시 파일을 치운다. 이름 모양이 정확히 우리 것
+ * (`<파일>.<pid>.<시각>.tmp`)이고, 지금 프로세스의 것이 아니며, 한 시간 넘게 지난 것만. 본 파일과 .bak은 건드리지 않는다.
+ */
+export function cleanStaleTemporaryFiles(file, { now = Date.now(), maxAgeMs = 60 * 60 * 1_000 } = {}) {
+  if (!file) return []
+  const directory = path.dirname(file)
+  const base = path.basename(file)
+  const pattern = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.(\\d+)\\.(\\d+)\\.tmp$`)
+  const removed = []
+  let names = []
+  try { names = readdirSync(directory) } catch { return removed }
+  for (const name of names) {
+    const match = pattern.exec(name)
+    if (!match || Number(match[1]) === process.pid) continue
+    const target = path.join(directory, name)
+    try {
+      if (now - statSync(target).mtimeMs < maxAgeMs) continue
+      unlinkSync(target)
+      removed.push(name)
+    } catch { /* 지우지 못하면 다음 기동 때 다시 본다 */ }
+  }
+  if (removed.length) console.warn('[json-store] 끊긴 저장이 남긴 임시 파일을 치웠습니다.', { removed })
+  return removed
+}
+
 function persistJson(file, store, state = {}) {
   if (!file) return { quarantined: null }
   assertKnownWorkspaceKeys(store)
@@ -160,6 +187,7 @@ export class JsonStoreAdapter {
   }
 
   async loadSnapshot() {
+    if (!this.readOnly) cleanStaleTemporaryFiles(this.file)
     const { store, source, primaryError } = readJsonDetailed(this.file)
     this.health.loadedFrom = source
     this.health.loadError = primaryError

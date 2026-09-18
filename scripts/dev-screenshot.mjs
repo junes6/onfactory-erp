@@ -1,5 +1,5 @@
 // 개발용 스크린샷 도구 — 헤드리스 Chrome(CDP, 의존성 0)으로 로그인 세션을 심어 1280x800 실측 캡처를 뜬다. AGENTS.md의 "셀프 스크린샷 판정"에 쓴다.
-// 사용: node scripts/dev-screenshot.mjs --out shots/a.png [--as operator|member|guest] [--email x --password y] [--tenant TENANT-SUNSEA] [--path /] [--prep @file.js | "js"] [--wait 1800] [--full true]
+// 사용: node scripts/dev-screenshot.mjs --out shots/a.png [--width 390 --height 844 --mobile true] [--as operator|member|guest] [--email x --password y] [--tenant TENANT-SUNSEA] [--path /] [--prep @file.js | "js"] [--wait 1800] [--full true]
 //   --as operator : 데모 운영자로 로그인해 --tenant 에 들어간 뒤 캡처(기본). member는 데모 직원, guest는 --email/--password 필수.
 //   --prep        : 캡처 직전에 페이지에서 실행할 JS(async, return 값이 결과에 찍힘). 메뉴 클릭·모달 열기 등에 쓴다. 데모 자격은 server/store/demo-seed.mjs의 것이다.
 import fs from 'node:fs'
@@ -67,7 +67,8 @@ const waitEvent = (name, timeout = 15000) => new Promise((resolve) => {
 
 await send('Page.enable')
 await send('Network.enable')
-await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: Number(args.scale ?? 1), mobile: false })
+// --width 390 --height 844 --mobile true 로 휴대폰 화면을 잰다(기본은 1280x800 데스크톱).
+await send('Emulation.setDeviceMetricsOverride', { width: Number(args.width ?? 1280), height: Number(args.height ?? 800), deviceScaleFactor: Number(args.scale ?? 1), mobile: args.mobile === 'true' })
 await send('Network.setCookie', { name: cookieName.trim(), value: cookieValue, url: base, path: '/' })
 await send('Page.navigate', { url: `${base}${args.path ?? '/'}` })
 await waitEvent('Page.loadEventFired')

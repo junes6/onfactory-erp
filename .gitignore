@@ -7,6 +7,10 @@ dist
 server/data/*.json
 server/data/*.json.bak
 server/data/documents/
+# 서버 잠금·저장 중 임시 파일·보존한 깨진 저장 파일 — 운영 데이터 폴더의 부산물이다(저장소에 넣지 않는다).
+server/data/server.lock
+server/data/*.tmp
+server/data/*.corrupt-*
 server/backups/
 vite.config.js
 vite.config.d.ts

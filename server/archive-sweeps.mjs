@@ -175,7 +175,7 @@ export function createOverflowSweeper({ workspaceStore, archive, commitWorkspace
           if (result.moved.size) {
             const written = { ...latestRecord, data: latestRecord.data.filter((row) => !result.moved.has(String(row?.id))), updatedAt: now.toISOString(), updatedBy: 'system:archive' }
             tenantStore[key] = written
-            touched.add(`${tenantId} ${key}`)
+            touched.add(`${tenantId}\u0000${key}`)
             rollbacks.push(async () => {
               if (tenantStore[key] !== written) return
               tenantStore[key] = latestRecord
@@ -200,7 +200,7 @@ export function createOverflowSweeper({ workspaceStore, archive, commitWorkspace
           if (ledgerResult.moved.size) {
             const written = { ...management, data: { ...management.data, ledger: management.data.ledger.filter((row) => !ledgerResult.moved.has(String(row?.id))) }, updatedAt: now.toISOString(), updatedBy: 'system:archive' }
             tenantStore['leave-management'] = written
-            touched.add(`${tenantId} leave-management`)
+            touched.add(`${tenantId}\u0000leave-management`)
             rollbacks.push(async () => {
               if (tenantStore['leave-management'] !== written) return
               tenantStore['leave-management'] = management
@@ -221,7 +221,7 @@ export function createOverflowSweeper({ workspaceStore, archive, commitWorkspace
       }
       // 열린 화면이 옮겨진 행을 들고 있지 않도록 바뀐 키를 알린다.
       for (const entry of touched) {
-        const [tenantId, key] = entry.split(' ')
+        const [tenantId, key] = entry.split('\u0000')
         publish(tenantId, key)
       }
       return summary

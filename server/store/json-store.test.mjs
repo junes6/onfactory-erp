@@ -79,6 +79,26 @@ test('JSON 모드 세션은 파일에 남아 다시 켜도 로그인이 유지�
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
+test('끊긴 저장이 남긴 오래된 임시 파일만 치운다 — 방금 것·남의 이름·본 파일은 그대로', async () => {
+  const { cleanStaleTemporaryFiles } = await import('./json-store.mjs')
+  const { utimes } = await import('node:fs/promises')
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'inthefield-json-tmp-'))
+  const file = path.join(directory, 'workspace-state.json')
+  try {
+    await writeFile(file, '{}')
+    const old = path.join(directory, 'workspace-state.json.4242.1700000000000.tmp')
+    const fresh = path.join(directory, 'workspace-state.json.4243.1700000000001.tmp')
+    const mine = path.join(directory, `workspace-state.json.${process.pid}.1700000000002.tmp`)
+    const other = path.join(directory, 'notes.json.4242.1700000000000.tmp')
+    for (const target of [old, fresh, mine, other]) await writeFile(target, 'x')
+    const hourAgo = new Date(Date.now() - 2 * 60 * 60 * 1_000)
+    for (const target of [old, mine, other]) await utimes(target, hourAgo, hourAgo)
+    const removed = cleanStaleTemporaryFiles(file)
+    assert.deepEqual(removed, ['workspace-state.json.4242.1700000000000.tmp'])
+    assert.deepEqual((await readdir(directory)).sort(), ['notes.json.4242.1700000000000.tmp', 'workspace-state.json', `workspace-state.json.${process.pid}.1700000000002.tmp`, 'workspace-state.json.4243.1700000000001.tmp'].sort())
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
 test('읽기 전용 저장소는 세션 파일을 쓰지 않는다', async () => {
   const adapter = new JsonStoreAdapter({ file: path.join(os.tmpdir(), 'never-written', 'workspace-state.json'), readOnly: true })
   const sessions = await adapter.createSessionMap()
