@@ -57,7 +57,15 @@ export const NOTIFICATION_TYPES = Object.freeze({
   'journal-reviewed': { label: '업무일지 결재 결과', pushByDefault: true, page: 'journal' },
   // 직원이 문서·회의록·메신저에서 올린 제안이 승인·반려됐다. 올린 사람이 결과를 몰랐다.
   'proposal-decided': { label: '올린 제안의 결과', pushByDefault: false, page: 'ai' },
+  // 1:1 대화의 새 메시지. 전에는 멘션·스레드 답글만 알렸고, 메신저를 닫아 둔 사람은 1:1 말을 받은 줄 몰랐다.
+  // 같은 대화의 읽지 않은 알림은 한 건으로 묶는다(COLLAPSE_TYPES) — 연달아 온 열 줄이 알림 열 건이 되지 않게.
+  // 그룹방은 알리지 않는다(배지와 멘션이 맡는다) — 모든 말마다 울리면 사람은 알림을 꺼 버린다.
+  'direct-message': { label: '1:1 새 메시지', pushByDefault: true, page: 'messenger' },
 })
+
+/** 같은 사람·같은 출처(source.id)의 읽지 않은 알림을 새 알림 한 건으로 묶는 유형. */
+const COLLAPSE_TYPES = new Set(['direct-message'])
+const MAX_COLLAPSE_COUNT = 999
 
 export const NOTIFICATION_TYPE_IDS = Object.freeze(Object.keys(NOTIFICATION_TYPES))
 const isType = (value) => NOTIFICATION_TYPE_IDS.includes(value)
@@ -140,6 +148,7 @@ export function normalizeNotification(value) {
       : null,
     readAt: value.readAt ?? null,
     createdAt: value.createdAt,
+    ...(Number.isInteger(value.count) && value.count > 1 ? { count: Math.min(value.count, MAX_COLLAPSE_COUNT) } : {}),
   }
 }
 
@@ -240,14 +249,27 @@ export function markRead(rows, accountId, ids, now = new Date()) {
 export function addNotifications(rows, incoming, { settingsRecord = {}, now = new Date() } = {}) {
   const existing = Array.isArray(rows) ? rows : []
   const accepted = []
+  let base = existing
   for (const candidate of incoming ?? []) {
     if (!candidate) continue
     if (settingsFor(settingsRecord, candidate.recipientId).muted.includes(candidate.type)) continue
+    // 묶기: 같은 대화의 읽지 않은 알림이 있으면 그 자리를 새 알림이 대신한다. id를 이어받아
+    // 기기의 푸시 알림도 새로 쌓이지 않고 바뀐다(서비스워커가 id를 tag로 쓴다).
+    if (COLLAPSE_TYPES.has(candidate.type) && candidate.source?.id) {
+      const previous = base.find((row) => row.recipientId === candidate.recipientId && row.type === candidate.type
+        && !row.readAt && row.source?.id === candidate.source.id)
+      if (previous) {
+        const count = Math.min((previous.count ?? 1) + 1, MAX_COLLAPSE_COUNT)
+        base = base.filter((row) => row !== previous)
+        accepted.push({ ...candidate, id: previous.id, count, title: text(`${candidate.title} ${count}건`, 160) })
+        continue
+      }
+    }
     accepted.push(candidate)
   }
   if (!accepted.length) return { rows: existing, accepted: [] }
 
-  const merged = [...accepted, ...existing]
+  const merged = [...accepted, ...base]
   // 사람마다 상한을 따로 지켜, 한 사람의 폭주가 다른 사람의 알림을 밀어내지 않게 한다.
   const perRecipient = new Map()
   const kept = []

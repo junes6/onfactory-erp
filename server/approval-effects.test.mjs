@@ -374,7 +374,8 @@ test('7. 알림은 다음 단계 결재자에게만 가고, 반려는 기안자�
     // 검토 자료의 검토 요청·마감 알림 두 유형이 늘어 16, P1-2의 휴가(신청·결과)·업무일지(요청·결과)·올린 제안의 결과
     // 다섯이 늘어 21이다. 되돌림 위험은 partitionNotifications가 줄인다 — 이제 모르는 유형의 줄은 버려지지 않고
     // 그대로 보관된다(server/notifications.mjs). 전자결재 자체는 여전히 새 유형을 만들지 않는다(아래 줄).
-    assert.equal(NOTIFICATION_TYPE_IDS.length, 21)
+    // P1-3a의 1:1 새 메시지(direct-message)가 늘어 22다.
+    assert.equal(NOTIFICATION_TYPE_IDS.length, 22)
     assert.deepEqual(NOTIFICATION_TYPE_IDS.filter((type) => type.startsWith('approval')), ['approval-requested'])
   })
 })

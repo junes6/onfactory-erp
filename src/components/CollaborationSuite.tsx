@@ -38,7 +38,7 @@ import {
   PinOff,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, ReactNode } from 'react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { SaveState } from './ui/States'
@@ -69,6 +69,7 @@ import {
 import { BRAND } from '../brand'
 import { CalendarConnectionCard, OverwriteHistoryDetails, type OverwriteHistory } from './CalendarConnection'
 import { canJudgeMissingNotice } from '../utils/noticeFocus'
+import { byRecentActivity, dividerBefore, lastActivityAt, listTimeLabel } from '../utils/messengerTime'
 import { useIndustrySurface } from '../modules/IndustryContext'
 import { useEventStream } from '../hooks/useEventStream'
 
@@ -260,6 +261,8 @@ type Conversation = {
   unread: number
   lastMessage: string
   lastTime: string
+  /** 본채널 마지막 말의 시각(ISO). 목록 정렬과 '어제'·'9월 16일' 표기에 쓴다. 예전 방에는 없다. */
+  lastAt?: string
   messages: ChatMessage[]
   hiddenFor?: string[]
   lineageId?: string
@@ -483,7 +486,9 @@ export function MessengerDrawer({
     if (item.type === 'team' && (!item.participantIds || item.participantIds.length === 0)) return true
     return legacyParticipantIds(item).some((participantId) => currentIdentityIds.includes(participantId))
   })
-  const activeConversation = myConversations.find((item) => item.id === selectedId) ?? myConversations[0]
+  // 방 목록은 최근 활동순이다. 전에는 저장 순서 그대로라 방금 말이 오간 방이 목록 아래에 묻혔다.
+  const orderedConversations = byRecentActivity(myConversations)
+  const activeConversation = myConversations.find((item) => item.id === selectedId) ?? orderedConversations[0]
   const activePendingAttachments = activeConversation ? pendingAttachments[activeConversation.id] ?? [] : []
   const selectedConversation: Conversation = activeConversation ?? {
     id: '',
@@ -706,7 +711,7 @@ export function MessengerDrawer({
     }, 60)
   }
 
-  const filteredConversations = myConversations.filter((item) => {
+  const filteredConversations = orderedConversations.filter((item) => {
     if (listMode === 'teams' && item.type !== 'team') return false
     if (listMode === 'people' && item.type !== 'direct') return false
     if (!normalizedQuery) return true
@@ -793,7 +798,7 @@ export function MessengerDrawer({
 
   useEffect(() => {
     if (activeConversation || myConversations.length === 0) return
-    setSelectedId(myConversations[0].id)
+    setSelectedId(orderedConversations[0].id)
   }, [activeConversation, myConversations])
 
   /**
@@ -1613,7 +1618,7 @@ export function MessengerDrawer({
                         ? <span className="messenger-team-icon"><Hash size={20} /></span>
                         : <Avatar name={conversationName(conversation)} status={conversationPeer(conversation)?.status} />}
                       <span className="messenger-conversation-copy">
-                        <span><strong>{conversationName(conversation)}</strong><time>{conversation.lastTime}</time></span>
+                        <span><strong>{conversationName(conversation)}</strong><time dateTime={lastActivityAt(conversation) || undefined}>{listTimeLabel(lastActivityAt(conversation), conversation.lastTime)}</time></span>
                         <small>{conversation.lastMessage}</small>
                       </span>
                       {unreadForConversation(conversation) > 0 && <em aria-label={'읽지 않은 메시지 ' + unreadForConversation(conversation) + '개'}>{unreadForConversation(conversation)}</em>}
@@ -1741,11 +1746,16 @@ export function MessengerDrawer({
                   </Button>
                 </div>
               )}
-              <div className="messenger-date-divider"><span>오늘</span></div>
               {channelMessages.length === 0 && (
                 <div className="collab-empty"><MessageCircle size={32} /><strong>첫 메시지를 보내세요</strong><span>업무 내용과 파일을 안전하게 공유할 수 있습니다.</span></div>
               )}
-              {visibleMessages.map((item) => renderMessage(item))}
+              {/* 날짜가 바뀌는 자리마다 구분선(오늘·어제·9월 16일 (화)). 전에는 날짜와 무관하게 맨 위에 '오늘' 하나였다. */}
+              {visibleMessages.map((item, index) => {
+                const divider = dividerBefore(visibleMessages, index)
+                return divider
+                  ? <Fragment key={`day-${item.id}`}><div className="messenger-date-divider" role="separator"><span>{divider}</span></div>{renderMessage(item)}</Fragment>
+                  : renderMessage(item)
+              })}
               <div ref={messageEndRef} />
             </div>
 

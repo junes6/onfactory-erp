@@ -49,8 +49,9 @@ test('only the immediate types are pushed by default; the rest are opt-in', () =
   // R16-E의 캘린더 재연결도 기본으로 켠다 — 끊긴 채 두면 일정이 조용히 어긋나고, 다시 잇는 것은 사람만 할 수 있다.
   // 검토 자료의 검토 요청·마감 알림도 기본으로 켠다 — 사람이 직접 부탁한 것이고, 마감 알림은 자료마다 한 번뿐이다.
   // P1-2의 휴가 결재 요청·결과와 업무일지 결재 결과도 기본으로 켠다 — 사람이 기다리는 답이다.
+  // P1-3a의 1:1 새 메시지도 켠다 — 대화마다 한 건으로 묶이고, 그룹방은 알리지 않는다.
   // 업무일지 결재 요청은 관리자에게 매일 여러 건이라 opt-in, 올린 제안의 결과도 급하지 않아 opt-in이다.
-  assert.deepEqual(settings.push.sort(), ['approval-requested', 'calendar-reauth', 'changes-requested', 'journal-reviewed', 'leave-decided', 'leave-requested', 'material-due', 'material-review', 'mention', 'notice-posted', 'notice-reminder', 'quiet-digest', 'task-assigned'].sort())
+  assert.deepEqual(settings.push.sort(), ['approval-requested', 'calendar-reauth', 'changes-requested', 'direct-message', 'journal-reviewed', 'leave-decided', 'leave-requested', 'material-due', 'material-review', 'mention', 'notice-posted', 'notice-reminder', 'quiet-digest', 'task-assigned'].sort())
   assert.deepEqual(settings.muted, [])
   // R16-J의 스레드 답글도 opt-in이다 — 스레드는 오래 이어져 울릴 일이 많고, 지목은 mention이 따로 한다.
   // R16-L의 외부 연동 중지도 opt-in이다 — 관리자가 화면에서 보고 고칠 일이지 사람을 깨울 일이 아니다.

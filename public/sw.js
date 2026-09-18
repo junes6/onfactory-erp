@@ -47,8 +47,10 @@ self.addEventListener('push', (event) => {
     body: payload.body || '',
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    // 같은 알림이 두 번 도착하면 덮어쓴다.
+    // 같은 알림이 두 번 도착하면 덮어쓴다. 1:1 새 메시지는 같은 대화의 알림 한 건으로 묶여 같은 id로 오므로
+    // 기기에도 한 건만 남고, renotify로 새 말이 올 때마다 다시 울린다.
     tag: payload.id || payload.type || 'inthefield',
+    renotify: true,
     data: { url: notificationTarget(payload) },
   }))
 })

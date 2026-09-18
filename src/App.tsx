@@ -2176,7 +2176,11 @@ export default function App() {
   useEffect(() => { void loadNotifications() }, [loadNotifications])
   // 알림·승인 대기 수는 서버가 밀어 준다. 주기 폴링 없이 즉시 반영된다.
   // 게스트 세션에서는 이 스트림을 열지 않는다 — GuestWorkspace가 자기 구독 하나로 업무·알림 갱신을 함께 처리한다(오리진당 연결 수 절약).
+  /** 메신저 안 읽은 수를 다시 센다(아래 tenantDataEnabled 뒤에서 채운다). 이벤트 스트림이 부른다. */
+  const messengerUnreadRefreshRef = useRef<(() => void) | null>(null)
   useEventStream(authStatus === 'signed-in' && mode === 'tenant' && account?.role !== 'tenant-guest', (event) => {
+    // 새 말·읽음 — 메신저 서랍을 닫아 둬도 상단 말풍선과 휴대폰 '채팅' 배지가 따라온다.
+    if (event.kind === 'message' || event.kind === 'resync') messengerUnreadRefreshRef.current?.()
     if (event.kind === 'notification' || event.kind === 'resync') void loadNotifications()
     // 제안 대기 수는 **관리자만의 사실**이다. `/api/proposals`가 requireTenantAdmin이고 제안 패널도
     // isAdmin으로 감춰져 있는데, proposal 프레임은 테넌트 전원에게 간다(server/app.mjs의 events.publish에
@@ -2226,6 +2230,31 @@ export default function App() {
    */
   const isGuestSession = account?.role === 'tenant-guest'
   const tenantDataEnabled = authStatus === 'signed-in' && mode === 'tenant' && !account?.requiresPasswordChange && !isGuestSession
+  // 메신저 안 읽은 수는 서버가 센다(/api/messenger/unread — 대화 본문은 받지 않는다). 전에는 서랍을 열 때만 세어,
+  // 닫아 둔 사이 온 말이 배지에 오르지 않았다. 말이 몰려와도 한 번만 묻도록 잠깐 모았다가 부른다.
+  const messengerUnreadTimerRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!tenantDataEnabled) { messengerUnreadRefreshRef.current = null; return }
+    let active = true
+    const load = async () => {
+      try {
+        const response = await fetch('/api/messenger/unread', { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+        if (!response.ok) return
+        const body = await response.json() as { unread?: number }
+        if (active && typeof body.unread === 'number') setMessengerUnread(body.unread)
+      } catch { /* 다음 이벤트에서 다시 센다 */ }
+    }
+    messengerUnreadRefreshRef.current = () => {
+      if (messengerUnreadTimerRef.current) window.clearTimeout(messengerUnreadTimerRef.current)
+      messengerUnreadTimerRef.current = window.setTimeout(() => { void load() }, 400)
+    }
+    void load()
+    return () => {
+      active = false
+      messengerUnreadRefreshRef.current = null
+      if (messengerUnreadTimerRef.current) window.clearTimeout(messengerUnreadTimerRef.current)
+    }
+  }, [tenantDataEnabled, workspaceScope])
   /**
    * 전자결재 배지. 직원에게도 도는 저비용 요약 경로(`/api/approval-documents/summary`)를 60초마다 읽는다.
    * `seenAt`은 결재 화면이 쓰는 것과 **같은 값**을 보낸다 — 다른 값을 보내면 사이드바 숫자와

@@ -22,6 +22,7 @@ export type NotificationType =
   | 'journal-submitted'
   | 'journal-reviewed'
   | 'proposal-decided'
+  | 'direct-message'
 
 export type AppNotification = {
   id: string
@@ -91,6 +92,7 @@ const typeIcon: Record<NotificationType, typeof ListChecks> = {
   'journal-submitted': NotebookPen,
   'journal-reviewed': NotebookPen,
   'proposal-decided': ClipboardCheck,
+  'direct-message': MessageCircle,
 }
 
 const typeTone: Record<NotificationType, string> = {
@@ -115,6 +117,7 @@ const typeTone: Record<NotificationType, string> = {
   'journal-submitted': 'blue',
   'journal-reviewed': 'green',
   'proposal-decided': 'violet',
+  'direct-message': 'blue',
 }
 
 /** base64url 공개키 → Uint8Array. 브라우저 구독 API가 요구하는 형식이다. */

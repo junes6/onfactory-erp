@@ -68,7 +68,8 @@ import { createScheduler, describeSpec, SCHEDULER_RUNS_KEY, SCHEDULER_STATE_KEY 
 import {
   addNotifications, buildNotification, bundleAssignmentDrafts, NOTIFICATIONS_KEY, NOTIFICATION_SETTINGS_KEY,
   normalizeNotifications,
-  partitionNotifications, pushPayload, PUSH_SUBSCRIPTIONS_KEY, removeSubscriptions,
+  partitionNotifications,
+  markRead, pushPayload, PUSH_SUBSCRIPTIONS_KEY, removeSubscriptions,
   subscriptionsFor,
   // R15-I: 방해 금지 시간 · 아침 요약
   buildQuietDigest, collectQuietDigest, lastQuietWindow, pushDecision, settingsFor,
@@ -287,6 +288,8 @@ const CONVERSATION_OPTIONAL_FIELDS = [
   'kind', 'icon', 'ownerId', 'createdBy', 'createdAt', 'pinnedMessageIds', 'mutedFor',
   // 프로젝트 채널. 외부 게스트는 projectId가 있는 방에만 참여할 수 있다.
   'projectId',
+  // 본채널 마지막 말의 시각(ISO). 목록을 최근순으로 세우고 '어제'·'9월 16일'로 표기하는 데 쓴다(P1-3a).
+  'lastAt',
 ]
 const CONVERSATION_LIFECYCLES = new Set(['active', 'closed', 'deleted'])
 const PLATFORM_TICKET_PRIORITIES = new Set(['P1', 'P2', 'P3'])
@@ -1296,6 +1299,7 @@ function hasConversationShape(value) {
   if (value.createdAt !== undefined && (typeof value.createdAt !== 'string' || Number.isNaN(Date.parse(value.createdAt)))) return false
   if (value.pinnedMessageIds !== undefined && (!Array.isArray(value.pinnedMessageIds) || value.pinnedMessageIds.length > 20 || value.pinnedMessageIds.some((id) => typeof id !== 'string'))) return false
   if (value.mutedFor !== undefined && (!Array.isArray(value.mutedFor) || value.mutedFor.some((id) => typeof id !== 'string'))) return false
+  if (value.lastAt !== undefined && (typeof value.lastAt !== 'string' || Number.isNaN(Date.parse(value.lastAt)))) return false
   return hasDeveloperSupportConversationIntegrity(value)
     && Array.isArray(value.messages) && value.messages.every(hasMessageShape)
 }
@@ -4365,6 +4369,48 @@ export function createApp(options = {}) {
     notify(auth.tenantId, drafts)
   }
 
+  /** 이 방을 지금 볼 수 있는 사람들(나간 사람·초대가 끝난 게스트 제외). 방의 사건은 이 명단에게만 간다. */
+  const conversationAudienceIds = (tenantId, conversation) => accounts
+    .filter((account) => account.tenantId === tenantId && accountSeesConversation(conversation, account))
+    .map((account) => account.id)
+
+  /**
+   * 1:1 대화의 새 말을 상대에게 알린다. 같은 대화의 읽지 않은 알림은 한 건으로 묶인다(notifications.mjs COLLAPSE_TYPES).
+   * 그룹방은 알리지 않는다 — 배지와 멘션이 맡는다. 상대를 @로 부른 말은 멘션 알림이 이미 갔으므로 건너뛴다.
+   */
+  const notifyDirectMessage = (auth, conversation, message) => {
+    if (conversation?.type !== 'direct' || message?.threadRootId || isDeveloperSupportConversation(conversation)) return
+    const drafts = []
+    for (const recipientId of conversation.participantIds ?? []) {
+      if (!recipientId || recipientId === auth.id) continue
+      const account = accounts.find((item) => item.id === recipientId && item.tenantId === auth.tenantId)
+      if (!accountSeesConversation(conversation, account)) continue
+      if (account?.name && String(message.text ?? '').includes(`@${account.name}`)) continue
+      const body = String(message.text ?? '').trim() || (Array.isArray(message.attachments) && message.attachments.length ? '파일을 보냈습니다.' : '')
+      drafts.push({
+        type: 'direct-message', recipientId, actorId: auth.id,
+        title: `${auth.name}님의 새 메시지`,
+        body: body.slice(0, 200),
+        page: 'messenger', focusId: `${conversation.id}:message:${message.id}`,
+        source: { kind: 'message', id: conversation.id, label: auth.name },
+      })
+    }
+    notify(auth.tenantId, drafts)
+  }
+
+  /** 대화를 읽으면 그 대화의 1:1 새 메시지 알림을 읽음으로. 바뀐 것이 있을 때만 쓰고 그 사람에게만 알린다. */
+  const readConversationNotifications = (auth, conversationId) => {
+    const tenantStore = workspaceStore.tenants[auth.tenantId]
+    if (!tenantStore?.[NOTIFICATIONS_KEY]) return
+    const { rows, foreign } = partitionNotifications(tenantStore[NOTIFICATIONS_KEY].data ?? [])
+    const ids = rows.filter((row) => row.recipientId === auth.id && !row.readAt && row.type === 'direct-message' && row.source?.id === conversationId).map((row) => row.id)
+    if (!ids.length) return
+    const now = new Date()
+    tenantStore[NOTIFICATIONS_KEY] = { data: [...markRead(rows, auth.id, ids, now), ...foreign], updatedAt: now.toISOString(), updatedBy: auth.id }
+    scheduleAuditCommit()
+    events.publish(auth.tenantId, 'notification', { read: ids }, { accountId: auth.id })
+  }
+
   const tenantAdminIds = (tenantId) => accounts
     .filter((account) => account.tenantId === tenantId && account.role === 'tenant-admin' && account.approved !== false)
     .map((account) => account.id)
@@ -6005,6 +6051,24 @@ export function createApp(options = {}) {
     response.status(201).json({ conversation, created: true, closedConversationIds })
   })
 
+  /**
+   * 메신저의 안 읽은 수만. 상단 말풍선·휴대폰 '채팅' 배지가 쓴다 — 전에는 서랍을 열 때만 다시 세어,
+   * 닫아 둔 사이 온 말이 배지에 오르지 않았다. 대화 본문은 내려보내지 않는다.
+   * 세는 규칙은 화면(unreadForConversation)과 같다: 볼 수 있는 방의 본채널 말 중 내가 보내지도 읽지도 않은 것.
+   */
+  app.get('/api/messenger/unread', requireAuth, requireMatchingWorkspaceIdentity, (request, response) => {
+    const conversations = workspaceStore.tenants[request.auth.tenantId]?.['messenger-conversations']?.data
+    let unread = 0
+    for (const conversation of Array.isArray(conversations) ? conversations : []) {
+      if (!conversation || (conversation.lifecycle && conversation.lifecycle !== 'active')) continue
+      if (!isConversationVisibleToMember(conversation, request.auth, accounts)) continue
+      const rows = (Array.isArray(conversation.messages) ? conversation.messages : []).filter((message) => message && !message.threadRootId)
+      if (!rows.some((message) => Array.isArray(message.readBy))) { unread += Number(conversation.unread) || 0; continue }
+      unread += rows.filter((message) => message.senderId !== request.auth.id && !(message.readBy ?? []).includes(request.auth.id)).length
+    }
+    response.json({ unread })
+  })
+
   app.post('/api/messenger/conversations/:id/read', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ?? {}
     const conversations = Array.isArray(tenantStore['messenger-conversations']?.data) ? tenantStore['messenger-conversations'].data : []
@@ -6022,6 +6086,8 @@ export function createApp(options = {}) {
         ? { ...message, readBy: Array.from(new Set([...(message.readBy ?? []), request.auth.id])) }
         : message)),
     }
+    // 대화를 열어 읽었으면 그 대화의 1:1 새 메시지 알림도 읽은 것이다 — 벨에 이미 본 말이 쌓이지 않게.
+    readConversationNotifications(request.auth, conversation.id)
     if (isDeepStrictEqual(conversation, previous)) {
       response.json({ conversation })
       return
@@ -6032,6 +6098,8 @@ export function createApp(options = {}) {
       response.status(500).json({ error: { code: 'MESSENGER_READ_WRITE_FAILED', message: '읽음 상태를 저장하지 못했습니다.' } })
       return
     }
+    // 내 다른 창(휴대폰·다른 탭)의 배지도 내려가게 나에게만 알린다.
+    events.publish(request.auth.tenantId, 'message', { key: 'messenger-conversations', conversationId: conversation.id, read: true }, { accountId: request.auth.id })
     response.json({ conversation })
   })
 
@@ -6222,6 +6290,8 @@ export function createApp(options = {}) {
           messages: [...previous.messages, message],
           lastMessage: text,
           lastTime: sentAt,
+          // 목록을 최근순으로 세우고 '어제'·'9월 16일'을 가리려면 시:분이 아니라 시각 전체가 필요하다.
+          lastAt: createdAt,
         }
     if (isDeveloperSupportConversation(previous)) {
       const ticketIndex = previous.supportTicketId
@@ -6323,9 +6393,11 @@ export function createApp(options = {}) {
     // 이 두 줄이 없어서, 화면이 쓰는 전송 경로로 보낸 메시지는 상대에게 실시간으로 닿지도
     // 않았고 @멘션 알림도 나가지 않았다. 알림·SSE는 일반 저장 경로에만 붙어 있었는데
     // 클라이언트는 그 경로를 쓰지 않는다.
-    events.publish(request.auth.tenantId, 'message', { key: 'messenger-conversations', conversationId: conversation.id })
+    // 이 방을 볼 수 있는 사람에게만 알린다. 전에는 회사 전원의 메신저가 말 한 줄마다 대화 전체를 다시 받았다.
+    events.publish(request.auth.tenantId, 'message', { key: 'messenger-conversations', conversationId: conversation.id }, { accountIds: conversationAudienceIds(request.auth.tenantId, conversation) })
     try { notifyMentions(request.auth, conversations, [conversation]) } catch { /* 알림 실패가 전송을 되돌리지 않는다 */ }
     try { notifyThreadReply(request.auth, conversation, message) } catch { /* 알림 실패가 전송을 되돌리지 않는다 */ }
+    try { notifyDirectMessage(request.auth, conversation, message) } catch { /* 알림 실패가 전송을 되돌리지 않는다 */ }
     response.status(201).json({ conversation, message })
   })
 
