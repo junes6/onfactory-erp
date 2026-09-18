@@ -628,7 +628,8 @@ html[data-theme='dark'] .nav-list button.active em { background: var(--color-pri
 }
 .toast > svg { flex: 0 0 auto; color: var(--color-white); }
 .toast > span { flex: 1; font-size: var(--font-13); font-weight: var(--weight-medium); }
-.toast button { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border: none; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-sidebar-raised-strong); cursor: pointer; }
+/* 닫기 단추만. [되돌리기]는 공용 버튼이라 이 모양을 받지 않는다 — 전에는 36px 폭에 눌려 글자가 두 줄로 꺾였다. */
+.toast > .toast-close { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border: none; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-sidebar-raised-strong); cursor: pointer; }
 .nav-scrim { display: none; }
 
 @media (max-width: 1320px) {
@@ -3098,7 +3099,7 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
   /* 알림 한 줄은 탭 막대 위에 뜬다 — 전에는 탭 막대 뒤에 깔려 "저장했습니다"도, 실행 취소 버튼도 보이지 않았다. */
   .app-shell:has(.mobile-tabbar) .toast { bottom: calc(56px + env(safe-area-inset-bottom) + var(--space-12)); }
   /* 닫기 버튼도 손가락 과녁(44px)에 맞춘다 — 실패 알림은 이 버튼으로만 닫힌다. */
-  .toast > button { width: 44px; height: 44px; }
+  .toast > .toast-close { width: 44px; height: 44px; }
   /* 입력칸 글자는 16px(--font-15) 아래로 내리지 않는다 — 14px 칸 30여 곳에서 iOS가 입력할 때 화면을 확대했다(감사). */
   input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea { font-size: var(--font-15) !important; }
   .top-icon-button.font-size-trigger { display: none; }

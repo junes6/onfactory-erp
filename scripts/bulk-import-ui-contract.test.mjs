@@ -170,7 +170,7 @@ test('10. 자료실 화면: 진입은 secondary 하나, 드로어는 한 번만 
   const source = await read('src/components/CompanyLibrary.tsx')
   assert.equal(count(source, '<BulkImportDialog'), 1)
   assert.match(source, /<Button tone="secondary" type="button" onClick=\{\(\) => openBulk\(null\)\}><FolderUp size=\{18\} \/> 폴더 통째로 올리기<\/Button>/)
-  // 화면의 기본 행동은 여전히 '자료 업로드' 하나다(모달 층의 제출 버튼은 그 층의 기본 행동이다).
+  // 화면의 기본 행동은 여전히 '자료 올리기' 하나다(모달 층의 제출 버튼은 그 층의 기본 행동이다).
   assert.equal(count(source, '<Button tone="primary" type="button" onClick={() => setEditing(\'new\')}>'), 1)
   assert.match(source, /className="library-import-strip"/)
   /**

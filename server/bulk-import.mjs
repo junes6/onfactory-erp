@@ -670,7 +670,8 @@ export function registerBulkImportRoutes({
     const limit = request.query?.limit === undefined ? ENTRY_PAGE_SIZE : Number(request.query.limit)
     const page = pageEntries(chunk?.entries ?? [], cursor, limit)
     const documents = documentsOf(request.auth.tenantId)
-    const documentIds = new Set(documents.map((document) => document?.id))
+    // 휴지통에 넣은 자료도 '지운 자료'다 — 되살리면 다시 보고서에서 살아난다.
+    const documentIds = new Set(documents.filter((document) => !document?.trashedAt).map((document) => document?.id))
     const withResume = page.entries.map((entry) => {
       // 크래시 창: 파일은 저장됐는데 상태 기록 전에 브라우저가 죽은 경우. 문서 쪽에서 되찾는다.
       if (entry.status === 'pending') {
@@ -786,7 +787,8 @@ export function registerBulkImportRoutes({
      */
     const isAdmin = request.auth.role === 'tenant-admin'
     const projects = projectSpacesOf(request.auth.tenantId)
-    const documentById = new Map(documents.filter((document) => document?.id).map((document) => [document.id, document]))
+    // 휴지통의 자료는 가리킬 대상이 아니다(30일 뒤 사라진다) — 사라진 자료와 같이 닫지 않는다.
+    const documentById = new Map(documents.filter((document) => document?.id && !document.trashedAt).map((document) => [document.id, document]))
     const duplicateDecision = (path, { documentId = '', otherPath = '' } = {}) => {
       const row = resolveMapping(path, session.mapping)
       // 대상 프로젝트가 없는 행(자료실)에는 '구멍'이라는 개념이 없다.

@@ -75,3 +75,32 @@ html[data-theme='dark'] :is(.library-page,.library-modal) :is(input,select,texta
 .library-import-history ul { display: flex; flex-direction: column; gap: var(--space-8); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
 .library-source-path { display: block; overflow: hidden; color: var(--muted); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
 .library-ai-locked { padding: var(--space-0) var(--space-4); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--muted); font-size: var(--font-13); }
+/* P1-6: 누가 볼 수 있나 — 쳐 넣는 칸 대신 고르는 칸 */
+.library-audience { min-width: 0; margin: var(--space-0); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.library-audience legend { padding: var(--space-0) var(--space-4); color: var(--muted); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.library-audience > small, .library-audience > p { display: block; margin: var(--space-8) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); }
+.library-audience-note { margin: var(--space-0); padding: var(--space-8) var(--space-12); border-radius: var(--radius-8); color: var(--muted); background: var(--color-gray-100); font-size: var(--font-13); }
+.library-choice-grid { display: flex; flex-wrap: wrap; gap: var(--space-8); max-height: 220px; overflow-y: auto; }
+.library-choice-grid label { min-height: 44px; display: inline-flex; align-items: center; gap: var(--space-8); padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); cursor: pointer; }
+.library-choice-grid label.is-checked { border-color: var(--forest); background: color-mix(in srgb, var(--forest) 8%, var(--surface)); font-weight: var(--weight-medium); }
+.library-choice-grid label small { color: var(--muted); font-size: var(--font-11); }
+.library-choice-grid input { width: auto; min-height: 0; }
+.library-picked { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--space-8); }
+.library-people-search { width: 100%; min-height: 43px; margin-bottom: var(--space-8); padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); }
+.library-more-fields { margin-top: var(--space-12); }
+.library-more-fields > summary { min-height: 44px; display: flex; align-items: center; color: var(--forest); font-weight: var(--weight-medium); cursor: pointer; }
+.library-more-fields[open] > summary { margin-bottom: var(--space-8); }
+/* 휴지통 */
+.library-toolbar .library-trash-open { flex: none; }
+.library-trash > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-16); margin-bottom: var(--space-16); }
+.library-trash > header h2 { margin: var(--space-0) var(--space-0) var(--space-4); font-size: var(--font-22); }
+.library-trash > header p { margin: var(--space-0); color: var(--muted); }
+.library-trash ul { display: grid; gap: var(--space-8); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.library-trash li { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: var(--space-12); padding: var(--space-12) var(--space-16); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.library-trash li > div:not(.library-trash-actions) { display: grid; gap: var(--space-4); min-width: 0; }
+.library-trash li strong { overflow-wrap: anywhere; }
+.library-trash li span:not(.library-file-icon) { color: var(--muted); font-size: var(--font-13); }
+.library-trash li small { color: var(--muted); font-size: var(--font-13); }
+.library-trash li small.is-soon { color: var(--color-danger); font-weight: var(--weight-medium); }
+.library-trash-actions { display: flex; flex-wrap: wrap; gap: var(--space-8); justify-content: flex-end; }
+@media (max-width: 760px) { .library-trash > header { flex-direction: column; } .library-trash li { grid-template-columns: auto minmax(0,1fr); } .library-trash-actions { grid-column: 1 / -1; justify-content: stretch; } .library-trash-actions .ui-button { flex: 1; } .library-toolbar .library-trash-open { align-self: flex-start; } }

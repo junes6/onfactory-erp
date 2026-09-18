@@ -23,7 +23,11 @@ const FAILURE_TEXT = /(못했|실패|할 수 없|수 없습니다|오류가)/u
 export const toastFromText = (text: string): ToastMessage | null => (text ? { text, tone: FAILURE_TEXT.test(text) ? 'error' : 'info' } : null)
 export type ToastMessage = { text: string; tone?: 'info' | 'error'; undo?: ToastUndo }
 
-export const UNDO_SECONDS = 5
+/**
+ * 되돌리기를 누를 수 있는 시간. 5초였다 — 알림을 읽고 손을 옮기기엔 짧았다(나이 든 사용자·휴대폰).
+ * 마우스를 올리거나 초점이 들어가 있는 동안은 세지 않는다.
+ */
+export const UNDO_SECONDS = 10
 /**
  * 되돌리기가 없는 알림은 이만큼 뒤 스스로 닫힌다. 전에는 닫기를 누를 때까지 남아
  * 휴대폰에서 화면 아래를 계속 가렸다. 읽는 속도가 느린 사람을 위해 짧게 잡지 않고,
@@ -37,6 +41,8 @@ export default function Toast({ message, onClose }: { message: ToastMessage; onC
   const [paused, setPaused] = useState(false)
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+  const pausedRef = useRef(false)
+  pausedRef.current = paused
 
   useEffect(() => {
     if (message.undo || message.tone === 'error' || paused) return
@@ -49,6 +55,7 @@ export default function Toast({ message, onClose }: { message: ToastMessage; onC
     if (!message.undo) return
     const timer = setInterval(() => {
       setLeft((current) => {
+        if (pausedRef.current) return current
         if (current <= 1) { clearInterval(timer); closeRef.current(); return 0 }
         return current - 1
       })
@@ -80,7 +87,7 @@ export default function Toast({ message, onClose }: { message: ToastMessage; onC
           <RotateCcw size={14} /> {message.undo.label ?? '실행 취소'} {left}
         </Button>
       )}
-      <button type="button" aria-label="알림 닫기" onClick={onClose}><X size={16} /></button>
+      <button type="button" className="toast-close" aria-label="알림 닫기" onClick={onClose}><X size={16} /></button>
     </div>
   )
 }

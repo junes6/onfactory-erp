@@ -2428,7 +2428,17 @@ export function createApp(options = {}) {
   const documentRecord = (tenantId) => workspaceStore.tenants[tenantId]?.['company-documents']
   const isDeveloperSupportDocument = (document) => document?.category === '개발운영지원'
     || (Array.isArray(document?.tags) && document.tags.includes(DEVELOPER_SUPPORT_CHANNEL))
-  const canReadDocument = (document, account) => {
+  /**
+   * 자료실 휴지통. 삭제는 곧바로 파일을 지우지 않고 30일 동안 휴지통에 둔다 — 전에는 [삭제] 한 번이
+   * 되돌릴 수 없는 영구 삭제였고, 올린 사람이면 누구나 누를 수 있었다(감사: 데이터 보호).
+   * 휴지통의 자료는 목록·내려받기·검색·AI·첨부 어디서도 읽히지 않는다(아래 canReadDocument 한 곳).
+   */
+  const DOCUMENT_TRASH_DAYS = 30
+  const isTrashedDocument = (document) => Boolean(document?.trashedAt)
+  const documentPurgeAt = (document) => new Date(Date.parse(document.trashedAt) + DOCUMENT_TRASH_DAYS * 86_400_000).toISOString()
+  const canReadDocument = (document, account) => !isTrashedDocument(document) && canSeeDocument(document, account)
+  /** 휴지통 여부를 빼고 본 열람 범위. 휴지통 목록·되살리기가 '원래 볼 수 있던 사람인가'를 잴 때만 쓴다. */
+  const canSeeDocument = (document, account) => {
     if (!document || !account || document.tenantId && document.tenantId !== account.tenantId) return false
     // 외부 게스트: 본인이 올린 것과, restricted로 본인에게 열린 것만. visibility 'all'·부서 문서는 회사 내부다.
     if (account.role === GUEST_ROLE) {
@@ -2466,6 +2476,8 @@ export function createApp(options = {}) {
    * (과 restricted 허용 명단)에게만 열린다 — 그래서 **문자열 하나로 재면 그 갈래에서 거짓말이 된다**.
    * 「이 자료보다 넓게 열리는가」를 말하는 자리(회의록 문서의 열람 범위)가 이 술어를 쓴다(규칙 8·11).
    */
+  const canRestoreDocument = (document, account) => canSeeDocument(document, account)
+    && (account.role === 'tenant-admin' || document.uploadedById === account.id || document.trashedById === account.id)
   const isDocumentOpenToEveryone = (document) => Boolean(document)
     && !isDeveloperSupportDocument(document)
     && document.visibility === 'all'
@@ -2696,15 +2708,20 @@ export function createApp(options = {}) {
   app.get('/api/documents', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
     if (!request.auth.tenantId) { response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } }); return }
     const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : []
-    const visible = await guestVisibleRows(request.auth, 'items', documents.filter((document) => canReadDocument(document, request.auth)))
+    const wantsTrash = String(request.query.trash ?? '') === '1'
+    const visible = await guestVisibleRows(request.auth, 'items', wantsTrash
+      ? documents.filter((document) => isTrashedDocument(document) && canRestoreDocument(document, request.auth))
+      : documents.filter((document) => canReadDocument(document, request.auth)))
     // 사내 폴더 구조와 이관 세션 귀속은 회사 정보다 — 외부 게스트에게는 키 자체를 주지 않는다.
     const isGuest = request.auth.role === GUEST_ROLE
     response.json({
-      documents: visible.map(({ tenantId: _tenantId, ...document }) => {
+      documents: visible.map(({ tenantId: _tenantId, ...stored }) => {
+        const document = wantsTrash ? { ...stored, purgeAt: documentPurgeAt(stored) } : stored
         if (!isGuest) return document
         const { sourcePath: _sourcePath, importId: _importId, ...safe } = document
         return safe
       }),
+      ...(wantsTrash ? { trashDays: DOCUMENT_TRASH_DAYS } : {}),
     })
   })
 
@@ -2868,7 +2885,7 @@ export function createApp(options = {}) {
   app.patch('/api/documents/:id', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
     const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? [...documentRecord(request.auth.tenantId).data] : []
     const index = documents.findIndex((document) => document.id === request.params.id)
-    if (index < 0) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } }); return }
+    if (index < 0 || isTrashedDocument(documents[index])) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다. 휴지통에 있는 자료는 되살린 뒤에 고칠 수 있습니다.' } }); return }
     const previous = documents[index]
     const visibility = ['all', 'department', 'restricted'].includes(String(request.body?.visibility)) ? String(request.body.visibility) : previous.visibility
     const updatedDocument = {
@@ -3212,11 +3229,26 @@ export function createApp(options = {}) {
     if (!document) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } }); return }
     if (isFactoryDrawingDocument(document) && request.auth.role !== 'tenant-admin') { response.status(403).json({ error: { code: 'FACTORY_DRAWING_WRITE_FORBIDDEN', message: '공장 배경 도면은 회사 관리자만 삭제할 수 있습니다.' } }); return }
     if (request.auth.role !== 'tenant-admin' && document.uploadedById !== request.auth.id) { response.status(403).json({ error: { code: 'DOCUMENT_DELETE_FORBIDDEN', message: '본인이 업로드한 자료만 삭제할 수 있습니다.' } }); return }
+    const permanent = String(request.query.permanent ?? '') === '1'
+    if (permanent && !isTrashedDocument(document)) { response.status(409).json({ error: { code: 'DOCUMENT_NOT_TRASHED', message: '휴지통에 있는 자료만 완전히 지울 수 있습니다. 먼저 [삭제]로 휴지통에 옮겨 주세요.' } }); return }
+    if (permanent && request.auth.role !== 'tenant-admin') { response.status(403).json({ error: { code: 'DOCUMENT_PURGE_FORBIDDEN', message: '휴지통의 자료를 완전히 지우는 일은 회사 관리자만 할 수 있습니다. 그대로 두면 30일 뒤 저절로 지워집니다.' } }); return }
+    if (!permanent && isTrashedDocument(document)) { response.status(409).json({ error: { code: 'DOCUMENT_ALREADY_TRASHED', message: '이미 휴지통에 있는 자료입니다.' } }); return }
     // 문장은 `documentReferenceHold` 가 실제로 답한 것과 같아야 한다(규칙 11). 화면 이름을 나열하면
     // 그 목록은 키가 늘 때마다 조용히 거짓이 되므로 범위로 적고, **할 수 있는 일이 다른 세 갈래**는
     // 문장을 가른다 — 승인 근거는 영영 못 지우는데 「연결을 해제한 뒤」라고 말하면 거짓말이다.
     const hold = documentReferenceHold(request.auth.tenantId, document.id)
     if (hold) { response.status(409).json({ error: { code: 'DOCUMENT_IN_USE', message: DOCUMENT_HOLD_MESSAGE[hold] } }); return }
+    if (!permanent) {
+      // 파일은 그대로 두고 표시만 한다 — 되살리면 내려받기·검색·AI가 전과 같이 돈다.
+      const trashed = { ...document, trashedAt: new Date().toISOString(), trashedById: request.auth.id, trashedByName: request.auth.name || '' }
+      try {
+        await persistDocumentList(request.auth.tenantId, documents.map((item) => item.id === document.id ? trashed : item), request.auth.id)
+        response.json({ deleted: true, trashed: true, purgeAt: documentPurgeAt(trashed), trashDays: DOCUMENT_TRASH_DAYS })
+      } catch {
+        response.status(500).json({ error: { code: 'DOCUMENT_DELETE_FAILED', message: '자료를 삭제하지 못했습니다. 기존 파일은 보존했습니다.' } })
+      }
+      return
+    }
     let originalBytes = null
     let removedFile = false
     try {
@@ -3224,7 +3256,7 @@ export function createApp(options = {}) {
       catch (error) { if (!(error instanceof DocumentStorageError && error.code === 'DOCUMENT_FILE_MISSING')) throw error }
       removedFile = await deleteTenantDocument(documentStorage, document, request.auth.tenantId)
       await persistDocumentList(request.auth.tenantId, documents.filter((item) => item.id !== document.id), request.auth.id)
-      response.json({ deleted: true })
+      response.json({ deleted: true, permanent: true })
     } catch {
       if (removedFile && originalBytes) {
         try {
@@ -3232,6 +3264,22 @@ export function createApp(options = {}) {
         } catch { /* best-effort file rollback */ }
       }
       response.status(500).json({ error: { code: 'DOCUMENT_DELETE_FAILED', message: '자료를 삭제하지 못했습니다. 기존 파일은 보존했습니다.' } })
+    }
+  })
+
+  /** 휴지통에서 되살리기: 올린 사람·지운 사람·회사 관리자. 원래 볼 수 없던 자료는 휴지통에서도 보이지 않는다. */
+  app.post('/api/documents/:id/restore', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    if (!request.auth.tenantId) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없습니다.' } }); return }
+    const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? [...documentRecord(request.auth.tenantId).data] : []
+    const document = documents.find((item) => item.id === request.params.id)
+    if (!document || !isTrashedDocument(document) || !canRestoreDocument(document, request.auth)) { response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '휴지통에서 이 자료를 찾을 수 없습니다. 이미 되살렸거나 30일이 지나 지워졌을 수 있습니다.' } }); return }
+    const { trashedAt: _trashedAt, trashedById: _trashedById, trashedByName: _trashedByName, ...restored } = document
+    try {
+      await persistDocumentList(request.auth.tenantId, documents.map((item) => item.id === document.id ? restored : item), request.auth.id)
+      const { tenantId: _tenantId, ...publicRow } = restored
+      response.json({ document: publicRow })
+    } catch {
+      response.status(500).json({ error: { code: 'DOCUMENT_RESTORE_FAILED', message: '자료를 되살리지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } })
     }
   })
 
@@ -4498,6 +4546,41 @@ export function createApp(options = {}) {
     ...Object.keys(workspaceStore.tenants ?? {}),
     ...(workspaceStore.platform.tenants ?? []).map((tenant) => tenant?.id).filter(Boolean),
   ])]
+
+  /**
+   * 휴지통에서 기한이 지난 자료를 완전히 지운다. 목록을 먼저 저장하고 파일은 그다음에 지운다 —
+   * 파일을 먼저 지웠다가 저장이 실패하면 '있다고 적힌데 열리지 않는 자료'가 남는다.
+   * 그 사이 누가 이 자료를 붙잡았다면(규칙상 휴지통 자료는 붙일 수 없지만) 지우지 않고 남긴다.
+   */
+  const sweepDocumentTrash = async (now = new Date()) => {
+    const cutoff = new Date(now).getTime() - DOCUMENT_TRASH_DAYS * 86_400_000
+    let removed = 0
+    let kept = 0
+    for (const tenantId of tenantIdsForSchedule()) {
+      const documents = Array.isArray(documentRecord(tenantId)?.data) ? documentRecord(tenantId).data : []
+      const expired = documents.filter((document) => isTrashedDocument(document) && Date.parse(document.trashedAt) <= cutoff)
+      if (!expired.length) continue
+      const purge = expired.filter((document) => {
+        if (documentReferenceHold(tenantId, document.id)) { kept += 1; return false }
+        return true
+      })
+      if (!purge.length) continue
+      const purgeIds = new Set(purge.map((document) => document.id))
+      try {
+        await persistDocumentList(tenantId, documents.filter((document) => !purgeIds.has(document.id)), 'system:document-trash')
+      } catch (error) {
+        console.error('[document-trash] 휴지통을 비우지 못했습니다', { tenantId, message: error?.message })
+        continue
+      }
+      removed += purge.length
+      if (!documentStorage) continue
+      for (const document of purge) {
+        try { await deleteTenantDocument(documentStorage, document, tenantId) } catch { /* 파일이 이미 없으면 그대로 둔다 */ }
+      }
+    }
+    return { removed, kept }
+  }
+  app.locals.sweepDocumentTrash = sweepDocumentTrash
 
   /** 마감이 임박했거나 이미 지난 업무. 센티널 제안과 별개로 "지금 무엇이 급한가"를 센다. */
   const workDeadlineSnapshot = (tenantId, now) => {
@@ -9461,6 +9544,17 @@ export function createApp(options = {}) {
         }
       }
       return { detail: `${created ? `${created}건을 만들었습니다.` : '만들 반복 업무가 없었습니다.'}${failed ? ` 실패 ${failed}곳.` : ''}` }
+    },
+  })
+
+  scheduler.register({
+    id: 'document-trash-sweep',
+    label: '자료실 휴지통 비우기',
+    description: `휴지통에 든 지 ${DOCUMENT_TRASH_DAYS}일이 지난 자료의 파일과 기록을 완전히 지웁니다.`,
+    spec: { every: 'day', hour: 4, minute: 30 },
+    run: async ({ now }) => {
+      const { removed, kept } = await sweepDocumentTrash(now)
+      return { detail: `${removed ? `${removed}건을 완전히 지웠습니다.` : '지울 자료가 없었습니다.'}${kept ? ` 다른 화면이 쓰고 있어 ${kept}건은 남겼습니다.` : ''}` }
     },
   })
 

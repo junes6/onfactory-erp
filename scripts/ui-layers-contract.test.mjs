@@ -91,6 +91,12 @@ test('알림 한 줄: 보통 알림은 저절로 닫히고(멈춤 가능), 실�
   assert.match(toast, /onMouseEnter=\{\(\) => setPaused\(true\)\}/)
   assert.match(toast, /onFocus=\{\(\) => setPaused\(true\)\}/)
   assert.match(toast, /role=\{message\.tone === 'error' \? 'alert' : 'status'\}/)
+  // 되돌리기는 10초, 마우스·초점이 머무는 동안은 세지 않는다. 닫기 단추 모양이 [되돌리기]를 누르지 않는다.
+  assert.match(toast, /export const UNDO_SECONDS = 10/)
+  assert.match(toast, /if \(pausedRef\.current\) return current/)
+  assert.match(styles, /\.toast > \.toast-close \{ width: 36px; height: 36px;/)
+  assert.match(toast, /className="toast-close" aria-label="알림 닫기"/)
+  assert.doesNotMatch(styles, /\.toast button \{/)
   const failure = new RegExp(toast.match(/const FAILURE_TEXT = \/(.+)\/u/)[1], 'u')
   for (const text of ['증빙 파일을 다운로드하지 못했습니다.', '업무 처리 서버에 연결할 수 없습니다.', '정리에 실패했습니다.']) assert.ok(failure.test(text), text)
   for (const text of ['업무를 시작했습니다.', '저장했습니다.', '검토 요청을 보냈습니다.']) assert.ok(!failure.test(text), text)

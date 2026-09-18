@@ -145,7 +145,7 @@ const contracts = [
       [/if \(document\)[\s\S]*?method: 'PATCH'[\s\S]*?else[\s\S]*?method: 'POST'/, 'update/create API selection'],
       [/if \(!response\.ok\) throw new Error[\s\S]*?await onSaved\(\); onClose\(\)/, 'failure handling before list reload'],
       [/const remove = async[\s\S]*?method: 'DELETE'[\s\S]*?if \(!response\.ok\)[\s\S]*?await load\(\)/, 'delete failure handling and immediate reload'],
-      [/onClick=\{\(\) => setEditing\('new'\)\}[\s\S]*?> 자료 업로드<\/Button>/, 'create button wiring'],
+      [/onClick=\{\(\) => setEditing\('new'\)\}[\s\S]*?> 자료 올리기<\/Button>/, 'create button wiring'],
       [/onClick=\{\(\) => setEditing\(document\)\}/, 'edit button wiring'],
       [/onClick=\{\(\) => remove\(document\)\}/, 'delete button wiring'],
     ],
