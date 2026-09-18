@@ -16,6 +16,9 @@ import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import type { LensTarget } from './LensPanel'
 import './IpRights.css'
 import { Button, IconButton } from './ui/Button'
+import { DeletedRowsButton } from './DeletedRows'
+import { deletedToast } from '../utils/deletedRows'
+import type { ToastMessage } from './ui/Toast'
 
 // 지식재산권·인증서: 등록증 원본 파일을 업로드해 두고 만료를 관리한다.
 type IpKind = '특허' | '실용신안' | '상표' | '디자인' | '저작권' | '인증서' | '등록증' | '기타'
@@ -87,8 +90,9 @@ function kindIcon(kind: IpKind) {
   return kind === '특허' || kind === '실용신안' ? Award : kind === '저작권' ? Copyright : kind === '인증서' || kind === '등록증' ? BadgeCheck : FileBadge
 }
 
-export function IpRightsPage({ workspaceScope, canManage, currentUserName, onAskLens, onToast }: { workspaceScope?: string; canManage: boolean; currentUserName: string; onAskLens?: (target: LensTarget) => void; onToast: (message: string) => void }) {
-  const [rights, setRights] = useWorkspaceState<IpRight[]>('ip-rights', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isIpRights })
+export function IpRightsPage({ workspaceScope, canManage, currentUserName, onAskLens, onToast }: { workspaceScope?: string; canManage: boolean; currentUserName: string; onAskLens?: (target: LensTarget) => void; onToast: (message: string | ToastMessage) => void }) {
+  const [restoreToken, setRestoreToken] = useState(0)
+  const [rights, setRights] = useWorkspaceState<IpRight[]>('ip-rights', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isIpRights, reloadToken: restoreToken })
   const [editor, setEditor] = useState<{ item?: IpRight } | null>(null)
   const [kindFilter, setKindFilter] = useState<'전체' | IpKind>('전체')
   const today = seoulDateInputValue()
@@ -109,18 +113,18 @@ export function IpRightsPage({ workspaceScope, canManage, currentUserName, onAsk
     if (days === null) return null
     return { label: days < 0 ? `만료 ${Math.abs(days)}일 지남` : `만료 D-${days}`, urgent: days <= IP_RENEWAL_WINDOW_DAYS }
   }
+  /** 지우기는 되살릴 수 있다(지운 기록 30일·등록증 파일은 휴지통) — 묻지 않고 [되돌리기]를 단다. */
   const remove = async (right: IpRight) => {
-    if (!window.confirm(`‘${right.title}’을(를) 삭제할까요? 첨부한 등록증 파일도 함께 삭제됩니다.`)) return
     const result = await setRights((current) => current.filter((item) => item.id !== right.id))
     if (!result.ok) { onToast(result.message ?? '삭제하지 못했습니다.'); return }
     await deleteDocumentAttachments(right.attachments.filter(isStoredDocumentAttachment).map((item) => item.id), workspaceScope)
-    onToast('삭제했습니다.')
+    onToast(deletedToast({ text: `‘${right.title}’을(를) 지웠습니다.`, storeKey: 'ip-rights', rowId: right.id, workspaceScope, onRestored: () => setRestoreToken((value) => value + 1), onToast }))
   }
 
   return <div className="content-page ip-page">
     <header className="page-header">
       <div><span className="eyebrow">IP & CERTIFICATES</span><h1>지식재산 · 인증</h1><p>특허·상표·저작권과 인증서·등록증을 한 대장에서 관리합니다. 원본 파일을 올려 두면 언제든 내려받을 수 있고, 만료 60일 전부터 강조됩니다.</p></div>
-      <div className="page-header-actions">{canManage && <Button tone="primary" type="button" onClick={() => setEditor({})}><Plus size={18} /> 권리 · 인증 등록</Button>}</div>
+      <div className="page-header-actions">{canManage && <DeletedRowsButton storeKey="ip-rights" title="권리 · 인증" workspaceScope={workspaceScope} refreshToken={rights.length} onRestored={() => setRestoreToken((value) => value + 1)} onToast={onToast} />}{canManage && <Button tone="primary" type="button" onClick={() => setEditor({})}><Plus size={18} /> 권리 · 인증 등록</Button>}</div>
     </header>
     <section className="ip-summary" aria-label="지식재산 요약">
       <article><span><Award size={18} /></span><div><small>전체 권리·인증</small><strong>{rights.length}건</strong></div></article>

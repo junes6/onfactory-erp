@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Briefcase, Building2, Check, Download, FileSignature, FileStack, Landmark, Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { Briefcase, Building2, Check, Download, FileSignature, FileStack, Landmark, LockKeyhole, Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { formatDateLabel, seoulDateInputValue } from '../utils/dateTime'
 import {
@@ -15,6 +15,9 @@ import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './ItServices.css'
 import { Button, IconButton } from './ui/Button'
 import { useIndustrySurface } from '../modules/IndustryContext'
+import { DeletedRowsButton } from './DeletedRows'
+import { deletedToast } from '../utils/deletedRows'
+import type { ToastMessage } from './ui/Toast'
 
 export type ItServicesView = 'it-projects' | 'it-deliverables' | 'it-contracts'
 
@@ -104,7 +107,7 @@ type Props = {
   canManage: boolean
   currentUserId: string
   currentUserName: string
-  onToast: (message: string) => void
+  onToast: (message: string | ToastMessage) => void
 }
 
 const isProjects = (value: unknown): value is ItProject[] => Array.isArray(value) && value.every((item) => item && typeof item.id === 'string' && typeof item.name === 'string')
@@ -155,11 +158,16 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
       .catch(() => {})
     return () => { active = false }
   }, [workspaceScope])
-  const [projects, setProjects] = useWorkspaceState<ItProject[]>('it-projects', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isProjects })
-  const [deliverables, setDeliverables] = useWorkspaceState<ItDeliverable[]>('it-deliverables', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isDeliverables })
-  const [contracts, setContracts] = useWorkspaceState<ItContract[]>('it-contracts', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isContracts })
-  const [clients, setClients] = useWorkspaceState<ItClient[]>('it-clients', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isClients })
-  const [programs, setPrograms] = useWorkspaceState<ItSupportProgram[]>('it-support-programs', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isPrograms })
+  // 지운 것을 되살리면 다섯 대장을 다시 읽는다(서버가 행을 되돌려 놓는다).
+  const [restoreToken, setRestoreToken] = useState(0)
+  const reloadAfterRestore = () => setRestoreToken((value) => value + 1)
+  const [projects, setProjects] = useWorkspaceState<ItProject[]>('it-projects', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isProjects, reloadToken: restoreToken })
+  const [deliverables, setDeliverables] = useWorkspaceState<ItDeliverable[]>('it-deliverables', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isDeliverables, reloadToken: restoreToken })
+  const [contracts, setContracts] = useWorkspaceState<ItContract[]>('it-contracts', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isContracts, reloadToken: restoreToken })
+  const [clients, setClients] = useWorkspaceState<ItClient[]>('it-clients', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isClients, reloadToken: restoreToken })
+  const [programs, setPrograms] = useWorkspaceState<ItSupportProgram[]>('it-support-programs', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isPrograms, reloadToken: restoreToken })
+  /** 지운 뒤 알림 — 되살릴 수 있으니 묻지 않고 [되돌리기]를 단다(지운 기록 30일·첨부는 휴지통). */
+  const deletedNotice = (text: string, storeKey: string, rowId: string) => deletedToast({ text, storeKey, rowId, workspaceScope, onRestored: reloadAfterRestore, onToast })
   const [contractTab, setContractTab] = useState<'contracts' | 'clients' | 'programs'>('contracts')
   const [editor, setEditor] = useState<{ kind: 'project'; item?: ItProject } | { kind: 'deliverable'; item?: ItDeliverable } | { kind: 'contract'; item?: ItContract } | { kind: 'client'; item?: ItClient } | { kind: 'program'; item?: ItSupportProgram } | null>(null)
   const [projectFilter, setProjectFilter] = useState<string>('all')
@@ -170,40 +178,52 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
   const today = seoulDateInputValue()
 
   const removeProject = async (project: ItProject) => {
-    if (!window.confirm(`‘${project.name}’ 프로젝트를 삭제할까요? 연결된 산출물 기록은 남습니다.`)) return
     const result = await setProjects((current) => current.filter((item) => item.id !== project.id))
     if (!result.ok) { onToast(result.message ?? '프로젝트를 삭제하지 못했습니다.'); return }
-    onToast('프로젝트를 삭제했습니다.')
+    onToast(deletedNotice(`‘${project.name}’ 프로젝트를 지웠습니다. 연결된 산출물 기록은 남습니다.`, 'it-projects', project.id))
   }
   const removeDeliverable = async (deliverable: ItDeliverable) => {
-    if (!window.confirm(`‘${deliverable.name} ${deliverable.version}’ 산출물과 첨부 파일을 삭제할까요?`)) return
     const result = await setDeliverables((current) => current.filter((item) => item.id !== deliverable.id))
     if (!result.ok) { onToast(result.message ?? '산출물을 삭제하지 못했습니다.'); return }
     const cleanup = await deleteDocumentAttachments(deliverable.attachments.filter(isStoredDocumentAttachment).map((item) => item.id), workspaceScope)
-    onToast(cleanup.failed.length ? `산출물은 삭제했지만 파일 ${cleanup.failed.length}개 정리에 실패했습니다.` : '산출물을 삭제했습니다.')
+    onToast(cleanup.failed.length ? `산출물은 지웠지만 파일 ${cleanup.failed.length}개를 휴지통으로 옮기지 못했습니다.` : deletedNotice(`‘${deliverable.name} ${deliverable.version}’ 산출물을 지웠습니다.`, 'it-deliverables', deliverable.id))
   }
   const removeClient = async (client: ItClient) => {
     const linked = contracts.filter((contract) => contract.client === client.name).length
-    if (!window.confirm(`‘${client.name}’ 거래처를 삭제할까요?${linked ? ` 연결된 계약 ${linked}건의 거래처명은 그대로 남습니다.` : ''}`)) return
     const result = await setClients((current) => current.filter((item) => item.id !== client.id))
     if (!result.ok) { onToast(result.message ?? '거래처를 삭제하지 못했습니다.'); return }
-    onToast('거래처를 삭제했습니다.')
+    onToast(deletedNotice(`‘${client.name}’ 거래처를 지웠습니다.${linked ? ` 연결된 계약 ${linked}건의 거래처명은 그대로 남습니다.` : ''}`, 'it-clients', client.id))
   }
   const removeProgram = async (program: ItSupportProgram) => {
-    if (!window.confirm(`‘${program.title}’ 지원사업을 삭제할까요?`)) return
     const result = await setPrograms((current) => current.filter((item) => item.id !== program.id))
     if (!result.ok) { onToast(result.message ?? '지원사업을 삭제하지 못했습니다.'); return }
     const cleanup = await deleteDocumentAttachments(program.attachments.filter(isStoredDocumentAttachment).map((item) => item.id), workspaceScope)
-    onToast(cleanup.failed.length ? `지원사업은 삭제했지만 문서 ${cleanup.failed.length}개 정리에 실패했습니다.` : '지원사업을 삭제했습니다.')
+    onToast(cleanup.failed.length ? `지원사업은 지웠지만 문서 ${cleanup.failed.length}개를 휴지통으로 옮기지 못했습니다.` : deletedNotice(`‘${program.title}’ 지원사업을 지웠습니다.`, 'it-support-programs', program.id))
   }
   const removeContract = async (contract: ItContract) => {
-    if (!window.confirm(`‘${contract.title}’ 계약을 삭제할까요?`)) return
     const result = await setContracts((current) => current.filter((item) => item.id !== contract.id))
     if (!result.ok) { onToast(result.message ?? '계약을 삭제하지 못했습니다.'); return }
     const cleanup = await deleteDocumentAttachments(contract.attachments.filter(isStoredDocumentAttachment).map((item) => item.id), workspaceScope)
-    onToast(cleanup.failed.length ? `계약은 삭제했지만 문서 ${cleanup.failed.length}개 정리에 실패했습니다.` : '계약을 삭제했습니다.')
+    onToast(cleanup.failed.length ? `계약은 지웠지만 문서 ${cleanup.failed.length}개를 휴지통으로 옮기지 못했습니다.` : deletedNotice(`‘${contract.title}’ 계약을 지웠습니다.`, 'it-contracts', contract.id))
   }
 
+  /**
+   * 내가 열 수 있는 파일. 계약 문서처럼 올린 사람·관리자만 여는 파일은 단추 대신 잠금 표시로 — 눌러야 '찾을 수 없음'을
+   * 알게 되는 단추를 그리지 않는다(감사 business-admin-05). 관리자는 모두 연다.
+   */
+  const [readableFileIds, setReadableFileIds] = useState<Set<string> | null>(null)
+  useEffect(() => {
+    if (canManage) return
+    let active = true
+    fetch('/api/documents', { headers: workspaceScope ? { 'x-workspace-identity': workspaceScope } : undefined })
+      .then(async (response) => response.ok ? (await response.json() as { documents?: Array<{ id: string }> }).documents ?? [] : [])
+      .then((documents) => { if (active) setReadableFileIds(new Set(documents.map((document) => document.id))) })
+      .catch(() => { if (active) setReadableFileIds(new Set()) })
+    return () => { active = false }
+  }, [canManage, workspaceScope, restoreToken])
+  const fileChip = (file: StoredDocumentAttachment) => canManage || !readableFileIds || readableFileIds.has(file.id)
+    ? <button type="button" key={file.id} onClick={() => void download(file)}><Download size={13} /> {file.name}</button>
+    : <span className="it-file-locked" key={file.id} title="올린 사람과 회사 관리자만 열 수 있는 파일입니다. 필요하면 관리자에게 요청해 주세요."><LockKeyhole size={13} /> {file.name}</span>
   const download = async (attachment: StoredDocumentAttachment) => {
     try { await downloadDocumentAttachment(attachment, workspaceScope) } catch (error) { onToast(error instanceof Error ? error.message : '파일을 내려받지 못했습니다.') }
   }
@@ -215,7 +235,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
     const overdue = active.filter((project) => project.dueDate && project.dueDate < today)
     const sorted = [...projects].sort((left, right) => (left.dueDate || '9999').localeCompare(right.dueDate || '9999'))
     return <div className="content-page it-page">
-      <header className="page-header"><div><span className="eyebrow">IT PROJECTS</span><h1>프로젝트</h1><p>수주부터 완료까지 상태·마감·담당을 한 줄로 관리합니다.</p></div><div className="page-header-actions"><Button tone="primary" type="button" onClick={() => setEditor({ kind: 'project' })}><Plus size={18} /> 프로젝트 등록</Button></div></header>
+      <header className="page-header"><div><span className="eyebrow">IT PROJECTS</span><h1>프로젝트</h1><p>수주부터 완료까지 상태·마감·담당을 한 줄로 관리합니다.</p></div><div className="page-header-actions"><DeletedRowsButton storeKey="it-projects" title="프로젝트" workspaceScope={workspaceScope} refreshToken={projects.length} onRestored={reloadAfterRestore} onToast={onToast} /><Button tone="primary" type="button" onClick={() => setEditor({ kind: 'project' })}><Plus size={18} /> 프로젝트 등록</Button></div></header>
       <section className="it-summary-strip" aria-label="프로젝트 요약">
         <article><span className="tone-blue"><Briefcase size={18} /></span><div><small>진행 중</small><strong>{active.length}건</strong></div></article>
         <article className={dueSoon.length ? 'is-warn' : ''}><span className="tone-warn"><Briefcase size={18} /></span><div><small>7일 내 마감</small><strong>{dueSoon.length}건</strong></div></article>
@@ -246,7 +266,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
   if (view === 'it-deliverables') {
     const visible = deliverables.filter((item) => projectFilter === 'all' || item.projectId === projectFilter).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
     return <div className="content-page it-page">
-      <header className="page-header"><div><span className="eyebrow">DELIVERABLES</span><h1>산출물</h1><p>프로젝트별 파일을 버전과 함께 보관합니다.</p></div><div className="page-header-actions"><Button tone="primary" type="button" disabled={projects.length === 0} onClick={() => setEditor({ kind: 'deliverable' })}><Plus size={18} /> 산출물 등록</Button></div></header>
+      <header className="page-header"><div><span className="eyebrow">DELIVERABLES</span><h1>산출물</h1><p>프로젝트별 파일을 버전과 함께 보관합니다.</p></div><div className="page-header-actions"><DeletedRowsButton storeKey="it-deliverables" title="산출물" workspaceScope={workspaceScope} refreshToken={deliverables.length} onRestored={reloadAfterRestore} onToast={onToast} /><Button tone="primary" type="button" disabled={projects.length === 0} onClick={() => setEditor({ kind: 'deliverable' })}><Plus size={18} /> 산출물 등록</Button></div></header>
       <section className="panel it-list-panel">
         <div className="it-toolbar"><label><span>프로젝트</span><select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">전체 프로젝트</option>{deliverableProjectOptions.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><span className="it-toolbar-count">{visible.length}건</span></div>
         {projects.length === 0
@@ -256,7 +276,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
             : <div className="it-rows" role="list">{visible.map((deliverable) => <article className="it-row" role="listitem" key={deliverable.id}>
               <span className="it-version">{deliverable.version}</span>
               <div className="it-row-main"><strong>{deliverable.name}</strong><small>{projectNameOf(deliverable.projectId)} · {deliverable.createdBy} · {formatDateLabel(deliverable.updatedAt.slice(0, 10))}</small></div>
-              <div className="it-row-files">{deliverable.attachments.length === 0 ? <span className="it-row-meta">파일 없음</span> : deliverable.attachments.map((file) => <button type="button" key={file.id} onClick={() => void download(file)}><Download size={13} /> {file.name}</button>)}</div>
+              <div className="it-row-files">{deliverable.attachments.length === 0 ? <span className="it-row-meta">파일 없음</span> : deliverable.attachments.map(fileChip)}</div>
               <div className="it-row-actions"><button type="button" aria-label={`${deliverable.name} 수정`} onClick={() => setEditor({ kind: 'deliverable', item: deliverable })}><Pencil size={15} /></button>{(canManage || deliverable.createdBy === currentUserName) && <button type="button" aria-label={`${deliverable.name} 삭제`} onClick={() => void removeDeliverable(deliverable)}><Trash2 size={15} /></button>}</div>
             </article>)}</div>}
       </section>
@@ -287,7 +307,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
   </div>
   if (contractTab === 'clients') {
     return <div className="content-page it-page">
-      <header className="page-header"><div><span className="eyebrow">CLIENTS</span><h1>계약 · 거래처</h1><p>거래처 정보는 계약 없이도 먼저 등록해 둘 수 있습니다. 계약을 만들 때 거래처를 골라 연결하세요.</p></div><div className="page-header-actions">{canManage && <Button tone="primary" type="button" onClick={() => setEditor({ kind: 'client' })}><Plus size={18} /> 거래처 등록</Button>}</div></header>
+      <header className="page-header"><div><span className="eyebrow">CLIENTS</span><h1>계약 · 거래처</h1><p>거래처 정보는 계약 없이도 먼저 등록해 둘 수 있습니다. 계약을 만들 때 거래처를 골라 연결하세요.</p></div><div className="page-header-actions">{canManage && <DeletedRowsButton storeKey="it-clients" title="거래처" workspaceScope={workspaceScope} refreshToken={clients.length} onRestored={reloadAfterRestore} onToast={onToast} />}{canManage && <Button tone="primary" type="button" onClick={() => setEditor({ kind: 'client' })}><Plus size={18} /> 거래처 등록</Button>}</div></header>
       {contractTabs}
       <section className="panel it-list-panel">
         {sortedClients.length === 0
@@ -310,7 +330,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
   }
   if (contractTab === 'programs') {
     return <div className="content-page it-page">
-      <header className="page-header"><div><span className="eyebrow">SUPPORT PROGRAMS</span><h1>지원사업 신청관리</h1><p>메인에서 발견한 공고를 준비부터 신청·선정·진행·완료까지 관리합니다. 접수 마감 7일 전부터 강조됩니다.</p></div><div className="page-header-actions">{canManage && <Button tone="primary" type="button" onClick={() => setEditor({ kind: 'program' })}><Plus size={18} /> 지원사업 등록</Button>}</div></header>
+      <header className="page-header"><div><span className="eyebrow">SUPPORT PROGRAMS</span><h1>지원사업 신청관리</h1><p>메인에서 발견한 공고를 준비부터 신청·선정·진행·완료까지 관리합니다. 접수 마감 7일 전부터 강조됩니다.</p></div><div className="page-header-actions">{canManage && <DeletedRowsButton storeKey="it-support-programs" title="지원사업" workspaceScope={workspaceScope} refreshToken={programs.length} onRestored={reloadAfterRestore} onToast={onToast} />}{canManage && <Button tone="primary" type="button" onClick={() => setEditor({ kind: 'program' })}><Plus size={18} /> 지원사업 등록</Button>}</div></header>
       {contractTabs}
       <section className="panel it-list-panel">
         {sortedPrograms.length === 0
@@ -320,7 +340,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
             <div className="it-row-main"><strong>{program.title}</strong><small>{program.agency || '주관기관 미입력'}{program.owner ? ` · 담당 ${program.owner}` : ''}{program.applyStart || program.applyEnd ? ` · 접수 ${program.applyStart ? formatDateLabel(program.applyStart) : '?'} ~ ${program.applyEnd ? formatDateLabel(program.applyEnd) : '?'}` : ''}{program.startDate || program.endDate ? ` · 사업 ${program.startDate ? formatDateLabel(program.startDate) : '?'} ~ ${program.endDate ? formatDateLabel(program.endDate) : '?'}` : ''}</small></div>
             <span className={`it-row-meta${due?.urgent ? ' is-urgent' : ''}`}>{due?.label ?? (program.amount ? money(program.amount) : '기간 미정')}</span>
             <span className="it-row-meta">{program.amount ? money(program.amount) : '—'}</span>
-            <div className="it-row-files">{program.attachments.length === 0 ? <span className="it-row-meta">문서 없음</span> : program.attachments.map((file) => <button type="button" key={file.id} onClick={() => void download(file)}><Download size={13} /> {file.name}</button>)}</div>
+            <div className="it-row-files">{program.attachments.length === 0 ? <span className="it-row-meta">문서 없음</span> : program.attachments.map(fileChip)}</div>
             {canManage && <div className="it-row-actions"><button type="button" aria-label={`${program.title} 수정`} onClick={() => setEditor({ kind: 'program', item: program })}><Pencil size={15} /></button><button type="button" aria-label={`${program.title} 삭제`} onClick={() => void removeProgram(program)}><Trash2 size={15} /></button></div>}
           </article> })}</div>}
       </section>
@@ -333,7 +353,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
     </div>
   }
   return <div className="content-page it-page">
-    <header className="page-header"><div><span className="eyebrow">CONTRACTS</span><h1>계약 · 거래처</h1><p>계약 기간·금액·문서를 거래처별로 관리합니다. 만료 60일 전부터 갱신 준비로 표시됩니다. 거래처 정보와 지원사업은 탭에서 따로 관리합니다.</p></div><div className="page-header-actions">{canManage ? <Button tone="primary" type="button" onClick={() => setEditor({ kind: 'contract' })}><Plus size={18} /> 계약 등록</Button> : <StatusBadge className="status-pill" tone="neutral">조회 전용</StatusBadge>}</div></header>
+    <header className="page-header"><div><span className="eyebrow">CONTRACTS</span><h1>계약 · 거래처</h1><p>계약 기간·금액·문서를 거래처별로 관리합니다. 만료 60일 전부터 갱신 준비로 표시됩니다. 거래처 정보와 지원사업은 탭에서 따로 관리합니다.</p></div><div className="page-header-actions">{canManage && <DeletedRowsButton storeKey="it-contracts" title="계약" workspaceScope={workspaceScope} refreshToken={contracts.length} onRestored={reloadAfterRestore} onToast={onToast} />}{canManage ? <Button tone="primary" type="button" onClick={() => setEditor({ kind: 'contract' })}><Plus size={18} /> 계약 등록</Button> : <StatusBadge className="status-pill" tone="neutral">조회 전용</StatusBadge>}</div></header>
     {contractTabs}
     <section className="panel it-list-panel">
       {sortedContracts.length === 0
@@ -342,7 +362,7 @@ export function ItServicesPage({ view, workspaceScope, canManage, currentUserId,
           <StatusBadge className="status-pill" dot tone={status.tone}>{status.label}</StatusBadge>
           <div className="it-row-main"><strong>{contract.title}</strong><small>{contract.client}{contract.number ? ` · ${contract.number}` : ''} · {contract.startDate ? formatDateLabel(contract.startDate) : '시작 미정'} ~ {contract.endDate ? formatDateLabel(contract.endDate) : '종료 미정'}</small></div>
           <span className="it-row-meta">{money(contract.amount)}</span>
-          <div className="it-row-files">{contract.attachments.length === 0 ? <span className="it-row-meta">문서 없음</span> : contract.attachments.map((file) => <button type="button" key={file.id} onClick={() => void download(file)}><Download size={13} /> {file.name}</button>)}</div>
+          <div className="it-row-files">{contract.attachments.length === 0 ? <span className="it-row-meta">문서 없음</span> : contract.attachments.map(fileChip)}</div>
           {canManage && <div className="it-row-actions"><button type="button" aria-label={`${contract.title} 수정`} onClick={() => setEditor({ kind: 'contract', item: contract })}><Pencil size={15} /></button><button type="button" aria-label={`${contract.title} 삭제`} onClick={() => void removeContract(contract)}><Trash2 size={15} /></button></div>}
         </article> })}</div>}
     </section>
@@ -450,7 +470,7 @@ function DeliverableEditor({ item, projects, defaultProjectId, workspaceScope, c
           if (!files.length) return
           setUploading(true)
           try {
-            const added = await uploadDocumentAttachments(files, { workspaceScope, category: '프로젝트 산출물', summary: `${text(form(event), 'name') || '산출물'} 파일`, tags: ['it-deliverable'] })
+            const added = await uploadDocumentAttachments(files, { workspaceScope, category: '프로젝트 산출물', summary: `${text(form(event), 'name') || '산출물'} 파일`, tags: ['it-deliverable'], visibility: 'all' })
             for (const file of added) uploadedRef.current.add(file.id)
             setAttachments((current) => [...current, ...added])
           } catch (error) { onToast(error instanceof Error ? error.message : '파일을 업로드하지 못했습니다.') }
@@ -667,7 +687,7 @@ function ProgramEditor({ item, workspaceScope, currentUserName, onToast, onClose
           if (!files.length) return
           setUploading(true)
           try {
-            const added = await uploadDocumentAttachments(files, { workspaceScope, category: '지원사업', summary: '지원사업 문서', tags: ['support-program'] })
+            const added = await uploadDocumentAttachments(files, { workspaceScope, category: '지원사업', summary: '지원사업 문서', tags: ['support-program'], visibility: 'all' })
             for (const file of added) uploadedRef.current.add(file.id)
             setAttachments((current) => [...current, ...added])
           } catch (error) { onToast(error instanceof Error ? error.message : '문서를 업로드하지 못했습니다.') }

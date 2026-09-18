@@ -38,6 +38,8 @@ export const ARCHIVE_COLLECTIONS = Object.freeze({
   'platform-actions': '운영 조치',
   // P1-3b: 5,000건에 닿은 대화방의 가장 오래된 말(과 그 스레드 답글). 행마다 conversationId가 붙어 있다.
   'messenger-messages': '메신저 옛 대화',
+  // P1-10: 대장에서 지운 행(봉투째). 30일 동안 되살릴 수 있다(server/deleted-rows.mjs).
+  'deleted-rows': '지운 기록',
 })
 
 export class ArchiveError extends Error {

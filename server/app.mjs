@@ -40,6 +40,7 @@ import { registerWikiRoutes } from './wiki.mjs'
 import { createTranscription } from './transcription.mjs'
 import { conversationIdOfDocument, privateConversationOfDocument, redactDirectMessageProposals } from './messenger-privacy.mjs'
 import { ARCHIVE_PAGE_LIMIT, createArchive } from './archive.mjs'
+import { DELETED_ROW_KEYS, DELETED_ROWS_COLLECTION, envelopesFor, registerDeletedRowRoutes, removedRows } from './deleted-rows.mjs'
 import { createOverflowSweeper, pageHotAndArchive } from './archive-sweeps.mjs'
 import { MATERIALS_KEY, registerMaterialRoutes } from './review-materials.mjs'
 import { WORK_ARCHIVE_AFTER_DAYS, WORK_ARCHIVE_PRESSURE, registerWorkArchiveRoutes } from './work-archive.mjs'
@@ -3297,6 +3298,13 @@ export function createApp(options = {}) {
     } catch {
       response.status(500).json({ error: { code: 'DOCUMENT_RESTORE_FAILED', message: '자료를 되살리지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } })
     }
+  })
+
+  registerDeletedRowRoutes({
+    app, requireAuth, requireMatchingWorkspaceIdentity, archive, workspaceStore, commitWorkspaceStore,
+    documentRecord, stageDocumentList, linkedDocumentIds,
+    // 되살리기는 그 대장을 쓸 수 있는 사람만 — generic PUT의 직무 판정과 같다.
+    canWriteKey: (auth, key) => auth.role === 'tenant-admin' || (auth.role === 'tenant-member' && TENANT_MEMBER_WRITE_KEYS.has(key)),
   })
 
   const platformTenant = (tenantId) => workspaceStore.platform.tenants.find((tenant) => tenant?.id === tenantId)
@@ -8954,10 +8962,27 @@ export function createApp(options = {}) {
         return
       }
     }
+    // P1-10: 대장에서 뺀 행은 **커밋 전에** 보관함에 담는다(지운 기록 30일). 전에는 [삭제] 한 번이 영구 삭제였다.
+    // 보관이 실패해도 삭제는 막지 않는다(전과 같은 결과) — 대신 로그를 남긴다. 커밋이 안 되면 담은 것을 가린다.
+    let deletedEnvelopeIds = []
+    if (DELETED_ROW_KEYS.has(key)) {
+      const removed = removedRows(rowsBeforeWrite, nextData)
+      if (removed.length) {
+        const envelopes = envelopesFor(key, removed, request.auth)
+        try {
+          await archive.append(request.auth.tenantId, DELETED_ROWS_COLLECTION, envelopes, { reason: `${key} 삭제`, actor: request.auth.id })
+          deletedEnvelopeIds = envelopes.map((envelope) => envelope.id)
+        } catch (error) {
+          console.warn('[deleted-rows] 지운 행을 보관하지 못했습니다', { key, message: error?.message })
+        }
+      }
+    }
+    const forgetDeletedEnvelopes = () => { if (deletedEnvelopeIds.length) void archive.forget(request.auth.tenantId, DELETED_ROWS_COLLECTION, deletedEnvelopeIds).catch(() => undefined) }
     // 버전 확인과 이 줄 사이에 await(첨부 참조 확인)가 있다. 그 사이에 다른 요청이 같은 키를 썼다면
     // 같은 If-Match를 든 두 요청이 모두 통과해 뒤의 것이 앞의 것을 지운다(감사 실측: 둘 다 200, 한쪽만 남음).
     // 쓰기 직전에 한 번 더 본다 — 바뀌었으면 409, 화면은 최신 값을 다시 읽는다.
     if (workspaceStore.tenants[request.auth.tenantId]?.[key] !== currentRecord) {
+      forgetDeletedEnvelopes()
       response.status(409).json({
         error: { code: 'WORKSPACE_VERSION_CONFLICT', message: '다른 사용자가 먼저 변경했습니다. 최신 데이터를 불러왔으니 내용을 확인한 뒤 다시 저장해 주세요.' },
         currentVersion: workspaceRecordVersion(workspaceStore.tenants[request.auth.tenantId]?.[key]),
@@ -9000,6 +9025,7 @@ export function createApp(options = {}) {
         else delete tenantStore[CALENDAR_SYNC_LINKS_KEY]
       }
       console.error('[workspace-store] Failed to persist data', { message: error?.message })
+      forgetDeletedEnvelopes()
       response.status(500).json({ error: { code: 'STORE_WRITE_FAILED', message: '공유 데이터를 저장하지 못했습니다.' } })
       return
     }

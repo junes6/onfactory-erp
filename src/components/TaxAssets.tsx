@@ -13,6 +13,9 @@ import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import { TaxWorkspace } from './TaxWorkspace'
 import './TaxAssets.css'
 import { Button, IconButton } from './ui/Button'
+import { DeletedRowsButton } from './DeletedRows'
+import { deletedToast } from '../utils/deletedRows'
+import type { ToastMessage } from './ui/Toast'
 
 type AssetKind = '비품' | '장비' | '차량' | '소프트웨어' | '부동산' | '기타'
 type AssetStatus = '사용 중' | '수리 중' | '보관' | '폐기'
@@ -38,8 +41,10 @@ const isAssets = (value: unknown): value is CompanyAsset[] => Array.isArray(valu
 function money(value: number) { return value ? `${Math.round(value).toLocaleString('ko-KR')}원` : '—' }
 function assetTone(status: AssetStatus): StatusBadgeTone { return status === '사용 중' ? 'success' : status === '수리 중' ? 'warning' : status === '폐기' ? 'danger' : 'neutral' }
 
-export function TaxAssetsPage({ workspaceScope, canManage, currentUserId, currentUserName, industryType, onToast }: { workspaceScope?: string; canManage: boolean; currentUserId: string; currentUserName: string; industryType?: string; onToast: (message: string) => void }) {
-  const [assets, setAssets] = useWorkspaceState<CompanyAsset[]>('company-assets', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isAssets })
+export function TaxAssetsPage({ workspaceScope, canManage, currentUserId, currentUserName, industryType, onToast }: { workspaceScope?: string; canManage: boolean; currentUserId: string; currentUserName: string; industryType?: string; onToast: (message: string | ToastMessage) => void }) {
+  // 지운 것을 되살리면 다시 읽는다(서버가 행을 되돌려 놓는다).
+  const [restoreToken, setRestoreToken] = useState(0)
+  const [assets, setAssets] = useWorkspaceState<CompanyAsset[]>('company-assets', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isAssets, reloadToken: restoreToken })
   const [tab, setTab] = useState<'tax' | 'assets'>('tax')
   const [editingAsset, setEditingAsset] = useState<CompanyAsset | 'new' | null>(null)
   const sortedAssets = useMemo(() => [...assets].sort((left, right) => (right.acquiredAt || '').localeCompare(left.acquiredAt || '')), [assets])
@@ -50,18 +55,18 @@ export function TaxAssetsPage({ workspaceScope, canManage, currentUserId, curren
     try { await downloadDocumentAttachment(attachment, workspaceScope) }
     catch (error) { onToast(error instanceof Error ? error.message : '파일을 내려받지 못했습니다.') }
   }
+  /** 지우기는 되살릴 수 있다(지운 기록 30일·첨부는 휴지통) — 묻지 않고 [되돌리기]를 단다. */
   const removeAsset = async (asset: CompanyAsset) => {
-    if (!window.confirm(`‘${asset.name}’ 자산을 삭제할까요?`)) return
     const result = await setAssets((current) => current.filter((item) => item.id !== asset.id))
     if (!result.ok) { onToast(result.message ?? '자산을 삭제하지 못했습니다.'); return }
     await deleteDocumentAttachments(asset.attachments.filter(isStoredDocumentAttachment).map((item) => item.id), workspaceScope)
-    onToast('자산을 삭제했습니다.')
+    onToast(deletedToast({ text: `‘${asset.name}’ 자산을 지웠습니다.`, storeKey: 'company-assets', rowId: asset.id, workspaceScope, onRestored: () => setRestoreToken((value) => value + 1), onToast }))
   }
 
   return <div className="content-page tax-page">
     <header className="page-header">
       <div><span className="eyebrow">TAX & ASSETS</span><h1>세무 · 자산</h1><p>회사에 적용되는 세무 일정을 확인하고, 당해연도 증빙과 회사 자산을 실제 파일로 보관합니다.</p></div>
-      <div className="page-header-actions">{tab === 'assets' && canManage && <Button tone="primary" type="button" onClick={() => setEditingAsset('new')}><Plus size={18} /> 자산 등록</Button>}</div>
+      <div className="page-header-actions">{tab === 'assets' && canManage && <DeletedRowsButton storeKey="company-assets" title="자산" workspaceScope={workspaceScope} refreshToken={assets.length} onRestored={() => setRestoreToken((value) => value + 1)} onToast={onToast} />}{tab === 'assets' && canManage && <Button tone="primary" type="button" onClick={() => setEditingAsset('new')}><Plus size={18} /> 자산 등록</Button>}</div>
     </header>
     <div className="segmented tax-tabs" role="tablist" aria-label="세무·자산 보기">
       <button type="button" role="tab" aria-selected={tab === 'tax'} className={tab === 'tax' ? 'active' : ''} onClick={() => setTab('tax')}><Landmark size={15} /> 세무 일정 · 증빙</button>

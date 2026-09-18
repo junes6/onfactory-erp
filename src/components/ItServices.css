@@ -56,3 +56,5 @@ html[data-theme='dark'] :is(.it-summary-strip article,.it-toolbar select,.it-row
 .it-client-mark { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--radius-8); color: var(--color-teal); background: var(--color-teal-soft); }
 .it-client-contact { flex: 0 1 220px; }
 .it-row-meta.is-urgent { color: var(--color-warning-ink); font-weight: var(--weight-medium); }
+/* 내가 열 수 없는 파일 — 단추가 아니라 잠금 표시(누르면 '찾을 수 없음'이던 것) */
+.it-file-locked { display: inline-flex; align-items: center; gap: var(--space-4); max-width: 200px; overflow: hidden; padding: var(--space-4) var(--space-8); border: var(--hairline) dashed var(--line); border-radius: var(--radius-8); color: var(--muted); font-size: var(--font-11); text-overflow: ellipsis; white-space: nowrap; cursor: help; }

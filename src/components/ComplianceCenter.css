@@ -407,3 +407,5 @@ html[data-theme='dark'] :is(.compliance-summary-strip article,.compliance-action
 .compliance-topline > button:disabled { opacity: .6; cursor: default; }
 
 
+/* P1-10: [지운 항목]과 [새 항목 등록]을 나란히 */
+.compliance-head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); }

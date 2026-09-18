@@ -9,6 +9,11 @@ type UploadAttachmentOptions = {
   category: string
   /** 이 파일이 받을 수 있는 최대 바이트. 회의 녹음만 MAX_MEETING_SOURCE_BYTES를 넘긴다. */
   maxBytes?: number
+  /**
+   * 누가 열 수 있나. 기본은 올린 사람(+allowedUserIds)과 관리자. 행을 전 직원이 읽는 대장(산출물·지원사업)의 파일은
+   * 'all'로 올린다 — 전에는 목록의 파일 단추를 동료가 누르면 '찾을 수 없음'이었다(감사 business-admin-05).
+   */
+  visibility?: 'all' | 'restricted'
   summary?: string
   tags?: string[]
   allowedUserIds?: string[]
@@ -58,7 +63,7 @@ export async function uploadDocumentAttachment(file: File, options: UploadAttach
   const params = new URLSearchParams({
     name: file.name,
     category: options.category,
-    visibility: 'restricted',
+    visibility: options.visibility ?? 'restricted',
     summary: options.summary ?? '',
     tags: (options.tags ?? []).join(','),
     ...(options.allowedUserIds?.length ? { allowedUserIds: [...new Set(options.allowedUserIds)].join(',') } : {}),

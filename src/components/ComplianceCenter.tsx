@@ -17,6 +17,9 @@ import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import type { LensTarget } from './LensPanel'
 import './ComplianceCenter.css'
 import { Button } from './ui/Button'
+import { DeletedRowsButton } from './DeletedRows'
+import { deletedToast } from '../utils/deletedRows'
+import type { ToastMessage } from './ui/Toast'
 
 type ComplianceRecord = {
   id: string
@@ -323,8 +326,9 @@ function RecordModal({ record, workspaceScope, currentUserName, onAskLens, onClo
   </div>
 }
 
-export function ComplianceCenter({ workspaceScope, canManage, currentUserName, companyName, onAskLens, onToast }: { workspaceScope?: string; canManage: boolean; currentUserName: string; companyName: string; onAskLens?: (target: LensTarget) => void; onToast: (message: string) => void }) {
-  const [storedRecords, setRecords] = useWorkspaceState<ComplianceRecord[]>('compliance-records', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isRecordArray })
+export function ComplianceCenter({ workspaceScope, canManage, currentUserName, companyName, onAskLens, onToast }: { workspaceScope?: string; canManage: boolean; currentUserName: string; companyName: string; onAskLens?: (target: LensTarget) => void; onToast: (message: string | ToastMessage) => void }) {
+  const [restoreToken, setRestoreToken] = useState(0)
+  const [storedRecords, setRecords] = useWorkspaceState<ComplianceRecord[]>('compliance-records', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isRecordArray, reloadToken: restoreToken })
   // 저장된 status는 무시하고 오늘 날짜로 다시 계산한다 — 생존 센티널(승인 큐)과 같은 근거(만료일)로 말한다.
   const today = seoulDateInputValue()
   const records = useMemo(() => storedRecords.map((record) => withLiveStatus(record, today)), [storedRecords, today])
@@ -362,8 +366,8 @@ export function ComplianceCenter({ workspaceScope, canManage, currentUserName, c
     else onToast(result.message ?? `${record.name} 정보를 저장하지 못했습니다. 새로 업로드한 증빙은 자동 롤백합니다.`)
     return result.ok
   }
+  /** 지우기는 되살릴 수 있다(지운 기록 30일·증빙 원본은 휴지통) — 묻지 않고 [되돌리기]를 단다. */
   const remove = async (record: ComplianceRecord) => {
-    if (!window.confirm(`${record.name} 항목과 연결된 증빙 원본을 함께 삭제할까요?`)) return
     const result = await setRecords((current) => current.filter((item) => item.id !== record.id))
     if (!result.ok) {
       onToast(result.message ?? `${record.name} 항목을 삭제하지 못했습니다. 증빙 원본은 그대로 보존했습니다.`)
@@ -371,9 +375,8 @@ export function ComplianceCenter({ workspaceScope, canManage, currentUserName, c
     }
     const cleanup = await deleteDocumentAttachments(record.attachments.filter(isStoredDocumentAttachment).map((attachment) => attachment.id), workspaceScope)
     if (selectedRecordId === record.id) setSelectedRecordId(null)
-    onToast(cleanup.failed.length
-      ? `${record.name} 항목은 삭제했지만 증빙 ${cleanup.failed.length}개의 원본 정리에 실패했습니다.`
-      : `${record.name} 항목과 연결된 증빙 원본을 삭제했습니다.`)
+    if (cleanup.failed.length) { onToast(`${record.name} 항목은 지웠지만 증빙 ${cleanup.failed.length}개를 휴지통으로 옮기지 못했습니다.`); return }
+    onToast(deletedToast({ text: `${record.name} 항목을 지웠습니다. 증빙 원본은 휴지통에 있습니다.`, storeKey: 'compliance-records', rowId: record.id, workspaceScope, onRestored: () => setRestoreToken((value) => value + 1), onToast }))
   }
   const downloadAttachment = async (attachment: ComplianceRecord['attachments'][number]) => {
     if (!isStoredDocumentAttachment(attachment) || downloadingId) return
@@ -383,7 +386,7 @@ export function ComplianceCenter({ workspaceScope, canManage, currentUserName, c
     finally { setDownloadingId('') }
   }
   return <div className="compliance-page">
-    <header className="compliance-page-head"><div><span>FOOD SAFETY & CERTIFICATION</span><h1>식품안전 · 인증</h1><p>인증·검사·교육·검교정 일정과 증빙을 항목별로 빠르게 확인합니다.</p></div>{canManage && <Button tone="primary" type="button" onClick={() => setEditing('new')}><Plus size={18} /> 새 항목 등록</Button>}</header>
+    <header className="compliance-page-head"><div><span>FOOD SAFETY & CERTIFICATION</span><h1>식품안전 · 인증</h1><p>인증·검사·교육·검교정 일정과 증빙을 항목별로 빠르게 확인합니다.</p></div>{canManage && <div className="compliance-head-actions"><DeletedRowsButton storeKey="compliance-records" title="인증·검사 항목" workspaceScope={workspaceScope} refreshToken={storedRecords.length} onRestored={() => setRestoreToken((value) => value + 1)} onToast={onToast} /><Button tone="primary" type="button" onClick={() => setEditing('new')}><Plus size={18} /> 새 항목 등록</Button></div>}</header>
 
     <section className="compliance-topline" aria-label="인증 현황 요약">
       <span><ShieldCheck size={16} /> 전체 <strong>{records.length}</strong></span>

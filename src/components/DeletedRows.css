@@ -1,0 +1,7 @@
+/* 대장의 [지운 항목] 창 — 30일 동안 되살리기 */
+.deleted-rows-dialog ul { display: grid; gap: var(--space-8); margin: var(--space-0); padding: var(--space-16); list-style: none; }
+.deleted-rows-dialog li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding: var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.deleted-rows-dialog li > div { display: grid; gap: var(--space-4); min-width: 0; }
+.deleted-rows-dialog li strong { overflow-wrap: anywhere; }
+.deleted-rows-dialog li span { color: var(--muted); font-size: var(--font-13); }
+@media (max-width: 600px) { .deleted-rows-dialog li { flex-direction: column; align-items: stretch; } }
