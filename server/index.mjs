@@ -1,4 +1,5 @@
 import { config } from 'dotenv'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import Anthropic from '@anthropic-ai/sdk'
 
@@ -61,6 +62,8 @@ const app = createApp({
   bizinfoCommercialUseApproved: process.env.BIZINFO_COMMERCIAL_USE_APPROVED?.trim().toLowerCase() === 'true',
   g2bServiceKey: process.env.G2B_SERVICE_KEY?.trim() || '',
   ulsanServiceKey: process.env.ULSAN_SERVICE_KEY?.trim() || '',
+  // 운영 콘솔의 "데이터 안전" 패널이 읽는다(백업으로 기동·깨진 파일 보존·저장 실패).
+  storeHealth: () => runtimeStore.adapter.health ?? null,
   storeStatus: {
     kind: runtimeStore.adapter.kind,
     readOnly: Boolean(runtimeStore.adapter.readOnly),
@@ -166,6 +169,14 @@ if (!backupSchedule.enabled) {
 
 app.locals.scheduler.start()
 console.log(`[scheduler] ${app.locals.scheduler.listJobs().length}개 정기 작업 등록 — 접속과 무관하게 실행됩니다.`)
+
+// 복원 도구(server/restore-data.mjs)가 켜진 서버를 알아보는 잠금 파일. 켜진 서버는 복원본을 다음 저장 때 덮어쓴다.
+const serverLockFile = path.join(dataDirectory, 'server.lock')
+try {
+  mkdirSync(dataDirectory, { recursive: true })
+  writeFileSync(serverLockFile, JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() }))
+} catch (error) { console.warn('[server] 잠금 파일을 쓰지 못했습니다 — 복원 도구가 켜진 서버를 알아보지 못할 수 있습니다.', { message: error?.message }) }
+process.on('exit', () => { try { rmSync(serverLockFile, { force: true }) } catch { /* 종료 중 */ } })
 
 const server = app.listen(port, host, () => {
   const mode = process.env.ANTHROPIC_API_KEY?.trim() ? 'Claude' : 'demo'

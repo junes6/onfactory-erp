@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cp, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 /**
@@ -15,6 +16,18 @@ import path from 'node:path'
 export const BACKUP_STATUS_KEY = 'backupStatus'
 const DEFAULT_RETENTION = 14
 const DEFAULT_HOUR = 3
+/**
+ * 날짜 기준 보관: 최근 14일은 하루 하나, 최근 8주는 주 하나, 최근 12달은 달 하나(각각 그 기간의 가장 새것).
+ * 최근 48시간 안의 세대와 가장 새 세대는 언제나 남긴다.
+ * 전에는 "14세대"였다 — 수동 실행도 한 세대로 세어, 실제 NAS의 14세대가 6일치뿐이었다(2026-09-18 감사 data-core-11).
+ */
+export const DEFAULT_RETENTION_POLICY = Object.freeze({ daily: DEFAULT_RETENTION, weekly: 8, monthly: 12, recentHours: 48 })
+/** 백업에 담지 않는 파일: 저장 중 임시 파일, 로그인 세션(복원으로 로그아웃한 세션이 되살아나지 않게), 서버 잠금 파일. */
+export const BACKUP_EXCLUDED = Object.freeze({ names: new Set(['sessions.json', 'sessions.json.bak', 'server.lock']), suffixes: ['.tmp'] })
+const backupIncludes = (source) => {
+  const name = path.basename(source)
+  return !BACKUP_EXCLUDED.names.has(name) && !BACKUP_EXCLUDED.suffixes.some((suffix) => name.endsWith(suffix))
+}
 /**
  * 백업 세트가 **어느 데이터 디렉터리의 것인지** 적어 두는 표식. NAS 디렉터리 바로 아래에 둔다.
  *
@@ -35,10 +48,19 @@ export class BackupError extends Error {
 }
 
 export function backupSettings(env = process.env) {
-  const retention = Number.parseInt(String(env.BACKUP_RETENTION_GENERATIONS ?? ''), 10)
+  const retention = Number.parseInt(String(env.BACKUP_RETENTION_DAYS ?? env.BACKUP_RETENTION_GENERATIONS ?? ''), 10)
+  const weeks = Number.parseInt(String(env.BACKUP_RETENTION_WEEKS ?? ''), 10)
+  const months = Number.parseInt(String(env.BACKUP_RETENTION_MONTHS ?? ''), 10)
   const hour = Number.parseInt(String(env.BACKUP_SCHEDULE_HOUR ?? ''), 10)
   const intervalHours = Number.parseInt(String(env.BACKUP_INTERVAL_HOURS ?? ''), 10)
+  const daily = Number.isFinite(retention) && retention > 0 ? Math.min(retention, 400) : DEFAULT_RETENTION
   return {
+    retentionPolicy: {
+      ...DEFAULT_RETENTION_POLICY,
+      daily,
+      weekly: Number.isFinite(weeks) && weeks >= 0 ? Math.min(weeks, 260) : DEFAULT_RETENTION_POLICY.weekly,
+      monthly: Number.isFinite(months) && months >= 0 ? Math.min(months, 120) : DEFAULT_RETENTION_POLICY.monthly,
+    },
     enabled: String(env.BACKUP_ENABLED ?? '').trim() === '1',
     nasDirectory: String(env.BACKUP_NAS_DIRECTORY ?? '').trim(),
     cloudBucket: String(env.BACKUP_CLOUD_BUCKET ?? '').trim(),
@@ -53,23 +75,72 @@ export function backupGenerationName(now = new Date()) {
   return `inthefield_${now.toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', '')}`
 }
 
-function directorySize(target) {
+/** 서버 프로세스 안에서 돌므로 전부 비동기다 — 전에는 동기 복사·크기 계산이 도는 동안 모든 요청이 멈췄다. */
+async function directorySize(target) {
   let total = 0
-  for (const entry of readdirSync(target, { withFileTypes: true })) {
+  for (const entry of await readdir(target, { withFileTypes: true })) {
     const child = path.join(target, entry.name)
-    total += entry.isDirectory() ? directorySize(child) : statSync(child).size
+    total += entry.isDirectory() ? await directorySize(child) : (await stat(child)).size
   }
   return total
 }
 
-function listFiles(root, base = root) {
+async function listFiles(root, base = root) {
   const files = []
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
+  for (const entry of await readdir(root, { withFileTypes: true })) {
     const target = path.join(root, entry.name)
-    if (entry.isDirectory()) files.push(...listFiles(target, base))
+    if (entry.isDirectory()) files.push(...await listFiles(target, base))
     else files.push({ absolute: target, relative: path.relative(base, target).replaceAll('\\', '/') })
   }
   return files
+}
+
+/** 세대 이름 → UTC epoch(ms). 모르는 모양이면 null(그런 폴더는 절대 지우지 않는다). */
+export function generationTime(name) {
+  const match = /^inthefield_(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})-(\d{3})$/.exec(String(name))
+  if (!match) return null
+  const [, year, month, day, hour, minute, second, millisecond] = match.map(Number)
+  return Date.UTC(year, month - 1, day, hour, minute, second, millisecond)
+}
+
+const SEOUL_OFFSET_MS = 9 * 60 * 60 * 1_000
+const seoulDate = (epoch) => new Date(epoch + SEOUL_OFFSET_MS)
+const dayKeyOf = (epoch) => seoulDate(epoch).toISOString().slice(0, 10)
+const monthKeyOf = (epoch) => seoulDate(epoch).toISOString().slice(0, 7)
+/** ISO 주(월요일 시작) 키. */
+const weekKeyOf = (epoch) => {
+  const date = seoulDate(epoch)
+  const weekday = (date.getUTCDay() + 6) % 7
+  const monday = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - weekday))
+  return monday.toISOString().slice(0, 10)
+}
+
+/**
+ * 남길 세대 이름 집합. `retention`이 숫자면(옛 설정) "최근 n일, 하루 하나"로 본다.
+ */
+export function generationsToKeep(names, retention, { now = new Date() } = {}) {
+  const policy = typeof retention === 'number'
+    ? { daily: retention, weekly: 0, monthly: 0, recentHours: 0 }
+    : { ...DEFAULT_RETENTION_POLICY, ...(retention ?? {}) }
+  const dated = names.map((name) => ({ name, at: generationTime(name) }))
+  const keep = new Set(dated.filter((generation) => generation.at === null).map((generation) => generation.name))
+  const valid = dated.filter((generation) => generation.at !== null).sort((left, right) => right.at - left.at)
+  if (valid.length) keep.add(valid[0].name)
+  for (const generation of valid) if (now.getTime() - generation.at <= (policy.recentHours ?? 0) * 60 * 60 * 1_000) keep.add(generation.name)
+  const bucket = (count, keyOf) => {
+    const seen = new Set()
+    for (const generation of valid) {
+      const key = keyOf(generation.at)
+      if (seen.has(key)) continue
+      if (seen.size >= count) break
+      seen.add(key)
+      keep.add(generation.name)
+    }
+  }
+  bucket(policy.daily ?? 0, dayKeyOf)
+  bucket(policy.weekly ?? 0, weekKeyOf)
+  bucket(policy.monthly ?? 0, monthKeyOf)
+  return keep
 }
 
 /** 경로 비교용 정규화. 대소문자와 슬래시 방향, 뒤 슬래시가 달라도 같은 폴더는 같게 본다(윈도 NAS 마운트). */
@@ -114,14 +185,15 @@ export function assertBackupSetSource(nasDirectory, dataDirectory, { now = new D
   return { markerPath, opened: true }
 }
 
-/** 보관 세대 수를 넘긴 오래된 백업을 지운다. 지운 목록을 돌려준다. */
-export function pruneGenerations(nasDirectory, retention) {
+/** 보관 정책 밖의 오래된 백업을 지운다. 지운 목록을 돌려준다. */
+export function pruneGenerations(nasDirectory, retention, { now = new Date() } = {}) {
   if (!existsSync(nasDirectory)) return []
   const generations = readdirSync(nasDirectory, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && entry.name.startsWith('inthefield_'))
     .map((entry) => entry.name)
     .sort()
-  const removable = generations.slice(0, Math.max(0, generations.length - retention))
+  const keep = generationsToKeep(generations, retention, { now })
+  const removable = generations.filter((name) => !keep.has(name))
   for (const name of removable) rmSync(path.join(nasDirectory, name), { recursive: true, force: true })
   return removable
 }
@@ -135,7 +207,9 @@ export async function runBackupCycle({
   settings,
   storage = null,
   now = new Date(),
-  copyDirectory = cpSync,
+  copyDirectory = (source, destination, options) => cp(source, destination, { ...options, filter: backupIncludes }),
+  /** Postgres 모드: 데이터 디렉터리에는 DB가 없다. 메모리의 전체 저장소를 JSON으로 함께 담는다. */
+  snapshot = null,
 } = {}) {
   const startedAt = now.toISOString()
   const result = {
@@ -157,17 +231,19 @@ export async function runBackupCycle({
     // 1차: 업무 데이터 덤프 → NAS
     const destination = path.join(settings.nasDirectory, result.generation)
     mkdirSync(destination, { recursive: true })
-    copyDirectory(dataDirectory, destination, { recursive: true })
+    await copyDirectory(dataDirectory, destination, { recursive: true })
+    if (typeof snapshot === 'function') await writeFile(path.join(destination, 'workspace-snapshot.json'), snapshot())
     const manifest = {
       generation: result.generation,
       createdAt: startedAt,
       source: dataDirectory,
       schemaVersion: 2,
-      retention: settings.retention,
+      retention: settings.retentionPolicy ?? settings.retention,
+      ...(typeof snapshot === 'function' ? { snapshot: 'workspace-snapshot.json' } : {}),
     }
-    writeFileSync(path.join(destination, 'BACKUP_INFO.json'), JSON.stringify(manifest, null, 2))
-    result.nas = { ok: true, path: destination, bytes: directorySize(destination), error: '' }
-    result.pruned = pruneGenerations(settings.nasDirectory, settings.retention)
+    await writeFile(path.join(destination, 'BACKUP_INFO.json'), JSON.stringify(manifest, null, 2))
+    result.nas = { ok: true, path: destination, bytes: await directorySize(destination), error: '' }
+    result.pruned = pruneGenerations(settings.nasDirectory, settings.retentionPolicy ?? settings.retention, { now })
   } catch (error) {
     result.nas.error = error instanceof Error ? error.message : String(error)
     result.error = result.nas.error
@@ -181,8 +257,8 @@ export async function runBackupCycle({
   } else {
     try {
       let objects = 0
-      for (const file of listFiles(result.nas.path)) {
-        const body = readFileSync(file.absolute)
+      for (const file of await listFiles(result.nas.path)) {
+        const body = await readFile(file.absolute)
         await storage.put(`${settings.cloudPrefix}/${result.generation}/${file.relative}`, body, { contentType: 'application/octet-stream' })
         objects += 1
       }
@@ -219,6 +295,26 @@ export function nextBackupStatus(previous, result) {
     prunedCount: result.pruned.length,
     consecutiveFailures: result.ok ? 0 : (Number(base.consecutiveFailures) || 0) + 1,
   }
+}
+
+/**
+ * 스케줄러 주기. 전에는 `{ every: 'day', hour: 3 }`이 박혀 있어 BACKUP_SCHEDULE_HOUR·BACKUP_INTERVAL_HOURS가
+ * 콘솔 문구에만 쓰이고 실제 실행에는 반영되지 않았다.
+ */
+export function backupScheduleSpec(settings) {
+  const hour = Number.isInteger(settings?.scheduleHour) ? settings.scheduleHour : DEFAULT_HOUR
+  const interval = Number(settings?.intervalHours)
+  return Number.isInteger(interval) && interval >= 1 && interval < 24
+    ? { every: 'hours', hour, interval }
+    : { every: 'day', hour }
+}
+
+/** 보관 정책을 사람 말로. 콘솔 부제에 쓴다. */
+export function describeRetention(policy) {
+  const parts = [`최근 ${policy.daily}일은 하루 하나`]
+  if (policy.weekly) parts.push(`${policy.weekly}주는 주 하나`)
+  if (policy.monthly) parts.push(`${policy.monthly}달은 달 하나`)
+  return parts.join(' · ')
 }
 
 /** 다음 실행까지 남은 밀리초. 지정한 시각(KST)을 지나면 다음 날로 넘어간다. */

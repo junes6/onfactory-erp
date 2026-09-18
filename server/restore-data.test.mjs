@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { looksLikeBackup, resolveRestoreSource, restoreDestination } from './restore-data.mjs'
+import { SERVER_LOCK_FILE, looksLikeBackup, performRestore, resolveRestoreSource, restoreDestination } from './restore-data.mjs'
 
 /** 백업 세대 하나를 흉내 낸다. */
 async function seedGeneration(root, name) {
@@ -107,4 +107,58 @@ test('복원 대상은 저장소가 읽는 것과 같은 환경변수를 본다'
     path.resolve('/var/lib/inthefield'),
   )
   assert.equal(restoreDestination({ env: {}, cwd: '/repo' }), path.resolve('/repo', 'server/data'))
+})
+
+test('복원은 병합이 아니라 교체다 — 백업 이후 생긴 파일은 남지 않고, 복원 전 데이터는 옆 폴더에 그대로 있다', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'inthefield-restore-swap-'))
+  try {
+    const source = await seedGeneration(path.join(root, 'backups'), 'inthefield_2026-09-17_18-00-00-000')
+    await writeFile(path.join(source, 'sessions.json'), '{}')
+    const destination = path.join(root, 'data')
+    await mkdir(path.join(destination, 'documents'), { recursive: true })
+    await writeFile(path.join(destination, 'workspace-state.json'), JSON.stringify({ version: 2, tenants: { 'TENANT-NEW': {} } }))
+    await writeFile(path.join(destination, 'documents', 'after-backup.bin'), '백업 이후 생긴 파일')
+    const result = performRestore({ source, destination, now: new Date('2026-09-18T01:00:00.000Z'), alive: () => false })
+    assert.equal(result.ok, true, result.message)
+    const restored = JSON.parse(await readFile(path.join(destination, 'workspace-state.json'), 'utf8'))
+    assert.deepEqual(restored.tenants, {}, '백업 시점의 저장소로 돌아갔다')
+    assert.ok(!(await readdir(destination)).includes('documents'), '백업 이후 생긴 폴더는 섞이지 않는다')
+    assert.ok(!(await readdir(destination)).includes('sessions.json'), '로그인 세션은 되살리지 않는다')
+    const kept = JSON.parse(await readFile(path.join(result.previous, 'workspace-state.json'), 'utf8'))
+    assert.ok(kept.tenants['TENANT-NEW'], '복원 전 데이터는 지워지지 않고 옆 폴더에 있다')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('서버가 켜져 있으면 복원하지 않는다 — 켜진 서버는 복원본을 다음 저장 때 덮어쓴다', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'inthefield-restore-running-'))
+  try {
+    const source = await seedGeneration(path.join(root, 'backups'), 'inthefield_2026-09-17_18-00-00-000')
+    const destination = path.join(root, 'data')
+    await mkdir(destination, { recursive: true })
+    await writeFile(path.join(destination, 'workspace-state.json'), JSON.stringify({ version: 2, tenants: { KEEP: {} } }))
+    await writeFile(path.join(destination, SERVER_LOCK_FILE), JSON.stringify({ pid: 424242, port: 8787 }))
+    const refused = performRestore({ source, destination, alive: (pid) => pid === 424242 })
+    assert.equal(refused.ok, false)
+    assert.equal(refused.reason, 'SERVER_RUNNING')
+    assert.match(refused.message, /8787/)
+    // 잠금 파일의 pid가 이미 죽었으면(강제 종료로 남은 잠금) 막지 않는다.
+    assert.equal(performRestore({ source, destination, alive: () => false }).ok, true)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('깨진 백업은 교체 전에 걸러진다 — 데이터 디렉터리는 그대로다', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'inthefield-restore-broken-'))
+  try {
+    const source = path.join(root, 'backups', 'inthefield_broken')
+    await mkdir(source, { recursive: true })
+    await writeFile(path.join(source, 'workspace-state.json'), '{"version":2,"tenan')
+    const destination = path.join(root, 'data')
+    await mkdir(destination, { recursive: true })
+    await writeFile(path.join(destination, 'workspace-state.json'), JSON.stringify({ version: 2, tenants: { KEEP: {} } }))
+    const result = performRestore({ source, destination, alive: () => false })
+    assert.equal(result.ok, false)
+    assert.equal(result.reason, 'STAGING_FAILED')
+    assert.ok(JSON.parse(await readFile(path.join(destination, 'workspace-state.json'), 'utf8')).tenants.KEEP)
+    assert.deepEqual((await readdir(root)).sort(), ['backups', 'data'], '임시 폴더도 남기지 않는다')
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

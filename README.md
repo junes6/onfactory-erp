@@ -169,10 +169,14 @@ BACKUP_ENABLED=1                       # 배치 사용 여부
 BACKUP_NAS_DIRECTORY=/mnt/nas/inthefield-backup
 BACKUP_CLOUD_BUCKET=inthefield-backup  # 비우면 NAS만 보관
 BACKUP_CLOUD_PREFIX=inthefield-backup
-BACKUP_RETENTION_GENERATIONS=14        # 보관 세대 수
-BACKUP_SCHEDULE_HOUR=3                 # 첫 실행 시각 (KST)
-BACKUP_INTERVAL_HOURS=24               # 반복 주기
+BACKUP_RETENTION_DAYS=14               # 최근 14일은 하루 하나
+BACKUP_RETENTION_WEEKS=8               # 최근 8주는 주 하나
+BACKUP_RETENTION_MONTHS=12             # 최근 12달은 달 하나 (최근 48시간 세대는 언제나 남음)
+BACKUP_SCHEDULE_HOUR=3                 # 실행 시각 (KST)
+BACKUP_INTERVAL_HOURS=24               # 24보다 작으면 그 시각부터 N시간마다
 ~~~
+
+보관은 **세대 수가 아니라 날짜 기준**입니다. 수동 실행을 여러 번 해도 지난 날짜의 백업이 밀려나지 않습니다. 로그인 세션 파일(`sessions.json`)과 저장 중 임시 파일은 백업에 담지 않습니다. Postgres 모드에서는 데이터 디렉터리에 DB가 없으므로 같은 세대에 전체 저장소 스냅샷(`workspace-snapshot.json`)을 함께 담습니다.
 
 클라우드 버킷은 파일 저장소와 같은 S3 설정(`S3_ENDPOINT`·`S3_REGION`·`S3_ACCESS_KEY_ID`·`S3_SECRET_ACCESS_KEY`)을 씁니다.
 
@@ -180,7 +184,7 @@ BACKUP_INTERVAL_HOURS=24               # 반복 주기
 
 ### 복구 절차
 
-1. **서버를 멈춥니다.** 복구 중 쓰기가 섞이면 어느 쪽이 정본인지 알 수 없게 됩니다.
+1. **서버를 멈춥니다.** 복구 중 쓰기가 섞이면 어느 쪽이 정본인지 알 수 없게 됩니다. 복원 도구는 데이터 폴더의 `server.lock`으로 켜진 서버를 알아보고, 켜져 있으면 아무것도 바꾸지 않고 멈춥니다.
 2. **현재 데이터부터 백업합니다.** 망가진 상태라도 원본은 남겨 둡니다.
    ~~~bash
    pnpm backup:data
@@ -192,7 +196,8 @@ BACKUP_INTERVAL_HOURS=24               # 반복 주기
    pnpm restore:data -- --from=/mnt/nas/inthefield-backup/inthefield_2026-08-31_03-00-00-000
    ~~~
    복원 소스로 받는 곳은 두 군데뿐입니다 — `server/backups`(로컬 `backup:data` 사본)와 `BACKUP_NAS_DIRECTORY`(야간 배치가 쌓는 세대). 그 밖의 경로, 그리고 `workspace-state.json`이 없는 폴더는 거절하고 무엇을 고르면 되는지 함께 알려 줍니다.
-5. **NAS가 소실됐으면 클라우드 버킷에서 같은 세대를 내려받아 같은 명령으로 복원합니다.** 버킷의 객체 키는 `<BACKUP_CLOUD_PREFIX>/<세대>/<원본 상대경로>` 형태이므로, 세대 폴더 하나를 통째로 받아 로컬 경로로 지정하면 됩니다.
+   복원은 **덮어쓰기가 아니라 교체**입니다. 세대를 임시 폴더에 풀어 저장소 파일이 읽히는지 먼저 확인하고, 지금 데이터 폴더는 지우지 않고 옆에 `<데이터 폴더>.before-restore-<시각>`으로 옮겨 둔 뒤 복원본을 제자리에 놓습니다. 백업 이후 생긴 파일이 섞여 남지 않고, 되돌리고 싶으면 두 폴더의 이름만 바꾸면 됩니다.
+5. **NAS가 소실됐으면 클라우드 버킷에서 같은 세대를 내려받아 같은 명령으로 복원합니다.** 버킷의 객체 키는 `<BACKUP_CLOUD_PREFIX>/<세대>/<원본 상대경로>` 형태이므로, 세대 폴더 하나를 통째로 받아 **`server/backups` 아래에 두고** 그 경로를 지정하면 됩니다.
 6. **서버를 다시 켜고** 로그인 → 업무 목록 → 파일 다운로드까지 한 번씩 확인합니다.
 7. **콘솔에서 다음 백업이 성공하는지 확인합니다.** 연속 실패 횟수가 0으로 돌아와야 복구가 끝난 것입니다.
 

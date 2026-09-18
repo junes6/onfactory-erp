@@ -162,6 +162,16 @@ type PlatformState = {
   unansweredSupportCount?: number
   backupStatus?: BackupStatus | null
   backupSettings?: BackupSettingsView
+  storeHealth?: StoreHealth | null
+}
+
+/** 저장소 건강 상태. 백업(.bak)으로 기동했거나, 깨진 본 파일을 보존했거나, 마지막 저장이 실패했으면 콘솔이 먼저 말한다. */
+type StoreHealth = {
+  loadedFrom: 'main' | 'backup' | 'empty'
+  loadError: string | null
+  quarantined: string[]
+  lastCommitError: { at: string; message: string } | null
+  lastCommitAt: string | null
 }
 
 type BackupStatus = {
@@ -175,7 +185,7 @@ type BackupStatus = {
   prunedCount: number
   consecutiveFailures: number
 }
-type BackupSettingsView = { enabled: boolean; retention: number; scheduleHour: number; intervalHours: number; nasConfigured: boolean; cloudConfigured: boolean }
+type BackupSettingsView = { enabled: boolean; retention: number; scheduleHour: number; intervalHours: number; nasConfigured: boolean; cloudConfigured: boolean; scheduleLabel?: string; retentionLabel?: string }
 
 type PlatformContextValue = PlatformState & {
   loading: boolean
@@ -950,12 +960,24 @@ function IntegrationDetail({ item, props, onScope, onOpenDialog }: { item?: Inte
   </aside>
 }
 
+/** 저장소 건강 경고. 문제가 없으면 아무것도 그리지 않는다. */
+function StoreHealthNotes({ health }: { health?: StoreHealth | null }) {
+  if (!health) return null
+  const notes: string[] = []
+  if (health.loadedFrom === 'backup') notes.push(`서버가 켜질 때 본 저장 파일을 읽지 못해 마지막 정상 백업(.bak)으로 시작했습니다${health.loadError ? ` — ${health.loadError}` : ''}. 그 사이의 마지막 저장 한 번이 빠졌을 수 있습니다.`)
+  if (health.quarantined.length) notes.push(`깨진 저장 파일을 지우지 않고 따로 보존했습니다: ${health.quarantined.join(', ')}. 원인 확인 전까지 지우지 마세요.`)
+  if (health.lastCommitError) notes.push(`마지막 저장이 실패했습니다(${formatDateTime(health.lastCommitError.at)}) — ${health.lastCommitError.message}`)
+  if (!notes.length) return null
+  return <div className="pc-store-health" role="alert">{notes.map((note) => <div className="pc-form-note" key={note}><AlertTriangle size={17} /><span>{note}</span></div>)}</div>
+}
+
 /** 백업 이중화 현황. 마지막 성공 시각과 실패 경고를 콘솔에서 바로 본다. */
 function BackupPanel() {
-  const { backupStatus: status, backupSettings: settings } = usePlatformData()
+  const { backupStatus: status, backupSettings: settings, storeHealth } = usePlatformData()
   if (!settings?.enabled) {
-    return <Panel title="백업 이중화" subtitle="야간 DB 덤프 → NAS · 파일 원본 → 클라우드 버킷">
-      <div className="pc-form-note"><AlertTriangle size={17} /><span>백업 배치가 꺼져 있습니다. 배포 환경에 BACKUP_ENABLED=1과 BACKUP_NAS_DIRECTORY를 설정하세요.</span></div>
+    return <Panel title="백업 이중화" subtitle="업무 데이터 → NAS · 같은 세대 → 클라우드 버킷">
+      <StoreHealthNotes health={storeHealth} />
+      <div className="pc-form-note"><AlertTriangle size={17} /><span>백업이 꺼져 있습니다 — 지금은 서버 디스크가 고장 나면 되돌릴 사본이 없습니다. 배포 환경에 BACKUP_ENABLED=1과 BACKUP_NAS_DIRECTORY를 설정하세요.</span></div>
     </Panel>
   }
   const stale = status?.lastSuccessAt
@@ -963,9 +985,10 @@ function BackupPanel() {
     : true
   return <Panel
     title="백업 이중화"
-    subtitle={`매 ${settings.intervalHours}시간 · ${settings.retention}세대 보관 · NAS ${settings.nasConfigured ? '연결' : '미설정'} · 클라우드 ${settings.cloudConfigured ? '연결' : '미설정'}`}
+    subtitle={`${settings.scheduleLabel ?? `매 ${settings.intervalHours}시간`} · ${settings.retentionLabel ?? `${settings.retention}세대 보관`} · NAS ${settings.nasConfigured ? '연결' : '미설정'} · 클라우드 ${settings.cloudConfigured ? '연결' : '미설정'}`}
     tools={<Badge tone={status?.warning ? 'danger' : stale ? 'warning' : 'success'}>{status?.warning ? '경고' : stale ? '확인 필요' : '정상'}</Badge>}
   >
+    <StoreHealthNotes health={storeHealth} />
     <div className="pc-detail-grid">
       <DetailStat label="마지막 성공" value={status?.lastSuccessAt ? formatDateTime(status.lastSuccessAt) : '아직 없음'} />
       <DetailStat label="마지막 시도" value={status?.lastAttemptAt ? formatDateTime(status.lastAttemptAt) : '아직 없음'} />

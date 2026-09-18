@@ -1,14 +1,4 @@
-import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -72,8 +62,8 @@ import { DEFAULT_BULK_AI_POLICY, aiLockedError, aiPolicyAllows, documentAiPolicy
 import { registerPersonalTodoRoutes } from './personal-todo-routes.mjs'
 import { registerApprovalRoutes } from './approval-forms.mjs'
 import { registerPersonalCoreRoutes } from './personal-core-routes.mjs'
-import { backupSettings, BACKUP_STATUS_KEY, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
-import { createScheduler, SCHEDULER_RUNS_KEY, SCHEDULER_STATE_KEY } from './scheduler.mjs'
+import { backupScheduleSpec, backupSettings, BACKUP_STATUS_KEY, describeRetention, nextBackupStatus, runBackupCycle } from './backup-mirror.mjs'
+import { createScheduler, describeSpec, SCHEDULER_RUNS_KEY, SCHEDULER_STATE_KEY } from './scheduler.mjs'
 import {
   addNotifications, buildNotification, bundleAssignmentDrafts, NOTIFICATIONS_KEY, NOTIFICATION_SETTINGS_KEY,
   normalizeNotifications, pushPayload, PUSH_SUBSCRIPTIONS_KEY, removeSubscriptions,
@@ -174,6 +164,7 @@ import {
   PLATFORM_TENANT_FIXTURES,
   PLATFORM_TICKET_FIXTURES,
 } from './store/demo-seed.mjs'
+import { writeJsonAtomically } from './store/json-store.mjs'
 import { BRAND } from './brand.mjs'
 
 const DEFAULT_MODEL = 'claude-sonnet-5'
@@ -183,7 +174,15 @@ const MAX_CONTEXT_LENGTH = 24_000
 const SESSION_COOKIE = 'onfactory_session'
 // 업종 모듈 구분. 자유 텍스트 industry는 표시용으로 유지하고, 메뉴·AI 분기는 이 enum으로만 한다.
 const TENANT_INDUSTRY_TYPES = new Set(['food_manufacturing', 'it_services'])
-const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
+/**
+ * 세션 만료는 **쓰는 동안 밀린다**(슬라이딩). 전에는 로그인 후 8시간 절대값이라, 오후에 일하던 사람이
+ * 퇴근 무렵 갑자기 튕겼다. 「이 기기에서 로그인 유지」를 켜면 30일, 끄면 12시간 동안 쓰지 않을 때 끝난다
+ * (끄면 쿠키도 브라우저를 닫을 때 사라진다). 연장은 한 시간에 한 번만 기록한다 — 요청마다 쓰지 않는다.
+ */
+const SESSION_IDLE_SECONDS = 12 * 60 * 60
+const SESSION_REMEMBER_SECONDS = 30 * 24 * 60 * 60
+const SESSION_REFRESH_AFTER_MS = 60 * 60 * 1_000
+const sessionWindowMs = (session) => (session?.remember ? SESSION_REMEMBER_SECONDS : SESSION_IDLE_SECONDS) * 1_000
 const WORKSPACE_STORE_KEYS = new Set([
   'work-items', 'inventory-locations', 'sales-channels', 'messenger-conversations',
   'calendar-events', 'daily-journals', 'leave-requests', 'account-requests',
@@ -1873,7 +1872,10 @@ function readWorkspaceStore(file) {
     }
   }
   try {
-    return parseWorkspaceStoreFile(file)
+    const parsed = parseWorkspaceStoreFile(file)
+    // 본 파일이 정상으로 읽혔다 — 첫 쓰기에서 다시 읽어 검증하지 않아도 된다.
+    fileWriteStateOf(file).mainVerified = true
+    return parsed
   } catch (primaryError) {
     const backupFile = `${file}.bak`
     if (existsSync(backupFile)) {
@@ -1890,41 +1892,20 @@ function readWorkspaceStore(file) {
   }
 }
 
-function writeAndSync(file, contents) {
-  writeFileSync(file, contents, { encoding: 'utf8', mode: 0o600 })
-  // Windows requires a writable handle for FlushFileBuffers/fsync.
-  const descriptor = openSync(file, 'r+')
-  try { fsyncSync(descriptor) } finally { closeSync(descriptor) }
+/** 파일마다 "이 프로세스가 본 파일을 썼거나 검증했는가". store/json-store.mjs의 writeJsonAtomically가 쓴다. */
+const fileWriteStates = new Map()
+function fileWriteStateOf(file) {
+  if (!fileWriteStates.has(file)) fileWriteStates.set(file, { mainVerified: false })
+  return fileWriteStates.get(file)
 }
 
+/**
+ * 시험·어댑터 없는 기동에서 쓰는 파일 저장. 운영(index.mjs)은 JsonStoreAdapter를 쓰지만 **구현은 하나다** —
+ * 전에는 이 자리에 따로 짠 사본이 있어, 깨진 본 파일을 만났을 때 두 경로가 서로 다르게 굴었다(감사 data-core-03).
+ */
 function persistWorkspaceStore(file, store) {
   if (!file) return
-  mkdirSync(path.dirname(file), { recursive: true })
-  const serialized = JSON.stringify(store, null, 2)
-  const temporaryFile = `${file}.${process.pid}.${Date.now()}.tmp`
-  const backupFile = `${file}.bak`
-  const temporaryBackup = `${backupFile}.${process.pid}.tmp`
-  try {
-    writeAndSync(temporaryFile, serialized)
-    // Only rotate a verified main file into the backup slot. A corrupt main
-    // must never overwrite the last known-good backup during recovery.
-    if (existsSync(file)) {
-      try {
-        const previous = readFileSync(file, 'utf8')
-        JSON.parse(previous)
-        writeAndSync(temporaryBackup, previous)
-        renameSync(temporaryBackup, backupFile)
-      } catch (error) {
-        console.warn('[workspace-store] Skipped backup rotation because the current main file is not verified', { message: error?.message })
-      }
-    }
-    renameSync(temporaryFile, file)
-  } catch (error) {
-    for (const candidate of [temporaryFile, temporaryBackup]) {
-      try { if (existsSync(candidate)) unlinkSync(candidate) } catch { /* preserve the original failure */ }
-    }
-    throw error
-  }
+  writeJsonAtomically(file, JSON.stringify(store, null, 2), fileWriteStateOf(file))
 }
 
 function workspaceRecordVersion(record) {
@@ -2177,9 +2158,16 @@ export function createApp(options = {}) {
     if (authDisabled) return { account: accounts[0], session: null }
     const token = parseCookies(request.headers.cookie)[SESSION_COOKIE]
     const session = token ? sessions.get(token) : null
-    if (!session || session.expiresAt <= Date.now()) {
+    const now = Date.now()
+    if (!session || session.expiresAt <= now) {
       if (token) sessions.delete(token)
       return { account: null, session: null }
+    }
+    // 쓰는 동안 만료를 민다. 마지막 연장에서 한 시간이 지났을 때만 기록한다(세션 저장소 쓰기를 아낀다).
+    if (session.expiresAt - now < sessionWindowMs(session) - SESSION_REFRESH_AFTER_MS) {
+      session.expiresAt = now + sessionWindowMs(session)
+      sessions.set(token, session)
+      sessions.flush?.()?.catch((error) => console.warn('[session] 만료 연장을 저장하지 못했습니다', { message: error?.message }))
     }
     return { account: accounts.find((account) => account.id === session.accountId && account.approved) ?? null, session }
   }
@@ -3344,8 +3332,13 @@ export function createApp(options = {}) {
     backupSettings: (() => {
       const settings = backupSettings(options.env ?? process.env)
       // 콘솔에는 "어디에 얼마나 보관하는가"만 보이고 경로·버킷 자격정보는 노출하지 않는다.
-      return { enabled: settings.enabled, retention: settings.retention, scheduleHour: settings.scheduleHour, intervalHours: settings.intervalHours, nasConfigured: Boolean(settings.nasDirectory), cloudConfigured: Boolean(settings.cloudBucket) }
+      return {
+        enabled: settings.enabled, retention: settings.retention, scheduleHour: settings.scheduleHour, intervalHours: settings.intervalHours,
+        nasConfigured: Boolean(settings.nasDirectory), cloudConfigured: Boolean(settings.cloudBucket),
+        scheduleLabel: describeSpec(backupScheduleSpec(settings)), retentionLabel: describeRetention(settings.retentionPolicy),
+      }
     })(),
+    storeHealth: publicStoreHealth(),
   })
 
   // ------------------------------------------------------------------
@@ -3436,6 +3429,21 @@ export function createApp(options = {}) {
    * 백업 이중화 실행기. 실패해도 예외를 던지지 않고 플랫폼 콘솔에 경고를 남긴다.
    * 마지막 성공 시각은 콘솔에서 그대로 확인할 수 있다.
    */
+  /**
+   * 저장소 건강 상태(운영 콘솔 전용). 경로는 파일 이름만 — 서버 디렉터리 구조를 화면에 흘리지 않는다.
+   * 백업(.bak)으로 기동했거나, 깨진 본 파일을 보존했거나, 마지막 저장이 실패했으면 콘솔이 먼저 말한다.
+   */
+  const publicStoreHealth = () => {
+    const health = typeof options.storeHealth === 'function' ? options.storeHealth() : null
+    if (!health) return null
+    return {
+      loadedFrom: health.loadedFrom ?? 'main',
+      loadError: health.loadError ?? null,
+      quarantined: (health.quarantined ?? []).map((file) => path.basename(String(file))),
+      lastCommitError: health.lastCommitError ?? null,
+      lastCommitAt: health.lastCommitAt ?? null,
+    }
+  }
   app.locals.runBackupCycle = async (now = new Date()) => {
     const settings = backupSettings(options.env ?? process.env)
     if (!settings.enabled) return { skipped: true, reason: 'BACKUP_ENABLED가 1이 아닙니다.' }
@@ -3444,6 +3452,8 @@ export function createApp(options = {}) {
       settings,
       storage: settings.cloudBucket ? documentStorage : null,
       now,
+      // Postgres 모드의 데이터 디렉터리에는 DB가 없다 — 메모리의 전체 저장소를 같은 세대에 JSON으로 담는다.
+      snapshot: options.storeStatus?.kind === 'postgres' ? () => JSON.stringify(workspaceStore) : null,
     })
     workspaceStore.platform[BACKUP_STATUS_KEY] = nextBackupStatus(workspaceStore.platform[BACKUP_STATUS_KEY], result)
     if (result.ok && !result.cloud.error) {
@@ -4466,7 +4476,8 @@ export function createApp(options = {}) {
     id: 'backup-mirror',
     label: '백업 이중화',
     description: 'NAS 세대 보관과 클라우드 미러를 실행합니다.',
-    spec: { every: 'day', hour: 3 },
+    // BACKUP_SCHEDULE_HOUR · BACKUP_INTERVAL_HOURS를 따른다(전에는 매일 03시가 박혀 있었다).
+    spec: backupScheduleSpec(backupSettings(options.env ?? process.env)),
     run: async ({ now }) => {
       const result = await app.locals.runBackupCycle(now)
       if (result?.skipped) return { detail: result.reason ?? '백업이 꺼져 있습니다.' }
@@ -5557,7 +5568,10 @@ export function createApp(options = {}) {
     }
 
     const token = randomBytes(32).toString('base64url')
-    sessions.set(token, { accountId: account.id, expiresAt: Date.now() + SESSION_MAX_AGE_SECONDS * 1000 })
+    const remember = request.body?.remember !== false
+    const createdSession = { accountId: account.id, remember, createdAt: new Date().toISOString() }
+    createdSession.expiresAt = Date.now() + sessionWindowMs(createdSession)
+    sessions.set(token, createdSession)
     try {
       await sessions.flush?.()
     } catch {
@@ -5566,12 +5580,18 @@ export function createApp(options = {}) {
       return
     }
     const secure = request.secure || request.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''
-    const persistence = request.body?.remember === false ? '' : `; Max-Age=${SESSION_MAX_AGE_SECONDS}`
+    const persistence = remember ? `; Max-Age=${SESSION_REMEMBER_SECONDS}` : ''
     response.setHeader('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/${persistence}${secure}`)
     response.json({ account: effectiveAuth(account, null) })
   })
 
   app.get('/api/auth/session', requireSession, (request, response) => {
+    // 「로그인 유지」 세션은 앱을 열 때마다 쿠키 수명도 함께 민다 — 30일 동안 한 번도 안 열었을 때만 끝난다.
+    if (request.session?.remember) {
+      const token = parseCookies(request.headers.cookie)[SESSION_COOKIE]
+      const secure = request.secure || request.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''
+      if (token) response.setHeader('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_REMEMBER_SECONDS}${secure}`)
+    }
     response.json({ account: request.auth })
   })
 

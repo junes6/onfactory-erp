@@ -36,6 +36,12 @@ function seoulEpoch({ year, month, day, hour = 0, minute = 0 }) {
   return Date.UTC(year, month, day, hour, minute) - SEOUL_OFFSET_MS
 }
 
+/** 'hours' 주기의 간격(시간). 1~23 밖이면 24(하루 한 번)로 본다. */
+function hoursInterval(spec) {
+  const value = Number(spec?.interval)
+  return Number.isInteger(value) && value >= 1 && value <= 23 ? value : 24
+}
+
 export function seoulDateKey(date) {
   const { year, month, day } = seoulParts(date)
   return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
@@ -59,6 +65,14 @@ export function lastOccurrence(spec, now) {
     if (candidate > now.getTime()) candidate = seoulEpoch({ ...parts, day: parts.day - 1, hour, minute })
     return new Date(candidate)
   }
+  if (spec?.every === 'hours') {
+    // 매일 hour시에서 시작해 interval시간마다. 24를 나누지 않는 간격도 매일 기준 시각에서 다시 맞춘다.
+    const hour = Number.isInteger(spec.hour) ? spec.hour : 0
+    const step = hoursInterval(spec) * 60 * MINUTE_MS
+    let anchor = seoulEpoch({ ...parts, hour, minute })
+    if (anchor > now.getTime()) anchor = seoulEpoch({ ...parts, day: parts.day - 1, hour, minute })
+    return new Date(anchor + Math.floor((now.getTime() - anchor) / step) * step)
+  }
   if (spec?.every === 'month') {
     const hour = Number.isInteger(spec.hour) ? spec.hour : 0
     const day = Number.isInteger(spec.day) ? spec.day : 1
@@ -75,6 +89,14 @@ export function nextOccurrence(spec, now) {
   const parts = seoulParts(previous)
   if (spec.every === 'hour') return new Date(previous.getTime() + 60 * MINUTE_MS)
   if (spec.every === 'day') return new Date(seoulEpoch({ ...parts, day: parts.day + 1 }))
+  if (spec.every === 'hours') {
+    const step = previous.getTime() + hoursInterval(spec) * 60 * MINUTE_MS
+    // 다음 날 기준 시각을 넘기면 그 기준 시각이 다음 실행이다.
+    const anchorParts = seoulParts(now)
+    let nextAnchor = seoulEpoch({ ...anchorParts, hour: Number.isInteger(spec.hour) ? spec.hour : 0, minute: Number.isInteger(spec.minute) ? spec.minute : 0 })
+    if (nextAnchor <= now.getTime()) nextAnchor = seoulEpoch({ ...anchorParts, day: anchorParts.day + 1, hour: Number.isInteger(spec.hour) ? spec.hour : 0, minute: Number.isInteger(spec.minute) ? spec.minute : 0 })
+    return new Date(Math.min(step, nextAnchor))
+  }
   return new Date(seoulEpoch({ ...parts, month: parts.month + 1 }))
 }
 
@@ -82,6 +104,7 @@ export function describeSpec(spec) {
   const minute = String(Number.isInteger(spec?.minute) ? spec.minute : 0).padStart(2, '0')
   if (spec?.every === 'hour') return `매시 ${minute}분`
   if (spec?.every === 'day') return `매일 ${String(spec.hour ?? 0).padStart(2, '0')}:${minute}`
+  if (spec?.every === 'hours') return `매일 ${String(spec.hour ?? 0).padStart(2, '0')}:${minute}부터 ${hoursInterval(spec)}시간마다`
   if (spec?.every === 'month') return `매월 ${spec.day ?? 1}일 ${String(spec.hour ?? 0).padStart(2, '0')}:${minute}`
   return '주기 미정'
 }

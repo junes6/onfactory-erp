@@ -156,6 +156,7 @@
 .pc-field input, .pc-field select { min-height: 42px; padding: var(--space-0) var(--space-12); }
 .pc-field textarea { min-height: 92px; padding: var(--space-8) var(--space-12); resize: vertical; line-height: 1.5; }
 .pc-field input:focus, .pc-field select:focus, .pc-field textarea:focus { border-color: var(--pc-accent); box-shadow: var(--shadow-none); }
+.pc-store-health { display: flex; flex-direction: column; gap: var(--space-8); margin-bottom: var(--space-12); }
 .pc-form-note { display: flex; align-items: flex-start; gap: var(--space-8); padding: var(--space-12); border: var(--hairline) solid var(--color-warning-soft); border-radius: var(--radius-8); color: var(--color-warning-ink); background: var(--color-warning-soft); font-size: var(--font-13); line-height: 1.5; }
 .pc-form-note svg { flex: 0 0 auto; margin-top: var(--space-0); }
 .pc-modal-actions { display: flex; justify-content: flex-end; gap: var(--space-8); padding-top: var(--space-4); }

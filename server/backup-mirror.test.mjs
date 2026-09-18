@@ -241,3 +241,61 @@ test('a broken marker is not a way around the guard', async () => {
     await rm(nas, { recursive: true, force: true })
   }
 })
+
+test('보관은 날짜 기준이다 — 하루 하나(14일) · 주 하나(8주) · 달 하나(12달), 최근 48시간과 가장 새 세대는 언제나 남긴다', async () => {
+  const { generationsToKeep, generationTime } = await import('./backup-mirror.mjs')
+  const now = new Date('2026-09-18T00:00:00.000Z')
+  const names = []
+  // 1년 동안 매일 03시(KST = 전날 18시 UTC) 백업 + 오늘 수동 실행 세 번.
+  for (let day = 0; day < 365; day += 1) names.push(backupGenerationName(new Date(now.getTime() - day * 86_400_000 - 6 * 3_600_000)))
+  for (const minutes of [10, 20, 30]) names.push(backupGenerationName(new Date(now.getTime() - minutes * 60_000)))
+  const keep = generationsToKeep(names, { daily: 14, weekly: 8, monthly: 12, recentHours: 48 }, { now })
+  // 수동 실행 세 번이 하루치 자리를 밀어내지 않는다: 최근 14일이 모두 남는다.
+  for (let day = 0; day < 14; day += 1) {
+    const name = backupGenerationName(new Date(now.getTime() - day * 86_400_000 - 6 * 3_600_000))
+    assert.ok(keep.has(name), `${day}일 전 백업이 남는다`)
+  }
+  for (const minutes of [10, 20, 30]) assert.ok(keep.has(backupGenerationName(new Date(now.getTime() - minutes * 60_000))), '최근 48시간 안의 수동 실행은 남는다')
+  // 1년 전 세대까지 다 남기지는 않는다 — 14 + 8주 + 12달 + 최근분 안쪽.
+  assert.ok(keep.size <= 14 + 8 + 12 + 3 + 2, `남은 세대 ${keep.size}`)
+  const oldest = Math.min(...[...keep].map(generationTime))
+  assert.ok(now.getTime() - oldest > 300 * 86_400_000, '열 달 넘게 거슬러 올라가는 월 세대가 있다')
+  // 모르는 이름은 절대 지우지 않는다.
+  assert.ok(generationsToKeep(['inthefield_manual-copy', ...names], 3, { now }).has('inthefield_manual-copy'))
+})
+
+test('백업에는 로그인 세션과 임시 파일이 담기지 않는다 — 복원으로 끝난 세션이 되살아나지 않는다', async () => {
+  const source = await seedDataDirectory()
+  const nas = await mkdtemp(path.join(os.tmpdir(), 'inthefield-backup-excl-'))
+  try {
+    await writeFile(path.join(source, 'sessions.json'), JSON.stringify({ version: 1, sessions: {} }))
+    await writeFile(path.join(source, 'workspace-state.json.123.456.tmp'), '{')
+    const result = await runBackupCycle({ dataDirectory: source, settings: { nasDirectory: nas, retention: 3 }, now: new Date('2026-08-31T18:00:00.000Z'), snapshot: () => '{"version":2}' })
+    assert.equal(result.ok, true, result.error)
+    const copied = await readdir(result.nas.path)
+    assert.ok(copied.includes('workspace-state.json'))
+    assert.ok(!copied.includes('sessions.json'))
+    assert.ok(!copied.some((name) => name.endsWith('.tmp')))
+    assert.ok(copied.includes('workspace-snapshot.json'), 'Postgres 모드 스냅샷이 함께 담긴다')
+  } finally {
+    await rm(source, { recursive: true, force: true })
+    await rm(nas, { recursive: true, force: true })
+  }
+})
+
+test('백업 주기는 설정을 따른다 — 24시간 미만이면 기준 시각부터 N시간마다', async () => {
+  const { backupScheduleSpec } = await import('./backup-mirror.mjs')
+  const { describeSpec, lastOccurrence, nextOccurrence } = await import('./scheduler.mjs')
+  assert.deepEqual(backupScheduleSpec(backupSettings({ BACKUP_SCHEDULE_HOUR: '2' })), { every: 'day', hour: 2 })
+  const spec = backupScheduleSpec(backupSettings({ BACKUP_SCHEDULE_HOUR: '3', BACKUP_INTERVAL_HOURS: '6' }))
+  assert.deepEqual(spec, { every: 'hours', hour: 3, interval: 6 })
+  assert.equal(describeSpec(spec), '매일 03:00부터 6시간마다')
+  // KST 2026-09-18 10:30 → 직전은 09:00, 다음은 15:00.
+  const now = new Date('2026-09-18T01:30:00.000Z')
+  assert.equal(lastOccurrence(spec, now).toISOString(), '2026-09-18T00:00:00.000Z')
+  assert.equal(nextOccurrence(spec, now).toISOString(), '2026-09-18T06:00:00.000Z')
+  // KST 02:00(기준 시각 전) → 직전은 어제 21:00, 다음은 오늘 03:00.
+  const early = new Date('2026-09-17T17:00:00.000Z')
+  assert.equal(lastOccurrence(spec, early).toISOString(), '2026-09-17T12:00:00.000Z')
+  assert.equal(nextOccurrence(spec, early).toISOString(), '2026-09-17T18:00:00.000Z')
+})
