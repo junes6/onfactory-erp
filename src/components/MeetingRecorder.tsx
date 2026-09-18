@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Mic, Square } from 'lucide-react'
-import { formatDocumentSize, uploadDocumentAttachment } from '../utils/documentAttachments'
+import { MAX_MEETING_SOURCE_BYTES, formatDocumentSize, uploadDocumentAttachment } from '../utils/documentAttachments'
 import {
   MAX_RECORDING_BYTES,
+  MAX_RECORDING_SECONDS,
+  formatRemaining,
   MICROPHONE_WAITING_MESSAGE,
   RECORDER_UNSUPPORTED_MESSAGE,
   RECORDING_AUTO_STOPPED_MESSAGE,
@@ -134,6 +136,7 @@ export function MeetingRecorder({ transcription, workspaceScope, disabled, onToa
       // 화면이 값을 잊어도 안전한 쪽으로 떨어져야 하고, 정하는 곳이 둘이면 곧 갈린다.
       const stored = await uploadDocumentAttachment(file, {
         workspaceScope,
+        maxBytes: MAX_MEETING_SOURCE_BYTES,
         category: MEETING_SOURCE_CATEGORY,
         summary: '회의 녹음 원본',
         tags: [MEETING_SOURCE_TAG],
@@ -238,6 +241,8 @@ export function MeetingRecorder({ transcription, workspaceScope, disabled, onToa
   if (phase === 'recording' || phase === 'saving') {
     const ratio = Math.min(1, bytes / MAX_RECORDING_BYTES)
     const near = ratio >= RECORDING_WARN_RATIO
+    // 처음 30초는 설정한 비트레이트로, 그 뒤에는 실제로 쌓인 바이트의 속도로 남은 시간을 잰다.
+    const remaining = elapsed >= 30 && ratio > 0 ? Math.round(elapsed * (1 / ratio - 1)) : Math.max(0, MAX_RECORDING_SECONDS - elapsed)
     return (
       <div className="meeting-recorder-bar" role="status" aria-live="polite">
         <span className="meeting-recorder-dot" aria-hidden="true" />
@@ -245,7 +250,8 @@ export function MeetingRecorder({ transcription, workspaceScope, disabled, onToa
         <span className="meeting-recorder-meter" aria-hidden="true">
           <span className="meeting-recorder-meter-fill" style={{ width: `${Math.round(ratio * 100)}%` }} />
         </span>
-        <small>{formatDocumentSize(bytes)} / {formatDocumentSize(MAX_RECORDING_BYTES)}{near ? ` · ${RECORDING_NEAR_LIMIT_MESSAGE}` : ''}</small>
+        {/* 바이트보다 '얼마나 더 녹음할 수 있나'가 사람이 읽는 말이다. 실제 비트레이트가 달라도 바이트로 잰 비율에서 계산한다. */}
+        <small>{near ? RECORDING_NEAR_LIMIT_MESSAGE : `약 ${formatRemaining(remaining)} 더 녹음할 수 있습니다`} · {formatDocumentSize(bytes)} / {formatDocumentSize(MAX_RECORDING_BYTES)}</small>
         <Button
           tone="danger"
           size="sm"

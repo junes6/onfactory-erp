@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpen, ClipboardCheck, FileAudio, FileText, Mic, RefreshCw, ShieldAlert, Trash2, X } from 'lucide-react'
 import { formatDateTime } from '../utils/dateTime'
-import { formatDocumentSize, uploadDocumentAttachment } from '../utils/documentAttachments'
+import { MAX_MEETING_SOURCE_BYTES, formatDocumentSize, uploadDocumentAttachment } from '../utils/documentAttachments'
 import {
   AI_LEVEL_LABEL,
   MAX_PARTICIPANTS,
@@ -561,6 +561,7 @@ function MeetingCreateDialog({ workspaceScope, pendingSources, onToast, onClose,
     try {
       const stored = await uploadDocumentAttachment(file, {
         workspaceScope,
+        maxBytes: MAX_MEETING_SOURCE_BYTES,
         category: MEETING_SOURCE_CATEGORY,
         summary: '회의 원본 자료',
         tags: [MEETING_SOURCE_TAG],
@@ -622,7 +623,7 @@ function MeetingCreateDialog({ workspaceScope, pendingSources, onToast, onClose,
               />
             )}
             <p className="meeting-field-note">
-              올린 파일은 자료실 「{MEETING_SOURCE_CATEGORY}」 분류에 보관되고, AI 처리 수준은 서버가 「{AI_LEVEL_LABEL.locked}」 단계로 정합니다.
+              녹음 파일은 24MB(대략 1시간 30분)까지 올릴 수 있습니다. 올린 파일은 자료실 「{MEETING_SOURCE_CATEGORY}」 분류에 보관되고, AI 처리 수준은 서버가 「{AI_LEVEL_LABEL.locked}」 단계로 정합니다.
               「AI로 정리」를 누를 때 수준을 올릴지 다시 물어봅니다. 여기서 취소해도 올린 파일은 자료실에 남습니다.
             </p>
           </div>

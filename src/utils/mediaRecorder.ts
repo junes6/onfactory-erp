@@ -1,4 +1,4 @@
-import { MAX_DOCUMENT_BYTES } from './documentAttachments.ts'
+import { MAX_MEETING_SOURCE_BYTES } from './documentAttachments.ts'
 
 /**
  * 브라우저 녹음 — `MediaRecorder`와 `getUserMedia`를 부르는 **저장소 안 유일한 파일**.
@@ -20,11 +20,20 @@ export type MicrophoneStream = MediaStream
 export const RECORDER_MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'] as const
 
 /**
- * 한 번에 녹음할 수 있는 바이트. **자료실 업로드 상한에서 나온다** — 상한을 넘긴 녹음은
+ * 한 번에 녹음할 수 있는 바이트. **회의 녹음 업로드 상한에서 나온다** — 상한을 넘긴 녹음은
  * 통째로 거절당하고, 사람이 그 사실을 아는 때는 녹음이 끝난 뒤다.
- * 여유 1MB는 마지막 조각과 컨테이너 헤더 몫이다(opus 32kbps로 대략 39분).
+ * 여유 1MB는 마지막 조각과 컨테이너 헤더 몫이다(아래 32kbps로 대략 1시간 38분).
  */
-export const MAX_RECORDING_BYTES = MAX_DOCUMENT_BYTES - 1024 * 1024
+export const MAX_RECORDING_BYTES = MAX_MEETING_SOURCE_BYTES - 1024 * 1024
+
+/**
+ * 말소리 녹음의 비트레이트. **적어서 정한다** — 정하지 않으면 브라우저 기본값(크롬은 128kbps 안팎)으로
+ * 녹음돼, 같은 상한에 네 배 빨리 닿았다. 32kbps opus는 회의 말소리를 받아쓰기에 충분하다.
+ */
+export const RECORDER_AUDIO_BITS_PER_SECOND = 32_000
+
+/** 상한까지 녹음할 수 있는 대략의 시간(초). 화면이 '남은 시간'을 말할 때 쓴다. */
+export const MAX_RECORDING_SECONDS = Math.floor(MAX_RECORDING_BYTES / (RECORDER_AUDIO_BITS_PER_SECOND / 8))
 
 /** 이 비율을 넘으면 화면이 「곧 멈춘다」고 미리 말한다. 말없이 멈추면 사람은 고장으로 읽는다. */
 export const RECORDING_WARN_RATIO = 0.9
@@ -62,7 +71,7 @@ export function pickRecorderMime(
 }
 
 export function createRecorder(stream: MicrophoneStream, mimeType: string): Recorder {
-  return new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+  return new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: RECORDER_AUDIO_BITS_PER_SECOND })
 }
 
 export async function requestMicrophone(): Promise<MicrophoneStream> {
@@ -155,6 +164,14 @@ export function recordingFileName(startedAt: Date, mimeType: string) {
 }
 
 /** 경과 시간 한 줄(mm:ss). 시간을 넘기면 h:mm:ss. */
+/** 남은 시간을 사람이 읽는 말로('약 1시간 25분'). 초 단위 숫자열보다 읽기 쉽다(나이 든 사용자). */
+export function formatRemaining(seconds: number) {
+  const minutes = Math.max(0, Math.floor(seconds / 60))
+  const hours = Math.floor(minutes / 60)
+  if (!hours) return minutes ? `${minutes}분` : '1분 미만'
+  return minutes % 60 ? `${hours}시간 ${minutes % 60}분` : `${hours}시간`
+}
+
 export function formatElapsed(seconds: number) {
   const total = Math.max(0, Math.floor(seconds))
   const hours = Math.floor(total / 3600)

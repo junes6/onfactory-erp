@@ -7,6 +7,8 @@ export type StoredDocumentAttachment = {
 type UploadAttachmentOptions = {
   workspaceScope?: string
   category: string
+  /** 이 파일이 받을 수 있는 최대 바이트. 회의 녹음만 MAX_MEETING_SOURCE_BYTES를 넘긴다. */
+  maxBytes?: number
   summary?: string
   tags?: string[]
   allowedUserIds?: string[]
@@ -19,6 +21,11 @@ type UploadAttachmentOptions = {
  * (R16-M4: `src/utils/mediaRecorder.ts`의 `MAX_RECORDING_BYTES`가 이 값에서 나온다.)
  */
 export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+/**
+ * 회의 녹음·원문만 받는 더 큰 상한. 전사(whisper)가 한 번에 받는 25MB 안쪽이다 — 서버 app.mjs의
+ * MEETING_SOURCE_MAX_BYTES와 같은 수. 전에는 10MB라 한 시간 회의 녹음을 올릴 수 없었다(감사 collab-17).
+ */
+export const MAX_MEETING_SOURCE_BYTES = 24 * 1024 * 1024
 
 function workspaceHeaders(workspaceScope?: string): Record<string, string> {
   return workspaceScope ? { 'x-workspace-identity': workspaceScope } : {}
@@ -45,7 +52,8 @@ export function formatDocumentSize(size: number) {
 
 export async function uploadDocumentAttachment(file: File, options: UploadAttachmentOptions): Promise<StoredDocumentAttachment> {
   if (!file.size) throw new Error(`${file.name}: 비어 있는 파일은 업로드할 수 없습니다.`)
-  if (file.size > MAX_DOCUMENT_BYTES) throw new Error(`${file.name}: 파일은 10MB 이하만 첨부할 수 있습니다.`)
+  const maxBytes = options.maxBytes ?? MAX_DOCUMENT_BYTES
+  if (file.size > maxBytes) throw new Error(`${file.name}: 파일은 ${Math.round(maxBytes / 1024 / 1024)}MB 이하만 올릴 수 있습니다.`)
 
   const params = new URLSearchParams({
     name: file.name,

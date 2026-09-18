@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import test from 'node:test'
 
@@ -11,8 +12,8 @@ import {
   MEETING_STATUSES,
 } from '../server/meeting-notes.mjs'
 import { TRANSCRIPT_EXTENSIONS as SERVER_TRANSCRIPT_EXTENSIONS } from '../server/transcription.mjs'
-import { MAX_DOCUMENT_BYTES } from '../src/utils/documentAttachments.ts'
-import { MAX_RECORDING_BYTES, RECORDER_MIME_CANDIDATES, pickRecorderMime } from '../src/utils/mediaRecorder.ts'
+import { MAX_DOCUMENT_BYTES, MAX_MEETING_SOURCE_BYTES } from '../src/utils/documentAttachments.ts'
+import { MAX_RECORDING_BYTES, MAX_RECORDING_SECONDS, RECORDER_AUDIO_BITS_PER_SECOND, RECORDER_MIME_CANDIDATES, formatRemaining, pickRecorderMime } from '../src/utils/mediaRecorder.ts'
 import {
   AI_LEVEL_LABEL,
   MAX_TRANSCRIPT_STORED,
@@ -156,11 +157,20 @@ test('녹음 형식은 폴백 목록에서 고르고, 하나도 없으면 버튼
 
 test('녹음 상한은 업로드 상한에서 나오고, 닿으면 스스로 멈춘다', () => {
   // 상한을 넘긴 녹음은 업로드에서 통째로 거절당한다 — 넘기게 두는 것은 그때까지의 녹음을 버리는 것이다.
-  assert.ok(MAX_RECORDING_BYTES < MAX_DOCUMENT_BYTES, '녹음 상한은 업로드 상한보다 작아야 한다')
-  assert.ok(MAX_RECORDING_BYTES < 10 * 1024 * 1024, '서버 express.raw 10MB 안쪽이어야 한다')
-  assert.ok(MAX_RECORDING_BYTES > 8 * 1024 * 1024, '지나치게 짧게 잘라 40분 회의를 못 담게 하지 않는다')
+  // 회의 녹음만 더 큰 상한(전사 whisper 25MB 안쪽)을 받는다 — 한 시간 회의가 10MB를 넘었다(감사 collab-17).
+  assert.ok(MAX_RECORDING_BYTES < MAX_MEETING_SOURCE_BYTES, '녹음 상한은 회의 원본 업로드 상한보다 작아야 한다')
+  assert.ok(MAX_MEETING_SOURCE_BYTES < 25 * 1024 * 1024, '전사(whisper) 한 번에 받는 25MB 안쪽이어야 한다')
+  assert.ok(MAX_DOCUMENT_BYTES < MAX_MEETING_SOURCE_BYTES, '다른 자료의 상한(10MB)은 그대로다')
+  assert.ok(MAX_RECORDING_SECONDS >= 90 * 60, `정한 비트레이트로 한 시간 반은 담아야 한다(지금 ${Math.round(MAX_RECORDING_SECONDS / 60)}분)`)
+  assert.match(mediaRecorderUtil, /audioBitsPerSecond: RECORDER_AUDIO_BITS_PER_SECOND/, '비트레이트를 브라우저 기본값(128kbps 안팎)에 맡기지 않는다')
+  assert.equal(RECORDER_AUDIO_BITS_PER_SECOND, 32_000)
+  // 서버가 같은 두 수를 쓴다.
+  const server = readFileSync(new URL('../server/app.mjs', import.meta.url), 'utf8')
+  assert.match(server, /const DOCUMENT_MAX_BYTES = 10 \* 1024 \* 1024/)
+  assert.match(server, /const MEETING_SOURCE_MAX_BYTES = 24 \* 1024 \* 1024/)
+  assert.match(server, /request\.auth\.role !== GUEST_ROLE && isMeetingRecordingUpload\(category, tags\)/)
   // 두 수가 따로 적혀 있으면 조용히 갈린다 — 한 수에서 나와야 한다.
-  assert.match(mediaRecorderUtil, /MAX_RECORDING_BYTES = MAX_DOCUMENT_BYTES - /)
+  assert.match(mediaRecorderUtil, /MAX_RECORDING_BYTES = MAX_MEETING_SOURCE_BYTES - /)
   // 자동 정지 분기.
   assert.match(mediaRecorderUtil, /if \(bytes >= MAX_RECORDING_BYTES && !autoStopped\) \{[\s\S]{0,120}halt\(\)/)
   assert.match(mediaRecorderUtil, /RECORDING_AUTO_STOPPED_MESSAGE = '용량 상한에 닿아 녹음을 자동으로 멈췄습니다\./)
@@ -659,4 +669,11 @@ test('59. 굳은 회의에도 나가는 길이 있다 — 진행 문장이 지�
   assert.match(rows, /meetingProcessLabel\(meeting\.status\)/)
   assert.equal(count(meetingCode, /meetingProcessLabel\(meeting\.status\)/g), 2, '목록과 바닥글이 같은 라벨을 쓴다')
   assert.match(meetingCode, /새로고침<\/Button>/, '문장이 지목하는 「새로고침」이 실제로 있다')
+})
+
+test('녹음 중에는 바이트가 아니라 "얼마나 더 녹음할 수 있나"를 사람 말로', () => {
+  assert.equal(formatRemaining(95 * 60), '1시간 35분')
+  assert.equal(formatRemaining(60 * 60), '1시간')
+  assert.equal(formatRemaining(12 * 60 + 40), '12분')
+  assert.equal(formatRemaining(30), '1분 미만')
 })

@@ -2726,7 +2726,14 @@ export function createApp(options = {}) {
     })
   })
 
-  app.post('/api/documents', requireAuth, requireMatchingWorkspaceIdentity, express.raw({ type: '*/*', limit: '10mb' }), async (request, response) => {
+  /**
+   * 한 번에 받는 바이트. 회의 녹음만 전사 상한(whisper 25MB) 안쪽까지 더 받는다 — 휴대폰으로 녹음한 한 시간
+   * 회의는 10MB를 넘어, 회의록을 만들려면 파일을 쪼개거나 다시 인코딩해야 했다(감사 collab-17).
+   * 화면(src/utils/documentAttachments.ts)의 두 수와 같다.
+   */
+  const DOCUMENT_MAX_BYTES = 10 * 1024 * 1024
+  const MEETING_SOURCE_MAX_BYTES = 24 * 1024 * 1024
+  app.post('/api/documents', requireAuth, requireMatchingWorkspaceIdentity, express.raw({ type: '*/*', limit: MEETING_SOURCE_MAX_BYTES }), async (request, response) => {
     if (!request.auth.tenantId) { response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } }); return }
     if (!documentStorage) { response.status(503).json({ error: { code: 'DOCUMENT_STORAGE_UNAVAILABLE', message: '파일 저장소가 설정되지 않았습니다.' } }); return }
     if (!Buffer.isBuffer(request.body) || request.body.length === 0) { response.status(400).json({ error: { code: 'DOCUMENT_FILE_REQUIRED', message: '업로드할 파일을 선택해 주세요.' } }); return }
@@ -2739,6 +2746,14 @@ export function createApp(options = {}) {
     let departments = listParameter(request.query.departments)
     let allowedUserIds = listParameter(request.query.allowedUserIds, 100)
     const tags = listParameter(request.query.tags)
+    const meetingSource = request.auth.role !== GUEST_ROLE && isMeetingRecordingUpload(category, tags)
+    const maxBytes = meetingSource ? MEETING_SOURCE_MAX_BYTES : DOCUMENT_MAX_BYTES
+    if (request.body.length > maxBytes) {
+      response.status(413).json({ error: { code: 'DOCUMENT_TOO_LARGE', message: meetingSource
+        ? '회의 녹음은 한 파일에 24MB까지 올릴 수 있습니다(대략 1시간 30분). 더 긴 회의는 나눠서 올려 주세요.'
+        : '한 파일은 10MB까지 올릴 수 있습니다. 더 큰 파일은 나눠서 올려 주세요.' } })
+      return
+    }
     const factoryDrawingUpload = category === '공장도면' || tags.includes('factory-drawing')
     if (factoryDrawingUpload && request.auth.role !== 'tenant-admin') {
       response.status(403).json({ error: { code: 'FACTORY_DRAWING_WRITE_FORBIDDEN', message: '공장 배경 도면은 회사 관리자만 등록하거나 교체할 수 있습니다.' } })
