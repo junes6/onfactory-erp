@@ -175,7 +175,7 @@
 
 .collab-overlay {
   position: fixed;
-  z-index: 200;
+  z-index: var(--layer-messenger);
   inset: 0;
 }
 

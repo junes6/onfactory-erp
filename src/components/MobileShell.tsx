@@ -209,43 +209,72 @@ export function MobileTaskList({ tasks, parentRefs, onAdvance, onOpenTask, busyI
  * 네 가지만 둔다. 휴대폰에서 재고를 조정하거나 공장 도면을 편집하는 일은
  * 실제로 일어나지 않고, 관리자 화면을 작은 화면에 욱여넣으면 잘못 누르기만 한다.
  */
-export const MOBILE_MORE_ITEMS: { id: string; label: string; hint: string; icon: typeof FileText }[] = [
-  { id: 'journal', label: '일일업무일지', hint: '오늘 한 일을 적습니다', icon: ClipboardList },
-  { id: 'people', label: '근태', hint: '출퇴근과 휴가를 봅니다', icon: Timer },
-  { id: 'documents', label: '자료실', hint: '회사 문서를 찾습니다', icon: FileText },
-  { id: 'settings', label: '설정', hint: '알림과 계정을 바꿉니다', icon: Settings2 },
+export type MobileMoreItem = { id: string; label: string; hint: string; icon: typeof FileText; badge?: number }
+
+/**
+ * 휴대폰 더보기에서 여는 화면과 한 줄 설명(이 순서대로 보인다).
+ *
+ * 전에는 업무일지·근태·자료실·설정 넷뿐이라 문서(회의록·검토 자료 포함)·일정·결재를 휴대폰에서 열 길이 없었다.
+ * 매일 쓰는 화면만 둔다 — 설정·관리·대량 편집 화면은 여전히 컴퓨터에서 연다(작은 화면에서 잘못 눌러 생기는 사고).
+ * 이름과 아이콘은 사이드바(사용자가 고친 이름 포함)를 그대로 따르고, 사이드바에 없는 화면은 여기에도 없다.
+ */
+export const MOBILE_MORE_PAGES: { id: string; hint: string }[] = [
+  { id: 'approvals', hint: '내가 결정할 결재·AI 제안을 봅니다' },
+  { id: 'schedule', hint: '팀 일정과 내 일정을 봅니다' },
+  { id: 'wiki', hint: '문서·회의록·검토 자료를 봅니다' },
+  { id: 'journal', hint: '오늘 한 일을 적습니다' },
+  { id: 'people', hint: '출퇴근과 휴가를 봅니다' },
+  { id: 'documents', hint: '회사 문서를 찾습니다' },
+  { id: 'projects', hint: '프로젝트 글과 진행을 봅니다' },
 ]
 
-export function MobileMoreSheet({ open, onClose, onPick, userName, userRole }: {
+export const MOBILE_SETTINGS_ITEM: MobileMoreItem = { id: 'settings', label: '설정', hint: '알림·글자 크기·계정을 바꿉니다', icon: Settings2 }
+
+export function mobileMoreItems(nav: { id: string; label: string; icon: typeof FileText; badge?: number }[]): MobileMoreItem[] {
+  const pages = MOBILE_MORE_PAGES.flatMap(({ id, hint }) => {
+    const found = nav.find((item) => item.id === id)
+    return found ? [{ id, label: found.label, hint, icon: found.icon, badge: found.badge }] : []
+  })
+  return [...pages, MOBILE_SETTINGS_ITEM]
+}
+
+export function MobileMoreSheet({ open, onClose, onPick, userName, userRole, items, activeId }: {
   open: boolean
   onClose: () => void
   onPick: (id: string) => void
   userName: string
   userRole: string
+  items: MobileMoreItem[]
+  activeId?: string
 }) {
   if (!open) return null
   return (
-    <div className="mobile-sheet" role="dialog" aria-modal="true" aria-label="더보기">
-      <div className="mobile-sheet-head">
-        <div><strong>{userName}</strong><small>{userRole}</small></div>
-        <button type="button" className="mobile-sheet-close" aria-label="더보기 닫기" onClick={onClose}><X size={22} /></button>
+    <>
+      {/* 시트 바깥을 누르면 닫힌다. 아래 탭 막대는 덮지 않는다. */}
+      <button type="button" className="mobile-sheet-scrim" aria-label="더보기 닫기" tabIndex={-1} onClick={onClose} />
+      <div className="mobile-sheet" role="dialog" aria-modal="true" aria-label="더보기" onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}>
+        <div className="mobile-sheet-head">
+          <div><strong>{userName}</strong><small>{userRole}</small></div>
+          <button type="button" className="mobile-sheet-close" aria-label="더보기 닫기" onClick={onClose}><X size={22} /></button>
+        </div>
+        <ul className="mobile-sheet-list">
+          {items.map((item) => {
+            const Icon = item.icon
+            return (
+              <li key={item.id}>
+                <button type="button" aria-current={activeId === item.id ? 'page' : undefined} onClick={() => onPick(item.id)}>
+                  <span className="mobile-sheet-icon"><Icon size={20} /></span>
+                  <span className="mobile-sheet-copy"><strong>{item.label}</strong><small>{item.hint}</small></span>
+                  {item.badge ? <em className="mobile-sheet-badge" aria-label={`${item.badge}건`}>{item.badge > 99 ? '99+' : item.badge}</em> : null}
+                  <ChevronRight size={18} aria-hidden="true" />
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+        <p className="mobile-sheet-note">관리 화면은 컴퓨터에서 열어 주세요. 작은 화면에서 잘못 눌러 생기는 사고를 막기 위해 숨겨 두었습니다.</p>
+        <div className="mobile-sheet-spacer" aria-hidden="true" />
       </div>
-      <ul className="mobile-sheet-list">
-        {MOBILE_MORE_ITEMS.map((item) => {
-          const Icon = item.icon
-          return (
-            <li key={item.id}>
-              <button type="button" onClick={() => onPick(item.id)}>
-                <span className="mobile-sheet-icon"><Icon size={20} /></span>
-                <span className="mobile-sheet-copy"><strong>{item.label}</strong><small>{item.hint}</small></span>
-                <ChevronRight size={18} aria-hidden="true" />
-              </button>
-            </li>
-          )
-        })}
-      </ul>
-      <p className="mobile-sheet-note">관리 화면은 컴퓨터에서 열어 주세요. 작은 화면에서 잘못 눌러 생기는 사고를 막기 위해 숨겨 두었습니다.</p>
-      <div className="mobile-sheet-spacer" aria-hidden="true" />
-    </div>
+    </>
   )
 }

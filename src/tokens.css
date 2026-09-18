@@ -18,6 +18,9 @@
   --color-danger: #E24B4A;
   /* 일곱 곳이 이미 쓰고 있었는데 정의가 없어 부모 글자색으로 떨어지고 있었다. 원색을 어둡게 눌러 옅은 배경 위에서 읽히게 한다. */
   --color-danger-ink: color-mix(in srgb, var(--color-danger) 72%, var(--color-gray-800));
+  /* 보라 배지 글자(활동 기록·지원사업 출처). 정의가 없어 부모 글자색으로 떨어지고 있었다.
+     gray-800과 섞으므로 밝은 화면에서는 어둡게, 다크 모드(gray-800이 밝다)에서는 밝게 눌린다. */
+  --color-violet-ink: color-mix(in srgb, var(--color-violet) 78%, var(--color-gray-800));
   /* Extended accent palette: One UI 컨셉의 다색 구분용. 화면 요소는 반드시
      이 토큰으로만 색을 얻는다 (verify-design-tokens allowedPalette와 동기화). */
   --color-primary: #2563EB;
@@ -32,6 +35,9 @@
   --color-gray-600: #545862;
   --color-gray-800: #343841;
   --color-card-line: #DEE1E8;
+  /* 여섯 곳(빈 상태 아이콘·로딩 뼈대·배지)이 쓰고 있었는데 정의가 없어 배경이 투명했다 — 로딩 뼈대가 아예 보이지 않았다.
+     50과 200 사이 한 단계. 다크 모드에서는 두 값이 뒤집히므로 따로 적지 않아도 함께 뒤집힌다. */
+  --color-gray-100: color-mix(in srgb, var(--color-gray-50) 55%, var(--color-gray-200));
 
   --color-blue-soft: color-mix(in srgb, var(--color-blue) 12%, var(--color-surface));
   --color-success-soft: color-mix(in srgb, var(--color-success) 12%, var(--color-surface));
@@ -114,6 +120,21 @@
   --radius-control: var(--radius-8);
   --radius-lg: var(--radius-8);
   --space-page: var(--space-32);
+
+  /* 키보드 초점 표시 — 선은 원래 hairline이지만, 초점만은 예외로 두껍게 둔다.
+     0.5px·8% 회색 링으로는 지금 어디에 있는지 눈으로 알 수 없었다(특히 나이 든 사용자·저시력).
+     :focus-visible에만 쓰므로 마우스·손가락으로 누를 때는 나타나지 않는다. */
+  --focus-width: 2px;
+  --duration-fast: .15s;
+
+  /* 겹침 순서 — 화면 위에 뜨는 층은 이 이름으로만 순서를 정한다.
+     휴대폰의 아래 탭 막대는 메신저 위, 대화상자·서랍 아래다. 메신저를 보면서도 탭을 옮길 수 있어야 하고,
+     업무 상세·대화상자의 [저장]·[닫기]가 탭 막대에 가려지면 안 된다(전에는 탭 막대가 모든 대화상자를 덮었다).
+     알림 한 줄(토스트)은 맨 위 — 대화상자 안에서 한 일의 결과가 대화상자 뒤에 숨지 않게 한다. */
+  --layer-messenger: 200;
+  --layer-tabbar: 260;
+  --layer-dialog: 300;
+  --layer-toast: 500;
 }
 
 html {

@@ -140,7 +140,7 @@
 .pc-onboarding-draft:first-child { border-top: none; }
 .pc-onboarding-draft strong, .pc-onboarding-draft span { display: block; }
 .pc-onboarding-draft span { margin-top: var(--space-0); color: var(--pc-muted); font-size: var(--font-13); }
-.pc-modal-backdrop { position: fixed; inset: 0; z-index: 180; display: grid; place-items: center; padding: var(--space-16); background: var(--color-overlay); backdrop-filter: blur(3px); }
+.pc-modal-backdrop { position: fixed; inset: 0; z-index: calc(var(--layer-dialog) + 60); display: grid; place-items: center; padding: var(--space-16); background: var(--color-overlay); backdrop-filter: blur(3px); }
 .pc-modal { width: min(620px, 100%); max-height: min(840px, calc(100vh - 36px)); overflow: auto; border: var(--hairline) solid var(--pc-line); border-radius: var(--radius-8); color: var(--pc-text); background: var(--pc-panel); box-shadow: var(--shadow-none); outline: none; }
 .pc-modal.wide { width: min(760px, 100%); }
 .pc-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-16); padding: var(--card-inset); border-bottom: var(--hairline) solid var(--pc-line); }

@@ -394,7 +394,7 @@
 .factory-location-empty strong { margin-top: var(--space-8); color: var(--factory-ink); font-size: var(--font-15); }
 .factory-location-empty span { margin-top: var(--space-4); font-size: var(--font-13); }
 
-.factory-modal-layer { position: fixed; z-index: 180; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: var(--space-24); background: var(--color-overlay); backdrop-filter: blur(4px); }
+.factory-modal-layer { position: fixed; z-index: calc(var(--layer-dialog) + 60); inset: 0; display: grid; place-items: center; overflow-y: auto; padding: var(--space-24); background: var(--color-overlay); backdrop-filter: blur(4px); }
 .factory-modal { width: min(760px, 100%); max-height: calc(100vh - 44px); overflow-y: auto; border: var(--hairline) solid var(--color-blue-soft); border-radius: var(--radius-8); background: var(--color-surface); box-shadow: var(--shadow-none); }
 .factory-modal__head { min-height: 92px; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-16); padding: var(--space-16) var(--space-24); border-bottom: var(--hairline) solid var(--factory-line); }
 .factory-modal__head > div { min-width: 0; }

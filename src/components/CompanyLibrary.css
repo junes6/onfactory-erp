@@ -44,7 +44,7 @@
 .library-empty { padding: var(--card-inset); border: var(--hairline) dashed var(--line); border-radius: var(--radius-8); color: var(--muted); text-align: left; background: var(--surface); }
 .library-empty h2 { margin: var(--space-8) var(--space-0) var(--space-4); color: var(--ink); font-size: var(--font-22); }
 .library-empty p { margin: var(--space-0); }
-.library-modal-backdrop { position: fixed; z-index: 188; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: var(--space-16); background: var(--color-overlay); backdrop-filter: blur(5px); }
+.library-modal-backdrop { position: fixed; z-index: calc(var(--layer-dialog) + 68); inset: 0; display: grid; place-items: center; overflow-y: auto; padding: var(--space-16); background: var(--color-overlay); backdrop-filter: blur(5px); }
 .library-modal { width: min(780px,100%); max-height: calc(100vh - 40px); overflow-y: auto; border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); box-shadow: var(--shadow-none); }
 .library-modal > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-12); padding: var(--card-inset); border-bottom: var(--hairline) solid var(--line); }
 .library-modal > header span { color: var(--forest); font-size: var(--font-13); font-weight: var(--weight-medium); letter-spacing: .09em; }

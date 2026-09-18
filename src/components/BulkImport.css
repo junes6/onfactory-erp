@@ -1,4 +1,4 @@
-.bulk-import-backdrop { position: fixed; z-index: 189; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: var(--space-16); background: var(--color-overlay); backdrop-filter: blur(5px); }
+.bulk-import-backdrop { position: fixed; z-index: calc(var(--layer-dialog) + 69); inset: 0; display: grid; place-items: center; overflow-y: auto; padding: var(--space-16); background: var(--color-overlay); backdrop-filter: blur(5px); }
 .bulk-import-drawer { width: min(880px,100%); max-height: calc(100vh - 40px); overflow-y: auto; border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); box-shadow: var(--shadow-none); }
 .bulk-import-drawer > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-12); padding: var(--card-inset); border-bottom: var(--hairline) solid var(--line); }
 .bulk-import-drawer > header span { color: var(--forest); font-size: var(--font-13); font-weight: var(--weight-medium); letter-spacing: .09em; }

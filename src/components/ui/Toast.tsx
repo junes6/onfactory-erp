@@ -14,15 +14,35 @@ import { Button } from './Button'
  */
 
 export type ToastUndo = { label?: string; run: () => void | Promise<void> }
+
+/**
+ * 문자열로만 넘어오는 알림 중 실패를 알리는 것. 화면 60여 곳과 서버 오류 문장이 모두 이 말투다
+ * ("…하지 못했습니다", "…할 수 없습니다", "…실패했습니다"). 실패는 저절로 닫지 않고 빨간 줄로 보인다.
+ */
+const FAILURE_TEXT = /(못했|실패|할 수 없|수 없습니다|오류가)/u
+export const toastFromText = (text: string): ToastMessage | null => (text ? { text, tone: FAILURE_TEXT.test(text) ? 'error' : 'info' } : null)
 export type ToastMessage = { text: string; tone?: 'info' | 'error'; undo?: ToastUndo }
 
 export const UNDO_SECONDS = 5
+/**
+ * 되돌리기가 없는 알림은 이만큼 뒤 스스로 닫힌다. 전에는 닫기를 누를 때까지 남아
+ * 휴대폰에서 화면 아래를 계속 가렸다. 읽는 속도가 느린 사람을 위해 짧게 잡지 않고,
+ * 마우스를 올리거나 초점이 들어가 있는 동안은 멈춘다. 오류는 저절로 닫지 않는다 — 읽고 대응해야 한다.
+ */
+export const AUTO_CLOSE_SECONDS = 7
 
 export default function Toast({ message, onClose }: { message: ToastMessage; onClose: () => void }) {
   const [left, setLeft] = useState(UNDO_SECONDS)
   const [busy, setBusy] = useState(false)
+  const [paused, setPaused] = useState(false)
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+
+  useEffect(() => {
+    if (message.undo || message.tone === 'error' || paused) return
+    const timer = setTimeout(() => closeRef.current(), AUTO_CLOSE_SECONDS * 1_000)
+    return () => clearTimeout(timer)
+  }, [message, paused])
 
   useEffect(() => {
     setLeft(UNDO_SECONDS)
@@ -37,7 +57,14 @@ export default function Toast({ message, onClose }: { message: ToastMessage; onC
   }, [message])
 
   return (
-    <div className={message.tone === 'error' ? 'toast is-error' : 'toast'} role="status">
+    <div
+      className={message.tone === 'error' ? 'toast is-error' : 'toast'}
+      role={message.tone === 'error' ? 'alert' : 'status'}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={() => setPaused(false)}
+    >
       <CheckCircle2 size={19} />
       <span>{message.text}</span>
       {message.undo && (

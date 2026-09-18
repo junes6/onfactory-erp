@@ -18,9 +18,9 @@ body.no-scroll { overflow: hidden; }
 button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
-button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:focus-visible {
-  outline: var(--hairline) solid var(--color-overlay-subtle);
-  outline-offset: var(--hairline);
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:focus-visible, a:focus-visible, summary:focus-visible {
+  outline: var(--focus-width) solid var(--color-primary);
+  outline-offset: var(--focus-width);
 }
 button:disabled { cursor: not-allowed; opacity: .55; }
 img { display: block; max-width: 100%; }
@@ -438,7 +438,7 @@ html[data-theme='dark'] .nav-list button.active em { background: var(--color-pri
 .business-empty-state h3 { margin: var(--space-12) var(--space-0) var(--space-4); color: var(--ink); }
 .business-empty-state p { margin: var(--space-0) var(--space-0) var(--space-16); font-size: var(--font-13); }
 
-.product-detail-layer { position: fixed; z-index: 110; inset: 0; display: grid; place-items: center; padding: var(--space-24); }
+.product-detail-layer { position: fixed; z-index: calc(var(--layer-dialog) + 10); inset: 0; display: grid; place-items: center; padding: var(--space-24); }
 .scrim, .product-detail-scrim { position: absolute; inset: 0; width: 100%; height: 100%; border: none; background: var(--color-overlay); backdrop-filter: blur(4px); cursor: default; }
 .product-detail-modal {
   position: relative; z-index: 1; width: min(930px, 100%); max-height: min(820px, calc(100vh - 44px));
@@ -583,7 +583,7 @@ html[data-theme='dark'] .nav-list button.active em { background: var(--color-pri
 .product-sales-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding: var(--space-12) var(--space-16); border-top: var(--hairline) solid var(--line); color: var(--muted); font-size: var(--font-13); }
 
 /* Overlays */
-.modal-backdrop { position: fixed; z-index: 130; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: var(--space-24); background: var(--color-overlay); backdrop-filter: blur(4px); }
+.modal-backdrop { position: fixed; z-index: calc(var(--layer-dialog) + 20); inset: 0; display: grid; place-items: center; overflow-y: auto; padding: var(--space-24); background: var(--color-overlay); backdrop-filter: blur(4px); }
 .modal-card { width: min(690px,100%); max-height: calc(100vh - 44px); overflow-y: auto; border: var(--hairline) solid var(--color-blue-soft); border-radius: var(--radius-8); background: var(--color-surface); box-shadow: var(--shadow-none); }
 .modal-card > header, .chat-drawer > header { min-height: 88px; display: flex; align-items: center; justify-content: space-between; gap: var(--space-16); padding: var(--space-16) var(--space-16); border-bottom: var(--hairline) solid var(--line); }
 .modal-card > header h2, .chat-drawer > header h2 { margin: var(--space-0); font-size: var(--font-22); letter-spacing: -.035em; }
@@ -603,8 +603,8 @@ html[data-theme='dark'] .nav-list button.active em { background: var(--color-pri
 .modal-note span { margin-top: var(--space-4); color: var(--color-blue-deep); font-size: var(--font-13); line-height: 1.5; }
 .modal-card footer { display: flex; justify-content: flex-end; gap: var(--space-8); margin: var(--space-16) calc(var(--space-16) * -1) calc(var(--space-16) * -1); padding: var(--space-12) var(--space-16); border-top: var(--hairline) solid var(--line); }
 
-.drawer-scrim { position: fixed; z-index: 94; inset: 0; border: none; background: var(--color-overlay); backdrop-filter: blur(2px); }
-.chat-drawer { position: fixed; z-index: 95; top: 0; right: 0; bottom: 0; width: min(470px,100vw); display: flex; flex-direction: column; background: var(--color-blue-soft); box-shadow: var(--shadow-none); animation: drawer-in .22s ease; }
+.drawer-scrim { position: fixed; z-index: var(--layer-dialog); inset: 0; border: none; background: var(--color-overlay); backdrop-filter: blur(2px); }
+.chat-drawer { position: fixed; z-index: calc(var(--layer-dialog) + 1); top: 0; right: 0; bottom: 0; width: min(470px,100vw); display: flex; flex-direction: column; background: var(--color-blue-soft); box-shadow: var(--shadow-none); animation: drawer-in .22s ease; }
 @keyframes drawer-in { from { transform: translateX(100%); } to { transform: none; } }
 .chat-drawer > header { flex: 0 0 auto; background: var(--color-surface); }
 .chat-drawer .ai-chat { flex: 1; height: auto; margin: var(--space-12); }
@@ -613,13 +613,13 @@ html[data-theme='dark'] .nav-list button.active em { background: var(--color-pri
 .chat-drawer .chat-bubble { max-width: 88%; }
 
 .toast {
-  position: fixed; z-index: 160; right: 25px; bottom: 25px; max-width: min(430px,calc(100vw - 30px));
+  position: fixed; z-index: var(--layer-toast); right: 25px; bottom: 25px; max-width: min(430px,calc(100vw - 30px));
   min-height: 56px; display: flex; align-items: center; gap: var(--space-8); padding: var(--space-12) var(--space-12) var(--space-12) var(--space-16);
   border: var(--hairline) solid var(--color-sidebar-line); border-radius: var(--radius-8); color: var(--color-white); background: var(--color-sidebar); box-shadow: var(--shadow-none);
 }
 .toast > svg { flex: 0 0 auto; color: var(--color-white); }
 .toast > span { flex: 1; font-size: var(--font-13); font-weight: var(--weight-medium); }
-.toast button { width: 30px; height: 30px; display: grid; place-items: center; border: none; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-sidebar-raised-strong); cursor: pointer; }
+.toast button { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border: none; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-sidebar-raised-strong); cursor: pointer; }
 .nav-scrim { display: none; }
 
 @media (max-width: 1320px) {
@@ -1134,7 +1134,7 @@ html[data-theme='dark'] {
 .auth-help { margin-top: var(--space-16); line-height: 1.6; }
 
 /* Personal settings */
-.settings-drawer { position: fixed; z-index: 155; inset: 0 0 0 auto; width: min(440px,100vw); display: flex; flex-direction: column; overflow-y: auto; color: var(--ink); background: var(--surface); box-shadow: var(--shadow-none); animation: drawer-in .2s ease; }
+.settings-drawer { position: fixed; z-index: calc(var(--layer-dialog) + 2); inset: 0 0 0 auto; width: min(440px,100vw); display: flex; flex-direction: column; overflow-y: auto; color: var(--ink); background: var(--surface); box-shadow: var(--shadow-none); animation: drawer-in .2s ease; }
 .settings-drawer > header { min-height: 86px; display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding: var(--space-16) var(--space-16); border-bottom: var(--hairline) solid var(--line); }
 .settings-drawer h2 { margin: var(--space-0); font-size: var(--font-22); }
 .settings-profile { display: flex; align-items: center; gap: var(--space-12); margin: var(--space-16) var(--space-16) var(--space-4); padding: var(--space-16); border-radius: var(--radius-8); background: var(--forest-soft); }
@@ -2472,7 +2472,7 @@ html[data-theme='dark'] .workflow-detail-stepper :is(i,li > span) { background: 
 .workflow-card-action { width: 100%; min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-4); margin-top: var(--space-12); border: none; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-primary); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
 .workflow-card-action:hover { background: color-mix(in srgb, var(--forest-dark) 82%, var(--color-sidebar-base)); }
 
-.workflow-drawer-backdrop { position: fixed; z-index: 140; inset: 0; display: flex; justify-content: flex-end; background: var(--color-overlay); backdrop-filter: blur(3px); }
+.workflow-drawer-backdrop { position: fixed; z-index: calc(var(--layer-dialog) + 30); inset: 0; display: flex; justify-content: flex-end; background: var(--color-overlay); backdrop-filter: blur(3px); }
 .workflow-drawer { width: min(520px,100%); height: 100%; display: flex; flex-direction: column; overflow-y: auto; border-left: var(--hairline) solid var(--line); background: var(--surface); }
 .workflow-drawer-head { position: sticky; z-index: 2; top: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-12); padding: var(--card-inset); border-bottom: var(--hairline) solid var(--line); background: var(--surface); }
 .workflow-drawer-head h2 { margin: var(--space-8) var(--space-0) var(--space-0); font-size: var(--font-22); line-height: 1.3; letter-spacing: -.02em; }
@@ -2702,7 +2702,7 @@ html[data-easy-mode='on'] .global-search { display: none; }
 
 /* 테넌트 관리자 재동의 알림 */
 .consent-reminder { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12); margin: var(--space-0) var(--space-0) var(--space-16); padding: var(--space-12) var(--space-16); border: var(--hairline) solid var(--color-warning-soft); border-radius: var(--radius-8); color: var(--color-warning-ink); background: var(--color-warning-soft); font-size: var(--font-13); }
-.consent-reminder span { flex: 1 1 240px; color: var(--text); }
+.consent-reminder span { flex: 1 1 240px; color: var(--ink); }
 .consent-reminder button { min-height: 36px; padding: var(--space-0) var(--space-12); border: none; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-warning); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
 .home-header-chips button.is-attention { border-color: var(--color-warning); color: var(--color-warning-ink); }
 
@@ -2828,7 +2828,7 @@ html[data-easy-mode='on'] :is(.modal-card header h2,.collab-dialog-header h2) { 
 html[data-easy-mode='on'] .home-header-chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
 html[data-easy-mode='on'] .home-header-chips button { min-height: 56px; justify-content: space-between; font-size: var(--font-15); }
 /* 포커스 표시 강화 (호버 의존 제거) */
-html[data-easy-mode='on'] .app-shell :is(button,a,[tabindex]):focus-visible { outline: var(--hairline) solid var(--color-primary); outline-offset: var(--space-4); }
+html[data-easy-mode='on'] .app-shell :is(button,a,[tabindex]):focus-visible { outline: var(--focus-width) solid var(--color-primary); outline-offset: var(--space-4); }
 @media (max-width: 960px) {
   html[data-easy-mode='on'] :is(.metric-grid,.summary-grid,.dashboard-metrics,.business-summary-grid,.people-summary,.factory-summary,.approval-stats,.home-header-chips) { grid-template-columns: minmax(0, 1fr); }
 }
@@ -2965,8 +2965,8 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
 /* ------------------------------------------------------------------ */
 
 .mobile-tabbar {
-  /* 메신저 오버레이(z-index 200) 위에 남아야 한다. 채팅 중에도 다른 탭으로 갈 수 있어야 하기 때문이다. */
-  position: fixed; z-index: 260; right: 0; bottom: 0; left: 0;
+  /* 메신저 위, 대화상자·서랍 아래(tokens.css의 겹침 순서). 채팅 중에도 다른 탭으로 갈 수 있어야 하기 때문이다. */
+  position: fixed; z-index: var(--layer-tabbar); right: 0; bottom: 0; left: 0;
   display: grid; grid-template-columns: repeat(4, 1fr);
   border-top: var(--hairline) solid var(--line); background: var(--color-surface);
 }
@@ -3013,7 +3013,10 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
 .mobile-done summary { padding: var(--space-12) var(--space-0); color: var(--muted); font-size: var(--font-15); cursor: pointer; }
 
 .mobile-sheet {
-  position: fixed; z-index: 130; right: 0; bottom: 0; left: 0;
+  /* 메신저 위, 아래 탭 막대 아래. 휴대폰은 채팅 탭에서 시작하므로, 메신저 밑에 깔리면 [더보기]가 아무 일도 안 하는 것처럼 보였다. */
+  position: fixed; z-index: calc(var(--layer-messenger) + 20); right: 0; bottom: 0; left: 0;
+  /* 화면이 늘어도(글자 크게·가로 화면) 시트 안에서만 스크롤한다. */
+  max-height: calc(100dvh - var(--space-24)); overflow-y: auto; overscroll-behavior: contain;
   padding: var(--space-16);
   border-top: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--color-surface);
 }
@@ -3033,6 +3036,13 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
 .mobile-sheet-copy { flex: 1; min-width: 0; }
 .mobile-sheet-copy strong { display: block; font-size: var(--font-15); font-weight: var(--weight-medium); }
 .mobile-sheet-copy small { color: var(--muted); font-size: var(--font-13); }
+.mobile-sheet-list button[aria-current='page'] .mobile-sheet-copy strong { color: var(--forest-dark); }
+.mobile-sheet-badge {
+  min-width: 24px; padding: var(--space-0) var(--space-8); border-radius: var(--radius-8);
+  background: var(--color-danger-ink); color: var(--color-white); font-size: var(--font-13); font-style: normal; font-weight: var(--weight-medium); line-height: 24px; text-align: center;
+}
+/* 시트 바깥 — 누르면 닫힌다. 아래 탭 막대는 덮지 않는다. */
+.mobile-sheet-scrim { position: fixed; z-index: calc(var(--layer-messenger) + 19); inset: 0 0 calc(56px + env(safe-area-inset-bottom)); border: 0; background: var(--color-overlay); }
 .mobile-sheet-note { margin: var(--space-12) var(--space-0) var(--space-0); color: var(--muted); font-size: var(--font-13); }
 .mobile-chat-placeholder { min-height: 1px; }
 
@@ -3046,6 +3056,10 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
   .app-shell:has(.mobile-tabbar) .messenger-drawer { bottom: calc(56px + env(safe-area-inset-bottom)); height: auto; }
   /* 어둡게 덮는 막도 탭 막대는 덮지 않는다. */
   .app-shell:has(.mobile-tabbar) .collab-overlay-backdrop { bottom: calc(56px + env(safe-area-inset-bottom)); height: auto; }
+  /* 알림 한 줄은 탭 막대 위에 뜬다 — 전에는 탭 막대 뒤에 깔려 "저장했습니다"도, 실행 취소 버튼도 보이지 않았다. */
+  .app-shell:has(.mobile-tabbar) .toast { bottom: calc(56px + env(safe-area-inset-bottom) + var(--space-12)); }
+  /* 닫기 버튼도 손가락 과녁(44px)에 맞춘다 — 실패 알림은 이 버튼으로만 닫힌다. */
+  .toast > button { width: 44px; height: 44px; }
   /* 손가락 과녁 최소 크기. 공용 버튼의 크기는 Button.css에서 함께 올린다. */
   .mobile-line-list button.mobile-line-open { min-height: 44px; }
   /* 390px에서 가로로 밀리지 않게 한다. 넘치는 표는 표 안에서만 스크롤한다. */

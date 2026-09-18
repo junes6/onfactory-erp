@@ -50,7 +50,8 @@ test('검토 자료 화면: 네 버튼(찬성·수정해서·반대·질문)과 
 
 test('휴대폰: 메뉴·알림으로 다른 화면에 가면 그 화면이 보인다(더보기 탭 아래)', async () => {
   const app = await read('src/App.tsx')
-  assert.match(app, /if \(phoneShell\) \{ setMobileTab\(nextPage === 'tasks' \? 'tasks' : nextPage === 'ai' \? 'today' : 'more'\); setMessengerOpen\(false\) \}/)
+  // 더보기 시트도 함께 닫는다 — 시트가 새 화면 위에 남지 않게.
+  assert.match(app, /if \(phoneShell\) \{ setMobileTab\(nextPage === 'tasks' \? 'tasks' : nextPage === 'ai' \? 'today' : 'more'\); setMessengerOpen\(false\); setMoreSheetOpen\(false\) \}/)
 })
 
 test('검토 자료 머리글: 자주 쓰는 셋(검토 요청·회의 준비·결정 요약)만 밖에, 나머지는 [더 보기]에 접는다', async () => {

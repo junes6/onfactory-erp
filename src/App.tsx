@@ -9,8 +9,8 @@ import {
 } from 'lucide-react'
 import AIChat from './components/AIChat'
 import GlobalSearch from './components/GlobalSearch'
-import Toast, { type ToastMessage } from './components/ui/Toast'
-import { MobileMoreSheet, MobileTabBar, MobileTaskList, MobileToday, TODAY_TASK_LIMIT, type MobileTab } from './components/MobileShell'
+import Toast, { toastFromText, type ToastMessage } from './components/ui/Toast'
+import { MobileMoreSheet, MobileTabBar, MobileTaskList, MobileToday, mobileMoreItems, TODAY_TASK_LIMIT, type MobileTab } from './components/MobileShell'
 import { ChatBubbleIcon, NotificationBellIcon, BrandMark } from './components/AppIcons'
 import { GuestAcceptPage, LoginPage, PasswordChangePage, ProfileEditor, SettingsDrawer, type AccentChoice, type EasyModeChoice, type FontChoice, type ThemeChoice } from './components/AccessExperience'
 import { ProjectSpacesPage } from './components/ProjectSpaces'
@@ -2273,7 +2273,7 @@ export default function App() {
    * 빈 문자열은 예전부터 "닫기"라는 뜻으로 쓰여 왔으므로 그대로 둔다.
    */
   const setToast = (value: string | ToastMessage) => {
-    if (typeof value === 'string') { setToastMessage(value ? { text: value } : null); return }
+    if (typeof value === 'string') { setToastMessage(toastFromText(value)); return }
     setToastMessage(value)
   }
   const toast = toastMessage?.text ?? ''
@@ -2655,7 +2655,8 @@ export default function App() {
     setPage(nextPage)
     // 휴대폰 화면은 탭(오늘·업무·채팅·더보기) 아래에 화면을 그린다. 메뉴·알림·검색으로 다른 화면에 가면
     // 그 화면을 '더보기' 탭 아래에 연다 — 전에는 탭이 그대로라 고른 화면이 보이지 않았다(오늘 화면이 계속 떴다).
-    if (phoneShell) { setMobileTab(nextPage === 'tasks' ? 'tasks' : nextPage === 'ai' ? 'today' : 'more'); setMessengerOpen(false) }
+    // 더보기 시트도 닫는다 — 알림·검색으로 다른 화면에 가도 시트가 새 화면 위에 남아 있었다.
+    if (phoneShell) { setMobileTab(nextPage === 'tasks' ? 'tasks' : nextPage === 'ai' ? 'today' : 'more'); setMessengerOpen(false); setMoreSheetOpen(false) }
     setMobileNav(false)
     setQuery('')
     window.scrollTo({ top: 0, behavior: 'auto' })
@@ -3232,6 +3233,8 @@ export default function App() {
       {phoneShell && (
         <MobileMoreSheet
           open={moreSheetOpen}
+          items={mobileMoreItems(personalizedTenantNav)}
+          activeId={mobileTab === 'more' ? page : ''}
           userName={account?.name ?? ''}
           userRole={account?.jobRole ?? (account?.role === 'tenant-admin' ? '회사 관리자' : '일반 직원')}
           onClose={() => setMoreSheetOpen(false)}
