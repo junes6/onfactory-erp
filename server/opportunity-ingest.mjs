@@ -151,6 +151,97 @@ function normalizeDraftRef(value) {
   return { documentId, name, sections: Math.max(0, Math.min(50, Number(value.sections) || 0)), needsInput: Math.max(0, Math.min(50, Number(value.needsInput) || 0)) }
 }
 
+/**
+ * 입찰 참가 조건(나라장터 상세 조회). 조회에 실패한 항목은 fetched=false로 온다 —
+ * 그 값을 "제한 없음"으로 바꿔 저장하면 사람이 제한 공고를 열린 공고로 읽는다. 그래서 fetched를 그대로 지킨다.
+ */
+function normalizeConditions(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const named = (item) => {
+    const name = plainText(item?.name, 80)
+    return name ? { name, code: plainText(item?.code, 12) } : null
+  }
+  const base = value.baseAmount && typeof value.baseAmount === 'object' ? value.baseAmount : {}
+  const amount = Number(base.amount)
+  const licenses = value.licenses && typeof value.licenses === 'object' ? value.licenses : {}
+  const regions = value.regions && typeof value.regions === 'object' ? value.regions : {}
+  const groups = (Array.isArray(licenses.groups) ? licenses.groups : []).slice(0, 10).map((group) => ({
+    group: plainText(group?.group, 8) || '1',
+    items: (Array.isArray(group?.items) ? group.items : []).map(named).filter(Boolean).slice(0, 10),
+  })).filter((group) => group.items.length)
+  const conditions = {
+    source: plainText(value.source, 20) || 'external',
+    baseAmount: {
+      fetched: base.fetched === true,
+      amount: Number.isFinite(amount) && amount > 0 ? Math.min(Math.round(amount), 1_000_000_000_000) : 0,
+      openedAt: isoDate(base.openedAt),
+      rangeRate: plainText(base.rangeRate, 30),
+      note: plainText(base.note, 120),
+    },
+    licenses: {
+      fetched: licenses.fetched === true,
+      restricted: licenses.restricted === true,
+      groups,
+      permittedIndustries: (Array.isArray(licenses.permittedIndustries) ? licenses.permittedIndustries : []).map(named).filter(Boolean).slice(0, 40),
+    },
+    regions: {
+      fetched: regions.fetched === true,
+      allowed: (Array.isArray(regions.allowed) ? regions.allowed : []).map((item) => plainText(item, 60)).filter(Boolean).slice(0, 20),
+    },
+    errors: (Array.isArray(value.errors) ? value.errors : []).map((item) => plainText(item, 160)).filter(Boolean).slice(0, 5),
+  }
+  const anything = conditions.baseAmount.fetched || conditions.licenses.fetched || conditions.regions.fetched || conditions.errors.length
+  return anything ? conditions : null
+}
+
+/** 첨부 본문 읽기 결과. "왜 판단 불가인가"가 첨부를 못 읽어서인지 사람이 바로 알아야 한다. */
+function normalizeExtraction(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return {
+    attempted: value.attempted === true,
+    succeeded: value.succeeded === true,
+    failedReason: plainText(value.failedReason, 200),
+    files: (Array.isArray(value.files) ? value.files : []).slice(0, 10).map((file) => ({
+      name: plainText(file?.name, 120),
+      format: plainText(file?.format, 12),
+      ok: file?.ok === true,
+      chars: Math.max(0, Math.min(10_000_000, Number(file?.chars) || 0)),
+      reason: plainText(file?.reason, 160),
+    })).filter((file) => file.name),
+    chars: Math.max(0, Math.min(10_000_000, Number(value.chars) || 0)),
+    truncated: value.truncated === true,
+  }
+}
+
+const describeLicense = (item) => (item.code ? `${item.name}[${item.code}]` : item.name)
+
+/**
+ * 조건을 사람이 읽는 줄로. 승인 큐 카드·업무 설명·기회 목록이 같은 문장을 쓴다(말이 두 벌이 되지 않게).
+ * 조회에 실패한 항목은 "확인 필요"라고 말한다 — 모르는 것을 "없음"이라 쓰지 않는다.
+ */
+export function conditionSummaryLines(conditions) {
+  if (!conditions) return []
+  const lines = []
+  const base = conditions.baseAmount
+  if (base?.fetched) {
+    lines.push(base.amount
+      ? `기초금액 ${base.amount.toLocaleString('ko-KR')}원${base.openedAt ? ` (${base.openedAt} 공개)` : ''}${base.rangeRate ? ` · 예비가격 ${base.rangeRate}` : ''}`
+      : `기초금액 없음${base.note ? ` — ${base.note}` : ''}`)
+  } else if (conditions.source === 'g2b') lines.push('기초금액 확인 필요(조회 실패)')
+
+  const licenses = conditions.licenses
+  if (licenses?.fetched) {
+    if (licenses.groups.length) lines.push(`면허제한 ${licenses.groups.map((group) => group.items.map(describeLicense).join(' + ')).join(' 또는 ')}`)
+    else lines.push(licenses.restricted ? '업종제한 있음 — 제한 업종은 공고문 확인 필요' : '면허·업종 제한 없음')
+    if (licenses.permittedIndustries.length) lines.push(`허용업종 ${licenses.permittedIndustries.slice(0, 8).map(describeLicense).join(', ')}${licenses.permittedIndustries.length > 8 ? ` 외 ${licenses.permittedIndustries.length - 8}개` : ''}`)
+  } else if (conditions.source === 'g2b') lines.push('면허·업종 제한 확인 필요(조회 실패)')
+
+  const regions = conditions.regions
+  if (regions?.fetched) lines.push(regions.allowed.length ? `참가가능지역 ${regions.allowed.join(', ')}` : '참가가능지역 제한 없음')
+  else if (conditions.source === 'g2b') lines.push('참가가능지역 확인 필요(조회 실패)')
+  return lines
+}
+
 /** 워커가 보낸 한 건을 저장 가능한 모양으로 검증한다. 필수는 공고번호·제목·대상 테넌트다. */
 export function normalizeIngestItem(value) {
   const noticeNo = plainText(value?.noticeNo ?? value?.notice_no, 80)
@@ -179,6 +270,8 @@ export function normalizeIngestItem(value) {
     eligibility: normalizeEligibility(value?.eligibility),
     documents: normalizeDocumentChecklist(value?.documents),
     draft: normalizeDraftRef(value?.draft),
+    conditions: normalizeConditions(value?.conditions),
+    extraction: normalizeExtraction(value?.extraction),
   }
 }
 
@@ -256,6 +349,8 @@ export function opportunityRecord(item, settings, receivedAt) {
     eligibility: item.eligibility ?? null,
     documents: item.documents ?? null,
     draft: item.draft ?? null,
+    conditions: item.conditions ?? null,
+    extraction: item.extraction ?? null,
     status: verdict.status,
     statusReason: verdict.reason,
     receivedAt,
@@ -311,6 +406,7 @@ export function opportunityProposal(record, { now, proposalId }) {
     record.deadline && `마감 ${record.deadline}`,
     record.amount > 0 && `금액 ${record.amount.toLocaleString('ko-KR')}원`,
   ].filter(Boolean).join(' · ')
+  const conditionLines = conditionSummaryLines(record.conditions)
   return {
     id: proposalId,
     kind: 'opportunity',
@@ -318,11 +414,12 @@ export function opportunityProposal(record, { now, proposalId }) {
     confidence: record.score,
     sourceKey: `opportunity:${record.key}`,
     summary: `${record.title} 검토`,
-    evidence: [detail, eligibilityLine(record), documentLine(record), record.rationale, record.link].filter(Boolean).join('\n'),
+    evidence: [detail, conditionLines.join(' · '), eligibilityLine(record), documentLine(record), record.rationale, record.link].filter(Boolean).join('\n'),
     payload: {
       title: `${record.title} 검토`,
       description: [
         detail,
+        ...conditionLines,
         eligibilityLine(record),
         documentLine(record),
         record.rationale,
@@ -340,6 +437,7 @@ export function opportunityProposal(record, { now, proposalId }) {
       eligibility: record.eligibility ?? null,
       documents: record.documents ?? null,
       draft: record.draft ?? null,
+      conditions: record.conditions ?? null,
     },
     createdAt: now,
     createdBy: 'opportunity-ingest',

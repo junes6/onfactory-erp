@@ -27,6 +27,8 @@ export type Opportunity = {
   status: 'queued' | 'below-threshold'
   /** 왜 승인 큐에 오르지 못했는지. 사람이 읽을 수 있는 문장이다. */
   statusReason?: string
+  /** 입찰 참가 조건(기초금액·면허제한·참가가능지역). 문장은 서버가 만든다 — 승인 큐 카드와 같은 말이다. */
+  conditionLines?: string[]
   receivedAt: string
 }
 
@@ -105,6 +107,9 @@ export function OpportunityWatch({ workspaceScope, onToast }: { workspaceScope?:
         <div>
           <strong>{item.title}</strong>
           <small>{[item.source, item.agency, item.deadline ? `마감 ${formatDateLabel(item.deadline, false, false)}` : '', money(item.amount)].filter(Boolean).join(' · ')}</small>
+          {item.conditionLines && item.conditionLines.length > 0 && <ul className="opportunity-conditions" aria-label="입찰 참가 조건">
+            {item.conditionLines.map((line) => <li key={line}>{line}</li>)}
+          </ul>}
           {item.rationale && <p>{item.rationale}</p>}
           {/* 왜 큐에 안 올랐는지를 목록에서 바로 읽는다. 설정을 고칠지 워커를 고칠지 판단할 근거다. */}
           {item.statusReason && <p className="opportunity-below-reason">{item.statusReason}</p>}

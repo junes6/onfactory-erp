@@ -125,6 +125,7 @@ import {
   resolveLenses,
 } from './document-lenses.mjs'
 import {
+  conditionSummaryLines,
   ingestResultLine,
   ingestTokenMatches,
   normalizeIngestBatch,
@@ -4359,7 +4360,8 @@ export function createApp(options = {}) {
     if (!request.auth.tenantId) { response.status(403).json({ error: { code: 'TENANT_REQUIRED', message: '고객사 워크스페이스에서만 사용할 수 있습니다.' } }); return }
     const opportunities = opportunitiesOf(request.auth.tenantId)
     response.json({
-      opportunities,
+      // 조건 문장은 서버가 한 번만 만든다 — 승인 큐 카드와 이 목록이 같은 말을 하게.
+      opportunities: opportunities.map((item) => (item?.conditions ? { ...item, conditionLines: conditionSummaryLines(item.conditions) } : item)),
       settings: opportunitySettingsOf(request.auth.tenantId),
       queuedCount: opportunities.filter((item) => item?.status === 'queued').length,
       ingestConfigured: Boolean(opportunityIngestToken),

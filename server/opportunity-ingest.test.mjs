@@ -241,3 +241,60 @@ test('ingest is disabled until a token is configured', async () => {
     })
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
+
+test('나라장터 참가 조건(기초금액·면허제한·참가가능지역)이 저장되고 승인 큐 카드와 목록에 같은 문장으로 실린다', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'inthefield-opportunity-conditions-'))
+  try {
+    await withServer(createApp({ apiKey: '', workspaceStoreFile: path.join(directory, 'state.json'), env: { OPPORTUNITY_INGEST_TOKEN: TOKEN } }), async (origin) => {
+      const admin = await login(origin, 'admin@sunsea.co.kr')
+      const headers = { cookie: admin.cookie, 'x-workspace-identity': admin.identity, 'content-type': 'application/json' }
+      const tenantId = admin.account.tenantId
+      const conditions = {
+        source: 'g2b',
+        baseAmount: { fetched: true, amount: 0, openedAt: '', rangeRate: '', note: '비예가(협상에 의한 계약) — 기초금액이 없는 공고입니다' },
+        licenses: { fetched: true, restricted: true, groups: [{ group: '1', items: [{ name: '소프트웨어사업자(컴퓨터관련서비스사업)', code: '1468' }] }], permittedIndustries: [] },
+        regions: { fetched: true, allowed: ['전북특별자치도'] },
+        errors: [],
+      }
+      const failedLookup = { source: 'g2b', baseAmount: { fetched: true, amount: 215_600_000, openedAt: '2026-09-14', rangeRate: '-2% ~ +2%' }, licenses: { fetched: false }, regions: { fetched: false }, errors: ['면허제한 조회 실패: 상류 오류 08'] }
+      const response = await ingest(origin, {
+        opportunities: [
+          { source: '나라장터', noticeNo: 'R26BK01726578-000', title: '홈페이지 리뉴얼 구축 용역', tenantId, score: 0.9, conditions, extraction: { attempted: true, succeeded: true, files: [{ name: '공고문.hwp', format: 'hwp', ok: true, chars: 5200 }], chars: 5200 } },
+          { source: '나라장터', noticeNo: 'R26BK00000001-000', title: '폐기물 처리 용역', tenantId, score: 0.1, conditions: failedLookup },
+        ],
+      })
+      assert.equal(response.status, 201)
+
+      const listed = await (await fetch(`${origin}/api/opportunities`, { headers })).json()
+      const homepage = listed.opportunities.find((item) => item.noticeNo === 'R26BK01726578-000')
+      assert.equal(homepage.conditions.licenses.groups[0].items[0].code, '1468')
+      assert.equal(homepage.extraction.files[0].name, '공고문.hwp', '워커가 보낸 첨부 읽기 결과를 버리지 않는다')
+      assert.deepEqual(homepage.conditionLines, [
+        '기초금액 없음 — 비예가(협상에 의한 계약) — 기초금액이 없는 공고입니다',
+        '면허제한 소프트웨어사업자(컴퓨터관련서비스사업)[1468]',
+        '참가가능지역 전북특별자치도',
+      ])
+      // 조회에 실패한 항목은 "제한 없음"이 아니라 "확인 필요"로 말한다.
+      const failed = listed.opportunities.find((item) => item.noticeNo === 'R26BK00000001-000')
+      assert.deepEqual(failed.conditionLines, [
+        '기초금액 215,600,000원 (2026-09-14 공개) · 예비가격 -2% ~ +2%',
+        '면허·업종 제한 확인 필요(조회 실패)',
+        '참가가능지역 확인 필요(조회 실패)',
+      ])
+
+      const queue = await (await fetch(`${origin}/api/proposals`, { headers })).json()
+      const proposal = queue.proposals.find((item) => item.kind === 'opportunity')
+      assert.match(proposal.evidence, /면허제한 소프트웨어사업자\(컴퓨터관련서비스사업\)\[1468\] · 참가가능지역 전북특별자치도/)
+      assert.match(proposal.payload.description, /참가가능지역 전북특별자치도/)
+      assert.equal(proposal.payload.conditions.regions.allowed[0], '전북특별자치도')
+    })
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('조건 정규화는 모양이 어긋난 값을 걸러 내고, 아무것도 조회하지 않았으면 조건 자체를 두지 않는다', () => {
+  const [item] = normalizeIngestBatch({ opportunities: [{ noticeNo: 'N1', title: '제목', tenantId: 'T', conditions: { source: 'g2b', licenses: { fetched: 'yes', groups: [{ items: [{ name: '<b>정보통신공사업</b>', code: '0036' }, { code: '9' }] }] }, regions: 'x' } }] })
+  assert.equal(item.conditions, null, 'fetched가 true가 아닌 값은 조회한 것으로 치지 않는다')
+  const [kept] = normalizeIngestBatch({ opportunities: [{ noticeNo: 'N2', title: '제목', tenantId: 'T', conditions: { source: 'g2b', licenses: { fetched: true, groups: [{ items: [{ name: '<b>정보통신공사업</b>', code: '0036' }, { code: '9' }] }] } } }] })
+  assert.deepEqual(kept.conditions.licenses.groups, [{ group: '1', items: [{ name: '정보통신공사업', code: '0036' }] }])
+  assert.equal(kept.conditions.regions.fetched, false)
+})

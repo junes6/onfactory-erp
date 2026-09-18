@@ -24,3 +24,7 @@
 
 .opportunity-below-reason { margin: var(--space-4) var(--space-0) var(--space-0); color: var(--color-warning-ink); font-size: var(--font-11); line-height: 1.5; }
 .opportunity-below-scale { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); text-align: right; }
+
+/* 입찰 참가 조건 — 기초금액·면허제한·참가가능지역. 서버가 만든 문장을 줄마다 그대로 보인다. */
+.opportunity-below .opportunity-conditions { display: grid; gap: var(--space-0); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.opportunity-below .opportunity-conditions li { display: block; padding: var(--space-0); border-top: none; color: var(--ink); font-size: var(--font-11); line-height: 1.5; }
