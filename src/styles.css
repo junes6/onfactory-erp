@@ -2481,7 +2481,8 @@ html[data-theme='dark'] .workflow-detail-stepper :is(i,li > span) { background: 
 .workflow-card-action { width: 100%; min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-4); margin-top: var(--space-12); border: none; border-radius: var(--radius-8); color: var(--color-white); background: var(--color-primary); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }
 .workflow-card-action:hover { background: color-mix(in srgb, var(--forest-dark) 82%, var(--color-sidebar-base)); }
 
-.workflow-drawer-backdrop { position: fixed; z-index: calc(var(--layer-dialog) + 30); inset: 0; display: flex; justify-content: flex-end; background: var(--color-overlay); backdrop-filter: blur(3px); }
+/* 드로어는 대화상자(.modal-backdrop +20)보다 아래다 — 드로어에서 연 완료 보고·검토·고치기·취소 창이 드로어 밑에 깔렸다. */
+.workflow-drawer-backdrop { position: fixed; z-index: calc(var(--layer-dialog) + 15); inset: 0; display: flex; justify-content: flex-end; background: var(--color-overlay); backdrop-filter: blur(3px); }
 .workflow-drawer { width: min(520px,100%); height: 100%; display: flex; flex-direction: column; overflow-y: auto; border-left: var(--hairline) solid var(--line); background: var(--surface); }
 .workflow-drawer-head { position: sticky; z-index: 2; top: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-12); padding: var(--card-inset); border-bottom: var(--hairline) solid var(--line); background: var(--surface); }
 .workflow-drawer-head h2 { margin: var(--space-8) var(--space-0) var(--space-0); font-size: var(--font-22); line-height: 1.3; letter-spacing: -.02em; }
@@ -2508,6 +2509,23 @@ html[data-theme='dark'] .workflow-detail-stepper :is(i,li > span) { background: 
 .workflow-drawer-timeline { display: flex; flex-direction: column; gap: var(--space-8); margin-top: var(--space-8); }
 .workflow-drawer-timeline .workflow-record { margin: var(--space-0); }
 .workflow-drawer-timeline-empty { margin: var(--space-8) var(--space-0) var(--space-0); color: var(--subtle); font-size: var(--font-13); }
+/* P1-5: 드로어 머리의 [고치기]·[업무 취소], 기록 줄(회색 — 보고·검토와 구별), 업무 댓글 */
+.workflow-drawer-manage { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-8); }
+.workflow-record.activity { color: var(--color-gray-600); background: var(--canvas); }
+.workflow-record.activity strong { font-weight: var(--weight-regular); color: var(--ink); line-height: 1.5; }
+.workflow-record.activity p { margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); }
+.workflow-comment-list { display: flex; flex-direction: column; gap: var(--space-8); margin: var(--space-8) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
+.workflow-comment-list > li { padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.workflow-comment-list > li.is-deleted p { color: var(--subtle); font-style: italic; }
+.workflow-comment-head { display: flex; align-items: center; gap: var(--space-8); }
+.workflow-comment-head strong { font-size: var(--font-13); }
+.workflow-comment-head time { color: var(--muted); font-size: var(--font-11); }
+.workflow-comment-head .ui-icon-button { margin-left: auto; }
+.workflow-comment-list p { margin: var(--space-4) var(--space-0) var(--space-0); font-size: var(--font-15); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.workflow-comment-compose { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-8); margin-top: var(--space-8); }
+.workflow-comment-compose textarea { width: 100%; min-height: 64px; padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); font: inherit; font-size: var(--font-15); resize: vertical; }
+.modal-note-plain { margin: var(--space-0) var(--space-0) var(--space-12); color: var(--color-gray-600); font-size: var(--font-13); line-height: 1.6; }
+.field-hint { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-11); }
 .workflow-drawer-meta { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: var(--space-8); margin: var(--space-0); padding-top: var(--space-12); border-top: var(--hairline) solid var(--line); }
 .workflow-drawer-meta dt { color: var(--subtle); font-size: var(--font-11); font-weight: var(--weight-medium); }
 .workflow-drawer-meta dd { display: flex; align-items: center; gap: var(--space-4); margin: var(--space-4) var(--space-0) var(--space-0); font-size: var(--font-13); }

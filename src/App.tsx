@@ -5,7 +5,7 @@ import {
   Database, Factory, FileClock, FileText, Headphones, Home, Layers3, ListChecks, LockKeyhole, Menu,
   NotebookPen, Package, Paperclip, PauseCircle, PlayCircle, Plus, Repeat2, Search, Settings2, ShieldCheck, ShoppingCart,
   Sparkles, Store, Trash2, Upload, Users, Warehouse, X, GripVertical, EyeOff, RotateCcw,
-  Briefcase, FileStack, FileSignature, FolderKanban, Landmark, Award, ExternalLink,
+  Briefcase, FileStack, FileSignature, FolderKanban, Landmark, Award, ExternalLink, History as HistoryIcon,
 } from 'lucide-react'
 import AIChat from './components/AIChat'
 import GlobalSearch from './components/GlobalSearch'
@@ -65,6 +65,7 @@ import { WorkspaceNavigationEditButton, WorkspaceNavigationEditor, usePersonalNa
 import { clearWorkspaceCaches, useWorkspaceState } from './hooks/useWorkspaceState'
 import { deleteDocumentAttachments, uploadDocumentAttachments } from './utils/documentAttachments'
 import { CompletionModal, useDialogFocus } from './components/CompletionModal'
+import { activityText, TaskCancelDialog, TaskComments, TaskEditDialog, TaskManageActions } from './components/WorkTaskDialogs'
 import { GuestWorkspace } from './components/GuestWorkspace'
 import { formatDateLabel, formatDateTime, formatMonthLabel, formatWorkDue, formatWorkRuleRun, seoulDateInputValue, seoulDateTimeInputValue, seoulLocalToUtcIso, seoulTimeOf, toIsoUtc } from './utils/dateTime'
 import { workStatusLabel, workStatusTone } from './utils/workStatus'
@@ -822,7 +823,7 @@ function WorkRuleModal({ assignees, industryType, onClose, onSubmit }: { assigne
 /** 업무 화면이 지금 제공하는 보기. 목록·캘린더는 뒤 절에서 같은 스위처에 붙는다. */
 const WORK_VIEW_MODES = ['list', 'board', 'calendar', 'timeline'] as const
 
-function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, industryType, workspaceScope, focusId, closeSignal = 0, onDrawerChange, parentRefs = {}, onToast, onOpenOrigin, onCreate, onCreateSubtask, onMoveParent, onSchedule, onSaveFields, onTransition, onCreateRule, onToggleRule, onDeleteRule, onToggleChecklist }: {
+function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, industryType, workspaceScope, focusId, closeSignal = 0, onDrawerChange, parentRefs = {}, onToast, onOpenOrigin, onCreate, onCreateSubtask, onMoveParent, onSchedule, onSaveFields, onTransition, onCreateRule, onToggleRule, onDeleteRule, onToggleChecklist, onEditTask, onCancelTask, onCommentTask, onDeleteTaskComment }: {
   items: WorkItem[]; rules: WorkRule[]; currentUserId: string; canAssignTasks: boolean; assignees: WorkAssignee[]
   industryType?: string
   onOpenOrigin?: (page: string, focusId: string) => void
@@ -846,6 +847,11 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
   onToggleRule: (rule: WorkRule) => Promise<boolean>
   onDeleteRule: (rule: WorkRule) => Promise<boolean>
   onToggleChecklist: (taskId: string, itemId: string, done: boolean) => Promise<boolean>
+  /** P1-5: 고치기·취소·댓글. 없으면 해당 단추를 그리지 않는다. */
+  onEditTask?: (id: string, patch: Record<string, string>) => Promise<boolean>
+  onCancelTask?: (id: string, reason: string) => Promise<boolean>
+  onCommentTask?: (id: string, text: string) => Promise<boolean>
+  onDeleteTaskComment?: (id: string, commentId: string) => Promise<boolean>
 }) {
   // 무엇을 보는가(업무 vs 반복 규칙)와 어떻게 보는가(목록·보드·캘린더·타임라인)는 한 값에 담는다 — 두 상태로 나누면 어긋난 조합이 생긴다.
   // 마지막에 보던 방식은 개인 취향이라 이 브라우저에 남는다('이름 붙여 공유하는 조건 묶음'은 서버의 저장된 보기다).
@@ -1166,10 +1172,15 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
   const drawerCompletionHistory = drawerItem
     ? (drawerItem.completionHistory?.length ? drawerItem.completionHistory : drawerItem.completion ? [drawerItem.completion] : [])
     : []
+  // 진행 이력은 완료 보고·검토에 더해 착수·고치기·담당 변경·마감 변경·취소·되살림 기록까지 한 줄 시간순이다(P1-5).
   const drawerTimeline = [
     ...drawerCompletionHistory.map((completion) => ({ kind: 'completion' as const, at: completion.submittedAt, completion })),
     ...drawerReviewHistory.map((review) => ({ kind: 'review' as const, at: review.reviewedAt, review })),
+    ...(drawerItem?.activity ?? []).map((entry) => ({ kind: 'activity' as const, at: entry.at, entry })),
   ].sort((left, right) => left.at.localeCompare(right.at))
+  // [고치기]·[업무 취소]는 지시한 사람과 관리자에게, 끝나지 않은 업무에만.
+  const canManageDrawer = Boolean(drawerItem && drawerItem.status !== '결재완료' && (canAssignTasks || drawerItem.requesterId === currentUserId))
+  const [taskDialog, setTaskDialog] = useState<{ type: 'edit' | 'cancel'; item: WorkItem } | null>(null)
   /**
    * 규칙별 이행률(최근 12회). 서버가 낮은 순으로 정렬해 준다 —
    * 관리자가 목록을 훑으며 문제를 찾는 대신 맨 위만 보면 되게 한다.
@@ -1512,6 +1523,7 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
               {isSubtask(drawerItem) && <ParentChip title={parentTitleOf(drawerItem, items, parentRefs)} onOpen={items.some((candidate) => candidate.id === drawerItem.parentId) ? () => setDrawerId(drawerItem.parentId) : undefined} />}
             </div>
             <h2 id="workflow-drawer-title">{drawerItem.title}</h2>
+            {canManageDrawer && onEditTask && onCancelTask && <TaskManageActions onEdit={() => setTaskDialog({ type: 'edit', item: drawerItem })} onCancel={() => setTaskDialog({ type: 'cancel', item: drawerItem })} />}
           </div>
           <IconButton tone="ghost" type="button" aria-label="상세 닫기" onClick={() => setDrawerId(null)}><X size={21} /></IconButton>
         </header>
@@ -1591,8 +1603,10 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
           {drawerItem.attachments?.length ? <section className="workflow-drawer-block" aria-label="지시 첨부"><span>지시 첨부</span><div className="workflow-drawer-files">{drawerItem.attachments.map((file) => <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('첨부 파일을 다운로드하지 못했습니다.') }}><Paperclip size={13} /> {file.name} · {file.size}</button>)}</div></section> : null}
           <section className="workflow-drawer-block" aria-label="진행 이력">
             <span>진행 이력 <small>{drawerTimeline.length}</small></span>
-            {drawerTimeline.length === 0 ? <p className="workflow-drawer-timeline-empty">아직 제출되거나 검토된 이력이 없습니다.</p> : <div className="workflow-drawer-timeline">
-              {drawerTimeline.map((entry, index) => entry.kind === 'completion'
+            {drawerTimeline.length === 0 ? <p className="workflow-drawer-timeline-empty">아직 진행 이력이 없습니다.</p> : <div className="workflow-drawer-timeline">
+              {drawerTimeline.map((entry, index) => entry.kind === 'activity'
+                ? <div className="workflow-record activity" key={`activity-${entry.at}-${index}`}><HistoryIcon size={17} /><div><strong>{activityText(entry.entry)}</strong><p><time dateTime={entry.at}>{formatDateTime(entry.at)}</time></p></div></div>
+                : entry.kind === 'completion'
                 ? <div className="workflow-record" key={`completion-${entry.at}-${index}`}><ClipboardCheck size={17} /><div><strong>결과 제출 {entry.completion.submittedByRole === 'tenant-guest' && <StatusBadge className="status-pill" tone="warning">게스트</StatusBadge>} <time dateTime={entry.completion.submittedAt}>{formatDateTime(entry.completion.submittedAt)}</time></strong><p>{entry.completion.summary}</p><div className="workflow-record-files">{entry.completion.evidence.length === 0 && <span>첨부 증빙 없음</span>}{entry.completion.evidence.map((file) => file.id.startsWith('DOC-') ? <button className="workflow-evidence-link" type="button" key={file.id} onClick={async () => { if (!await downloadWorkEvidence(file, workspaceScope)) onToast('증빙 파일을 다운로드하지 못했습니다.') }}><Paperclip size={12} /> {file.name} · {file.size}</button> : <span key={file.id}><Paperclip size={12} /> {file.name} · {file.size}</span>)}</div></div></div>
                 : <div className={`workflow-record ${entry.review.decision === 'approved' ? 'approved' : 'changes'}`} key={`review-${entry.at}-${index}`}><ShieldCheck size={17} /><div><strong>{entry.review.decision === 'approved' ? '승인' : '보완 요청'} <time dateTime={entry.review.reviewedAt}>{formatDateTime(entry.review.reviewedAt)}</time></strong><p>{entry.review.requestedChanges || entry.review.comment}</p></div></div>)}
             </div>}
@@ -1600,11 +1614,20 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
           {/* 마감 하나가 아니라 기간을 읽는다 — 시작일이 없으면 없다고 말한다(추론한 날짜를 값처럼 적지 않는다).
               두 끝은 같은 표기(M.D)다: formatWorkDue는 가까운 날을 요일 이름으로 돌려주어 '토요일 → 9.19'가 된다.
               오늘 마감일 때만 시각이 붙는다('9.1 → 9.5 18:00') — 목록이 아는 그 시각이 드로어에서만 사라지지 않게. */}
+          {onCommentTask && onDeleteTaskComment && <TaskComments
+            comments={drawerItem.comments ?? []}
+            currentUserId={currentUserId}
+            canModerate={canAssignTasks}
+            onPost={(text) => onCommentTask(drawerItem.id, text)}
+            onDelete={(commentId) => onDeleteTaskComment(drawerItem.id, commentId)}
+          />}
           <dl className="workflow-drawer-meta"><div><dt>기간</dt><dd><Clock3 size={15} /> {workPeriodLabel(drawerItem)}</dd></div><div><dt>담당</dt><dd>{drawerItem.owner}</dd></div><div><dt>요청</dt><dd>{drawerItem.requestedBy}</dd></div></dl>
         </div>
       </aside>
     </div>}
 
+    {taskDialog?.type === 'edit' && onEditTask && <TaskEditDialog item={taskDialog.item} people={assignees} canChangeRequester={canAssignTasks} onClose={() => setTaskDialog(null)} onSave={(patch) => onEditTask(taskDialog.item.id, patch)} />}
+    {taskDialog?.type === 'cancel' && onCancelTask && <TaskCancelDialog item={taskDialog.item} childCount={items.filter((candidate) => candidate.parentId === taskDialog.item.id).length} onClose={() => setTaskDialog(null)} onConfirm={async (reason) => { const ok = await onCancelTask(taskDialog.item.id, reason); if (ok) setDrawerId(null); return ok }} />}
     {dialog?.type === 'completion' && <CompletionModal item={dialog.item} workspaceScope={workspaceScope} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(summary, evidence) => onTransition(dialog.item.id, 'submit', { completion: { summary, evidence } })} />}
     {dialog?.type === 'review' && <WorkReviewModal item={dialog.item} industryType={industryType} workspaceScope={workspaceScope} initialMode={dialog.decision} onToast={onToast} onClose={() => setDialog(null)} onSubmit={(decision, comment, requestedChanges) => onTransition(dialog.item.id, decision, { review: { comment, requestedChanges } })} />}
     {/* 반복 규칙이 만드는 업무는 프로젝트가 없다. 게스트를 순번에 넣으면 서버가 GUEST_PROJECT_REQUIRED로 거절하므로 후보에서 뺀다. */}
@@ -2906,6 +2929,48 @@ export default function App() {
     setPlatformRefreshToken((current) => current + 1)
     setToast(`${tenant.name} 지원 세션 승인 요청을 공유 감사기록에 저장했습니다.`)
   }
+  /** 업무 한 건을 서버에 부탁하고 돌려받은 업무로 목록을 바꾼다(고치기·댓글). */
+  const callTaskRoute = async (url: string, init: RequestInit, fallback: string): Promise<{ item?: WorkItem; version?: string } | null> => {
+    if (!workspaceScope) return null
+    try {
+      const response = await fetch(url, { ...init, headers: { 'content-type': 'application/json', 'x-workspace-identity': workspaceScope } })
+      const body = await response.json().catch(() => ({})) as { item?: WorkItem; version?: string; error?: { message?: string } }
+      if (!response.ok) { setToast(body.error?.message || fallback); return null }
+      if (body.item) await setWorkItems((current) => current.map((item) => item.id === body.item!.id ? body.item! : item), { persist: false, serverVersion: body.version })
+      return body
+    } catch { setToast('업무 처리 서버에 연결할 수 없습니다.'); return null }
+  }
+  const editTask = async (id: string, patch: Record<string, string>) => {
+    const body = await callTaskRoute(`/api/work-items/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }, '업무를 고치지 못했습니다.')
+    if (body) setToast(patch.ownerId ? '담당자를 바꿨습니다. 새 담당자에게 알렸습니다.' : '업무를 고쳤습니다. 진행 이력에 남았습니다.')
+    return Boolean(body)
+  }
+  const commentTask = async (id: string, text: string) => Boolean(await callTaskRoute(`/api/work-items/${encodeURIComponent(id)}/comments`, { method: 'POST', body: JSON.stringify({ text }) }, '댓글을 남기지 못했습니다.'))
+  const deleteTaskComment = async (id: string, commentId: string) => Boolean(await callTaskRoute(`/api/work-items/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`, { method: 'DELETE' }, '댓글을 지우지 못했습니다.'))
+  /** 취소는 보관함으로 옮긴다. 5초 안에는 알림 한 줄에서 되돌릴 수 있다(그 뒤에도 보관함에서 되살린다). */
+  const restoreCancelledTask = async (id: string) => {
+    if (!workspaceScope) return
+    try {
+      const response = await fetch(`/api/work-items/cancelled/${encodeURIComponent(id)}/restore`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-workspace-identity': workspaceScope }, body: '{}' })
+      const body = await response.json().catch(() => ({})) as { items?: WorkItem[]; version?: string; error?: { message?: string } }
+      if (!response.ok || !body.items) { setToast(body.error?.message || '취소한 업무를 되살리지 못했습니다.'); return }
+      const restored = body.items
+      await setWorkItems((current) => [...restored.filter((item) => !current.some((existing) => existing.id === item.id)), ...current], { persist: false, serverVersion: body.version })
+      setToast('취소를 되돌렸습니다. 업무가 다시 진행 중 목록에 있습니다.')
+    } catch { setToast('업무 처리 서버에 연결할 수 없습니다.') }
+  }
+  const cancelTask = async (id: string, reason: string) => {
+    if (!workspaceScope) return false
+    try {
+      const response = await fetch(`/api/work-items/${encodeURIComponent(id)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-workspace-identity': workspaceScope }, body: JSON.stringify({ reason }) })
+      const body = await response.json().catch(() => ({})) as { cancelled?: string[]; version?: string; error?: { message?: string } }
+      if (!response.ok || !body.cancelled) { setToast(body.error?.message || '업무를 취소하지 못했습니다.'); return false }
+      const gone = new Set(body.cancelled)
+      await setWorkItems((current) => current.filter((item) => !gone.has(item.id)), { persist: false, serverVersion: body.version })
+      setToast({ text: `업무를 취소했습니다${gone.size > 1 ? `(하위 ${gone.size - 1}건 포함)` : ''}. 보관함에 이유와 함께 남습니다.`, undo: { label: '되돌리기', run: () => restoreCancelledTask(id) } })
+      return true
+    } catch { setToast('업무 처리 서버에 연결할 수 없습니다.'); return false }
+  }
   const transitionTask = async (id: string, action: WorkTransitionAction, input: Record<string, unknown> = {}) => {
     if (!workspaceScope) return false
     try {
@@ -3166,7 +3231,7 @@ export default function App() {
       // 상세를 열어야 하는 업무는 기존 업무 화면으로 넘긴다. 작은 화면용으로 상세를 새로 만들면
       // 결재·증빙 같은 것이 두 곳에서 갈라진다.
       if (workFocusId) {
-        return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} closeSignal={taskCloseSignal} onDrawerChange={handleTaskDrawerChange} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onSchedule={scheduleTask} onSaveFields={saveTaskFields} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
+        return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} closeSignal={taskCloseSignal} onDrawerChange={handleTaskDrawerChange} onEditTask={editTask} onCancelTask={cancelTask} onCommentTask={commentTask} onDeleteTaskComment={deleteTaskComment} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onSchedule={scheduleTask} onSaveFields={saveTaskFields} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
       }
       return (
         <MobileTaskList
@@ -3192,7 +3257,7 @@ export default function App() {
     }
     switch (page) {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} calendarCallbackFlag={calendarCallbackFlag} onCalendarCallbackHandled={() => setCalendarCallbackFlag('')} />
-      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} closeSignal={taskCloseSignal} onDrawerChange={handleTaskDrawerChange} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onSchedule={scheduleTask} onSaveFields={saveTaskFields} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
+      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} closeSignal={taskCloseSignal} onDrawerChange={handleTaskDrawerChange} onEditTask={editTask} onCancelTask={cancelTask} onCommentTask={commentTask} onDeleteTaskComment={deleteTaskComment} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onSchedule={scheduleTask} onSaveFields={saveTaskFields} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} focusProjectId={projectFocusId} onFocusHandled={() => setProjectFocusId(undefined)} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onOpenWiki={(projectId) => { setWikiProjectId(projectId); setWikiFocusId(undefined); navigate('wiki') }} onNavigate={(target) => { if (target === 'people') setPeopleInitialTab('accounts'); navigate(target as PageId) }} />
       case 'finance': return <TaxAssetsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} industryType={account?.industryType ?? 'food_manufacturing'} onToast={setToast} />

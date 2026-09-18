@@ -1,4 +1,5 @@
 import { GUEST_ROLE, GUEST_SCOPE_FORBIDDEN } from './guest-access.mjs'
+import { appendWorkActivity } from './work-activity.mjs'
 
 /**
  * 업무 기간 — 시작(startAt)과 마감(due).
@@ -96,10 +97,12 @@ export function scheduleArrayViolation(nextItems, previousItems = []) {
  * hasStartKey가 거짓이면 startAt은 손대지 않는다 — 값이 없으면 키도 없다는 이진성이
  * JSON 모드와 PG 모드를 같게 유지한다(빈 문자열을 남기면 두 모드가 갈린다).
  */
-export function withSchedule(items, id, { startAt, due, hasStartKey }) {
+export function withSchedule(items, id, { startAt, due, hasStartKey, actor = null }) {
   return items.map((item) => {
     if (item?.id !== id) return item
-    const next = { ...item, due }
+    // 마감이 바뀌면 누가 언제 무엇에서 무엇으로 바꿨는지 기록에 남긴다(P1-5 — 전에는 덮어쓰기만 했다).
+    const base = actor && item.due !== due ? appendWorkActivity(item, { kind: 'schedule', field: 'due', from: String(item.due ?? '').slice(0, 300), to: String(due ?? '').slice(0, 300), actorId: actor.id, actorName: actor.name, at: actor.at }) : item
+    const next = { ...base, due }
     if (hasStartKey) {
       if (startAt === null) delete next.startAt
       else next.startAt = startAt
@@ -178,7 +181,7 @@ export function registerWorkItemScheduleRoutes({
       response.json({ item: previous, updatedAt: previousRecord?.updatedAt ?? null, version: workspaceRecordVersion(previousRecord) })
       return
     }
-    const nextData = withSchedule(previousData, previous.id, { startAt: nextStartAt, due, hasStartKey })
+    const nextData = withSchedule(previousData, previous.id, { startAt: nextStartAt, due, hasStartKey, actor: { id: request.auth.id, name: request.auth.name, at: new Date().toISOString() } })
     const nextItem = nextData.find((item) => item?.id === previous.id)
     if (!hasWorkItemShape(nextItem)) {
       response.status(400).json({ error: { code: 'INVALID_WORK_ITEM', message: '업무 처리 데이터 형식을 확인해 주세요.' } })

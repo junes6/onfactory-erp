@@ -61,6 +61,10 @@ export const NOTIFICATION_TYPES = Object.freeze({
   // 같은 대화의 읽지 않은 알림은 한 건으로 묶는다(COLLAPSE_TYPES) — 연달아 온 열 줄이 알림 열 건이 되지 않게.
   // 그룹방은 알리지 않는다(배지와 멘션이 맡는다) — 모든 말마다 울리면 사람은 알림을 꺼 버린다.
   'direct-message': { label: '1:1 새 메시지', pushByDefault: true, page: 'messenger' },
+  // P1-5: 업무 안의 댓글 — 담당자·지시한 사람에게(쓴 사람 제외). 업무를 두고 묻는 말은 답을 기다리므로 기본 푸시.
+  'task-comment': { label: '업무 댓글', pushByDefault: true, page: 'tasks' },
+  // P1-5: 내 업무가 고쳐졌다·넘어갔다·취소됐다. 알림함에만 둔다(급한 것은 배정 알림이 따로 간다).
+  'task-updated': { label: '업무 변경', pushByDefault: false, page: 'tasks' },
 })
 
 /** 같은 사람·같은 출처(source.id)의 읽지 않은 알림을 새 알림 한 건으로 묶는 유형. */

@@ -43,6 +43,8 @@ import { ARCHIVE_PAGE_LIMIT, createArchive } from './archive.mjs'
 import { createOverflowSweeper, pageHotAndArchive } from './archive-sweeps.mjs'
 import { MATERIALS_KEY, registerMaterialRoutes } from './review-materials.mjs'
 import { WORK_ARCHIVE_AFTER_DAYS, WORK_ARCHIVE_PRESSURE, registerWorkArchiveRoutes } from './work-archive.mjs'
+import { appendWorkActivity, hasWorkActivityShape, hasWorkCancelledShape, hasWorkCommentShape, WORK_ACTIVITY_LIMIT, WORK_COMMENT_LIMIT } from './work-activity.mjs'
+import { registerWorkItemEditRoutes } from './work-item-edit.mjs'
 import { registerMeetingNoteRoutes } from './meeting-notes.mjs'
 import { CUSTOM_FIELD_KEY, customFieldViolation, hasWorkFieldValuesShape, registerCustomFieldRoutes } from './custom-fields.mjs'
 import { registerSavedViewRoutes } from './saved-views.mjs'
@@ -242,7 +244,9 @@ const WORK_ITEM_ID_FIELDS = ['ownerId', 'requesterId']
 // 받지 않는다 — 파싱에 실패하는 값이 하나 섞이면 막대 순서가 조용히 무너지고, 그 이유가 화면 어디에도 남지 않는다.
 // fields: 관리자가 정의한 커스텀 필드의 값 맵(string | number 뿐). 여기서는 모양만 보고,
 // 정의와의 대조는 store를 볼 수 있는 배열 후검증(customFieldViolation)에서 한 번 한다.
-const WORK_ITEM_OPTIONAL_FIELDS = ['attachments', 'completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt', 'origin', 'checklist', 'projectId', 'parentId', 'startAt', 'fields']
+// activity: 착수·고치기·담당/요청자 변경·기간 변경·취소·되살림의 덧붙이기 기록(work-activity.mjs). comments: 업무 안의 댓글.
+// cancelled: 취소 표시 — 취소한 업무는 보관함에 있고, 되살리면 이 표시를 뗀다(P1-5).
+const WORK_ITEM_OPTIONAL_FIELDS = ['attachments', 'completion', 'completionHistory', 'review', 'reviewHistory', 'ruleId', 'ruleOccurrence', 'createdAt', 'origin', 'checklist', 'projectId', 'parentId', 'startAt', 'fields', 'activity', 'comments', 'cancelled']
 const WORK_ITEM_FIELDS = [...WORK_ITEM_BASE_FIELDS, ...WORK_ITEM_ID_FIELDS, ...WORK_ITEM_OPTIONAL_FIELDS]
 const WORK_ITEM_STATUSES = new Set(['업무요청', '수행중', '결재대기', '결재완료'])
 const WORK_ITEM_PRIORITIES = new Set(['긴급', '높음', '보통'])
@@ -453,6 +457,9 @@ function hasWorkItemShape(value) {
   if (value.review !== undefined && !hasWorkReviewShape(value.review)) return false
   if (value.reviewHistory !== undefined && (!Array.isArray(value.reviewHistory) || value.reviewHistory.length > 100 || !value.reviewHistory.every(hasWorkReviewShape))) return false
   if (value.origin !== undefined && !hasWorkOriginShape(value.origin)) return false
+  if (value.activity !== undefined && (!Array.isArray(value.activity) || value.activity.length > WORK_ACTIVITY_LIMIT || !value.activity.every(hasWorkActivityShape))) return false
+  if (value.comments !== undefined && (!Array.isArray(value.comments) || value.comments.length > WORK_COMMENT_LIMIT || !value.comments.every(hasWorkCommentShape))) return false
+  if (value.cancelled !== undefined && !hasWorkCancelledShape(value.cancelled)) return false
   return Boolean(value.id) && WORK_ITEM_STATUSES.has(value.status) && WORK_ITEM_PRIORITIES.has(value.priority)
 }
 
@@ -8079,7 +8086,8 @@ export function createApp(options = {}) {
     }
 
     if (action === 'accept' && isOwner && previous.status === '업무요청') {
-      next = { ...previous, status: '수행중' }
+      // 착수는 감사 페이로드가 없는 유일한 전이였다 — 누가 언제 시작했는지 기록에 남긴다(상태머신은 그대로).
+      next = appendWorkActivity({ ...previous, status: '수행중' }, { kind: 'accept', actorId: request.auth.id, actorName: request.auth.name, at: now })
     } else if (action === 'submit' && isOwner && previous.status === '수행중') {
       // 체크리스트가 남아 있으면 완료 보고를 받지 않는다. 결재 상태머신은 그대로이고,
       // 결재대기로 넘어가기 전에 조건을 하나 더 보는 것뿐이다.
@@ -9330,6 +9338,12 @@ export function createApp(options = {}) {
   workArchive = registerWorkArchiveRoutes({
     app, requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, workspaceStore, commitWorkspaceStore,
     archive, events, isMemberWorkItem,
+  })
+  // P1-5: 만든 업무를 고치고·넘기고·취소하고(보관함으로), 그 업무 안에서 이야기한다.
+  registerWorkItemEditRoutes({
+    app, requireAuth, requireMatchingWorkspaceIdentity, workspaceStore, commitWorkspaceStore,
+    accounts, notify, events, archive, hasWorkItemShape, rebaseRowWrite, workspaceRecordVersion,
+    bundleAssignmentDrafts, prependWithinCap, WORK_ITEMS_FULL,
   })
   app.locals.archive = archive
   app.locals.workArchive = workArchive

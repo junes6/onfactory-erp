@@ -52,6 +52,8 @@ test('겹침 순서: 메신저 < 더보기 시트 < 아래 탭 막대 < 대화�
     assert.ok(layer > tabbar, `${selector}(${layer})는 아래 탭 막대(${tabbar}) 위에 떠야 [저장]·[닫기]가 가려지지 않는다`)
     assert.ok(layer < toast, `${selector}(${layer})는 알림 한 줄(${toast}) 아래다`)
   }
+  // 업무 드로어에서 연 완료 보고·검토·고치기·취소 창은 드로어 위에 뜬다(전에는 드로어 밑에 깔렸다 — 감사 P0).
+  assert.ok(layerOf(styles, '.workflow-drawer-backdrop') < layerOf(styles, '.modal-backdrop'), '드로어 < 대화상자')
   // 휴대폰에서 알림 한 줄은 탭 막대 위에 뜬다.
   assert.match(styles, /\.app-shell:has\(\.mobile-tabbar\) \.toast \{ bottom: calc\(56px \+ env\(safe-area-inset-bottom\) \+ var\(--space-12\)\); \}/)
 })

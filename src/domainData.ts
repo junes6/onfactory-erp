@@ -85,6 +85,32 @@ export type WorkItem = {
    * '값 없음'은 한 가지뿐이다 — 키가 없는 것. 빈 문자열·null을 저장 형태로 두지 않는다.
    */
   fields?: Record<string, string | number>
+  /** 착수·고치기·담당/확인할 사람 변경·마감 변경·취소·되살림의 덧붙이기 기록(서버가 적는다). */
+  activity?: WorkActivity[]
+  /** 업무 안의 댓글. 지운 댓글은 본문 없이 자리만 남는다. */
+  comments?: WorkComment[]
+}
+
+export type WorkActivity = {
+  kind: 'accept' | 'edit' | 'owner' | 'requester' | 'schedule' | 'cancel' | 'restore'
+  at: string
+  actorId: string
+  actorName: string
+  field?: string
+  from?: string
+  to?: string
+  note?: string
+}
+
+export type WorkComment = {
+  id: string
+  authorId: string
+  authorName: string
+  authorRole?: string
+  text: string
+  createdAt: string
+  editedAt?: string
+  deletedAt?: string
 }
 
 export type WorkRule = {
