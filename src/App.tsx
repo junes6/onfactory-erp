@@ -57,6 +57,7 @@ import { StatusBadge } from './components/StatusBadge'
 import { WorkspaceNavigationEditButton, WorkspaceNavigationEditor, usePersonalNavigation } from './components/WorkspaceNavigation'
 import { clearWorkspaceCaches, useWorkspaceState } from './hooks/useWorkspaceState'
 import { installDirtyGuard } from './utils/dirtyGuard'
+import { MobileAttendanceCard } from './components/MobileAttendanceCard'
 import { deleteDocumentAttachments, uploadDocumentAttachments } from './utils/documentAttachments'
 import { CompletionModal, useDialogFocus } from './components/CompletionModal'
 import { activityText, TaskCancelDialog, TaskComments, TaskEditDialog, TaskManageActions } from './components/WorkTaskDialogs'
@@ -3283,6 +3284,7 @@ export default function App() {
           onOpenTask={(task) => { setWorkFocusId(task.id); setMobileTab('tasks') }}
           onGoTasks={() => setMobileTab('tasks')}
           onOpenAlerts={() => { setNotificationsOpen(true); setMessengerOpen(false) }}
+          attendance={account?.role !== 'tenant-guest' ? <MobileAttendanceCard workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} onToast={setToast} /> : undefined}
         />
       )
     }

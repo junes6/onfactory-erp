@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Bell, CalendarDays, ChevronDown, ChevronRight, ClipboardList, FileText, Home, ListChecks, MessageCircle, MoreHorizontal, Settings2, Timer, X } from 'lucide-react'
 import type { WorkItem } from '../domainData'
 import { Button } from './ui/Button'
@@ -70,7 +71,7 @@ export function nextActionLabel(status: WorkItem['status']) {
   return '보기'
 }
 
-export function MobileToday({ tasks, allTasks, openCount: givenOpenCount, events, alerts, userName, onOpenTask, onGoTasks, onOpenAlerts }: {
+export function MobileToday({ tasks, allTasks, openCount: givenOpenCount, events, alerts, userName, onOpenTask, onGoTasks, onOpenAlerts, attendance }: {
   tasks: WorkItem[]
   /** 진행률을 셀 때 쓰는 전체 목록. tasks는 이미 최상위만 남겨 자식이 빠져 있다. */
   allTasks?: WorkItem[]
@@ -83,6 +84,8 @@ export function MobileToday({ tasks, allTasks, openCount: givenOpenCount, events
   onOpenTask: (task: WorkItem) => void
   onGoTasks: () => void
   onOpenAlerts: () => void
+  /** 맨 위 출퇴근 한 줄(직원에게만). 더보기 › 인사 › 출퇴근까지 가지 않고 여기서 찍는다. */
+  attendance?: ReactNode
 }) {
   const shown = tasks.slice(0, TODAY_TASK_LIMIT)
   // 제목의 건수는 자식까지 센다 — 목록에서 접었다고 맡은 일이 줄지는 않는다.
@@ -92,6 +95,7 @@ export function MobileToday({ tasks, allTasks, openCount: givenOpenCount, events
   return (
     <div className="mobile-today">
       <h1 className="mobile-today-greeting">{userName}님, 오늘 할 일입니다</h1>
+      {attendance}
 
       <section className="mobile-card" aria-label="오늘 업무">
         <h2><ListChecks size={17} /> 내 업무 {openCount}건</h2>

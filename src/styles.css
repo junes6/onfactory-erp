@@ -3106,7 +3106,9 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
   /* 손가락 과녁 최소 크기. 공용 버튼의 크기는 Button.css에서 함께 올린다. */
   .mobile-line-list button.mobile-line-open { min-height: 44px; }
   /* 390px에서 가로로 밀리지 않게 한다. 넘치는 표는 표 안에서만 스크롤한다. */
-  html, body { max-width: 100%; overflow-x: hidden; }
+  /* clip은 스크롤 상자를 만들지 않는다 — hidden이면 body가 스크롤 상자가 되어 상단바의 sticky가 풀리고,
+     아래로 내리면 상단바(알림·검색)가 사라져 알림 창이 화면 밖에서 열렸다(감사 shell-ux-17). 옛 사파리는 hidden으로 남는다. */
+  html, body { max-width: 100%; overflow-x: hidden; overflow-x: clip; }
   table { display: block; max-width: 100%; overflow-x: auto; }
 }
 
@@ -3156,3 +3158,7 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
   :is(.it-row-actions, .compliance-row-actions, .library-file-actions, .approval-actions, .journal-attachment-actions, .factory-location-card__actions, .dashboard-link-manage-actions) > button { min-width: 44px; min-height: 44px; }
   :is(.it-row-files, .journal-comment-files) > button, .it-file-locked { min-height: 40px; }
 }
+/* 휴대폰 '오늘' 맨 위 출퇴근 한 줄 */
+.mobile-attendance { display: grid; gap: var(--space-12); }
+.mobile-attendance-missed { display: grid; gap: var(--space-4); color: var(--muted); font-size: var(--font-13); }
+.mobile-attendance-missed input { min-height: 44px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); }
