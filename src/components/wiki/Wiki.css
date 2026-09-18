@@ -484,3 +484,6 @@
   color: var(--color-primary);
   font-size: var(--font-11);
 }
+/* [새 문서]의 제목 묻기 */
+.wiki-new-field { display: grid; gap: var(--space-4); margin-top: var(--space-12); color: var(--muted); font-size: var(--font-13); }
+.wiki-new-field input { min-height: 44px; padding: var(--space-8) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--ink); background: var(--surface); font-size: var(--font-15); }

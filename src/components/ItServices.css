@@ -25,7 +25,7 @@
 .it-row-main small { display: block; overflow: hidden; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
 .it-row-meta { color: var(--muted); font-size: var(--font-13); white-space: nowrap; }
 .it-row-files { display: flex; flex-wrap: wrap; gap: var(--space-4); max-width: 360px; }
-.it-row-files button { display: inline-flex; align-items: center; gap: var(--space-4); max-width: 200px; overflow: hidden; padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--color-primary); background: var(--surface); font-size: var(--font-11); text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.it-row-files button { display: inline-flex; align-items: center; gap: var(--space-4); max-width: 200px; overflow: hidden; padding: var(--space-4) var(--space-8); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--color-primary); background: var(--surface); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .it-row-files button:hover { border-color: var(--color-primary); background: var(--color-primary-soft); }
 .it-row-actions { display: flex; gap: var(--space-4); }
 .it-row-actions button { width: 34px; height: 34px; display: grid; place-items: center; border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--muted); background: var(--surface); cursor: pointer; }
@@ -57,4 +57,4 @@ html[data-theme='dark'] :is(.it-summary-strip article,.it-toolbar select,.it-row
 .it-client-contact { flex: 0 1 220px; }
 .it-row-meta.is-urgent { color: var(--color-warning-ink); font-weight: var(--weight-medium); }
 /* 내가 열 수 없는 파일 — 단추가 아니라 잠금 표시(누르면 '찾을 수 없음'이던 것) */
-.it-file-locked { display: inline-flex; align-items: center; gap: var(--space-4); max-width: 200px; overflow: hidden; padding: var(--space-4) var(--space-8); border: var(--hairline) dashed var(--line); border-radius: var(--radius-8); color: var(--muted); font-size: var(--font-11); text-overflow: ellipsis; white-space: nowrap; cursor: help; }
+.it-file-locked { display: inline-flex; align-items: center; gap: var(--space-4); max-width: 200px; overflow: hidden; padding: var(--space-4) var(--space-8); border: var(--hairline) dashed var(--line); border-radius: var(--radius-8); color: var(--muted); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; cursor: help; }

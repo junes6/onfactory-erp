@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type RefObject } from 'react'
 import { Archive, ArchiveRestore, History, Pencil, Send, Sparkles } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { ErrorState, SaveState, Skeleton } from '../ui/States'
@@ -87,6 +87,11 @@ export function WikiPage({ workspaceScope, currentUserId, currentUserName, canMa
   const [historyFocus, setHistoryFocus] = useState<number | null>(null)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  /**
+   * [새 문서]는 제목부터 묻는다. 전에는 누를 때마다 회사 전체가 보는 '제목 없는 문서'가 곧바로 생겨,
+   * 잘못 누른 흔적이 문서 목록에 쌓였다(감사 live-ui-14).
+   */
+  const [newTitle, setNewTitle] = useState<string | null>(null)
 
   const queueRef = useRef<ReturnType<typeof createWikiOpQueue> | null>(null)
   const focusedBlockRef = useRef<string | null>(null)
@@ -312,12 +317,12 @@ export function WikiPage({ workspaceScope, currentUserId, currentUserName, canMa
   }, [onToast])
 
   // ── 문서 만들기·보관 ──────────────────────────────────────────────────────
-  const createDocument = async (templateId?: string) => {
+  const createDocument = async (templateId?: string, title?: string) => {
     setBusy(true)
     try {
       const response = await fetch('/api/wiki', {
         method: 'POST', headers,
-        body: JSON.stringify({ clientRequestId: `WNEW-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, ...(templateId ? { templateId } : {}) }),
+        body: JSON.stringify({ clientRequestId: `WNEW-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, ...(templateId ? { templateId } : {}), ...(title ? { title } : {}) }),
       })
       const body = await readJson<{ document: WikiDocument }>(response)
       if (!response.ok) throw new Error(body.error?.message || '문서를 만들지 못했습니다.')
@@ -325,6 +330,7 @@ export function WikiPage({ workspaceScope, currentUserId, currentUserName, canMa
       setArchivedMode(false)
       setActiveId(body.document.id)
       setReadMode(false)
+      setNewTitle(null)
       onToast('새 문서를 만들었습니다.')
     } catch (cause) {
       onToast(cause instanceof Error ? cause.message : '문서를 만들지 못했습니다.')
@@ -449,6 +455,19 @@ export function WikiPage({ workspaceScope, currentUserId, currentUserName, canMa
 
   return (
     <div className="content-page wiki-page">
+      {newTitle !== null && <div className="wiki-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setNewTitle(null) }}>
+        <section className="wiki-dialog" role="dialog" aria-modal="true" aria-labelledby="wiki-new-title">
+          <h3 id="wiki-new-title">새 문서</h3>
+          <form onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (newTitle.trim()) void createDocument(undefined, newTitle.trim()) }}>
+            <label className="wiki-new-field"><span>제목</span><input value={newTitle} maxLength={MAX_TITLE} autoFocus required onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape' && !newTitle.trim()) setNewTitle(null) }} placeholder="예: 9월 품질 점검 절차" /></label>
+            <p>만든 문서는 회사 구성원 모두가 볼 수 있습니다. 프로젝트 사람만 보려면 프로젝트 화면에서 만들어 주세요.</p>
+            <div className="wiki-dialog-actions">
+              <Button tone="ghost" size="sm" type="button" disabled={busy} onClick={() => setNewTitle(null)}>취소</Button>
+              <Button tone="secondary" size="sm" type="submit" disabled={busy || !newTitle.trim()}>{busy ? '만드는 중…' : '만들기'}</Button>
+            </div>
+          </form>
+        </section>
+      </div>}
       <div className="page-header">
         <div>
           <h1>문서</h1>
@@ -468,7 +487,7 @@ export function WikiPage({ workspaceScope, currentUserId, currentUserName, canMa
               </select>
             </label>
           ) : null}
-          <Button tone="primary" disabled={busy} onClick={() => void createDocument()}>새 문서</Button>
+          <Button tone="primary" disabled={busy} onClick={() => setNewTitle('')}>새 문서</Button>
         </div>
       </div>
 

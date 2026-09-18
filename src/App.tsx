@@ -56,6 +56,7 @@ import type { PlatformSection } from './components/PlatformConsole'
 import { StatusBadge } from './components/StatusBadge'
 import { WorkspaceNavigationEditButton, WorkspaceNavigationEditor, usePersonalNavigation } from './components/WorkspaceNavigation'
 import { clearWorkspaceCaches, useWorkspaceState } from './hooks/useWorkspaceState'
+import { installDirtyGuard } from './utils/dirtyGuard'
 import { deleteDocumentAttachments, uploadDocumentAttachments } from './utils/documentAttachments'
 import { CompletionModal, useDialogFocus } from './components/CompletionModal'
 import { activityText, TaskCancelDialog, TaskComments, TaskEditDialog, TaskManageActions } from './components/WorkTaskDialogs'
@@ -2101,6 +2102,8 @@ export default function App() {
   useEffect(() => { if (authStatus === 'signed-out') clearWorkspaceCaches() }, [authStatus])
   // 로그인한 뒤 한가할 때 나머지 화면을 미리 받아 둔다(데스크톱만 — src/lazyPages.tsx).
   useEffect(() => { if (authStatus === 'signed-in') prefetchPages() }, [authStatus])
+  // 대화상자에 쓰던 내용은 Esc·바깥 누름으로 말없이 사라지지 않는다 — 먼저 묻는다(utils/dirtyGuard.ts).
+  useEffect(() => installDirtyGuard(), [])
   const [account, setAccount] = useState<AuthAccount | null>(null)
   /**
    * 게스트 초대 링크(?guestInvite=<token>)로 들어왔는가. SPA에 라우터가 없어 쿼리로 받는다.
