@@ -4483,9 +4483,20 @@ export function createApp(options = {}) {
       const settings = opportunitySettingsOf(item.tenantId)
       const record = opportunityRecord(item, settings, now)
       const existing = opportunitiesOf(item.tenantId)
-      if (existing.some((entry) => entry?.key === record.key)) {
+      const known = existing.find((entry) => entry?.key === record.key)
+      if (known) {
         result.duplicate += 1
-        result.results.push(ingestResultLine(item, { outcome: 'duplicate', settings, reason: '같은 출처·공고번호가 이미 등록돼 있습니다.' }))
+        result.results.push(ingestResultLine(item, {
+          outcome: 'duplicate',
+          settings,
+          reason: '같은 출처·공고번호가 이미 등록돼 있습니다.',
+          /**
+           * 이미 등록된 건이라도 **초안을 예고했는데 아직 문서가 붙지 않았으면** 그 기록에 자리를 다시 준다.
+           * 자리표를 받지 못해(서버 배포 누락·업로드 실패·30분 만료) 빠진 초안이 같은 건 재전송으로 회복된다.
+           * 자리는 새로 온 값이 아니라 **저장된 기록**을 보고 정한다 — 이미 붙었으면(documentId) 주지 않는다.
+           */
+          draftUpload: draftUploadSlot({ secret: opportunityIngestToken, tenantId: item.tenantId, record: known, now: Date.parse(now) }),
+        }))
         continue
       }
       result.results.push(ingestResultLine(item, {

@@ -236,10 +236,20 @@ test('초안을 예고하지 않았거나 이미 있는 건에는 자리가 없�
     assert.ok(first[1].draftUpload, '큐에 오른 건에는 자리가 있다')
     assert.ok(first[2].draftUpload, '임계 미만이어도 목록에는 남으므로 초안은 붙는다')
 
-    // 같은 공고를 다시 보내면 중복이라 아무것도 저장되지 않는다 — 자리도 없다.
+    // 같은 공고를 다시 보내면 중복이라 아무것도 저장되지 않는다. 다만 초안이 **아직 붙지 않았으면**
+    // 저장된 그 기록에 자리를 다시 준다 — 자리표를 못 받아 빠진 초안이 재전송으로 회복된다.
     const second = (await (await ingest(origin, [draftNotice(tenantId, 'G-7')])).json()).results
     assert.equal(second[0].outcome, 'duplicate')
-    assert.equal(second[0].draftUpload, null, '중복 건에 자리를 주면 있던 초안을 덮어쓴다')
+    assert.ok(second[0].draftUpload, '초안이 아직 없으면 중복 재전송이 자리를 되살린다')
+    assert.equal(second[0].draftUpload.opportunityId, first[1].draftUpload.opportunityId, '새 기록이 아니라 저장된 그 기록의 자리다')
+    assert.equal((await uploadDraft(origin, second[0].draftUpload, '# 되살린 자리로 올린 초안')).status, 201)
+
+    // 초안이 붙은 뒤의 중복에는 자리가 없다 — 있던 초안을 덮어쓰지 않는다.
+    const third = (await (await ingest(origin, [draftNotice(tenantId, 'G-7')])).json()).results
+    assert.equal(third[0].outcome, 'duplicate')
+    assert.equal(third[0].draftUpload, null, '이미 붙은 초안은 덮어쓰지 않는다')
+    // 처음 받은 자리표도 이제는 쓸 수 없다(한 기회에 초안 하나).
+    assert.equal((await uploadDraft(origin, first[1].draftUpload, '# 두 번째 초안')).status, 409)
 
     // 없는 고객사에도 자리는 없다.
     const unknown = (await (await ingest(origin, [draftNotice('TENANT-DOES-NOT-EXIST', 'G-9')])).json()).results
