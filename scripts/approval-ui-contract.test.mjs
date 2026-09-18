@@ -4,7 +4,8 @@ import test from 'node:test'
 
 import { PROPOSAL_KINDS } from '../server/proposal-engine.mjs'
 import { saveApprovalDraft } from '../src/utils/approvalDraft.ts'
-import { approvalListEmptyText, filledLineSteps, notificationFocusTarget } from '../src/utils/approvalLine.ts'
+import { approvalListEmptyText, filledLineSteps } from '../src/utils/approvalLine.ts'
+import { planOpen } from '../src/utils/appRoute.ts'
 
 /**
  * 양식형 전자결재 화면 계약.
@@ -358,16 +359,16 @@ test('결재선 거울은 서버 술어와 같은 규칙을 적는다', () => {
 test('알림이 지목한 결재 문서는 결재 자리로 가고, 업무 id 자리에 섞이지 않는다', () => {
   // 판정은 page 가 아니라 **id 의 모양**이다. page 로 먼저 가르면, 결재 문서를 가리키면서
   // page 가 'approvals' 가 아닌 알림이 업무 id 자리로 흘러들어 아무것도 열리지 않는다.
-  assert.deepEqual(notificationFocusTarget('approvals', 'APD-MTKCDCW0-DE3D'),
-    { page: 'approvals', approvalFocusId: 'APD-MTKCDCW0-DE3D', workFocusId: '' })
+  assert.deepEqual(planOpen('approvals', 'APD-MTKCDCW0-DE3D'), { page: 'approvals', approvalFocusId: 'APD-MTKCDCW0-DE3D' })
   // 아침 요약(buildQuietDigest)과 유형표가 아직 'tasks' 인 결재 요청이 여기로 온다.
-  assert.deepEqual(notificationFocusTarget('tasks', 'APD-MTKCDCW0-DE3D'),
-    { page: 'approvals', approvalFocusId: 'APD-MTKCDCW0-DE3D', workFocusId: '' })
+  assert.deepEqual(planOpen('tasks', 'APD-MTKCDCW0-DE3D'), { page: 'approvals', approvalFocusId: 'APD-MTKCDCW0-DE3D' })
   // 업무 알림은 그대로 업무 자리로 간다.
-  assert.deepEqual(notificationFocusTarget('tasks', 'WRK-2026-0001'),
-    { page: 'tasks', approvalFocusId: '', workFocusId: 'WRK-2026-0001' })
-  assert.equal(count(app, /const target = notificationFocusTarget\(page, focus/g), 2, '알림 센터와 푸시 클릭 두 곳 모두에서')
-  assert.equal(count(app, /setApprovalFocusId\(target\.approvalFocusId\)/g), 2)
+  assert.deepEqual(planOpen('tasks', 'WRK-2026-0001'), { page: 'tasks', workFocusId: 'WRK-2026-0001' })
+  // 알림 센터와 푸시 클릭(열린 앱) 두 곳이 같은 함수로 연다 — 갈래가 둘이면 언젠가 서로 다른 곳에 내려놓는다.
+  assert.match(app, /onNavigate=\{\(page, focusId\) => openTarget\(page, focusId\)\}/)
+  assert.match(app, /openTarget\(params\.get\('page'\) \?\? '', params\.get\('focus'\)\)/)
+  assert.equal(count(app, /const plan = planOpen\(targetPage, focusId\)/g), 1, '여는 규칙은 openTarget 한 곳')
+  assert.match(app, /if \(plan\.page === 'approvals'\) setApprovalFocusId\(plan\.approvalFocusId \?\? ''\)/)
   assert.match(app, /if \(nextPage !== 'approvals'\) setApprovalFocusId\(''\)/, '떠날 때 지워야 다음에 다시 열리지 않는다')
   assert.match(approvalQueue, /focusId=\{focusId\}/)
 })
@@ -375,11 +376,9 @@ test('알림이 지목한 결재 문서는 결재 자리로 가고, 업무 id �
 test("page:'approvals' 알림이 전부 결재 문서인 것은 아니다 — 결재 문서 id 일 때만 상세를 연다", () => {
   // AI 제안(PRP-)·센티널·외부 기회(OPP-)가 같은 page 로 온다. 그 id 를 결재 상세에 넘기면
   // 서버가 404 를 주고 사람은 「결재 문서를 찾을 수 없거나 열람 권한이 없습니다.」만 본다.
-  assert.deepEqual(notificationFocusTarget('approvals', 'PRP-2026-0007'),
-    { page: 'approvals', approvalFocusId: '', workFocusId: '' })
-  assert.deepEqual(notificationFocusTarget('approvals', 'OPP-88'),
-    { page: 'approvals', approvalFocusId: '', workFocusId: '' })
-  assert.match(app, /import \{[^}]*notificationFocusTarget[^}]*\} from '\.\/utils\/approvalLine'/)
+  assert.deepEqual(planOpen('approvals', 'PRP-2026-0007'), { page: 'approvals' })
+  assert.deepEqual(planOpen('approvals', 'OPP-88'), { page: 'approvals' })
+  assert.match(app, /import \{[^}]*planOpen[^}]*\} from '\.\/utils\/appRoute'/)
   // 모양의 정본은 서버다. 두 글자가 갈리면 진짜 결재 알림이 조용히 버려진다.
   const server = /export const DOCUMENT_ID_RE = (\/\^APD-[^\n]*\/)\n/.exec(approvalRouting)?.[1]
   assert.ok(server, '서버에서 DOCUMENT_ID_RE 를 읽어야 한다')

@@ -70,11 +70,14 @@ export function nextActionLabel(status: WorkItem['status']) {
   return '보기'
 }
 
-export function MobileToday({ tasks, allTasks, events, alerts, userName, onOpenTask, onGoTasks, onOpenAlerts }: {
+export function MobileToday({ tasks, allTasks, openCount: givenOpenCount, events, alerts, userName, onOpenTask, onGoTasks, onOpenAlerts }: {
   tasks: WorkItem[]
-  /** 진행률·건수를 셀 때 쓰는 전체 목록. tasks는 이미 최상위만 남겨 자식이 빠져 있다. */
+  /** 진행률을 셀 때 쓰는 전체 목록. tasks는 이미 최상위만 남겨 자식이 빠져 있다. */
   allTasks?: WorkItem[]
-  events: { id: string; title: string; date: string; owner?: string }[]
+  /** 제목의 '내 업무 N건'. 주지 않으면 allTasks에서 센다. */
+  openCount?: number
+  /** time은 'HH:MM–HH:MM', 비었으면 종일. */
+  events: { id: string; title: string; time?: string; owner?: string }[]
   alerts: { id: string; title: string; createdAt?: string }[]
   userName: string
   onOpenTask: (task: WorkItem) => void
@@ -83,7 +86,7 @@ export function MobileToday({ tasks, allTasks, events, alerts, userName, onOpenT
 }) {
   const shown = tasks.slice(0, TODAY_TASK_LIMIT)
   // 제목의 건수는 자식까지 센다 — 목록에서 접었다고 맡은 일이 줄지는 않는다.
-  const openCount = (allTasks ?? tasks).filter((task) => task.status !== '결재완료').length
+  const openCount = givenOpenCount ?? (allTasks ?? tasks).filter((task) => task.status !== '결재완료').length
   // 버튼이 말하는 '나머지'는 5줄 제한이 자른 줄이다. 접힌 자식까지 세면 다 보이는 화면에서도 '나머지 1건 보기'가 뜬다.
   const hidden = Math.max(0, tasks.length - shown.length)
   return (
@@ -116,7 +119,7 @@ export function MobileToday({ tasks, allTasks, events, alerts, userName, onOpenT
             <li key={event.id}>
               <span className="mobile-line-open">
                 <strong>{event.title}</strong>
-                <small>{event.date.slice(11, 16) || '종일'}{event.owner ? ` · ${event.owner}` : ''}</small>
+                <small>{event.time || '종일'}{event.owner ? ` · ${event.owner}` : ''}</small>
               </span>
             </li>
           ))}
@@ -143,8 +146,20 @@ export function MobileToday({ tasks, allTasks, events, alerts, userName, onOpenT
  * 한 행에 제목·상태·기한만 두고 버튼은 하나다. 손가락으로 누르는 화면에서
  * 행마다 버튼이 서넛이면 어느 것을 눌렀는지 모른 채 눌리게 된다.
  */
-export function MobileTaskList({ tasks, parentRefs, onAdvance, onOpenTask, busyId }: {
+/**
+ * 이 사람이 이 업무에서 지금 누를 수 있는 다음 행동이 있는가. 남의 업무에 [착수]가 뜨면
+ * 누르는 순간 서버가 거절하고, 사람은 무엇이 잘못됐는지 모른다.
+ */
+export function canActOn(task: WorkItem, userId: string) {
+  if (!userId || task.status === '결재완료') return false
+  if (task.status === '결재대기') return task.requesterId === userId || task.ownerId === userId
+  return task.ownerId === userId
+}
+
+export function MobileTaskList({ tasks, currentUserId = '', parentRefs, onAdvance, onOpenTask, busyId }: {
   tasks: WorkItem[]
+  /** 다음 행동 버튼은 그 행동을 할 수 있는 사람에게만 보인다. */
+  currentUserId?: string
   /** 상위가 목록 밖에 있는 자식에게 붙일 제목(서버 응답 봉투). */
   parentRefs?: Record<string, ParentRef>
   onAdvance: (task: WorkItem) => void
@@ -174,14 +189,14 @@ export function MobileTaskList({ tasks, parentRefs, onAdvance, onOpenTask, busyI
         <small>{workStatusLabel(task.status)} · {task.owner} · {task.due ? task.due.slice(5, 10).replace('-', '.') : '기한 없음'}{progress ? ` · ${progressLabel(progress)}` : ''}</small>
         {isSubtask(task) && !foldIds.has(task.parentId) && <ParentChip title={parentTitleOf(task, tasks, parentRefs)} />}
       </button>
-      {task.status !== '결재완료' && (
+      {canActOn(task, currentUserId) && (
         <Button tone="secondary" size="sm" disabled={busyId === task.id} onClick={() => onAdvance(task)}>
           {nextActionLabel(task.status)}
         </Button>
       )}
       {progress && <details className="mobile-line-children">
         <summary><ChevronDown size={14} /> {progressLabel(progress)}</summary>
-        {children.length > 0 && <SubtaskRows items={children} onOpen={onOpenTask} actionFor={(child) => child.status === '결재완료' ? null : { label: nextActionLabel(child.status), run: () => onAdvance(child) }} busyId={busyId} />}
+        {children.length > 0 && <SubtaskRows items={children} onOpen={onOpenTask} actionFor={(child) => canActOn(child, currentUserId) ? { label: nextActionLabel(child.status), run: () => onAdvance(child) } : null} busyId={busyId} />}
         {/* 센 것과 그린 것이 다르면 그 차이를 말한다 — 끝난 상위 아래 남은 자식은 위쪽에 한 줄로 올라가 있다. */}
         {progress.total > children.length && <p className="workflow-subtask-note">하위 업무 {progress.total - children.length}건은 이 목록 위쪽에 한 줄로 나와 있습니다.</p>}
       </details>}

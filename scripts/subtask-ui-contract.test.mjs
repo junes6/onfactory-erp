@@ -190,9 +190,11 @@ test('막다른 길을 만들지 않는다: 출처 배지는 프로젝트 상세
   assert.match(app, /onFocusHandled=\{\(\) => setProjectFocusId\(undefined\)\}/)
   // 데스크톱·휴대폰이 같은 함수를 쓴다. 휴대폰은 page만 바꾸면 업무 탭에 그대로 남으므로 탭도 함께 옮긴다.
   assert.equal(count(app, /onOpenOrigin=\{openWorkOrigin\}/g), 2, '데스크톱·휴대폰 두 마운트가 같은 통로를 쓴다')
-  assert.match(app, /if \(originPage === 'projects'\) \{ setProjectFocusId\(focusId\);/)
+  assert.match(app, /if \(plan\.projectFocusId\) setProjectFocusId\(plan\.projectFocusId\)/)
   // 탭 이동은 갈래마다가 아니라 **갈래 밖 한 자리**에 있다 — 갈래 안에 두면 빠뜨린 갈래가 업무 탭에 남는다.
-  assert.match(app, /setWorkFocusId\(''\)\r?\n\s*if \(phoneShell\) setMobileTab\('more'\)/)
+  // 그 한 자리는 navigate다: 휴대폰에서는 화면에 맞춰 아래 탭을 옮긴다(업무·오늘·더보기).
+  assert.match(app, /if \(phoneShell\) \{ setMobileTab\(nextPage === 'tasks' \? 'tasks' : nextPage === 'ai' \? 'today' : 'more'\)/)
+  assert.match(app, /if \(plan\.page\) navigate\(plan\.page as PageId\)/)
   // 게스트 자식 행도 열리고, 열린 자식의 상세는 상위와 같은 것을 쓴다.
   assert.match(guestWorkspace, /onOpen=\{\(child\) => \{ setOpenTaskId\(openTaskId === child\.id \? null : child\.id\); openChildList\(item\.id\) \}\}/)
   assert.match(guestWorkspace, /\{openChild && taskDetail\(openChild\)\}/)
@@ -218,7 +220,10 @@ test('게스트에게는 퍼센트를 말하지 않고, 막힌 이유는 누르�
 })
 
 test('건수는 자식까지 센다 — 목록에서 접었다고 맡은 일이 줄지 않는다', () => {
-  assert.match(mobileShell, /const openCount = \(allTasks \?\? tasks\)\.filter\(\(task\) => task\.status !== '결재완료'\)\.length/)
+  assert.match(mobileShell, /const openCount = givenOpenCount \?\? \(allTasks \?\? tasks\)\.filter\(\(task\) => task\.status !== '결재완료'\)\.length/)
+  // '오늘'의 건수는 **내** 업무만 센다(자식 포함) — 관리자에게 회사 전체 업무가 '내 업무'로 나오던 자리.
+  assert.match(app, /openCount=\{mobileOpenItems\.length\}/)
+  assert.match(app, /item\.ownerId === myId \|\| \(item\.requesterId === myId && item\.status === '결재대기'\)/)
   assert.match(mobileShell, /내 업무 \{openCount\}건/)
   assert.match(mobileShell, /const openTotal = tasks\.filter\(\(task\) => task\.status !== '결재완료'\)\.length/)
   assert.match(mobileShell, /업무 \{openTotal\}건/)

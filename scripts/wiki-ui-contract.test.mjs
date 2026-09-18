@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import { BLOCK_TYPES, fieldsOf } from '../src/components/wiki/wikiBlocks.ts'
+import { planOpen } from '../src/utils/appRoute.ts'
 
 /**
  * 문서(위키) 화면 계약(설계서 H절 §6·§8-6).
@@ -266,12 +267,14 @@ test('라우트 배선 여섯 자리가 모두 있다 — 하나라도 빠지면
 })
 
 test('검색 결과와 출처 배지가 문서로 돌아온다', () => {
-  assert.match(app, /hit\.kind === 'wiki'/u)
-  // 출처 배지의 이동은 두 WorkPage 렌더가 공유하는 한 함수를 지난다 — 그 함수에 문서 갈래가 있고,
-  // 두 렌더가 모두 그 함수를 넘겨야 배지가 양쪽에서 살아난다.
+  // 검색·출처 배지·알림이 같은 규칙(planOpen)으로 문서를 연다. 검토 자료는 'material:' 접두로 가른다.
+  assert.match(app, /openTarget\(hit\.page, hit\.focusId\)/u)
+  assert.deepEqual(planOpen('wiki', 'DOC-1'), { page: 'wiki', wikiFocusId: 'DOC-1' })
+  assert.deepEqual(planOpen('wiki', 'material:MAT-1'), { page: 'wiki', materialFocusId: 'MAT-1' })
+  assert.match(app, /if \(plan\.wikiFocusId\) setWikiFocusId\(plan\.wikiFocusId\)/u)
+  // 출처 배지의 이동은 두 WorkPage 렌더가 공유하는 한 함수를 지난다 — 두 렌더가 모두 그 함수를 넘겨야 배지가 양쪽에서 살아난다.
   const body = functionBody(app, 'const openWorkOrigin = (originPage: string, focusId: string) => {')
-  assert.match(body, /originPage === 'wiki'/u)
-  assert.match(body, /setWikiFocusId\(focusId\)/u)
+  assert.match(body, /openTarget\(originPage, focusId\)/u)
   assert.equal(count(app, /onOpenOrigin=\{openWorkOrigin\}/gu), 2, '데스크톱·휴대폰 두 렌더가 같은 이동 함수를 쓴다')
   assert.match(approvalQueue, /proposal\.kind === 'wiki-task'/u)
   // 승인 큐를 지나 만들어진 업무의 출처 kind는 'wiki'가 아니라 'wiki-task'다(제안 kind를 그대로 쓴다).
@@ -283,13 +286,11 @@ test('검색 결과와 출처 배지가 문서로 돌아온다', () => {
 
 test('출처 배지는 실제로 도착한다 — 휴대폰 탭까지 옮기고, 안내 문장은 목적지를 아는 곳에서 고른다', () => {
   const body = functionBody(app, 'const openWorkOrigin = (originPage: string, focusId: string) => {')
-  const lastBranch = body.lastIndexOf("originPage === '")
-  // 휴대폰은 아래 네 칸(mobileTab)이 화면을 정한다. 탭 이동이 어느 한 갈래 안에 갇히면
-  // 나머지 갈래는 page만 바뀐 채 업무 탭에 남아, 눌러도 목적지에 닿지 못한다.
-  const tabMoves = [...body.matchAll(/setMobileTab\('more'\)/gu)]
-  assert.equal(tabMoves.length, 1, '휴대폰 탭 이동은 갈래마다가 아니라 한 자리에 있어야 한다')
-  assert.ok(tabMoves[0].index > lastBranch, '탭 이동이 갈래 안에 갇히면 그 밖의 출처는 업무 탭에 남는다')
-  assert.ok(body.indexOf("setWorkFocusId('')") > lastBranch, '업무 상세가 남아 있으면 탭을 옮겨도 업무 화면이 계속 그려진다')
+  // 휴대폰은 아래 네 칸(mobileTab)이 화면을 정한다. 탭 이동은 갈래마다가 아니라 navigate 한 자리에서
+  // 화면에 맞춰 일어난다(업무·오늘·더보기) — openWorkOrigin은 갈래를 가르지 않고 openTarget에 맡긴다.
+  assert.doesNotMatch(body, /setMobileTab\(/u)
+  assert.match(app, /if \(phoneShell\) \{ setMobileTab\(nextPage === 'tasks' \? 'tasks' : nextPage === 'ai' \? 'today' : 'more'\)/u)
+  assert.ok(body.indexOf("setWorkFocusId('')") >= 0 && body.indexOf("setWorkFocusId('')") < body.indexOf('openTarget(originPage, focusId)'), '업무 상세가 남아 있으면 탭을 옮겨도 업무 화면이 계속 그려진다')
   // 한 클릭이 두 목적지를 말하지 않는다 — 배지 쪽에는 안내 문장이 없다.
   const badge = attributeValues(app, 'onOpen').find((value) => value.includes('onOpenOrigin'))
   assert.ok(badge, '업무 상세의 출처 배지를 찾지 못했다')

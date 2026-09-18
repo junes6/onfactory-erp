@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import { canJudgeMissingNotice } from '../src/utils/noticeFocus.ts'
+import { planOpen } from '../src/utils/appRoute.ts'
 
 /**
  * 공지 화면 계약(설계서 D절 §2·§7).
@@ -111,12 +112,17 @@ test('본문 상한 숫자는 화면과 서버가 같다 — 어긋나면 막지
 test('딥링크는 focusId 한 문자열로 가고, onNavigate 시그니처는 그대로 두 인자다', () => {
   assert.match(noticeCenter, /export function parseMessengerFocus/)
   assert.match(noticeCenter, /event\.nativeEvent\.isComposing/)
-  // 규약을 읽는 함수는 여전히 한 벌(NoticeCenter)이고, 부르는 자리만 늘어난다.
-  // R16-J에서 업무 출처 배지(스레드에서 승격)가 두 번째 호출부가 됐다 — 'messenger'는 industryRoutes에
-  // 없어 navigate로는 토스트로 끝나므로, 여기서도 서랍을 그 자리에 여는 같은 갈래를 탄다.
-  assert.equal((app.match(/parseMessengerFocus\(focusId\)/g) ?? []).length, 2)
-  assert.match(app, /const openWorkOrigin = \(originPage: string, focusId: string\) => \{[\s\S]{0,400}?originPage === 'messenger' \? parseMessengerFocus\(focusId\) : null/)
-  assert.equal((app.match(/hit\.kind === 'notice'/g) ?? []).length, 1)
+  // 규약을 읽는 함수는 여전히 한 벌(NoticeCenter)이고, 부르는 자리는 이제 openTarget 한 곳이다 —
+  // 알림 센터·웹푸시·전역 검색·업무 출처 배지(스레드에서 승격)가 모두 openTarget을 지난다.
+  // 'messenger'는 industryRoutes에 없어 navigate로는 토스트로 끝나므로, 서랍을 그 자리에 연다.
+  assert.equal((app.match(/parseMessengerFocus\(/g) ?? []).length, 1)
+  assert.match(app, /const focus = plan\.messenger \? parseMessengerFocus\(plan\.messenger\) : null/)
+  assert.match(app, /const openWorkOrigin = \(originPage: string, focusId: string\) => \{[\s\S]{0,900}?openTarget\(originPage, focusId\)/)
+  assert.match(app, /openTarget\(hit\.page, hit\.focusId\)/)
+  // 메신저 갈래는 page보다 focusId의 모양이 먼저다 — 검색의 메시지 결과는 page가 'ai'로 온다.
+  assert.deepEqual(planOpen('messenger', 'company:notice:NTC-1'), { page: '', messenger: 'company:notice:NTC-1' })
+  assert.deepEqual(planOpen('ai', 'CONV-1:message:MSG-1'), { page: '', messenger: 'CONV-1:message:MSG-1' })
+  assert.deepEqual(planOpen('messenger', ''), { page: '', messenger: null })
   assert.match(notificationCenter, /onNavigate: \(page: string, focusId: string\) => void/)
 })
 

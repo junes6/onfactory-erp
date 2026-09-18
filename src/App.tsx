@@ -52,7 +52,8 @@ import { WorkCalendarView } from './components/WorkCalendarView'
 import { WorkFilterBar } from './components/WorkFilterBar'
 import { SavedViewMenu } from './components/SavedViewMenu'
 import { collectCreateFields, CustomFieldAdmin, CustomFieldCreateInputs, CustomFieldEditor, useCustomFields, type CustomFieldDefinition, type WorkFieldSaveResult } from './components/CustomFieldInputs'
-import { approvalSeenAt, notificationFocusTarget } from './utils/approvalLine'
+import { approvalSeenAt } from './utils/approvalLine'
+import { currentRoutePage, planOpen, readRoute, routeSearch, type AppRoute } from './utils/appRoute'
 import { isWorkOverdue, projectBarLabel, scheduleBlockReason, workPeriodLabel, SCHEDULE_ORDER_HINT } from './utils/workTimeline'
 import type { ScheduleResult } from './utils/workTimeline'
 import { activeFilterCount, applyWorkFilters, DEFAULT_WORK_SORT, EMPTY_WORK_FILTERS, readStoredWorkView, sortWorkItems, writeStoredWorkView, type WorkFilters, type WorkSort } from './utils/workViews'
@@ -260,6 +261,52 @@ type DashboardDropTarget = {
   edge: 'before' | 'after'
 }
 
+/**
+ * AI에게 넘기는 운영 데이터. 홈의 AI 칸과 어느 화면에서나 여는 [AI에게 묻기]가 이 하나를 쓴다 —
+ * 두 곳이 따로 만들면 같은 질문에 다른 근거로 답한다.
+ * 업종을 따른다: IT 고객사에게 빈 products·salesChannels를 보내면 모델은 "제품이 하나도 없는 제조사"로 읽는다.
+ */
+function buildAiContext({ workItems, products, salesChannels, itProjects, itContracts, calendarEvents, companyName, currentUserId, canAssignTasks, industryType }: {
+  workItems: WorkItem[]
+  products: DashboardProduct[]
+  salesChannels: DashboardSalesChannel[]
+  itProjects: DashboardItProject[]
+  itContracts: DashboardItContract[]
+  calendarEvents: DashboardCalendarEvent[]
+  companyName: string
+  currentUserId: string
+  canAssignTasks: boolean
+  industryType?: string
+}) {
+  const openWork = workItems.filter((item) => item.status !== '결재완료')
+  const myWork = openWork.filter((item) => item.ownerId === currentUserId || (item.requesterId === currentUserId && item.status === '결재대기'))
+  const isItServices = resolveIndustry(industryType) === 'it_services'
+  const moduleDataAvailable = isItServices ? itProjects.length > 0 || itContracts.length > 0 : products.length > 0 || salesChannels.length > 0
+  return {
+    operatingDataAvailable: moduleDataAvailable || calendarEvents.length > 0 || workItems.length > 0,
+    context: {
+      date: seoulDateInputValue(new Date()),
+      company: companyName,
+      industry: resolveIndustry(industryType),
+      ...(isItServices
+        ? {
+          projects: itProjects.map(({ name, client, status, dueDate }) => ({ name, client, status, dueDate })),
+          contracts: canAssignTasks ? itContracts.map(({ client, title, endDate }) => ({ client, title, endDate })) : [],
+        }
+        : {
+          salesChannels: salesChannels.map(({ name, orders, units, revenue, status }) => canAssignTasks
+            ? { name, orders, units, revenue, status }
+            : { name, status }),
+          products: products.map(({ name, stock, available, safetyStock, labelStatus, status }) => ({
+            name, stock, available, safetyStock, labelStatus, status,
+          })),
+        }),
+      sharedSchedule: calendarEvents,
+      openWork: canAssignTasks ? openWork : myWork,
+    },
+  }
+}
+
 function AIHome({ workItems, products, salesChannels, itProjects, itContracts, calendarEvents, currentUserName, currentUserId, companyName, canAssignTasks, workspaceScope, onOpenTask, easyMode = false, industryType, pendingProposals = 0, decidedUnread = 0, onAdvanceTask, onCreateTask, onNavigate, onOpenAlerts, onToast }: {
   /** 사람이 **지금 결정할 것** — AI 제안 + 내가 결재할 문서. */
   pendingProposals?: number
@@ -333,28 +380,7 @@ function AIHome({ workItems, products, salesChannels, itProjects, itContracts, c
   const [keyboardWidgetId, setKeyboardWidgetId] = useState<DashboardWidgetPreference['id'] | null>(null)
   const [dropTarget, setDropTarget] = useState<DashboardDropTarget | null>(null)
   const [layoutAnnouncement, setLayoutAnnouncement] = useState('')
-  // AI에 넘기는 운영 데이터도 업종을 따른다. IT 고객사에게 빈 products·salesChannels를 보내면
-  // 모델은 "제품이 하나도 없는 제조사"로 읽고 정작 프로젝트·계약은 근거로 쓰지 못한다.
-  const aiContext = {
-    date: todayIso,
-    company: companyName,
-    industry: resolveIndustry(industryType),
-    ...(isItServices
-      ? {
-        projects: itProjects.map(({ name, client, status, dueDate }) => ({ name, client, status, dueDate })),
-        contracts: canAssignTasks ? itContracts.map(({ client, title, endDate }) => ({ client, title, endDate })) : [],
-      }
-      : {
-        salesChannels: salesChannels.map(({ name, orders, units, revenue, status }) => canAssignTasks
-          ? { name, orders, units, revenue, status }
-          : { name, status }),
-        products: products.map(({ name, stock, available, safetyStock, labelStatus, status }) => ({
-          name, stock, available, safetyStock, labelStatus, status,
-        })),
-      }),
-    sharedSchedule: calendarEvents,
-    openWork: canAssignTasks ? openWork : myWork,
-  }
+  const aiContext = buildAiContext({ workItems, products, salesChannels, itProjects, itContracts, calendarEvents, companyName, currentUserId, canAssignTasks, industryType }).context
 
   const visibleWidgets = widgetPreferences.filter((item) => item.id !== 'summary' && item.visible)
   const hiddenWidgets = widgetPreferences.filter((item) => item.id !== 'summary' && !item.visible)
@@ -796,12 +822,16 @@ function WorkRuleModal({ assignees, industryType, onClose, onSubmit }: { assigne
 /** 업무 화면이 지금 제공하는 보기. 목록·캘린더는 뒤 절에서 같은 스위처에 붙는다. */
 const WORK_VIEW_MODES = ['list', 'board', 'calendar', 'timeline'] as const
 
-function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, industryType, workspaceScope, focusId, parentRefs = {}, onToast, onOpenOrigin, onCreate, onCreateSubtask, onMoveParent, onSchedule, onSaveFields, onTransition, onCreateRule, onToggleRule, onDeleteRule, onToggleChecklist }: {
+function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, industryType, workspaceScope, focusId, closeSignal = 0, onDrawerChange, parentRefs = {}, onToast, onOpenOrigin, onCreate, onCreateSubtask, onMoveParent, onSchedule, onSaveFields, onTransition, onCreateRule, onToggleRule, onDeleteRule, onToggleChecklist }: {
   items: WorkItem[]; rules: WorkRule[]; currentUserId: string; canAssignTasks: boolean; assignees: WorkAssignee[]
   industryType?: string
   onOpenOrigin?: (page: string, focusId: string) => void
   workspaceScope?: string
   focusId?: string
+  /** 값이 바뀌면 열린 상세를 닫는다(브라우저 [뒤로]). */
+  closeSignal?: number
+  /** 상세 서랍이 열리고 닫힐 때 — 주소창과 휴대폰 목록 복귀가 이것을 따른다. */
+  onDrawerChange?: (taskId: string | null) => void
   /** 자식만 보이는 직원에게 서버가 내려 준 상위 제목({ id, title }). 담당·상태·마감은 오지 않는다. */
   parentRefs?: Record<string, ParentRef>
   onToast: (message: string) => void
@@ -866,8 +896,24 @@ function WorkPage({ items, rules, currentUserId, canAssignTasks, assignees, indu
   const drawerRef = useDialogFocus(Boolean(drawerId))
   const handledFocusRef = useRef<string | undefined>(undefined)
 
+  // 상세가 열리고 닫힌 것을 App에 알린다. 부모 함수는 매번 새로 만들어지므로 ref로 붙든다.
+  const drawerChangeRef = useRef(onDrawerChange)
+  drawerChangeRef.current = onDrawerChange
+  const reportedDrawerRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!focusId || handledFocusRef.current === focusId) return
+    if (reportedDrawerRef.current === drawerId) return
+    reportedDrawerRef.current = drawerId
+    drawerChangeRef.current?.(drawerId)
+  }, [drawerId])
+  // 상세를 연 채 화면을 떠나면 닫힌 것으로 알린다(주소에 떠난 업무가 남지 않게).
+  useEffect(() => () => { if (reportedDrawerRef.current) drawerChangeRef.current?.(null) }, [])
+  // [뒤로]로 상세 주소를 떠나면 상세도 닫는다. 첫 값(0)에는 아무것도 하지 않는다.
+  useEffect(() => { if (closeSignal) setDrawerId(null) }, [closeSignal])
+
+  useEffect(() => {
+    // App이 초점을 비우면(상세를 닫았다) 같은 업무를 다시 가리킬 때 다시 열 수 있어야 한다.
+    if (!focusId) { handledFocusRef.current = undefined; return }
+    if (handledFocusRef.current === focusId) return
     const focused = items.find((item) => item.id === focusId)
     if (!focused) return
     handledFocusRef.current = focusId
@@ -2076,8 +2122,18 @@ export default function App() {
    * 한 손으로 드는 화면에만 필요하고, 태블릿에서는 옆 메뉴가 그대로 낫다.
    */
   const [isPhone, setIsPhone] = useState(() => window.innerWidth <= 768)
-  /** 휴대폰에서 처음 들어오는 곳은 채팅이다. 현장에서 앱을 여는 이유가 대개 "누가 뭐라고 했나"다. */
-  const [mobileTab, setMobileTab] = useState<MobileTab>('chat')
+  /**
+   * 휴대폰에서 처음 들어오는 곳은 '오늘'이다. 전에는 채팅이었는데, 대화가 없는 사람에게는 빈 메신저와
+   * "검색 결과가 없습니다"가 첫 화면이 됐다(실측). 오늘 할 일·일정·알림이 한 화면에 있는 '오늘'이
+   * 앱을 여는 이유 대부분에 답하고, 채팅은 한 번 누르면 된다.
+   */
+  const [mobileTab, setMobileTab] = useState<MobileTab>('today')
+  /** 어디서나 여는 [AI에게 묻기] 서랍. 한 번 열면 대화가 남도록 닫아도 내려 두지 않는다. */
+  const [aiDrawerOpen, setAiDrawerOpen] = useState(false)
+  const [aiDrawerMounted, setAiDrawerMounted] = useState(false)
+  /** 지금 열려 있는 업무 상세(데스크톱·휴대폰 공통). 주소창의 focus가 이것을 따른다. */
+  const [openTaskId, setOpenTaskId] = useState('')
+  const [taskCloseSignal, setTaskCloseSignal] = useState(0)
   const [moreSheetOpen, setMoreSheetOpen] = useState(false)
   const [messengerOpen, setMessengerOpen] = useState(false)
   const [messengerUnread, setMessengerUnread] = useState(0)
@@ -2145,15 +2201,8 @@ export default function App() {
       const data = event.data as { kind?: string; url?: string } | null
       if (data?.kind !== 'notification-click' || !data.url) return
       const params = new URL(data.url, window.location.origin).searchParams
-      const page = params.get('page')
-      const focus = params.get('focus')
-      // 어디를 열 것인가는 page가 아니라 **id의 모양**이 정한다(notificationFocusTarget).
-      // page로 먼저 가르면 결재 문서를 가리키면서 page가 'approvals'가 아닌 알림 — 아침 요약과
-      // 유형표가 아직 'tasks'인 결재 요청 — 이 업무 id 자리로 흘러들어 아무것도 열리지 않는다.
-      const target = notificationFocusTarget(page, focus)
-      setApprovalFocusId(target.approvalFocusId)
-      if (target.workFocusId) setWorkFocusId(target.workFocusId)
-      if (target.page) navigate(target.page as PageId)
+      // 알림 센터와 같은 규칙으로 연다(openTarget) — 전에는 이 갈래에 메신저·인사·문서·검토 자료가 없었다.
+      openTarget(params.get('page') ?? '', params.get('focus'))
       void loadNotifications()
     }
     navigator.serviceWorker.addEventListener('message', onMessage)
@@ -2665,26 +2714,108 @@ export default function App() {
    * 같은 클릭이 두 개의 다른 목적지를 말한다(문서로 가면서 "승인 큐에서 확인하세요"라고 하는 식이다).
    */
   const openWorkOrigin = (originPage: string, focusId: string) => {
-    // 스레드에서 승격한 업무의 출처는 메신저다. navigate('messenger')는 industryRoutes에 없어
-    // '이 회사의 업종 모듈에 없는 메뉴입니다'로 끝나므로, 알림과 같은 규약으로 서랍을 그 자리에 연다.
-    // 서랍은 그 자리에서 열리므로 어디로 가라는 안내가 필요 없고, 하면 거짓말이 된다.
-    const focus = originPage === 'messenger' ? parseMessengerFocus(focusId) : null
-    if (focus) { setMessengerFocus(focus); setMessengerOpen(true); if (phoneShell) setMobileTab('chat'); return }
-    if (originPage === 'projects') { setProjectFocusId(focusId); setToast('프로젝트에서 출처를 확인하세요.') }
-    // R16-L: 외부 연동에서 만들어진 업무의 출처는 인사·조직의 '외부 연동' 탭이다.
-    // 그 탭은 관리자에게만 열리므로(PeopleOperations의 initialTab && canManage), 구성원은 기본 탭을 본다.
-    // 이 갈래의 문장은 R16-L이 쓰던 것을 그대로 둔다 — 여기서 고치면 이 절이 재지 않은 화면을 말하게 된다.
-    else if (originPage === 'people') { setPeopleInitialTab('integrations'); setToast('승인 큐에서 원인을 확인하세요.') }
-    // R16-H: 문서에서 승격한 업무의 출처는 그 문서다. page만 바꾸면 목록 첫 화면이 열려 근거에 닿지 못한다.
-    else if (originPage === 'wiki' && focusId.startsWith('material:')) { setMaterialFocusId(focusId.slice('material:'.length)); setToast('결정한 검토 자료를 엽니다.') }
-    else if (originPage === 'wiki') { setWikiFocusId(focusId); setToast('원본 문서를 엽니다.') }
-    else setToast('승인 큐에서 원인을 확인하세요.')
-    // 휴대폰은 아래 네 칸이 화면을 정한다 — page만 바꾸고 탭을 두면 업무 상세가 그대로 남아
-    // 어느 갈래도 실제로는 도착하지 못한다. 'more' 시트가 이 화면들로 가는 유일한 휴대폰 입구다.
-    setWorkFocusId('')
-    if (phoneShell) setMobileTab('more')
-    navigate(originPage as PageId)
+    const plan = planOpen(originPage, focusId)
+    // 메신저 서랍은 그 자리에서 열리므로 어디로 가라는 안내가 필요 없고, 하면 거짓말이 된다.
+    // 나머지 문장은 R16-H·R16-L이 쓰던 것을 그대로 둔다.
+    if (plan.messenger === undefined) {
+      setToast(plan.projectFocusId ? '프로젝트에서 출처를 확인하세요.'
+        : plan.materialFocusId ? '결정한 검토 자료를 엽니다.'
+          : plan.wikiFocusId ? '원본 문서를 엽니다.'
+            : '승인 큐에서 원인을 확인하세요.')
+      // 휴대폰에서 업무 상세가 그대로 남으면 어느 갈래도 도착하지 못한다.
+      setWorkFocusId('')
+    }
+    openTarget(originPage, focusId)
   }
+
+  /**
+   * 링크 하나를 연다 — 알림 센터·웹푸시·전역 검색·출처 배지·근거 링크·주소창이 모두 여기로 온다.
+   * 무엇을 열지는 utils/appRoute.ts의 planOpen 한 곳이 정한다(전에는 다섯 곳이 제각각 갈랐다).
+   */
+  const openTarget = (targetPage: string, focusId?: string | null) => {
+    const plan = planOpen(targetPage, focusId)
+    setNotificationsOpen(false)
+    setAiDrawerOpen(false)
+    if (plan.messenger !== undefined) {
+      const focus = plan.messenger ? parseMessengerFocus(plan.messenger) : null
+      if (focus) setMessengerFocus(focus)
+      setMessengerOpen(true)
+      if (phoneShell) { setMoreSheetOpen(false); setMobileTab('chat') }
+      return
+    }
+    if (plan.page === 'approvals') setApprovalFocusId(plan.approvalFocusId ?? '')
+    if (plan.workFocusId) setWorkFocusId(plan.workFocusId)
+    if (plan.wikiFocusId) setWikiFocusId(plan.wikiFocusId)
+    if (plan.materialFocusId) setMaterialFocusId(plan.materialFocusId)
+    if (plan.projectFocusId) setProjectFocusId(plan.projectFocusId)
+    if (plan.peopleTab) setPeopleInitialTab(plan.peopleTab)
+    if (plan.page) navigate(plan.page as PageId)
+  }
+
+  // ---- 주소창: 화면을 따라가고, [뒤로]·새로 고침·링크 공유·닫힌 앱의 푸시가 제자리로 온다 ----
+  /** 처음 연 주소(?page=&focus=). 로그인해 회사 데이터가 준비되면 한 번 열고 비운다. */
+  const initialRouteRef = useRef<AppRoute | null>(readRoute(window.location.search))
+  /** 첫 주소를 연 직후 한 번은 옛 화면으로 주소를 덮지 않는다(상태가 아직 따라오지 않았다). */
+  const skipRouteSyncRef = useRef(false)
+  const routePage = currentRoutePage({ phone: phoneShell, mobileTab, page: page === 'wiki' && documentsTab === 'meetings' ? 'meetings' : page })
+  const routeFocus = routePage === 'tasks' ? openTaskId : ''
+  /** 업무 상세가 열리고 닫힐 때. 닫으면 초점도 비운다 — 휴대폰은 이것으로 한 줄 목록에 돌아온다. */
+  const handleTaskDrawerChange = (taskId: string | null) => {
+    setOpenTaskId(taskId ?? '')
+    if (!taskId) setWorkFocusId('')
+  }
+  // 1) 처음 연 주소를 한 번 연다 — 닫혀 있던 앱을 연 푸시, 공유받은 링크, 새로 고침.
+  useEffect(() => {
+    if (!tenantDataEnabled) return
+    const route = initialRouteRef.current
+    if (!route) return
+    initialRouteRef.current = null
+    skipRouteSyncRef.current = true
+    // focus는 한 번 열고 주소에서 뗀다 — 상세가 열리면 아래 동기화가 다시 붙인다.
+    try { window.history.replaceState(null, '', window.location.pathname + routeSearch(route.page)) } catch { /* 주소 정리는 편의 기능이다 */ }
+    openTarget(route.page, route.focus)
+  }, [tenantDataEnabled]) // eslint-disable-line react-hooks/exhaustive-deps -- 로그인해 데이터가 준비된 그 한 번만 연다
+  // 2) 화면이 바뀌면 주소를 따라 바꾼다. 상세를 닫아 방금 연 상세의 바로 앞 주소로 돌아가는 것이면
+  //    새 칸을 쌓지 않고 한 칸 되돌린다 — 그래야 [뒤로]가 닫은 상세를 다시 열지 않는다.
+  useEffect(() => {
+    if (!tenantDataEnabled || initialRouteRef.current) return
+    if (skipRouteSyncRef.current) { skipRouteSyncRef.current = false; return }
+    const params = new URLSearchParams(window.location.search)
+    if (params.has('guestInvite') || params.has('reset') || params.has('calendar')) return
+    const current = readRoute(window.location.search)
+    if (current && current.page === routePage && current.focus === routeFocus) return
+    const url = window.location.pathname + routeSearch(routePage, routeFocus)
+    try {
+      const pushedFocus = (window.history.state as { itfFocus?: boolean } | null)?.itfFocus === true
+      if (current && current.page === routePage && current.focus && !routeFocus && pushedFocus) { window.history.back(); return }
+      if (!current) { window.history.replaceState(null, '', url); return }
+      window.history.pushState({ itfFocus: Boolean(routeFocus) && current.page === routePage && !current.focus }, '', url)
+    } catch { /* 주소는 편의 기능이다 — 실패해도 화면은 그대로 쓴다 */ }
+  }, [routePage, routeFocus, tenantDataEnabled])
+  // 3) 브라우저·휴대폰의 [뒤로]·[앞으로]. 열린 겹(시트·알림·AI 서랍)은 함께 닫는다.
+  useEffect(() => {
+    const onPop = () => {
+      if (!tenantDataEnabled) return
+      const route = readRoute(window.location.search)
+      if (!route) return
+      setMoreSheetOpen(false)
+      setNotificationsOpen(false)
+      setAiDrawerOpen(false)
+      if (route.page === 'messenger') { setMessengerOpen(true); if (phoneShell) setMobileTab('chat'); return }
+      setMessengerOpen(false)
+      if (route.page === 'tasks' && route.focus) setWorkFocusId(route.focus)
+      else { setWorkFocusId(''); setTaskCloseSignal((value) => value + 1) }
+      navigate(route.page as PageId)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }) // navigate는 매 렌더 새로 만들어지므로 의존성 배열을 두지 않는다.
+  const aiDrawerRef = useDialogFocus(aiDrawerOpen)
+  const askAi = aiDrawerMounted ? buildAiContext({
+    workItems: scopedWorkItems, products: dashboardProducts, salesChannels: dashboardSalesChannels, itProjects: dashboardItProjects,
+    itContracts: dashboardItContracts, calendarEvents: dashboardCalendarEvents, companyName: tenantName,
+    currentUserId: account?.id ?? '', canAssignTasks: account?.role === 'tenant-admin', industryType: account?.industryType,
+  }) : null
   const enterPlatform = () => {
     if (account?.role !== 'platform-operator') { setToast(`통합 관리자는 ${BRAND.platformOperatorLabel} 계정으로만 접근할 수 있습니다.`); return }
     setMode('platform')
@@ -2977,18 +3108,24 @@ export default function App() {
    * 더보기도 시트를 여는 동작이라 화면 자체는 직전 탭을 그대로 둔다.
    */
   const renderMobileTab = () => {
-    const todayIso = new Date().toISOString().slice(0, 10)
+    // 서울 날짜로 센다 — UTC로 자르면 아침 9시 전에는 어제 일정이 '오늘'로 나왔다.
+    const todayIso = seoulDateInputValue(new Date())
+    const myId = account?.id ?? ''
+    // '오늘'은 **내** 할 일이다. 전에는 관리자에게 회사 전체 업무가 '내 업무'로 나왔다.
+    // 내가 맡은 것 + 내가 확인할 차례인 것(요청자·결재대기) — AI 홈의 '내 업무'와 같은 기준이다.
+    const mobileOpenItems = scopedWorkItems.filter((item) => item.status !== '결재완료'
+      && (item.ownerId === myId || (item.requesterId === myId && item.status === '결재대기')))
     // 오늘 5건은 최상위 행만 센다 — 한 상위가 자식 수만큼 줄을 차지하면 '오늘 다섯 가지'가 뜻을 잃는다.
     // 접는 기준은 '오늘 목록에 있는 상위'다. 끝난 상위 아래 남은 자식이 오늘 목록에서 통째로 사라지면 안 된다.
-    const mobileOpenItems = scopedWorkItems.filter((item) => item.status !== '결재완료')
     const mobileIds = new Set(mobileOpenItems.map((item) => item.id))
     if (mobileTab === 'today') {
       return (
         <MobileToday
           userName={account?.name ?? ''}
           allTasks={scopedWorkItems}
+          openCount={mobileOpenItems.length}
           tasks={mobileOpenItems.filter((item) => isTopLevelIn(item, mobileIds))}
-          events={dashboardCalendarEvents.filter((event) => event.date.slice(0, 10) === todayIso).map((event) => ({ id: event.id, title: event.title, date: event.date, owner: event.department }))}
+          events={dashboardCalendarEvents.filter((event) => event.date.slice(0, 10) === todayIso).map((event) => ({ id: event.id, title: event.title, time: event.start ? `${event.start}${event.end ? `–${event.end}` : ''}` : '', owner: event.department }))}
           alerts={(notificationFeed?.items ?? []).filter((item) => !item.readAt).map((item) => ({ id: item.id, title: item.title, createdAt: item.createdAt }))}
           onOpenTask={(task) => { setWorkFocusId(task.id); setMobileTab('tasks') }}
           onGoTasks={() => setMobileTab('tasks')}
@@ -3000,11 +3137,12 @@ export default function App() {
       // 상세를 열어야 하는 업무는 기존 업무 화면으로 넘긴다. 작은 화면용으로 상세를 새로 만들면
       // 결재·증빙 같은 것이 두 곳에서 갈라진다.
       if (workFocusId) {
-        return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onSchedule={scheduleTask} onSaveFields={saveTaskFields} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
+        return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} closeSignal={taskCloseSignal} onDrawerChange={handleTaskDrawerChange} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onSchedule={scheduleTask} onSaveFields={saveTaskFields} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
       }
       return (
         <MobileTaskList
           tasks={scopedWorkItems}
+          currentUserId={account?.id ?? ''}
           parentRefs={workParentRefs}
           onAdvance={(task) => advanceTask(task)}
           onOpenTask={(task) => setWorkFocusId(task.id)}
@@ -3025,7 +3163,7 @@ export default function App() {
     }
     switch (page) {
       case 'schedule': return <SchedulePage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} calendarCallbackFlag={calendarCallbackFlag} onCalendarCallbackHandled={() => setCalendarCallbackFlag('')} />
-      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onSchedule={scheduleTask} onSaveFields={saveTaskFields} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
+      case 'tasks': return <WorkPage items={scopedWorkItems} rules={workRules} currentUserId={account?.id ?? ''} canAssignTasks={account?.role === 'tenant-admin'} assignees={workAssignees} industryType={account?.industryType} workspaceScope={workspaceScope} focusId={workFocusId} closeSignal={taskCloseSignal} onDrawerChange={handleTaskDrawerChange} parentRefs={workParentRefs} onToast={setToast} onOpenOrigin={openWorkOrigin} onCreate={() => setTaskDraft({ title: '', completionCriteria: '' })} onCreateSubtask={(parentId) => setTaskDraft({ title: '', completionCriteria: '', parentId })} onMoveParent={moveTaskParent} onSchedule={scheduleTask} onSaveFields={saveTaskFields} onTransition={transitionTask} onCreateRule={createWorkRule} onToggleRule={toggleWorkRule} onDeleteRule={deleteWorkRule} onToggleChecklist={toggleChecklistItem} />
       case 'journal': return <DailyJournalPage {...collaborationIdentity} workspaceScope={workspaceScope} onToast={setToast} />
       case 'projects': return <ProjectSpacesPage workspaceScope={workspaceScope} focusProjectId={projectFocusId} onFocusHandled={() => setProjectFocusId(undefined)} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onOpenWiki={(projectId) => { setWikiProjectId(projectId); setWikiFocusId(undefined); navigate('wiki') }} onNavigate={(target) => { if (target === 'people') setPeopleInitialTab('accounts'); navigate(target as PageId) }} />
       case 'finance': return <TaxAssetsPage workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} industryType={account?.industryType ?? 'food_manufacturing'} onToast={setToast} />
@@ -3044,15 +3182,7 @@ export default function App() {
         focusId={approvalFocusId}
         onToast={setToast}
         onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }}
-        onOpenEvidence={(page, focusId) => {
-          // id는 그 id를 뜻하는 자리에만 넣는다. 자료 id를 workFocusId에 넣으면 업무 화면이
-          // 없는 업무를 찾다가 아무것도 못 여는 자리로 사람을 데려간다.
-          if (page === 'approvals') { setApprovalFocusId(focusId); return }
-          if (page === 'wiki' && focusId?.startsWith('material:')) setMaterialFocusId(focusId.slice('material:'.length))
-          else if (page === 'wiki' && focusId) setWikiFocusId(focusId)
-          else if (page === 'tasks' && focusId) setWorkFocusId(focusId)
-          navigate(page as PageId)
-        }}
+        onOpenEvidence={(page, focusId) => openTarget(page, focusId)}
         onPendingChange={setPendingProposals}
         onWaitingChange={handleApprovalSummary}
       />
@@ -3147,19 +3277,9 @@ export default function App() {
                 workspaceScope={workspaceScope}
                 placeholder={tenantSurface.globalSearchPlaceholder}
                 onOpen={(hit) => {
-                  // 공지와 메신저 메시지는 같은 focusId 규약('<방>:<종류>:<id>')을 쓴다. 이 한 갈래가
-                  // "메시지 결과를 눌러도 그 방이 열리지 않던" 기존 결손도 함께 닫는다.
-                  // 아래 message 갈래는 그대로 둔다 — 규약이 바뀌기 전에 저장된 '최근 연 항목'은
-                  // 아직 방 id만 들고 있어 parse가 null이고, 그때는 서랍만 여는 옛 행동이 맞다.
-                  if (hit.kind === 'notice' || hit.kind === 'message') {
-                    const focus = parseMessengerFocus(hit.focusId)
-                    if (focus) { setMessengerFocus(focus); setMessengerOpen(true); return }
-                  }
-                  if (hit.kind === 'task') setWorkFocusId(hit.focusId)
-                  else if (hit.kind === 'wiki') setWikiFocusId(hit.focusId)
-                  else if (hit.kind === 'message' || hit.kind === 'conversation') { setMessengerOpen(hit.kind === 'message'); if (hit.kind === 'message') return }
-                  else setPlatformFocusId(hit.focusId)
-                  navigate(hit.page as PageId)
+                  // 규약이 바뀌기 전에 저장된 '최근 연 항목'의 메시지는 방 id만 들고 있다 — 그때는 서랍만 연다.
+                  if (hit.kind === 'message' && planOpen(hit.page, hit.focusId).messenger === undefined) { setMessengerOpen(true); if (phoneShell) setMobileTab('chat'); return }
+                  openTarget(hit.page, hit.focusId)
                 }}
               />
             ) : (
@@ -3173,6 +3293,7 @@ export default function App() {
               })}</div>}
             </div>
             )}
+            {tenantDataEnabled && <button type="button" className={'top-icon-button ai-trigger ' + (aiDrawerOpen ? 'active' : '')} aria-label="AI에게 묻기" aria-expanded={aiDrawerOpen} onClick={() => { setAiDrawerMounted(true); setAiDrawerOpen((value) => !value); setNotificationsOpen(false); setMoreSheetOpen(false) }}><Sparkles size={20} /><span className="ai-trigger-label">AI에게 묻기</span></button>}
             {mode === 'tenant' && <button type="button" className={'top-icon-button messenger-trigger ' + (messengerOpen ? 'active' : '')} aria-label={`사내 메신저 열기, 읽지 않은 대화 ${messengerUnread}개`} aria-controls="company-messenger" aria-expanded={messengerOpen} onClick={() => { setMessengerOpen((value) => !value); setNotificationsOpen(false) }}><ChatBubbleIcon />{messengerUnread > 0 && <span>{messengerUnread}</span>}</button>}
             <div className="notification-wrap" ref={notificationWrapRef}>
               <button type="button" className={'top-icon-button ' + (notificationsOpen ? 'active' : '')} aria-label={'알림 ' + unread + '개'} aria-controls="notification-panel" aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((value) => !value); setMessengerOpen(false) }}><NotificationBellIcon />{unread > 0 && <span>{unread}</span>}</button>
@@ -3180,27 +3301,7 @@ export default function App() {
                 workspaceScope={workspaceScope}
                 feed={notificationFeed}
                 onReload={loadNotifications}
-                onNavigate={(page, focusId) => {
-                  // 공지·멘션 알림은 화면을 갈아 끼우지 않고 메신저 서랍을 그 자리에 연다.
-                  // navigate('messenger')는 industryRoutes에 없어 토스트로 끝난다(기존 결손).
-                  const focus = page === 'messenger' ? parseMessengerFocus(focusId) : null
-                  if (focus) { setMessengerFocus(focus); setMessengerOpen(true); setNotificationsOpen(false); if (phoneShell) setMobileTab('chat'); return }
-                  if (page === 'messenger') { setMessengerOpen(true); setNotificationsOpen(false); if (phoneShell) setMobileTab('chat'); return }
-                  // R16-L: '외부 연동이 중지됐습니다'는 인사·조직의 외부 연동 탭에서만 고칠 수 있다.
-                  // 출처 배지(openWorkOrigin)와 같은 규칙을 쓴다 — 두 입구가 다른 곳에 내려놓으면
-                  // 한쪽은 '주소를 고쳐 주세요'라고 말해 놓고 고칠 수 없는 화면을 연다.
-                  // 엔드포인트 id를 workFocusId에 넣지 않는다: 그 자리는 업무 id만 뜻한다.
-                  if (page === 'people') { setPeopleInitialTab('integrations'); setNotificationsOpen(false); navigate('people'); return }
-                  // 문서·검토 자료 알림은 그 문서·자료를 연다(업무 자리에 문서 id를 넣지 않는다).
-                  if (page === 'wiki' && focusId) { if (focusId.startsWith('material:')) setMaterialFocusId(focusId.slice('material:'.length)); else setWikiFocusId(focusId); setNotificationsOpen(false); navigate('wiki'); return }
-                  // 어디를 열 것인가는 page가 아니라 **id의 모양**이 정한다(notificationFocusTarget).
-                  // 결재 문서 id는 결재 자리에서만 뜻이 있고, page:'approvals'로 오는 알림이 전부
-                  // 결재 문서인 것도 아니다(AI 제안 PRP-·센티널·기회 OPP-).
-                  const target = notificationFocusTarget(page, focusId)
-                  setApprovalFocusId(target.approvalFocusId)
-                  if (target.workFocusId) setWorkFocusId(target.workFocusId)
-                  navigate((target.page || page) as PageId)
-                }}
+                onNavigate={(page, focusId) => openTarget(page, focusId)}
                 onToast={setToast}
                 onClose={() => setNotificationsOpen(false)}
               />}
@@ -3249,6 +3350,16 @@ export default function App() {
 
       {/* 메신저는 고객사 워크스페이스의 것이다. 플랫폼 콘솔에서 그리면 대화 목록을 읽다 403이 나고 「고객사 워크스페이스에서만…」 알림이 뜬다. */}
       {tenantDataEnabled && <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => { setMessengerOpen(false); if (phoneShell && mobileTab === 'chat') setMobileTab('today') }} onToast={setToast} onUnreadChange={setMessengerUnread} focus={messengerFocus} onFocusHandled={() => setMessengerFocus(null)} />}
+      {/* 어디서나 여는 [AI에게 묻기]. 한 번 열면 대화가 남도록 닫아도 내려 두지 않고 숨긴다. */}
+      {askAi && tenantDataEnabled && (
+        <div hidden={!aiDrawerOpen}>
+          <button className="drawer-scrim" type="button" aria-label="AI 대화 닫기" tabIndex={-1} onClick={() => setAiDrawerOpen(false)} />
+          <aside ref={aiDrawerRef} className="chat-drawer" role="dialog" aria-modal="true" aria-labelledby="ask-ai-title" onKeyDown={(event) => { if (event.key === 'Escape') setAiDrawerOpen(false) }}>
+            <header><div><span className="eyebrow">AI</span><h2 id="ask-ai-title">AI에게 묻기</h2></div><IconButton tone="ghost" type="button" aria-label="AI 대화 닫기" onClick={() => setAiDrawerOpen(false)}><X size={21} /></IconButton></header>
+            <AIChat companyName={tenantName} canCreateTask={account?.role === 'tenant-admin'} canViewCommercial={account?.role === 'tenant-admin'} operatingDataAvailable={askAi.operatingDataAvailable} workspaceScope={workspaceScope} industryType={account?.industryType} onCreateTask={(text, completionCriteria = '') => { setAiDrawerOpen(false); setTaskDraft({ title: text, completionCriteria }) }} context={askAi.context} />
+          </aside>
+        </div>
+      )}
       {lensTarget && <LensPanel target={lensTarget} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} onClose={() => setLensTarget(null)} onToast={setToast} onPendingChange={setPendingProposals} />}
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? BRAND.name} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
       {profileOpen && account && <ProfileEditor account={account} onClose={() => setProfileOpen(false)} onToast={setToast} onSaved={(next) => { setAccount((current) => current ? { ...current, ...next } as AuthAccount : current) }} />}

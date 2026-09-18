@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
+import { planOpen } from '../src/utils/appRoute.ts'
+
 /**
  * 외부 연동 화면 계약(설계서 L절 §6·§7).
  *
@@ -20,6 +22,8 @@ const settingsCss = await read('src/components/WebhookSettings.css')
 const notifications = await read('src/components/NotificationCenter.tsx')
 const notificationsCss = await read('src/components/NotificationCenter.css')
 const app = await read('src/App.tsx')
+const appRoute = await read('src/utils/appRoute.ts')
+const webhookRoutes = await read('server/webhook-routes.mjs')
 
 const count = (source, pattern) => (source.match(pattern) ?? []).length
 
@@ -151,7 +155,11 @@ test('알림 설정 표의 열은 서버가 준 채널 목록에서 나온다 �
 })
 
 test('출처 배지를 누르면 관리자만 외부 연동 탭으로 가고, 그 한 번으로 끝난다', () => {
-  assert.match(app, /originPage === 'people'\) \{ setPeopleInitialTab\('integrations'\)/)
+  // 출처 배지와 알림이 같은 규칙(planOpen)으로 연다 — 외부 연동 엔드포인트(WHK-)면 외부 연동 탭.
+  assert.match(appRoute, /if \(target === 'people' && WEBHOOK_ENDPOINT_RE\.test\(id\)\) return \{ page: 'people', peopleTab: 'integrations' \}/)
+  assert.match(appRoute, /const WEBHOOK_ENDPOINT_RE = \/\^WHK-\//)
+  assert.match(webhookRoutes, /export const newEndpointId = \(\) => `WHK-/)
+  assert.match(app, /if \(plan\.peopleTab\) setPeopleInitialTab\(plan\.peopleTab\)/)
   assert.match(app, /useState<'members' \| 'accounts' \| 'performance' \| 'integrations' \| null>\(null\)/)
   // 지우지 않으면 그 뒤로는 사이드바로 들어와도 늘 외부 연동이 먼저 열린다.
   assert.match(app, /if \(nextPage !== 'people'\) setPeopleInitialTab\(null\)/)
@@ -159,12 +167,12 @@ test('출처 배지를 누르면 관리자만 외부 연동 탭으로 가고, �
 
 test('중지 알림을 누르면 고칠 수 있는 화면에 내려놓는다 — 두 입구가 같은 곳으로 간다', () => {
   // '주소를 고친 뒤 다시 켜 주세요'라고 말해 놓고 기본 탭(구성원)에 내려놓으면 그 문장이 헛말이 된다.
-  assert.match(app, /if \(page === 'people'\) \{ setPeopleInitialTab\('integrations'\); setNotificationsOpen\(false\); navigate\('people'\); return \}/)
+  assert.deepEqual(planOpen('people', 'WHK-mabc-1a2b3c'), { page: 'people', peopleTab: 'integrations' })
+  assert.match(app, /onNavigate=\{\(page, focusId\) => openTarget\(page, focusId\)\}/)
   // 엔드포인트 id를 업무 초점 슬롯에 밀어 넣지 않는다 — 그 자리는 업무 id만 뜻한다.
-  const handler = app.match(/onNavigate=\{\(page, focusId\) => \{[\s\S]*?\n\s{16}\}\}/)?.[0] ?? ''
-  const generic = handler.indexOf('if (target.workFocusId) setWorkFocusId(target.workFocusId)')
-  assert.ok(generic > 0, '일반 갈래를 찾지 못했다 — 이 시험이 재는 순서가 사라졌다')
-  assert.ok(handler.indexOf("if (page === 'people')") < generic)
+  assert.equal(planOpen('people', 'WHK-mabc-1a2b3c').workFocusId, undefined)
+  // 사람(검색의 인물 결과)은 외부 연동 탭으로 가지 않는다.
+  assert.deepEqual(planOpen('people', 'USR-1'), { page: 'people' })
 })
 
 test('열 때마다 채널 목록을 다시 읽고, 못 읽으면 빈 목록으로 접지 않는다', () => {

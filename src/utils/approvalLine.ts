@@ -30,31 +30,8 @@ export function isApprovalDocumentFocus(focusId: string | null | undefined): boo
   return APPROVAL_DOCUMENT_ID_RE.test(String(focusId ?? ''))
 }
 
-/** 알림 하나를 눌렀을 때 어디를 열 것인가. 세 값이 함께 나와야 두 갈래가 서로 다른 답을 하지 않는다. */
-export type NotificationFocusTarget = { page: string; approvalFocusId: string; workFocusId: string }
-
-/**
- * **판정은 page 가 아니라 id 의 모양으로 한다.**
- *
- * 결재 문서 id 는 오직 결재 자리에서만 뜻이 있다. 그런데 `page` 는 결재 문서를 가리키면서도
- * 'approvals' 가 아닐 수 있다 — 아침 요약(`buildQuietDigest`)이 그렇고, 알림 유형표
- * (`NOTIFICATION_TYPES['approval-requested'].page`)는 업무 결재 시절의 'tasks' 를 아직 들고 있다.
- * page 로 먼저 가르면 그런 알림이 업무 id 자리(`workFocusId`)로 흘러들어, 사람은 알림을 눌러
- * 업무지시 화면에 떨어지고 기다리던 결재는 열리지 않는다.
- *
- * 반대 방향도 함께 막는다: `page:'approvals'` 로 오는 알림이 전부 결재 문서인 것은 아니다
- * (AI 제안 `PRP-`·센티널·외부 기회 `OPP-`). 그 id 를 결재 상세에 넘기면 서버가 404 를 주고
- * 사람은 오류 대화상자만 본다 — 그래서 결재 화면으로 이동만 하고 문서는 열지 않는다.
- */
-export function notificationFocusTarget(
-  page: string | null | undefined,
-  focusId: string | null | undefined,
-): NotificationFocusTarget {
-  const id = String(focusId ?? '')
-  if (isApprovalDocumentFocus(id)) return { page: 'approvals', approvalFocusId: id, workFocusId: '' }
-  const target = String(page ?? '')
-  return { page: target, approvalFocusId: '', workFocusId: target === 'approvals' ? '' : id }
-}
+// 알림 하나를 눌렀을 때 어디를 열지(결재 문서는 page와 무관하게 결재 자리로 — 아침 요약과 유형표가
+// 아직 'tasks'를 들고 오는 결재 요청이 있다)는 utils/appRoute.ts의 planOpen 한 곳이 정한다.
 
 /**
  * 결재선에서 **사람이 실제로 정해진 단계**만 남긴다.

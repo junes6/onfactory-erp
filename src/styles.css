@@ -181,8 +181,12 @@ html[data-theme='dark'] .nav-list button.active em { background: var(--color-pri
   position: relative; width: 45px; height: 45px; flex: 0 0 auto; display: grid; place-items: center;
   border: var(--hairline) solid var(--line); border-radius: var(--radius-8); color: var(--color-blue-deep); background: var(--color-surface); cursor: pointer;
 }
+/* [AI에게 묻기]는 글자까지 보인다 — 반짝이 아이콘 하나로는 무엇인지 알 수 없다. 좁은 화면에서만 아이콘으로 접는다. */
+.top-icon-button.ai-trigger { width: auto; display: inline-flex; align-items: center; gap: var(--space-8); padding: var(--space-0) var(--space-12); color: var(--forest-dark); }
+.ai-trigger-label { font-size: var(--font-13); font-weight: var(--weight-medium); white-space: nowrap; }
 .top-icon-button:hover, .top-icon-button.active { color: var(--forest); border-color: var(--color-blue-soft); background: var(--forest-soft); }
-.top-icon-button > span {
+/* 읽지 않은 수 배지. [AI에게 묻기]의 글자는 배지가 아니다. */
+.top-icon-button > span:not(.ai-trigger-label) {
   position: absolute; z-index: 2; top: -7px; right: -7px; min-width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
   padding: var(--space-0) var(--space-4); border: var(--hairline) solid var(--surface); border-radius: var(--radius-8); color: var(--color-white); background: var(--color-danger); font-size: var(--font-11); font-weight: var(--weight-medium); line-height: 18px; white-space: nowrap;
 }
@@ -755,6 +759,9 @@ html[data-theme='dark'] .nav-list button.active em { background: var(--color-pri
   .form-grid { grid-template-columns: 1fr; gap: var(--space-0); }
   .chat-drawer .ai-chat { margin: var(--space-8); }
   .toast { right: 14px; bottom: 14px; left: 14px; max-width: none; }
+  /* 좁은 화면에서는 [AI에게 묻기]도 다른 상단 버튼처럼 아이콘 한 칸으로 접는다(이름은 aria-label이 말한다). */
+  .top-icon-button.ai-trigger { width: 42px; justify-content: center; padding: var(--space-0); }
+  .top-icon-button .ai-trigger-label { display: none; }
 }
 
 @media (max-width: 420px) {
