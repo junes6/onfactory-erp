@@ -74,10 +74,12 @@ export function LensPanel({ target, workspaceScope, canManage, onClose, onToast,
     setSending(true)
     try {
       const body = await sendLensTasksToQueue(target.id, run.lens, run.result.tasks, workspaceScope)
-      onPendingChange?.(body.pendingCount)
-      onToast(body.queued
-        ? `승인 큐로 ${body.queued}건을 보냈습니다${body.skipped ? ` · 이미 올라간 ${body.skipped}건은 건너뛰었습니다` : ''}. 검토 후 승인하면 업무가 생성됩니다.`
-        : '이미 승인 큐에 올라간 업무입니다.')
+      if (typeof body.pendingCount === 'number') onPendingChange?.(body.pendingCount)
+      const skipped = body.skipped ? ` · 이미 올라간 ${body.skipped}건은 건너뛰었습니다` : ''
+      onToast(!body.queued ? '이미 승인 큐에 올라간 업무입니다.'
+        : canManage ? `승인 큐로 ${body.queued}건을 보냈습니다${skipped}. 검토 후 승인하면 업무가 생성됩니다.`
+          // 직원은 큐를 보지 못한다 — 어디로 갔고 언제 알게 되는지를 말한다.
+          : `회사 관리자에게 ${body.queued}건을 제안했습니다${skipped}. 승인되거나 반려되면 알림으로 알려 드립니다.`)
     } catch (error) { onToast(error instanceof Error ? error.message : '승인 큐로 보내지 못했습니다.') }
     finally { setSending(false) }
   }
@@ -116,7 +118,7 @@ export function LensPanel({ target, workspaceScope, canManage, onClose, onToast,
           {available.filter((lens) => lens.description).slice(0, 4).map((lens) => <li key={lens.id}><strong>{lens.name}</strong> · {lens.description}</li>)}
         </ul>}
         {running && <p className="lens-panel-empty" role="status">파일을 읽는 중입니다…</p>}
-        {run && <LensAnswer run={run} sending={sending} onSendTasks={() => void sendTasks()} />}
+        {run && <LensAnswer run={run} sending={sending} canManage={canManage} onSendTasks={() => void sendTasks()} />}
       </>}
 
     {settingsOpen && <LensSettings
@@ -129,7 +131,7 @@ export function LensPanel({ target, workspaceScope, canManage, onClose, onToast,
   </aside>
 }
 
-function LensAnswer({ run, sending, onSendTasks }: { run: LensRun; sending: boolean; onSendTasks: () => void }) {
+function LensAnswer({ run, sending, canManage, onSendTasks }: { run: LensRun; sending: boolean; canManage: boolean; onSendTasks: () => void }) {
   const { result } = run
   if (result.insufficient) {
     return <section className="lens-answer">
@@ -165,7 +167,8 @@ function LensAnswer({ run, sending, onSendTasks }: { run: LensRun; sending: bool
       </li>)}</ol>
       <div className="lens-answer-actions">
         <Button tone="primary" size="sm" disabled={sending} onClick={onSendTasks}>
-          <ClipboardCheck size={15} /> {sending ? '보내는 중…' : `승인 큐로 보내기 (${result.tasks.length}건)`}
+          <ClipboardCheck size={15} /> {/* 직원에게는 '승인 큐'가 없다 — 누구에게 가는지로 말한다. */}
+          {sending ? '보내는 중…' : canManage ? `승인 큐로 보내기 (${result.tasks.length}건)` : `관리자에게 업무로 제안 (${result.tasks.length}건)`}
         </Button>
       </div>
     </>}

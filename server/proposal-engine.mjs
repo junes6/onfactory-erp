@@ -215,6 +215,11 @@ export function proposeTaskFromMessage({ message, conversation, recipients = [],
 function complianceRecords(tenantStore) { return Array.isArray(tenantStore?.['compliance-records']?.data) ? tenantStore['compliance-records'].data : [] }
 function products(tenantStore) { return Array.isArray(tenantStore?.['product-catalog']?.data) ? tenantStore['product-catalog'].data : [] }
 function workItems(tenantStore) { return Array.isArray(tenantStore?.['work-items']?.data) ? tenantStore['work-items'].data : [] }
+/**
+ * 센티널이 만든 업무(승인된 센티널 제안에서 생긴 것)는 센티널의 감시 대상이 아니다. 전에는 '마감 초과 점검: X'가
+ * 마감을 넘기면 '마감 초과 점검: 마감 초과 점검: X'가 올라오는 식으로 자기 자신을 먹이로 불어났다(감사 ai-04).
+ */
+const isSentinelWork = (item) => item?.origin?.kind === 'sentinel-task'
 
 function taskProposal({ ruleId, ruleLabel, sourceKey, title, evidence, ownerId, owner, dueIso, priority = '높음', confidence = .9, now }) {
   return {
@@ -288,7 +293,7 @@ const coreRulePack = [
     evaluate({ tenantStore, resolveOwnerById, now }) {
       const out = []
       for (const item of workItems(tenantStore)) {
-        if (item?.status !== '결재대기') continue
+        if (item?.status !== '결재대기' || isSentinelWork(item)) continue
         const submittedAt = item.completion?.submittedAt
         if (!submittedAt || now.getTime() - Date.parse(submittedAt) < 48 * 60 * 60 * 1_000) continue
         const hours = Math.floor((now.getTime() - Date.parse(submittedAt)) / (60 * 60 * 1_000))
@@ -311,7 +316,7 @@ const coreRulePack = [
     evaluate({ tenantStore, resolveOwnerById, now }) {
       const out = []
       for (const item of workItems(tenantStore)) {
-        if (!item || item.status === '결재완료') continue
+        if (!item || item.status === '결재완료' || isSentinelWork(item)) continue
         const dueAt = Date.parse(item.due)
         if (!Number.isFinite(dueAt) || dueAt >= now.getTime()) continue
         const days = Math.floor((now.getTime() - dueAt) / DAY_MS)
@@ -394,7 +399,10 @@ export function rulePackFor(industryType) {
  * 센티널 평가: 현재 상태 기준 제안 목록을 만들고, 기존 제안과 합친다.
  * - 같은 sourceKey의 미결 제안이 있으면 새로 만들지 않는다(중복 금지).
  * - 조건이 해소된 미결 센티널 제안은 expired로 닫는다.
- * 반환: { proposals: 갱신된 전체 목록, created: 새로 만든 수, expired: 닫힌 수 }
+ * - 결정(승인·수정·거절)된 사안은 **조건이 이어지는 동안만** 다시 올리지 않는다. 조건이 한 번 풀리면 그 결정에
+ *   clearedAt을 찍고, 같은 사안이 다시 생기면 새로 알린다. 전에는 한 번 결정한 대상(같은 인증서·같은 업무)을
+ *   해가 바뀌어 다시 만료돼도 영구히 알리지 않았다(감사 ai-04).
+ * 반환: { proposals: 갱신된 전체 목록, created: 새로 만든 수, expired: 닫힌 수, cleared: 풀린 결정 수 }
  */
 export function evaluateSentinel({ tenantStore, existing = [], industryType, accounts = [], tenantId, now = new Date() }) {
   const tenantAccounts = accounts.filter((account) => account?.tenantId === tenantId && account.approved)
@@ -406,17 +414,24 @@ export function evaluateSentinel({ tenantStore, existing = [], industryType, acc
   const detectedKeys = new Set(detected.map((proposal) => proposal.sourceKey))
   const pendingKeys = new Set(existing.filter((proposal) => proposal.kind === 'sentinel-task' && proposal.status === 'pending').map((proposal) => proposal.sourceKey))
   let expired = 0
+  let cleared = 0
+  const isDecided = (proposal) => proposal.status !== 'pending' && proposal.status !== 'expired'
   const next = existing.map((proposal) => {
-    if (proposal.kind === 'sentinel-task' && proposal.status === 'pending' && !detectedKeys.has(proposal.sourceKey)) {
+    if (proposal.kind !== 'sentinel-task') return proposal
+    if (proposal.status === 'pending' && !detectedKeys.has(proposal.sourceKey)) {
       expired += 1
       return { ...proposal, status: 'expired', decidedAt: now.toISOString(), decidedBy: 'sentinel', decisionDiff: null, resolutionNote: '조건 해소' }
     }
+    if (isDecided(proposal) && !proposal.clearedAt && !detectedKeys.has(proposal.sourceKey)) {
+      cleared += 1
+      return { ...proposal, clearedAt: now.toISOString() }
+    }
     return proposal
   })
-  // 이미 결정(승인/수정/거절)된 사안은 해소 전 다시 올리지 않는다.
-  const decidedKeys = new Set(existing.filter((proposal) => proposal.kind === 'sentinel-task' && proposal.status !== 'pending' && proposal.status !== 'expired').map((proposal) => proposal.sourceKey))
+  // 결정된 사안은 그 조건이 아직 풀리지 않았을 때만 막는다.
+  const decidedKeys = new Set(next.filter((proposal) => proposal.kind === 'sentinel-task' && isDecided(proposal) && !proposal.clearedAt).map((proposal) => proposal.sourceKey))
   const created = detected.filter((proposal) => !pendingKeys.has(proposal.sourceKey) && !decidedKeys.has(proposal.sourceKey))
-  return { proposals: [...created, ...next], created: created.length, expired }
+  return { proposals: [...created, ...next], created: created.length, expired, cleared }
 }
 
 // ---------------------------------------------------------------------------

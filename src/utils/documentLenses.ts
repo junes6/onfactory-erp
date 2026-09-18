@@ -96,5 +96,6 @@ export async function sendLensTasksToQueue(documentId: string, lens: { id: strin
     body: JSON.stringify({ lensId: lens.id, lensName: lens.name, tasks }),
   })
   if (!response.ok) throw new Error(await readError(response, '승인 큐로 보내지 못했습니다.'))
-  return await response.json() as { queued: number; skipped: number; pendingCount: number }
+  // pendingCount는 큐를 보는 관리자에게만 온다.
+  return await response.json() as { queued: number; skipped: number; pendingCount?: number }
 }

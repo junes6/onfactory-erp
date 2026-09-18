@@ -425,7 +425,8 @@ function workOriginFromProposal(proposal) {
   // R16-H: 문서에서 올라온 제안은 승인된 뒤에도 **문서로** 되짚어야 한다.
   // page를 'approvals'로 고정해 두면 그 업무의 출처 배지가 이미 결정된 제안 카드로 되돌아가는 막다른 길이 된다.
   // R16-M: 회의에서 뽑은 할 일도 같은 문으로 되짚는다 — 그 회의록 문서가 결정과 인용이 적힌 자리다.
-  const fromWiki = ['wiki-task', 'meeting-task'].includes(proposal?.kind) && Boolean(proposal.payload?.documentId)
+  const fromWiki = (['wiki-task', 'meeting-task'].includes(proposal?.kind) && Boolean(proposal.payload?.documentId))
+    || (proposal?.kind === 'lens-task' && String(proposal.payload?.documentId ?? '').startsWith('WDOC-'))
   // 검토 자료의 결정에서 온 업무는 그 자료(그 항목)로 되짚는다.
   const fromMaterial = proposal?.kind === 'material-task' && Boolean(proposal.payload?.materialId)
   return {
@@ -3532,9 +3533,22 @@ export function createApp(options = {}) {
     if (!tenantStore) return { created: 0, expired: 0 }
     const existing = proposalsOf(tenantId)
     const result = evaluateSentinel({ tenantStore, existing, industryType: tenantIndustryType(tenantId), accounts, tenantId, now })
-    if (result.created || result.expired) {
+    if (result.created || result.expired || result.cleared) {
       const known = new Set(existing.map((item) => item?.id))
       writeProposals(tenantId, result.proposals, 'sentinel')
+      // 새 경고는 관리자에게 알린다 — 전에는 큐에 조용히 쌓여, 큐를 열어 보기 전에는 아무도 몰랐다(감사 ai-04).
+      // 한 번에 많이 찾았으면(첫 평가 등) 한 줄로 묶는다.
+      const fresh = result.proposals.filter((proposal) => proposal?.id && !known.has(proposal.id))
+      if (fresh.length > 0 && fresh.length <= 3) for (const proposal of fresh) notifyProposal(tenantId, proposal)
+      else if (fresh.length > 3) {
+        notify(tenantId, tenantAdminIds(tenantId).map((recipientId) => ({
+          type: 'sentinel-warning', recipientId, actorId: null,
+          title: `센티널이 새 위험 신호 ${fresh.length}건을 찾았습니다`,
+          body: fresh.slice(0, 3).map((proposal) => String(proposal.summary ?? '').replace(/^업무 생성: /, '')).join(' · '),
+          page: 'approvals', focusId: '', source: { kind: 'proposal', id: fresh[0].id, label: '승인 큐' },
+        })))
+      }
+      if (result.created || result.expired) events.publish(tenantId, 'proposal', { pending: pendingProposalCount(tenantId) })
       // R16-L: 기존 알림 동작은 손대지 않는다 — 발신만 더한다.
       // (센티널 경고 알림은 지금도 발생 경로가 없다. 그 결손을 이 절에서 고치지 않는다.)
       for (const proposal of result.proposals) {
@@ -3705,7 +3719,11 @@ export function createApp(options = {}) {
           return
         }
         const ownerAccount = owner ?? { id: request.auth.id, name: request.auth.name }
-        const dueIso = Number.isFinite(Date.parse(finalPayload.due)) ? new Date(Date.parse(finalPayload.due)).toISOString() : new Date(Date.now() + 2 * 24 * 60 * 60 * 1_000).toISOString()
+        // 날짜만 적힌 마감('금요일까지' → 2026-09-25)은 그날 퇴근 시각(서울 18:00)이다. 전에는 UTC 자정으로 읽혀
+        // 오전 9시 마감이 됐고, 화면 미리보기는 같은 값을 0시로 보여 줬다.
+        const dueText = String(finalPayload.due ?? '')
+        const dueAt = /^\d{4}-\d{2}-\d{2}$/.test(dueText) ? Date.parse(`${dueText}T18:00:00+09:00`) : Date.parse(dueText)
+        const dueIso = Number.isFinite(dueAt) ? new Date(dueAt).toISOString() : new Date(Date.now() + 2 * 24 * 60 * 60 * 1_000).toISOString()
         const workItem = {
           id: newWorkItemId(Array.isArray(tenantStore['work-items']?.data) ? tenantStore['work-items'].data : []),
           title: String(finalPayload.title ?? proposal.summary).trim().slice(0, 120) || '승인된 제안 업무',
@@ -4013,11 +4031,33 @@ export function createApp(options = {}) {
   })
 
   // 업무 추출 결과 → 승인 큐. 제안은 저장만 되고 사람이 결정해야 업무가 된다.
-  app.post('/api/documents/:id/lens/tasks', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
+  /**
+   * 렌즈가 뽑은 할 일을 승인 큐로 보낸다. **읽을 수 있는 사람이면 누구나** 보낸다 — 보내는 것은 제안이고
+   * 업무를 만드는 결정은 관리자가 큐에서 한다. 전에는 관리자 전용이라 직원은 [승인 큐로 보내기]를 눌러도
+   * 403을 받았고, 문서(위키)에서 연 렌즈는 자료실만 찾아 404가 났다(감사 ai-08).
+   */
+  app.post('/api/documents/:id/lens/tasks', requireAuth, requireMatchingWorkspaceIdentity, async (request, response) => {
+    if (!request.auth.tenantId || request.auth.role === GUEST_ROLE) {
+      response.status(403).json({ error: { code: 'LENS_TASKS_FORBIDDEN', message: '회사 구성원만 승인 큐로 보낼 수 있습니다.' } })
+      return
+    }
+    const isWiki = String(request.params.id).startsWith('WDOC-')
+    const wikiSource = isWiki ? wiki.wikiLensSourceOf(request.auth, request.params.id) : null
     const documents = Array.isArray(documentRecord(request.auth.tenantId)?.data) ? documentRecord(request.auth.tenantId).data : []
-    const document = documents.find((item) => item.id === request.params.id)
-    if (!document || !canReadDocument(document, request.auth)) {
+    const document = isWiki
+      ? (wikiSource ? { id: request.params.id, name: wikiSource.name } : null)
+      : documents.find((item) => item.id === request.params.id)
+    if (!document || (!isWiki && !canReadDocument(document, request.auth))) {
       response.status(404).json({ error: { code: 'DOCUMENT_NOT_FOUND', message: '자료를 찾을 수 없거나 열람 권한이 없습니다.' } })
+      return
+    }
+    if (isWiki && wikiSource.blocked) {
+      response.status(403).json({ error: { code: 'WIKI_AI_LEVEL_BLOCKED', message: 'AI 처리 수준이 ‘보관만’인 문서입니다. 문서 설정에서 수준을 올린 뒤 다시 시도해 주세요.' } })
+      return
+    }
+    // 1:1 대화에 붙은 파일에서 뽑은 할 일은 관리자 큐로 보내지 않는다 — 파일 이름과 내용 요약이 대화 밖으로 나간다(가입 동의).
+    if (!isWiki && privateConversationOfDocument(document, workspaceStore.tenants[request.auth.tenantId]?.['messenger-conversations']?.data)) {
+      response.status(409).json({ error: { code: 'LENS_PRIVATE_CONVERSATION', message: '1:1 대화에 붙은 파일이라 승인 큐로 보내지 않습니다. 필요한 일은 업무 화면에서 직접 지시해 주세요.' } })
       return
     }
     const lensId = String(request.body?.lensId ?? '').slice(0, 80)
@@ -4049,7 +4089,8 @@ export function createApp(options = {}) {
           title: task.title,
           description: [task.reason, `근거 파일: ${document.name}`].filter(Boolean).join('\n'),
           owner: task.owner,
-          due: task.due ? new Date(`${task.due}T09:00:00+09:00`).toISOString() : '',
+          // 날짜만 뽑힌 마감은 그날 퇴근 시각(서울 18:00) — 승인 경로와 같은 규칙.
+          due: task.due ? new Date(`${task.due}T18:00:00+09:00`).toISOString() : '',
           priority: '보통',
           category: '문서 검토',
           documentId: document.id,
@@ -4065,7 +4106,8 @@ export function createApp(options = {}) {
       response.status(500).json({ error: { code: 'LENS_TASK_WRITE_FAILED', message: '승인 큐에 저장하지 못했습니다.' } })
       return
     }
-    response.status(201).json({ queued, skipped: prepared.length - queued, pendingCount: visiblePendingCount(request.auth.tenantId, request.auth) })
+    // 큐의 건수는 큐를 보는 사람(관리자)에게만 준다.
+    response.status(201).json({ queued, skipped: prepared.length - queued, ...(request.auth.role === 'tenant-admin' ? { pendingCount: visiblePendingCount(request.auth.tenantId, request.auth) } : {}) })
   })
 
   // ------------------------------------------------------------------

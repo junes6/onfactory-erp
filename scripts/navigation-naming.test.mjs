@@ -44,3 +44,11 @@ test('사이드바는 묶음(내 일·함께·회사·업종)으로 — 묶음 �
   assert.match(app, /<span className="nav-group-caption" role="presentation">\{group\}<\/span>/)
   assert.match(app, /document\.querySelector\('\.nav-list button\.active'\)\?\.scrollIntoView\(\{ block: 'nearest' \}\)/)
 })
+
+test('AI 제안 카드: 승인하기 전에 무엇이 일어나는지(담당·마감·우선순위, 분류 변경) 한 줄로', () => {
+  assert.match(queue, /\{pending && <span className="approval-preview">\{executionPreview\(item\)\}<\/span>\}/)
+  assert.match(queue, /return `승인하면: 업무를 만듭니다 · 담당 \$\{owner \|\| '승인하는 사람\(나\)'\} · 마감 \$\{due\} · \$\{priority\}`/)
+  // 날짜만 적힌 마감은 서버와 화면이 같은 시각(그날 서울 18:00)으로 읽는다.
+  assert.match(queue, /`\$\{dueText\}T18:00:00\+09:00`/)
+  assert.match(server, /Date\.parse\(`\$\{dueText\}T18:00:00\+09:00`\)/)
+})

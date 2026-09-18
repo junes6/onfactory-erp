@@ -22,6 +22,8 @@
 .approval-row-main small { display: block; overflow: hidden; margin-top: var(--space-4); color: var(--muted); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
 .approval-row-main em { font-style: normal; }
 .approval-row-main em.is-high { color: var(--color-success-ink); font-weight: var(--weight-medium); }
+/* 승인하면 무엇이 일어나는지 — 줄이지 않고 다 보인다(담당·마감이 잘리면 미리보기가 아니다). */
+.approval-preview { display: block; margin-top: var(--space-4); color: var(--ink); font-size: var(--font-13); overflow-wrap: anywhere; }
 .approval-diff { display: block; overflow: hidden; margin-top: var(--space-4); color: var(--color-violet); font-size: var(--font-11); text-overflow: ellipsis; white-space: nowrap; }
 .approval-actions { display: flex; gap: var(--space-4); }
 .approval-actions button { display: inline-flex; align-items: center; gap: var(--space-4); min-height: 38px; padding: var(--space-0) var(--space-12); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); font-size: var(--font-13); font-weight: var(--weight-medium); cursor: pointer; }

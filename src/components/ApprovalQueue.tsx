@@ -73,7 +73,9 @@ function confidenceLabel(value: number | null) {
 function evidenceTarget(proposal: Proposal): { page: string; focusId: string; label: string } | null {
   const payload = proposal.payload as Record<string, string> | undefined
   if (proposal.kind === 'document-classification' && payload?.documentId) return { page: 'documents', focusId: payload.documentId, label: '원본 문서 열기' }
-  if (proposal.kind === 'lens-task' && payload?.documentId) return { page: 'documents', focusId: payload.documentId, label: '분석한 파일 열기' }
+  if (proposal.kind === 'lens-task' && payload?.documentId) return String(payload.documentId).startsWith('WDOC-')
+    ? { page: 'wiki', focusId: payload.documentId, label: '분석한 문서 열기' }
+    : { page: 'documents', focusId: payload.documentId, label: '분석한 파일 열기' }
   if (proposal.kind === 'task-from-message' && payload?.conversationId) return { page: 'messenger', focusId: payload.conversationId, label: '원본 대화 열기' }
   if (proposal.kind === 'sentinel-task' && payload?.complianceId) return { page: 'compliance', focusId: payload.complianceId, label: '인증 대장 열기' }
   if (proposal.kind === 'wiki-task' && payload?.documentId) return { page: 'wiki', focusId: payload.documentId, label: '원본 문서 열기' }
@@ -83,6 +85,27 @@ function evidenceTarget(proposal: Proposal): { page: string; focusId: string; la
   if (proposal.kind === 'meeting-task' && payload?.documentId) return { page: 'wiki', focusId: payload.documentId, label: '회의록 문서 열기' }
   if (proposal.kind === 'material-task' && payload?.materialId) return { page: 'wiki', focusId: `material:${payload.materialId}`, label: '검토 자료 열기' }
   return null
+}
+
+/**
+ * 승인하면 **무엇이** 일어나는가 — 누르기 전에 한 줄로 보인다. 전에는 제목과 근거만 보여, 누구에게·언제까지·
+ * 어떤 우선순위로 업무가 생기는지는 승인한 뒤 업무 목록에서야 알 수 있었다(감사 ai-06).
+ * 서버의 실행 규칙과 같은 말을 한다: 규범은 판단 기록에, 분류 제안은 자료의 분류·태그에, 나머지는 업무 하나.
+ */
+function executionPreview(proposal: Pick<Proposal, 'kind' | 'payload'>): string {
+  const payload = proposal.payload ?? {}
+  if (proposal.kind === 'principle') return '승인하면: 이 문장을 판단 기록(규범)에 넣습니다'
+  if (proposal.kind === 'document-classification') {
+    const tags = Array.isArray(payload.tags) ? payload.tags.map(String).filter(Boolean) : []
+    return `승인하면: 자료 분류를 '${String(payload.category ?? '') || '그대로'}'(으)로${tags.length ? ` · 태그 ${tags.slice(0, 4).join(', ')}` : ''} 바꿉니다`
+  }
+  const owner = String(payload.owner ?? '').trim()
+  // 날짜만 적힌 마감은 서버가 그날 18:00(서울)으로 만든다 — 미리보기도 같은 시각을 보인다.
+  const dueText = typeof payload.due === 'string' ? payload.due : ''
+  const dueValue = /^\d{4}-\d{2}-\d{2}$/.test(dueText) ? `${dueText}T18:00:00+09:00` : dueText
+  const due = dueValue && Number.isFinite(Date.parse(dueValue)) ? formatDateTime(dueValue) : '2일 뒤(정하지 않음)'
+  const priority = ['긴급', '높음', '보통'].includes(String(payload.priority)) ? String(payload.priority) : '보통'
+  return `승인하면: 업무를 만듭니다 · 담당 ${owner || '승인하는 사람(나)'} · 마감 ${due} · ${priority}`
 }
 
 /** 이 화면 밖에서 처리하는, 내가 확인할 것들(업무 완료 확인·업무일지·휴가). 0이면 그리지 않는다. */
@@ -281,6 +304,7 @@ export function ApprovalQueue({ account, workspaceScope, focusId, onToast, onOpe
                     <strong>{item.summary}</strong>
                     <small>{item.evidence}{confidence ? <> · <em className={confidence.high ? 'is-high' : ''}>{confidence.text}</em></> : null}{!pending && <> · {item.status === 'approved' ? '승인' : item.status === 'edited' ? '수정 승인' : item.status === 'rejected' ? '거절' : '해소됨'} {item.decidedByName ? `· ${item.decidedByName}` : ''} {item.decidedAt ? formatDateTime(item.decidedAt) : ''}</>}</small>
                     {evidenceTarget(item) && <button type="button" className="approval-link approval-evidence" onClick={(event) => { event.stopPropagation(); const target = evidenceTarget(item); if (target) onOpenEvidence?.(target.page, target.focusId) }}>{evidenceTarget(item)?.label} <ArrowUpRight size={12} /></button>}
+                    {pending && <span className="approval-preview">{executionPreview(item)}</span>}
                     {!pending && item.decisionDiff && <span className="approval-diff">수정: {Object.entries(item.decisionDiff).map(([key, change]) => `${key}: ${String(change.before ?? '—')} → ${String(change.after ?? '—')}`).join(' / ')}</span>}
                   </div>
                   {pending ? <div className="approval-actions">
@@ -342,7 +366,9 @@ function ProposalEditDialog({ proposal, busy, onClose, onSubmit }: { proposal: P
   const [title, setTitle] = useState(String(payload.title ?? ''))
   const [owner, setOwner] = useState(String(payload.owner ?? ''))
   const [due, setDue] = useState(() => {
-    const value = String(payload.due ?? '')
+    const raw = String(payload.due ?? '')
+    // 날짜만 적힌 마감은 그날 18:00(서울) — 카드의 미리보기·서버와 같은 시각으로 칸을 채운다.
+    const value = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T18:00:00+09:00` : raw
     return Number.isFinite(Date.parse(value)) ? new Date(Date.parse(value) + 9 * 60 * 60 * 1_000).toISOString().slice(0, 16) : ''
   })
   const [priority, setPriority] = useState(String(payload.priority ?? '보통'))
