@@ -8,7 +8,8 @@ import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { PerformanceReports } from './PerformanceReports'
 import { AttendancePanel } from './AttendancePanel'
 import { BarChart3 } from 'lucide-react'
-import { formatDateLabel, formatDateTime, seoulDateInputValue } from '../utils/dateTime'
+import { formatDateLabel, formatDateTime, seoulDateInputValue, seoulTimeOf } from '../utils/dateTime'
+import { groupOperatorVisits, type OperatorAccessRow } from '../utils/operatorVisits'
 import './PeopleOperations.css'
 import { Button, IconButton } from './ui/Button'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
@@ -56,6 +57,8 @@ type LeaveRequest = {
 }
 
 type LeaveApprover = { id: string; name: string; team: string; role: string }
+type OperatorAccessEvent = OperatorAccessRow
+const OPERATOR_ACCESS_PAGE = 30
 
 type AccountRequest = {
   id: string; name: string; email: string; team: string; role: string; requested: string; status: AccountStatus
@@ -224,7 +227,10 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
   const [editingLeaveId, setEditingLeaveId] = useState<string | null>(null)
   const [modal, setModal] = useState<PeopleModal | null>(null)
   const [selectedProfile, setSelectedProfile] = useState<MemberProfile | null>(null)
-  const [operatorAccessLog, setOperatorAccessLog] = useState<Array<{ id: string; at: string; event: string; scope: string; actor: string; reference?: string }>>([])
+  const [operatorAccessLog, setOperatorAccessLog] = useState<OperatorAccessEvent[]>([])
+  const [operatorAccessTotal, setOperatorAccessTotal] = useState(0)
+  const [operatorAccessLoading, setOperatorAccessLoading] = useState(false)
+  const operatorVisits = useMemo(() => groupOperatorVisits(operatorAccessLog), [operatorAccessLog])
   // 외부 게스트 — 목록·진행 중인 행·초대 결과 카드·범위 변경 대상. 프로젝트 목록은 모달을 열 때 한 번만 읽는다.
   const [guests, setGuests] = useState<GuestGrant[]>([])
   const [guestsState, setGuestsState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -294,15 +300,30 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
     }
   }, [modal])
 
+  /** 운영사 접속 이력은 "모든 기록"을 약속한다 — 보관함으로 옮겨진 오래된 기록까지 30건씩 이어 읽는다. */
+  const fetchOperatorAccess = async (offset: number) => {
+    const response = await fetch(`/api/operator-access-log?offset=${offset}&limit=${OPERATOR_ACCESS_PAGE}`)
+    if (!response.ok) return { events: [] as OperatorAccessEvent[], total: 0 }
+    const body = await response.json() as { events?: OperatorAccessEvent[]; total?: number }
+    const events = Array.isArray(body.events) ? body.events : []
+    return { events, total: typeof body.total === 'number' ? body.total : events.length }
+  }
   useEffect(() => {
     if (!canManage || tab !== 'accounts') return
     let active = true
-    fetch('/api/operator-access-log')
-      .then(async (response) => response.ok ? response.json() as Promise<{ events?: Array<{ id: string; at: string; event: string; scope: string; actor: string; reference?: string }> }> : { events: [] })
-      .then((body) => { if (active) setOperatorAccessLog(Array.isArray(body.events) ? body.events : []) })
-      .catch(() => { if (active) setOperatorAccessLog([]) })
+    fetchOperatorAccess(0)
+      .then((page) => { if (active) { setOperatorAccessLog(page.events); setOperatorAccessTotal(page.total) } })
+      .catch(() => { if (active) { setOperatorAccessLog([]); setOperatorAccessTotal(0) } })
     return () => { active = false }
   }, [canManage, tab])
+  const loadMoreOperatorAccess = async () => {
+    setOperatorAccessLoading(true)
+    try {
+      const page = await fetchOperatorAccess(operatorAccessLog.length)
+      setOperatorAccessLog((current) => [...current, ...page.events.filter((event) => !current.some((known) => known.id === event.id))])
+      setOperatorAccessTotal(page.total)
+    } catch { onToast('이전 기록을 불러오지 못했습니다. 잠시 뒤 다시 눌러 주세요.') } finally { setOperatorAccessLoading(false) }
+  }
 
   const loadGuests = async () => {
     setGuestsState((current) => current === 'ready' ? current : 'loading')
@@ -523,7 +544,8 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
       return {
         ...current,
         balances: existing ? current.balances.map((balance) => (accountId && balance.accountId ? balance.accountId === accountId : balance.name === name) ? nextBalance : balance) : [nextBalance, ...current.balances],
-        ledger: [entry, ...current.ledger].slice(0, 500),
+        // 자르지 않는다 — 원장은 영구 이력이다. 넘친 오래된 쪽은 서버 정리기가 보관함으로 옮긴다.
+        ledger: [entry, ...current.ledger],
       }
     })
     if (!result.ok) { if (result.message) onToast(result.message); return }
@@ -571,7 +593,7 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
         actor: currentUserName,
         createdAt: now,
       }))
-      return { ...current, balances: nextBalances, ledger: [...entries, ...current.ledger].slice(0, 500) }
+      return { ...current, balances: nextBalances, ledger: [...entries, ...current.ledger] }
     })
     if (!result.ok) { if (result.message) onToast(result.message); return }
     onToast(mode === 'monthly' ? '전 직원의 이번 달 연차를 발생시켰습니다.' : '전 직원의 연차를 리뉴얼했습니다.')
@@ -1004,10 +1026,14 @@ export function PeopleOperationsPage({ onToast, canManage, currentUserId, curren
         })}</div>}
       </section>
       <section className="operator-access-log" aria-labelledby="operator-access-log-title">
-        <div className="people-subsection-head"><div><h3 id="operator-access-log-title">{`운영사(${BRAND.name}) 접속 이력`}</h3><p>플랫폼 운영자가 우리 회사 워크스페이스에 접속·조회·변경한 모든 기록입니다.</p></div><strong>{operatorAccessLog.length}건</strong></div>
+        <div className="people-subsection-head"><div><h3 id="operator-access-log-title">{`운영사(${BRAND.name}) 접속 이력`}</h3><p>플랫폼 운영자가 우리 회사 워크스페이스에 접속·조회·변경한 모든 기록입니다.</p></div><strong>{operatorAccessTotal.toLocaleString('ko-KR')}건</strong></div>
         {operatorAccessLog.length === 0
           ? <div className="people-empty-state"><ShieldCheck size={22} /><strong>운영사 접속 기록이 없습니다.</strong><span>운영자가 접속하면 시각·행위·운영자 이름이 여기에 남습니다.</span></div>
-          : <div className="operator-access-list">{operatorAccessLog.slice(0, 50).map((event) => <article key={event.id}><time>{event.at}</time><div><strong>{event.event}</strong><small>{event.scope}</small></div><span>{event.actor}</span></article>)}</div>}
+          : <><ol className="operator-visit-list">{operatorVisits.map((visit) => <li key={visit.id}><details>
+              <summary><span className="operator-visit-when"><time dateTime={visit.startedAt}>{formatDateTime(visit.startedAt)}</time>{visit.rows.length > 1 && seoulTimeOf(visit.endedAt) !== seoulTimeOf(visit.startedAt) ? ` ~ ${seoulTimeOf(visit.endedAt)}` : ''}</span><strong>{visit.actor}</strong><span className="operator-visit-counts">{visit.writes > 0 && <em>변경 {visit.writes}건</em>}{visit.reads > 0 && <span>조회 {visit.reads}건</span>}</span></summary>
+              <div className="operator-access-list">{visit.rows.map((event) => <article key={event.id}><time dateTime={event.at}>{seoulTimeOf(event.at)}</time><div><strong>{event.event}</strong><small>{event.scope}</small></div></article>)}</div>
+            </details></li>)}</ol>
+            {operatorAccessLog.length < operatorAccessTotal && <Button tone="ghost" type="button" className="operator-access-more" disabled={operatorAccessLoading} onClick={() => void loadMoreOperatorAccess()}>{operatorAccessLoading ? '불러오는 중…' : `이전 기록 더 보기 (남은 ${(operatorAccessTotal - operatorAccessLog.length).toLocaleString('ko-KR')}건)`}</Button>}</>}
       </section>
     </section>}
 

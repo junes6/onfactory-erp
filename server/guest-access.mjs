@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 
+import { pageHotAndArchive } from './archive-sweeps.mjs'
+
 /**
  * 외부 게스트(거래처) 접근 — 초대·격리·수명주기.
  *
@@ -184,6 +186,7 @@ export function registerGuestRoutes({
   requireTenantAdmin,
   requireMatchingWorkspaceIdentity,
   workspaceStore,
+  archive = null,
   accounts,
   sessions,
   commitWorkspaceStore,
@@ -701,13 +704,21 @@ export function registerGuestRoutes({
     response.json({ guest: publicGrant(grant) })
   })
 
-  app.get('/api/admin/guests/:id/audit', ...adminGuards, (request, response) => {
+  app.get('/api/admin/guests/:id/audit', ...adminGuards, async (request, response) => {
     const grant = grantById(request.auth.tenantId, request.params.id)
     if (!grant) { fail(response, 404, 'GUEST_NOT_FOUND', '게스트를 찾을 수 없습니다.'); return }
-    const events = (workspaceStore.platform?.auditEvents ?? [])
-      .filter((event) => event?.tenantId === request.auth.tenantId && (event.reference === grant.id || event.reference === grant.accountId))
-      .slice(0, 200)
-    response.json({ events })
+    // 오래된 기록은 보관함으로 옮겨지므로 거기까지 이어서 읽는다.
+    const tenantId = request.auth.tenantId
+    const page = await pageHotAndArchive({
+      hot: workspaceStore.platform?.auditEvents,
+      archive,
+      tenantId,
+      collection: 'audit-events',
+      filter: (event) => event?.tenantId === tenantId && (event.reference === grant.id || event.reference === grant.accountId),
+      offset: request.query?.offset,
+      limit: request.query?.limit ?? 200,
+    })
+    response.json({ events: page.rows, total: page.total })
   })
 
   // ── 공개 라우트: 초대 링크 ───────────────────────────────────────

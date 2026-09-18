@@ -1,3 +1,5 @@
+import { pageHotAndArchive } from './archive-sweeps.mjs'
+
 /**
  * 감독 열람 — 회사 관리자와 지정된 열람 권한자가 업무 대화를 확인하는 통로.
  *
@@ -42,6 +44,7 @@ export function registerOversightRoutes({
   requireTenantAdmin,
   requireMatchingWorkspaceIdentity,
   workspaceStore,
+  archive = null,
   accounts,
   commitWorkspaceStore,
   appendPlatformAudit,
@@ -118,14 +121,20 @@ export function registerOversightRoutes({
   })
 
   // ── 열람 기록 조회 (회사 관리자) ─────────────────────────────────
-  app.get('/api/oversight/audit', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, (request, response) => {
-    const limit = Math.min(Math.max(Number.parseInt(String(request.query?.limit ?? ''), 10) || 100, 1), 500)
+  app.get('/api/oversight/audit', requireAuth, requireTenantAdmin, requireMatchingWorkspaceIdentity, async (request, response) => {
     // 자기 회사 기록만 본다. 플랫폼 감사 기록 전체가 아니라 tenantId로 거른 것이다.
-    const events = (workspaceStore.platform.auditEvents ?? [])
-      .filter((item) => item?.tenantId === request.auth.tenantId
-        && ['대화 감독 열람', '대화 열람 권한 부여', '대화 열람 권한 회수'].includes(item.event))
-      .slice(0, limit)
-    response.json({ events, total: events.length })
+    // 오래된 열람 기록은 보관함으로 옮겨지므로 거기까지 이어서 센다 — total은 이 회사의 열람 기록 전체 수다.
+    const tenantId = request.auth.tenantId
+    const page = await pageHotAndArchive({
+      hot: workspaceStore.platform.auditEvents,
+      archive,
+      tenantId,
+      collection: 'audit-events',
+      filter: (item) => item?.tenantId === tenantId && ['대화 감독 열람', '대화 열람 권한 부여', '대화 열람 권한 회수'].includes(item.event),
+      offset: request.query?.offset,
+      limit: request.query?.limit ?? 100,
+    })
+    response.json({ events: page.rows, total: page.total, offset: page.offset, limit: page.limit })
   })
 
   // ── 열람 권한 부여·회수 (회사 관리자) ────────────────────────────

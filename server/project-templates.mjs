@@ -20,6 +20,10 @@ import { WEBHOOK_DELIVERIES_KEY } from './webhook-routes.mjs'
  * 그 네 곳의 관계가 언제든 어긋날 수 있다. 쓰기는 서버가 규칙을 아는 라우트로만 한다.
  */
 
+/** 회사당 프로젝트 공간 수. 넘으면 오래된 것을 지우지 않고 새로 만들기를 거절한다. */
+export const PROJECT_SPACES_CAP = 500
+export const PROJECT_SPACES_FULL = Object.freeze({ code: 'PROJECT_LIMIT_REACHED', message: '프로젝트가 500개에 닿아 새로 만들 수 없습니다. 지우지 않고 막아 두었습니다 — 한도 조정은 운영사에 요청해 주세요.' })
+
 export const PROJECT_TEMPLATES_KEY = 'project-templates'
 export const TEMPLATE_ORIGINS = Object.freeze(['system', 'custom'])
 export const TEMPLATE_INDUSTRIES = Object.freeze(['food_manufacturing', 'it_services'])
@@ -1064,8 +1068,8 @@ export function registerProjectTemplateRoutes({
     }
 
     const spaces = projectSpacesOf(tenantId)
-    if (spaces.length >= 500) {
-      response.status(409).json({ error: { code: 'PROJECT_LIMIT_REACHED', message: '프로젝트가 너무 많습니다. 보관 처리 후 다시 시도해 주세요.' } })
+    if (spaces.length >= PROJECT_SPACES_CAP) {
+      response.status(409).json({ error: PROJECT_SPACES_FULL })
       return
     }
 
@@ -1143,7 +1147,7 @@ export function registerProjectTemplateRoutes({
       // 웹훅 적재도 이 커밋에 함께 실린다 — 실패하면 아래 복원 루프가 같이 되돌린다.
       [WEBHOOK_DELIVERIES_KEY]: tenantStore[WEBHOOK_DELIVERIES_KEY],
     }
-    writeProjectData(tenantId, 'project-spaces', [project, ...spaces].slice(0, 500), request.auth.id)
+    writeProjectData(tenantId, 'project-spaces', [project, ...spaces], request.auth.id)
     tenantStore['work-items'] = { data: nextWorkItems, updatedAt: now, updatedBy: request.auth.id }
     if (plan.channels.length) tenantStore['messenger-conversations'] = { data: [...currentConversations, ...plan.channels], updatedAt: now, updatedBy: request.auth.id }
     if (plan.rules.length) tenantStore['work-rules'] = { data: nextRules, updatedAt: now, updatedBy: request.auth.id }

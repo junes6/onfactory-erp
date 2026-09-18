@@ -50,11 +50,12 @@ import { registerWikiRoutes } from './wiki.mjs'
 import { createTranscription } from './transcription.mjs'
 import { conversationIdOfDocument, privateConversationOfDocument, redactDirectMessageProposals } from './messenger-privacy.mjs'
 import { createArchive } from './archive.mjs'
+import { createOverflowSweeper, pageHotAndArchive } from './archive-sweeps.mjs'
 import { WORK_ARCHIVE_AFTER_DAYS, WORK_ARCHIVE_PRESSURE, registerWorkArchiveRoutes } from './work-archive.mjs'
 import { registerMeetingNoteRoutes } from './meeting-notes.mjs'
 import { CUSTOM_FIELD_KEY, customFieldViolation, hasWorkFieldValuesShape, registerCustomFieldRoutes } from './custom-fields.mjs'
 import { registerSavedViewRoutes } from './saved-views.mjs'
-import { PROJECT_TEMPLATES_KEY, registerProjectTemplateRoutes } from './project-templates.mjs'
+import { PROJECT_SPACES_CAP, PROJECT_SPACES_FULL, PROJECT_TEMPLATES_KEY, registerProjectTemplateRoutes } from './project-templates.mjs'
 import { NOTICES_KEY, registerNoticeRoutes } from './notices.mjs'
 // R16-L: 외부 연동. 봉인 헬퍼·수신 훅과 관리 라우트·발신 적재를 세 파일로 나눠 둔다.
 import { createSecretBox } from './secret-box.mjs'
@@ -639,6 +640,20 @@ function normalizeLeaveInput(value) {
   const days = Number(value?.days)
   if (!period || period.length > 100 || !Number.isFinite(days) || days <= 0 || days > 30) return null
   return { type, period, reason, days, approverId: approverId || undefined }
+}
+
+/**
+ * 휴가 원장은 영구 이력이다 — 이미 있는 줄을 빼거나 고치는 저장을 거절한다.
+ * (2026-09-18 감사: 화면이 원장을 500줄로 잘라 저장해 오래된 부여·차감 이력이 말없이 지워졌다.)
+ * 잘못 넣은 조정은 반대 방향 조정으로 바로잡는다.
+ */
+export function rewrittenLedgerEntries(previousLedger, nextLedger) {
+  const next = new Map((Array.isArray(nextLedger) ? nextLedger : []).map((entry) => [entry?.id, entry]))
+  return (Array.isArray(previousLedger) ? previousLedger : []).filter((entry) => {
+    if (!entry?.id) return false
+    const after = next.get(entry.id)
+    return !after || ['name', 'type', 'days', 'createdAt', 'actor'].some((field) => String(after[field] ?? '') !== String(entry[field] ?? ''))
+  })
 }
 
 function normalizeLeaveManagement(value) {
@@ -1818,7 +1833,8 @@ function appendPlatformAudit(platform, { tenantId, event, scope, actor, result =
     result,
     reference: reference || '—',
   }
-  platform.auditEvents = [audit, ...platform.auditEvents].slice(0, 5_000)
+  // 자르지 않는다 — 넘친 오래된 쪽은 정리기(archive-sweeps.mjs)가 보관함에 먼저 쓰고 뺀다.
+  platform.auditEvents = [audit, ...platform.auditEvents]
   return audit
 }
 
@@ -1986,9 +2002,12 @@ export function createApp(options = {}) {
     ? options.initialWorkspaceStore
     : readWorkspaceStore(workspaceStoreFile)
   const onWorkspaceStoreChange = typeof options.onWorkspaceStoreChange === 'function' ? options.onWorkspaceStoreChange : null
+  /** 넘친 기록을 보관함으로 옮기는 정리기. 커밋 뒤마다 길이만 보고, 크게 넘쳤을 때만 다음 틱에 돈다. */
+  let overflowSweeper = null
   const commitWorkspaceStore = () => {
-    if (onWorkspaceStoreChange) return onWorkspaceStoreChange(workspaceStore)
-    return persistWorkspaceStore(workspaceStoreFile, workspaceStore)
+    const result = onWorkspaceStoreChange ? onWorkspaceStoreChange(workspaceStore) : persistWorkspaceStore(workspaceStoreFile, workspaceStore)
+    overflowSweeper?.schedule()
+    return result
   }
   workspaceStore.accountApprovals ??= {}
   workspaceStore.accountCredentials ??= {}
@@ -3339,7 +3358,8 @@ export function createApp(options = {}) {
   const writeProposals = (tenantId, proposals, actorId) => {
     const tenantStore = workspaceStore.tenants[tenantId] ??= {}
     const now = new Date().toISOString()
-    tenantStore[PROPOSALS_KEY] = { data: proposals.slice(0, 2_000), updatedAt: now, updatedBy: actorId }
+    // 자르지 않는다 — 결정된 지 오래된 제안은 정리기가 보관함으로 옮긴다(대기 중인 제안은 절대 옮기지 않는다).
+    tenantStore[PROPOSALS_KEY] = { data: proposals, updatedAt: now, updatedBy: actorId }
     tenantStore[AUTOMATION_POLICIES_KEY] = { data: approvalStatistics(proposals), updatedAt: now, updatedBy: actorId }
   }
   /**
@@ -3946,6 +3966,18 @@ export function createApp(options = {}) {
 
   // 실시간 스트림. 폴링을 대체하며, 끊긴 동안의 변경은 재연결 시 한 번에 따라잡는다.
   const events = createEventStream()
+  overflowSweeper = createOverflowSweeper({
+    workspaceStore,
+    archive,
+    commitWorkspaceStore,
+    // 옮긴 제안은 결정된 것뿐이라 대기 수는 그대로지만, 관리자 화면이 낡은 목록을 들고 있지 않도록 한 번 알린다.
+    publish: (tenantId, key) => {
+      if (key === PROPOSALS_KEY) events.publish(tenantId, 'proposal', { pending: proposalsOf(tenantId).filter((item) => item?.status === 'pending').length })
+    },
+  })
+  app.locals.overflowSweeper = overflowSweeper
+  // 이미 넘친 채로 켜졌다면(예: 이 정리기가 들어오기 전 데이터) 새벽 정리를 기다리지 않고 한 번 돈다.
+  overflowSweeper.schedule()
   events.start()
   app.locals.events = events
 
@@ -4405,12 +4437,18 @@ export function createApp(options = {}) {
   scheduler.register({
     id: 'archive-sweep',
     label: '보관함 정리',
-    description: '끝난 지 오래된 업무를 보관함으로 옮겨 진행 중 목록에 자리를 만듭니다. 지우지 않고 옮깁니다.',
+    description: '끝난 지 오래된 업무와, 넘친 감사·제안·휴가·프로젝트 글·외부 기회 기록을 보관함으로 옮깁니다. 지우지 않고 옮깁니다.',
     spec: { every: 'day', hour: 2, minute: 30 },
     run: async ({ now }) => {
       if (!workArchive) return { detail: '보관 실행기가 아직 준비되지 않았습니다.' }
       let archived = 0
       const failures = []
+      let others = ''
+      try {
+        const swept = await overflowSweeper.run(now)
+        const labels = { audit: '감사', actions: '운영 조치', proposals: '제안', posts: '프로젝트 글', leaveRequests: '휴가 신청', leaveLedger: '휴가 원장', opportunities: '외부 기회' }
+        others = Object.entries(swept).filter(([, count]) => count > 0).map(([field, count]) => `${labels[field]} ${count}건`).join(' · ')
+      } catch (error) { failures.push(`기록 정리: ${error?.message ?? error}`) }
       for (const tenantId of tenantIdsForSchedule()) {
         try {
           const first = await workArchive.archiveCompletedWorkItems(tenantId, { now, olderThanDays: WORK_ARCHIVE_AFTER_DAYS })
@@ -4419,8 +4457,8 @@ export function createApp(options = {}) {
           if (first.remaining >= WORK_ARCHIVE_PRESSURE) archived += (await workArchive.archiveCompletedWorkItems(tenantId, { now, olderThanDays: 7 })).archived
         } catch (error) { failures.push(`${tenantId}: ${error?.message ?? error}`) }
       }
-      if (failures.length && !archived) throw new Error(`보관 실패 — ${failures.join(' / ')}`)
-      return { detail: `업무 ${archived}건 보관${failures.length ? ` · 실패 ${failures.length}곳` : ''}` }
+      if (failures.length && !archived && !others) throw new Error(`보관 실패 — ${failures.join(' / ')}`)
+      return { detail: `업무 ${archived}건 보관${others ? ` · ${others}` : ''}${failures.length ? ` · 실패 ${failures.length}곳` : ''}` }
     },
   })
 
@@ -4614,7 +4652,7 @@ export function createApp(options = {}) {
         draftUpload: draftUploadSlot({ secret: opportunityIngestToken, tenantId: item.tenantId, record, now: Date.parse(now) }),
       }))
       tenantStore[OPPORTUNITIES_KEY] = {
-        data: [record, ...existing].slice(0, MAX_OPPORTUNITIES),
+        data: [record, ...existing],
         updatedAt: now,
         updatedBy: 'opportunity-ingest',
       }
@@ -4894,12 +4932,20 @@ export function createApp(options = {}) {
     response.json({ account: safeAccount(account) })
   })
 
-  // 고객사 관리자가 보는 "운영사 접속 이력" — 고객 신뢰 장치.
-  app.get('/api/operator-access-log', requireAuth, requireTenantAdmin, (request, response) => {
-    const events = workspaceStore.platform.auditEvents
-      .filter((event) => event?.tenantId === request.auth.tenantId && typeof event.event === 'string' && event.event.startsWith('운영자'))
-      .slice(0, 300)
-    response.json({ events })
+  // 고객사 관리자가 보는 "운영사 접속 이력" — 고객 신뢰 장치. 화면이 "모든 기록"이라고 말하므로
+  // 보관함으로 옮겨진 오래된 기록까지 이어서 넘겨 볼 수 있다(전에는 최근 300건에서 잘렸다).
+  app.get('/api/operator-access-log', requireAuth, requireTenantAdmin, async (request, response) => {
+    const tenantId = request.auth.tenantId
+    const page = await pageHotAndArchive({
+      hot: workspaceStore.platform.auditEvents,
+      archive,
+      tenantId,
+      collection: 'audit-events',
+      filter: (event) => event?.tenantId === tenantId && typeof event.event === 'string' && event.event.startsWith('운영자'),
+      offset: request.query.offset,
+      limit: request.query.limit,
+    })
+    response.json({ events: page.rows, total: page.total, offset: page.offset, limit: page.limit, archiveUnavailable: page.archiveUnavailable })
   })
 
   const developerSupportContext = (ticketId) => {
@@ -5358,7 +5404,7 @@ export function createApp(options = {}) {
     const action = { id: `ACT-${Date.now()}-${randomBytes(3).toString('hex')}`, tenantId, kind, target, message, createdAt: new Date().toISOString(), actor: request.auth.name, reference }
     const previousActions = workspaceStore.platform.actions
     const previousAudits = workspaceStore.platform.auditEvents
-    workspaceStore.platform.actions = [action, ...previousActions].slice(0, 5_000)
+    workspaceStore.platform.actions = [action, ...previousActions]
     appendPlatformAudit(workspaceStore.platform, { tenantId, event: kind, scope: `${target} · ${message.slice(0, 160)}`, actor: request.auth.name, reference: reference || action.id })
     try { await commitWorkspaceStore() }
     catch {
@@ -6583,7 +6629,7 @@ export function createApp(options = {}) {
       calendarVisibility: 'pending',
     }
     const record = {
-      data: [leave, ...previousData].slice(0, 1_000),
+      data: [leave, ...previousData],
       updatedAt: new Date().toISOString(),
       updatedBy: request.auth.id,
     }
@@ -6762,7 +6808,7 @@ export function createApp(options = {}) {
       nextLeaveManagement = {
         ...currentManagement,
         balances: currentManagement.balances.map((item, index) => index === balanceIndex ? nextBalance : item),
-        ledger: [ledgerEntry, ...currentManagement.ledger].slice(0, 5_000),
+        ledger: [ledgerEntry, ...currentManagement.ledger],
       }
     }
 
@@ -7069,7 +7115,8 @@ export function createApp(options = {}) {
       })
     }
     if (additions.length) {
-      writeProjectData(tenantId, 'project-spaces', [...additions, ...spaces].slice(0, 500), 'system:it-projects-migration')
+      // 옮겨 오는 자리에서도 자르지 않는다 — 옛 IT 프로젝트가 말없이 빠지면 안 된다.
+      writeProjectData(tenantId, 'project-spaces', [...additions, ...spaces], 'system:it-projects-migration')
       scheduleAuditCommit()
     }
   }
@@ -7124,7 +7171,10 @@ export function createApp(options = {}) {
     }
     applyProjectInfo(project, request.body)
     const previous = workspaceStore.tenants[request.auth.tenantId]?.['project-spaces']
-    writeProjectData(request.auth.tenantId, 'project-spaces', [project, ...projectSpacesOf(request.auth.tenantId)].slice(0, 500), request.auth.id)
+    const currentSpaces = projectSpacesOf(request.auth.tenantId)
+    // 전에는 501번째에서 가장 오래된 프로젝트를 말없이 지웠다. 이제 지우지 않고 거절한다.
+    if (currentSpaces.length >= PROJECT_SPACES_CAP) { response.status(409).json({ error: PROJECT_SPACES_FULL }); return }
+    writeProjectData(request.auth.tenantId, 'project-spaces', [project, ...currentSpaces], request.auth.id)
     try { await commitWorkspaceStore() } catch {
       const tenantStore = workspaceStore.tenants[request.auth.tenantId]; if (previous) tenantStore['project-spaces'] = previous; else delete tenantStore['project-spaces']
       response.status(500).json({ error: { code: 'PROJECT_WRITE_FAILED', message: '프로젝트를 저장하지 못했습니다.' } }); return
@@ -7208,7 +7258,7 @@ export function createApp(options = {}) {
     const post = { id: `PP-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`, projectId: project.id, title: title || (body.split('\n')[0] || '파일 공유').slice(0, 80), body, attachments, authorId: request.auth.id, author: request.auth.name, authorRole: request.auth.role, pinned: false, comments: [], createdAt: now, updatedAt: now }
     const tenantStore = workspaceStore.tenants[request.auth.tenantId]
     const previousPosts = tenantStore['project-posts']; const previousDocuments = tenantStore['company-documents']
-    writeProjectData(request.auth.tenantId, 'project-posts', [post, ...projectPostsOf(request.auth.tenantId)].slice(0, 5_000), request.auth.id)
+    writeProjectData(request.auth.tenantId, 'project-posts', [post, ...projectPostsOf(request.auth.tenantId)], request.auth.id)
     grantDocumentAccess(request.auth.tenantId, attachments.map((item) => item.id), projectMemberIds(project), { projectId: project.id })
     try { await commitWorkspaceStore() } catch {
       if (previousPosts) tenantStore['project-posts'] = previousPosts; else delete tenantStore['project-posts']; if (previousDocuments) tenantStore['company-documents'] = previousDocuments
@@ -8248,6 +8298,11 @@ export function createApp(options = {}) {
         response.status(400).json({ error: { code: 'INVALID_LEAVE_MANAGEMENT', message: '휴가 정책 또는 원장 데이터 형식을 확인해 주세요.' } })
         return
       }
+      const rewritten = rewrittenLedgerEntries(tenantStore[key]?.data?.ledger, nextData.ledger)
+      if (rewritten.length) {
+        response.status(409).json({ error: { code: 'LEAVE_LEDGER_APPEND_ONLY', message: `휴가 원장의 기존 기록 ${rewritten.length}줄을 지우거나 고치는 저장은 받지 않습니다. 잘못 넣은 조정은 반대 방향 조정으로 바로잡아 주세요.` } })
+        return
+      }
     }
     if (request.auth.role === 'tenant-admin' && key === 'factory-layouts') {
       nextData = normalizeFactoryLayouts(nextData)
@@ -8426,6 +8481,7 @@ export function createApp(options = {}) {
     requireTenantAdmin,
     requireMatchingWorkspaceIdentity,
     workspaceStore,
+    archive,
     accounts,
     commitWorkspaceStore,
     appendPlatformAudit,
@@ -8439,6 +8495,7 @@ export function createApp(options = {}) {
     requireTenantAdmin,
     requireMatchingWorkspaceIdentity,
     workspaceStore,
+    archive,
     accounts,
     sessions,
     commitWorkspaceStore,

@@ -334,6 +334,18 @@ html[data-theme='dark'] .leave-duration-preview { border-color: var(--line); bac
 .operator-access-list strong { display: block; font-size: var(--font-13); }
 .operator-access-list small { display: block; overflow: hidden; color: var(--muted); font-size: var(--font-11); text-overflow: ellipsis; white-space: nowrap; }
 .operator-access-list span { padding: var(--space-0) var(--space-8); border-radius: var(--radius-8); color: var(--color-violet); background: var(--color-violet-soft); font-size: var(--font-11); font-weight: var(--weight-medium); line-height: 22px; white-space: nowrap; }
+.operator-access-more { width: 100%; margin-top: var(--space-12); }
+.operator-visit-list { display: flex; flex-direction: column; gap: var(--space-8); margin: var(--space-12) var(--space-0) var(--space-0); padding: var(--space-0); list-style: none; }
+.operator-visit-list details { border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.operator-visit-list summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-12); min-height: 48px; padding: var(--space-8) var(--space-12); cursor: pointer; }
+.operator-visit-list summary:focus-visible { outline: var(--hairline) solid var(--color-primary); outline-offset: var(--hairline); }
+.operator-visit-when { color: var(--ink); font-size: var(--font-13); font-weight: var(--weight-medium); }
+.operator-visit-list summary strong { color: var(--color-violet); font-size: var(--font-13); font-weight: var(--weight-medium); white-space: nowrap; }
+.operator-visit-counts { display: inline-flex; gap: var(--space-8); color: var(--muted); font-size: var(--font-13); white-space: nowrap; }
+.operator-visit-counts em { padding: var(--space-0) var(--space-8); border-radius: var(--radius-8); color: var(--color-warning-ink); background: var(--color-warning-soft); font-style: normal; font-weight: var(--weight-medium); }
+.operator-visit-list .operator-access-list { margin: var(--space-0); padding: var(--space-0) var(--space-12) var(--space-12); }
+.operator-visit-list .operator-access-list article { grid-template-columns: 64px minmax(0,1fr); }
+@media (max-width: 640px) { .operator-visit-list summary { grid-template-columns: minmax(0,1fr) auto; } .operator-visit-when { grid-column: 1 / -1; } }
 
 /* 가입 동의 내역 (테넌트 관리자 설정) */
 .tenant-consent { margin-top: var(--space-0); padding: var(--space-16) var(--space-16) var(--space-24); border-top: var(--hairline) solid var(--line); }
