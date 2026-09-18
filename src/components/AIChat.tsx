@@ -5,6 +5,7 @@ import { assistantExperienceForIndustry } from '../modules/registry'
 import { aiTaskDraftFromAnswer } from '../utils/aiTaskDraft'
 import { formatDateTime } from '../utils/dateTime'
 import { BRAND } from '../brand'
+import { AnswerText } from './AnswerText'
 
 export type ChatAttachmentMeta = {
   documentId: string
@@ -78,6 +79,9 @@ function validateChatFile(file: File) {
   if (!acceptedExtensions.has(extension)) return 'PDF, 이미지, 문서, 스프레드시트, 텍스트 파일만 첨부할 수 있습니다.'
   return ''
 }
+
+/** 답 아래 메타에 모델 ID(예: claude-…) 대신 사람이 읽는 이름. 기술 ID는 화면에 두지 않는다(감사 live-ui-16). */
+const answerSourceLabel = (message: { mode?: 'claude' | 'demo'; model?: string }) => message.mode === 'demo' ? '체험 답변' : message.model ? 'AI 답변' : ''
 
 export default function AIChat({ compact = false, companyName, onCreateTask, canCreateTask = true, canViewCommercial = true, operatingDataAvailable = false, context, workspaceScope, industryType = 'food_manufacturing' }: AIChatProps) {
   const assistantExperience = assistantExperienceForIndustry(industryType, { companyName, operatingDataAvailable, canViewCommercial })
@@ -324,7 +328,7 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
         : 'Claude 응답이 비어 있어 결과를 적용하지 않았습니다. 잠시 후 다시 요청해 주세요.'
       const contentConfirmed = data.attachmentMode === 'content' || data.attachmentsProcessed === attachmentMeta.length
       const responseText = attachmentMeta.length && data.mode !== 'claude'
-        ? `첨부 파일 ${attachmentMeta.length}개는 기업 자료실에 안전하게 저장했습니다. 현재 데모 모드에서는 파일 본문을 읽거나 검증하지 않았습니다. Claude 연결 후 다시 요청해 주세요.`
+        ? `첨부 파일 ${attachmentMeta.length}개는 기업 자료실에 안전하게 저장했습니다. 지금은 체험 모드라 AI가 파일 내용을 읽지 않았습니다. AI가 연결되면 다시 물어봐 주세요.`
         : attachmentMeta.length && !contentConfirmed
           ? `${serverText}\n\n첨부 파일은 문서 ID와 메타정보로 전달됐지만, 서버가 본문 판독 완료를 확인하지 않았습니다.`
           : serverText
@@ -383,7 +387,7 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
         )}
         <span className="ai-chat-scope" title="이 대화가 무엇을 보고 있는지">{conversationScope.label}</span>
         <span className={'connection-pill ' + apiMode}>
-          <i />{apiMode === 'claude' ? 'Claude 연결됨' : apiMode === 'checking' ? '연결 확인 중' : '데모 모드'}
+          <i />{apiMode === 'claude' ? 'AI 연결됨' : apiMode === 'checking' ? '연결 확인 중' : '체험 모드'}
         </span>
       </div>
       {foldedNote && <p className="ai-chat-folded">{foldedNote}</p>}
@@ -403,7 +407,8 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
             {message.role === 'assistant' && <span className="chat-avatar"><Sparkles size={15} /></span>}
             <div className="chat-message-content">
               <div className="chat-bubble">
-                <p>{message.content}</p>
+                {/* AI 답은 제목·목록·굵게를 읽기 쉽게(기호 그대로 보이던 것 — 감사 ai-23). 사람이 쓴 말은 쓴 그대로. */}
+                {message.role === 'assistant' ? <AnswerText text={message.content} /> : <p>{message.content}</p>}
                 {message.attachments?.length ? <ul className="chat-message-files" aria-label="이 메시지의 첨부 파일">
                   {message.attachments.map((file) => <li key={file.documentId}><FileText size={14} /><span>{file.name}</span><small>{fileSizeLabel(file.size)}</small></li>)}
                 </ul> : null}
@@ -415,18 +420,19 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
                   </li>)}</ul>
                   {message.personalContext.dropped.length > 0 && <small>토큰 상한으로 제외: {message.personalContext.dropped.join(", ")}</small>}
                 </details> : null}
+                {/* 업무 만들기는 한 개(감사 ai-13): 업무를 맡길 수 있는 사람은 담당·마감을 고르는 창으로, 아니면 아래 '내 업무로'. */}
                 {canCreateTask && message.role === 'assistant' && index > 0 && message.sourcePrompt && (
                   <button type="button" className="message-action" onClick={() => {
                     const draft = aiTaskDraftFromAnswer(message.content, message.sourcePrompt)
                     onCreateTask(draft.title, draft.completionCriteria)
                   }}>
-                    <ClipboardPlus size={14} /> 이 내용으로 업무 만들기
+                    <ClipboardPlus size={14} /> 업무로 만들기
                   </button>
                 )}
                 {/* 대화에서 나온 결론이 대화 안에만 남으면 아무 일도 일어나지 않는다. */}
                 {conversationId && message.role === 'assistant' && index > 0 && (
                   <div className="message-promotions">
-                    {(['task', 'decision', 'document'] as const).map((kind) => {
+                    {(['task', 'decision', 'document'] as const).filter((kind) => !(kind === 'task' && canCreateTask && message.sourcePrompt)).map((kind) => {
                       const done = (promotedBy[message.id] ?? []).includes(kind)
                       const Icon = kind === 'task' ? ClipboardPlus : kind === 'decision' ? Gavel : FolderPlus
                       return (
@@ -437,14 +443,14 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
                           disabled={done || promoting === `${message.id}:${kind}`}
                           onClick={() => void promote(message, kind)}
                         >
-                          <Icon size={13} /> {done ? `${PROMOTIONS[kind].to} 올림` : PROMOTIONS[kind].to}
+                          <Icon size={13} /> {done ? `${PROMOTIONS[kind].to} 올림` : kind === 'task' ? '내 업무로' : kind === 'document' ? '자료로(나만 보기)' : PROMOTIONS[kind].to}
                         </button>
                       )
                     })}
                   </div>
                 )}
               </div>
-              <div className="chat-message-meta">{message.model && <small>{message.model}</small>}<time dateTime={message.createdAt}>{formatDateTime(message.createdAt)}</time></div>
+              <div className="chat-message-meta">{message.role === 'assistant' && message.id !== 'welcome' && answerSourceLabel(message) && <small>{answerSourceLabel(message)}</small>}<time dateTime={message.createdAt}>{formatDateTime(message.createdAt)}</time></div>
             </div>
           </div>
         ))}
@@ -470,7 +476,7 @@ export default function AIChat({ compact = false, companyName, onCreateTask, can
         {attachments.length > 0 && <ul className="chat-attachment-list" aria-label="선택한 첨부 파일" aria-live="polite">
           {attachments.map((attachment) => <li className={attachment.status} key={attachment.localId}>
             <span className="chat-attachment-icon">{attachment.status === 'uploading' ? <LoaderCircle className="spin" size={16} /> : attachment.status === 'error' ? <AlertCircle size={16} /> : <FileText size={16} />}</span>
-            <span className="chat-attachment-copy"><strong>{attachment.name}</strong><small>{attachment.error || `${fileSizeLabel(attachment.size)} · ${apiMode === 'demo' ? '저장됨, 데모 분석 안 됨' : attachment.status === 'ready' ? '문서 참조 준비됨' : '기업 자료실에 저장 중'}`}</small></span>
+            <span className="chat-attachment-copy"><strong>{attachment.name}</strong><small>{attachment.error || `${fileSizeLabel(attachment.size)} · ${apiMode === 'demo' ? '저장됨 · 체험 모드라 읽지 않음' : attachment.status === 'ready' ? '문서 참조 준비됨' : '기업 자료실에 저장 중'}`}</small></span>
             <button type="button" disabled={attachment.status === 'uploading'} aria-label={attachment.status === 'uploading' ? `${attachment.name} 업로드 중` : `${attachment.name} 첨부 삭제`} onClick={() => void removeAttachment(attachment)}><X size={16} /></button>
           </li>)}
         </ul>}

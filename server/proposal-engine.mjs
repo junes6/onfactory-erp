@@ -117,8 +117,20 @@ export function proposeDocumentClassification(document, { now = new Date(), indu
 export const INSTRUCTION_PATTERN = /(주세요|주시겠어요|주실래요|주십시오|줘요|부탁(?:드립니다|드려요|해요|합니다|드릴게요|해)|처리\s?바랍니다|확인\s?바랍니다|요청\s?드립니다|까지\s?(?:부탁|처리|완료|제출|보내|정리|올려|마무리))/
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
 
+/**
+ * 인사·예의 말. '잘 부탁드립니다'·'좋은 주말 보내 주세요'·'참고해 주세요'도 지시 문형에 걸려, 인사 한 줄마다
+ * 관리자 승인 큐와 알림에 업무 제안이 쌓였다(감사 ai-16). 이 말만 있고 일의 단서가 없으면 지시가 아니다.
+ */
+const COURTESY_PATTERN = /(?:잘\s?부탁|양해\s?부탁|이해\s?부탁|관심\s?부탁|참고\s?(?:해\s?)?(?:주세요|주십시오|부탁)|좋은\s?(?:하루|주말|저녁|밤|시간|꿈)(?:\s?(?:보내|되|꾸))?|즐거운\s?(?:하루|주말|시간|휴가)(?:\s?(?:보내|되))?|편안한\s?(?:밤|저녁|주말)(?:\s?(?:보내|되))?|푹\s?쉬|수고\s?(?:하셨|하세요|해\s?주세요|많으셨)|건강\s?(?:챙기|유의|조심)|맛있게|조심히\s?(?:들어가|가))/g
+/** 일의 단서 — 인사말을 걷어 낸 뒤에도 이것이 있으면 지시로 본다('잘 부탁드려요. 내일까지 견적 보내 주세요'). */
+const WORK_CUE = /(?:까지|마감|확인|정리|제출|보내|작성|처리|검토|준비|수정|올려|전달|발주|점검|회신|공유|업로드|결재|등록|출력|연락|해결|완료|반영)/
+
 export function isInstructionMessage(text) {
-  return INSTRUCTION_PATTERN.test(String(text ?? ''))
+  const value = String(text ?? '')
+  if (!INSTRUCTION_PATTERN.test(value)) return false
+  const withoutCourtesy = value.replace(COURTESY_PATTERN, ' ')
+  if (withoutCourtesy !== value && !WORK_CUE.test(withoutCourtesy)) return false
+  return true
 }
 
 /** "내일까지", "금요일까지", "8월 25일까지", "25일까지" 에서 마감일을 추정한다. 없으면 2영업일 뒤. */

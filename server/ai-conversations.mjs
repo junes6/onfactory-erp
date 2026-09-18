@@ -478,6 +478,9 @@ export function registerAiConversationRoutes({
         conversation,
         message,
         title: String(request.body?.title ?? '').trim(),
+        // '자료로' 올린 답은 기본이 올린 사람만 보는 자료다 — 답이 제한 자료를 요약했을 수 있다(감사 ai-10).
+        // 넓히는 것은 자료실에서 관리자가 한다.
+        ...(kind === 'document' ? { visibility: 'restricted' } : {}),
       })
     } catch (error) {
       if (error?.status === 409 && error?.code) { response.status(409).json({ error: { code: error.code, message: error.message } }); return }

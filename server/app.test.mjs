@@ -86,7 +86,9 @@ test('chat returns a usable demo response without an API key', async () => {
     assert.equal(response.status, 200)
     assert.equal(body.mode, 'demo')
     assert.equal(body.model, DEFAULT_MODEL)
-    assert.match(body.text, /데모 모드/)
+    // 사람 말로 체험 모드임을 알리고, 서버 설정 파일·환경 변수 이름 같은 개발자 말은 쓰지 않는다.
+    assert.match(body.text, /체험 모드/)
+    assert.doesNotMatch(body.text, /ANTHROPIC_API_KEY|\.env/)
   })
 })
 

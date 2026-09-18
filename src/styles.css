@@ -3144,3 +3144,10 @@ html[data-easy-mode='on'] .app-shell :is(.compliance-topline button,.compliance-
 .page-loading-dot { width: 10px; height: 10px; border-radius: var(--radius-8); background: var(--color-primary); animation: page-loading-pulse 1s ease-in-out infinite; }
 @keyframes page-loading-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .page-loading-dot { animation: none; } }
+/* AI 답: 제목·목록·굵게(마크다운 기호 대신) */
+.answer-text { display: grid; gap: var(--space-8); }
+.answer-text p { margin: var(--space-0); font-size: var(--font-15); line-height: 1.75; }
+.answer-text .answer-heading { margin-top: var(--space-4); }
+.answer-text :is(ul, ol) { margin: var(--space-0); padding-left: var(--space-24); font-size: var(--font-15); line-height: 1.7; }
+.answer-text li + li { margin-top: var(--space-4); }
+.answer-text code { padding: var(--space-0) var(--space-4); border-radius: var(--radius-8); background: var(--color-gray-100); font-size: var(--font-13); }

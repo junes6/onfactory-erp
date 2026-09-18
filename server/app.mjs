@@ -1717,10 +1717,10 @@ function demoText(messages, accessibleDocuments = []) {
     : ''
 
   return [
-    '현재 Claude API 키가 설정되지 않아 데모 모드로 동작 중입니다.',
+    '지금은 AI 연결 전(체험 모드)이라 실제 AI가 답하지 않습니다. 아래는 회사 자료에서 찾은 것만 보여 드립니다.',
     preview ? `요청 내용: “${preview}${latestUserMessage.length > 120 ? '…' : ''}”` : '',
     documentResult,
-    '실제 AI 검토·제안·업무 지시를 사용하려면 서버의 .env에 ANTHROPIC_API_KEY를 설정한 뒤 재시작해 주세요.',
+    'AI 답·검토·업무 제안을 쓰려면 회사 관리자가 운영사에 AI 연결을 요청해 주세요.',
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -1741,7 +1741,7 @@ function mapAnthropicError(error) {
     return {
       status: 503,
       code: 'CLAUDE_AUTH_ERROR',
-      message: 'Claude API 인증에 실패했습니다. 서버의 ANTHROPIC_API_KEY를 확인해 주세요.',
+      message: 'AI 연결에 문제가 생겨 답을 받지 못했습니다. 운영사에 알려 주세요.',
     }
   }
 
@@ -1749,14 +1749,14 @@ function mapAnthropicError(error) {
     return {
       status: 429,
       code: 'CLAUDE_RATE_LIMIT',
-      message: 'Claude API 요청이 일시적으로 많습니다. 잠시 후 다시 시도해 주세요.',
+      message: 'AI에 요청이 잠시 몰렸습니다. 잠시 뒤 다시 물어봐 주세요.',
     }
   }
 
   return {
     status: 502,
     code: 'CLAUDE_API_ERROR',
-    message: 'Claude 응답을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    message: 'AI 답을 받지 못했습니다. 잠시 뒤 다시 물어봐 주세요.',
   }
 }
 
