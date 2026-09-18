@@ -82,6 +82,8 @@
 .factory-identity > div span { margin-top: var(--space-4); overflow: hidden; color: var(--factory-muted); font-size: var(--font-13); text-overflow: ellipsis; white-space: nowrap; }
 .factory-identity__live { display: inline-flex !important; align-items: center; gap: var(--space-8); padding: var(--space-8) var(--space-8); border-radius: var(--radius-8); color: var(--color-blue-deep); background: var(--color-blue-soft); font-size: var(--font-13); font-weight: var(--weight-medium); white-space: nowrap; }
 .factory-identity__live i { width: 8px; height: 8px; border-radius: var(--radius-8); background: var(--color-success); box-shadow: var(--shadow-none); }
+/* 블록·위치가 하나도 없으면 초록 점을 켜지 않는다 — 켜진 점은 뭔가 등록돼 있다는 뜻이다. */
+.factory-identity__live.is-empty i { background: var(--color-gray-400); }
 
 .factory-overview {
   overflow: hidden; margin-bottom: var(--space-12); border: var(--hairline) solid var(--factory-line); border-radius: var(--radius-8);

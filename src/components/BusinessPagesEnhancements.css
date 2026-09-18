@@ -99,180 +99,6 @@
   justify-content: center;
 }
 
-.channel-health-card-button,
-.channel-health-check {
-  min-height: 38px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-4);
-  padding: var(--space-0) var(--space-8);
-  border: var(--hairline) solid var(--color-blue-soft);
-  border-radius: var(--radius-8);
-  color: var(--forest);
-  background: var(--color-blue-soft);
-  font-size: var(--font-13);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-}
-
-.channel-health-card-button:disabled,
-.channel-health-check:disabled {
-  cursor: wait;
-  opacity: .55;
-}
-
-.channel-health-panel {
-  margin: var(--space-16) var(--space-0) var(--space-16);
-  overflow: hidden;
-  border: var(--hairline) solid var(--color-blue-soft);
-  border-radius: var(--radius-8);
-  background: var(--surface);
-  box-shadow: var(--shadow-none);
-}
-
-.channel-health-panel > header {
-  min-height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-16);
-  padding: var(--space-12) var(--space-12);
-  border-bottom: var(--hairline) solid var(--line);
-  background: var(--color-blue-soft);
-}
-
-.channel-health-panel > header > div {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-}
-
-.channel-health-icon {
-  width: 36px;
-  height: 36px;
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-8);
-  color: var(--color-blue-deep);
-  background: var(--color-blue-soft);
-}
-
-.channel-health-panel h2 {
-  margin: var(--space-0);
-  font-size: var(--font-15);
-}
-
-.channel-health-panel p {
-  margin: var(--space-4) var(--space-0) var(--space-0);
-  color: var(--muted);
-  font-size: var(--font-13);
-}
-
-.channel-health-table {
-  min-width: 0;
-}
-
-.channel-health-row {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(150px, 1.05fr) minmax(125px, .85fr) minmax(185px, 1.3fr) minmax(150px, 1fr) minmax(115px, .75fr) 58px;
-  align-items: center;
-  gap: var(--space-8);
-  padding: var(--space-8) var(--space-12);
-  border-top: var(--hairline) solid var(--line);
-  font-size: var(--font-13);
-}
-
-.channel-health-row:first-child {
-  border-top: none;
-}
-
-.channel-health-row.header {
-  min-height: 34px;
-  padding-block: var(--space-8);
-  color: var(--muted);
-  background: var(--canvas);
-  font-size: var(--font-11);
-  font-weight: var(--weight-medium);
-}
-
-.channel-health-row > span:not(.channel-health-name) {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  line-height: 1.35;
-}
-
-.channel-health-name {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-}
-
-.channel-health-name .channel-mark {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-8);
-  color: var(--color-white);
-  font-size: var(--font-11);
-  font-style: normal;
-  font-weight: var(--weight-medium);
-}
-
-.channel-health-name strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.health-dot {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border-radius: var(--radius-8);
-  background: var(--color-gray-200);
-}
-
-.health-dot.ok { background: var(--color-success); }
-.health-dot.warning { background: var(--color-warning); }
-.health-dot.danger { background: var(--color-danger); }
-
-.channel-health-check {
-  min-height: 32px;
-  padding-inline: var(--space-8);
-}
-
-.channel-health-empty {
-  padding: var(--space-24);
-  color: var(--muted);
-  text-align: center;
-  font-size: var(--font-13);
-}
-
-.channel-remove-button {
-  min-height: 42px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-4);
-  padding: var(--space-0) var(--space-8);
-  border: var(--hairline) solid var(--color-danger-soft);
-  border-radius: var(--radius-8);
-  color: var(--color-danger);
-  background: var(--color-surface);
-  font-size: var(--font-13);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-}
-
 .channel-catalog > button.configured {
   border-color: var(--color-blue-soft);
   background: var(--color-blue-soft);
@@ -482,9 +308,6 @@
 
 html[data-theme='dark'] .product-image-preview,
 html[data-theme='dark'] .shipment-filter-row button,
-html[data-theme='dark'] .channel-remove-button,
-html[data-theme='dark'] .channel-health-card-button,
-html[data-theme='dark'] .channel-health-check,
 html[data-theme='dark'] .shipment-delete-button:not(.confirming),
 html[data-theme='dark'] .shipment-editor-help,
 html[data-theme='dark'] .shipment-table th {
@@ -494,9 +317,7 @@ html[data-theme='dark'] .shipment-table th {
 }
 
 html[data-theme='dark'] .shipment-integration-note,
-html[data-theme='dark'] .channel-catalog > button.configured,
-html[data-theme='dark'] .channel-health-panel > header,
-html[data-theme='dark'] .channel-health-row.header {
+html[data-theme='dark'] .channel-catalog > button.configured {
   color: var(--ink);
   border-color: var(--line);
   background: var(--color-blue-deep-fill);
@@ -511,14 +332,6 @@ html[data-theme='dark'] .channel-health-row.header {
   .shipment-heading-actions {
     width: 100%;
     justify-content: flex-start;
-  }
-
-  .channel-health-table {
-    overflow-x: auto;
-  }
-
-  .channel-health-row {
-    min-width: 920px;
   }
 }
 
@@ -540,13 +353,59 @@ html[data-theme='dark'] .channel-health-row.header {
 
   .channel-card-actions { grid-template-columns: 1fr 1fr; }
 
-  .channel-health-panel > header { align-items: flex-start; }
-
   .shipment-heading-actions > button {
     flex: 1 1 150px;
   }
 
   .shipment-integration-note {
     margin-inline: var(--space-12);
+  }
+}
+
+/* 표시사항 필수항목 칸: 항목 이름과 상태('입력됨'·'비어 있음')를 두 줄로 나눠 붙어 읽히지 않게 한다. */
+.label-check-item > div {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-0);
+}
+
+.label-check-item:not(.warning) > div > span {
+  color: var(--muted);
+}
+
+/* 필수항목 N/7 링: 채운 비율 위에 글자가 바로 얹히지 않도록 안쪽 바탕을 깐다. */
+.label-score-ring {
+  position: relative;
+}
+
+.label-score-ring::after {
+  content: '';
+  position: absolute;
+  inset: var(--space-8);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+}
+
+.label-score-ring > * {
+  z-index: 1;
+}
+
+/* 요약 칸이 세 개인 줄 — 공용 4칸 격자에 빈 칸이 남지 않게 한다. */
+.business-summary-strip.is-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 760px) {
+  .business-summary-strip.is-three {
+    grid-template-columns: 1fr;
+  }
+
+  .business-summary-strip.is-three > div:nth-child(n) {
+    border-right: none;
+    border-bottom: var(--hairline) solid var(--line);
+  }
+
+  .business-summary-strip.is-three > div:last-child {
+    border-bottom: none;
   }
 }

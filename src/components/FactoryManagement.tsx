@@ -55,32 +55,30 @@ type FactoryManagementProps = {
 }
 
 type ZoneKind = 'raw' | 'frozen' | 'production' | 'packing' | 'shipping'
-type ZoneState = '정상' | '주의' | '가동중' | '출하중' | '대기'
 type LocationKind = '재고' | '생산'
+/** 위치 카드의 상태는 사람이 위치를 등록·수정할 때 직접 고른 값이다(센서·점검 일지에서 온 값이 아니다). */
 type LocationState = '정상' | '주의' | '점검' | '비가동'
 
+/**
+ * 구역은 배치 블록을 묶는 이름표일 뿐이다. 전에는 구역마다 상태('대기')·가동률·조건('센서 미연결')·담당자 같은
+ * 고정값을 만들어 두고, 요약에 그 상태를 센 '정상 0 · 확인 0'을 늘 보여 주었다. 그 값을 채우는 곳은 없었다.
+ */
 type FactoryZone = {
   id: ZoneKind
   name: string
   shortName: string
-  state: ZoneState
-  utilization: number
-  primaryLabel: string
-  primaryValue: string
-  secondaryLabel: string
-  secondaryValue: string
-  condition: string
-  manager: string
-  note: string
-  nextAction: string
 }
 
+/**
+ * 공장은 따로 저장되지 않는다 — 배치(factory-layouts)·위치(factory-locations)에 쓰인 공장 id가 곧 공장 목록이다.
+ * 그래서 이름·주소·면적을 적어 둘 곳이 없다(서버에 공장 정보 저장 칸이 생기면 옮긴다). 전에는 목록 순서로
+ * '제1공장·2공장'을 붙여 공장 하나를 지우면 다른 공장 이름이 바뀌었고, 주소·면적은 늘 '미등록' 고정 문구였다.
+ * 지금은 id에서 나온 관리번호로만 부른다 — 지우거나 더해도 다른 공장의 이름이 바뀌지 않는다.
+ */
 type FactoryDefinition = {
   id: string
   name: string
   code: string
-  address: string
-  area: string
   zones: FactoryZone[]
 }
 
@@ -176,37 +174,23 @@ type LocationModalState =
   | { mode: 'create'; location?: undefined }
   | { mode: 'edit'; location: FactoryLocation }
 
+const FACTORY_ZONES: FactoryZone[] = [
+  { id: 'raw', name: '원료·자재 구역', shortName: '원료' },
+  { id: 'frozen', name: '냉장·냉동 구역', shortName: '냉동' },
+  { id: 'production', name: '생산 구역', shortName: '생산' },
+  { id: 'packing', name: '포장 구역', shortName: '포장' },
+  { id: 'shipping', name: '출하 구역', shortName: '출하' },
+]
+
+/** 공장 id에서 나온 관리번호. 목록 순서와 무관하다. */
+function factoryCode(id: string) {
+  return id.replace(/^FAC-/, '').slice(0, 16) || id.slice(0, 16)
+}
+
 function createCustomerFactory(companyName?: string, id = `FAC-${Date.now()}`): FactoryDefinition {
   const company = companyName?.trim() || '우리 회사'
-  const zone = (id: ZoneKind, name: string, shortName: string): FactoryZone => ({
-    id,
-    name,
-    shortName,
-    state: '대기',
-    utilization: 0,
-    primaryLabel: '등록 위치',
-    primaryValue: '0곳',
-    secondaryLabel: '연결 품목·설비',
-    secondaryValue: '0개',
-    condition: '센서 미연결',
-    manager: '담당자 미지정',
-    note: '배치 블록을 추가하고 실제 운영 정보를 연결해 주세요.',
-    nextAction: '편집 모드에서 첫 공간 블록 등록',
-  })
-  return {
-    id,
-    name: `${company} 제1공장`,
-    code: 'MAIN-01',
-    address: '주소 미등록',
-    area: '면적 미등록',
-    zones: [
-      zone('raw', '원료·자재 구역', '원료'),
-      zone('frozen', '냉장·냉동 구역', '냉동'),
-      zone('production', '생산 구역', '생산'),
-      zone('packing', '포장 구역', '포장'),
-      zone('shipping', '출하 구역', '출하'),
-    ],
-  }
+  const code = factoryCode(id)
+  return { id, name: `${company} 공장 ${code}`, code, zones: FACTORY_ZONES }
 }
 
 const emptyFactoryLayouts: FactoryLayouts = {}
@@ -249,9 +233,9 @@ const zonePresentation: Record<ZoneKind, { icon: LucideIcon; className: string }
   shipping: { icon: Truck, className: 'shipping' },
 }
 
-const statusTone = (state: ZoneState | LocationState): StatusBadgeTone => {
+const statusTone = (state: LocationState): StatusBadgeTone => {
   if (state === '주의' || state === '점검') return 'warning'
-  if (state === '대기' || state === '비가동') return 'neutral'
+  if (state === '비가동') return 'neutral'
   return 'success'
 }
 
@@ -260,7 +244,7 @@ const formatFileSize = (bytes: number) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function FactoryStatusBadge({ state }: { state: ZoneState | LocationState }) {
+function FactoryStatusBadge({ state }: { state: LocationState }) {
   return <StatusBadge className="factory-status" dot tone={statusTone(state)}>{state}</StatusBadge>
 }
 
@@ -842,10 +826,8 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
   const [layouts, setLayouts] = useWorkspaceState<FactoryLayouts>('factory-layouts', emptyFactoryLayouts, { scope: workspaceScope, seedWhenEmpty: false, validate: isFactoryLayouts })
   const availableFactories = useMemo(() => {
     const ids = Array.from(new Set([...Object.keys(layouts), ...locations.map((location) => location.factoryId)]))
-    return ids.map((id, index) => {
-      const definition = createCustomerFactory(companyName, id)
-      return { ...definition, name: `${companyName?.trim() || '우리 회사'} ${ids.length === 1 ? '제1공장' : `${index + 1}공장`}`, code: id.replace(/^FAC-/, '').slice(0, 16) || `SITE-${index + 1}` }
-    })
+    // 이름은 id에서만 만든다 — 목록 순서로 번호를 붙이면 공장 하나를 지울 때 다른 공장의 이름이 바뀐다.
+    return ids.map((id) => createCustomerFactory(companyName, id))
   }, [companyName, layouts, locations])
   const placeholderFactory = useMemo(() => createCustomerFactory(companyName, 'FAC-PENDING'), [companyName])
   const [selectedFactoryId, setSelectedFactoryId] = useState('')
@@ -872,8 +854,9 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
   )
   const selectedLocations = factoryLocations.filter((location) => location.zoneId === selectedZone.id)
   const drawing = drawings[factory.id]
-  const warningCount = factory.zones.filter((zone) => zone.state === '주의').length
-  const operatingCount = factory.zones.filter((zone) => ['정상', '가동중', '출하중'].includes(zone.state)).length
+  // 요약 칸은 저장된 것만 센다: 블록 수, 등록한 위치 수, 사람이 '주의'·'점검'으로 표시한 위치 수, 품목이 적힌 블록 수.
+  // 전에는 늘 '대기'인 구역 상태를 세어 '정상 0 · 확인 0'이 떠 있었다.
+  const flaggedLocationCount = factoryLocations.filter((location) => location.status === '주의' || location.status === '점검').length
 
   useEffect(() => () => {
     objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
@@ -1295,14 +1278,14 @@ export function FactoryManagement({ onToast, canManage, companyName, workspaceSc
         <div className="factory-overview__main">
           <div className="factory-identity factory-identity--compact">
             <span className="factory-identity__mark"><FactoryIcon size={20} aria-hidden="true" /></span>
-            <div><strong>{factory.name}</strong><span>{factory.code} · {factory.address} · {factory.area}</span></div>
-            <span className="factory-identity__live"><i />{factoryBlocks.length || factoryLocations.length ? '운영 중' : '초기 설정'}</span>
+            <div><strong>{factory.name}</strong><span>관리번호 {factory.code}</span></div>
+            <span className={`factory-identity__live${factoryBlocks.length || factoryLocations.length ? '' : ' is-empty'}`}><i />{factoryBlocks.length || factoryLocations.length ? '배치 등록됨' : '배치 등록 전'}</span>
           </div>
           <div className="factory-summary factory-summary--compact" aria-label="핵심 지표">
             <article><Layers3 size={16} /><span>블록 <strong>{factoryBlocks.length}</strong></span></article>
-            <article><CheckCircle2 size={16} /><span>정상 <strong>{operatingCount}</strong></span></article>
-            <article className={warningCount ? 'is-warning' : ''}><AlertTriangle size={16} /><span>확인 <strong>{warningCount}</strong></span></article>
-            <article><MapIcon size={16} /><span>연결 <strong>{factoryBlocks.filter((block) => block.item).length}</strong></span></article>
+            <article><Warehouse size={16} /><span>위치 <strong>{factoryLocations.length}</strong></span></article>
+            <article className={flaggedLocationCount ? 'is-warning' : ''}><AlertTriangle size={16} /><span>주의·점검 <strong>{flaggedLocationCount}</strong></span></article>
+            <article><MapIcon size={16} /><span>품목 연결 <strong>{factoryBlocks.filter((block) => block.item).length}</strong></span></article>
           </div>
           <button className="factory-overview__toggle" type="button" aria-expanded={overviewExpanded} aria-controls="factory-overview-details" onClick={() => setOverviewExpanded((value) => !value)}>
             <UploadCloud size={17} /> 도면·상세 <ChevronDown size={17} />

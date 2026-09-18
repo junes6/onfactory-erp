@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent 
 import { AlertTriangle, Bot, CalendarClock, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileCheck2, FileText, Gauge, GraduationCap, Microscope, Pencil, Plus, Search, ShieldCheck, Sparkles, Tags, Trash2, Upload, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
-import { formatDateTime } from '../utils/dateTime'
+import { formatDateTime, seoulDateInputValue } from '../utils/dateTime'
+import { deriveComplianceStatus, type ComplianceStatus } from '../utils/expiryStatus'
 import {
   deleteDocumentAttachment,
   deleteDocumentAttachments,
@@ -17,7 +18,6 @@ import type { LensTarget } from './LensPanel'
 import './ComplianceCenter.css'
 import { Button } from './ui/Button'
 
-type ComplianceStatus = '유효' | '갱신예정' | '보완필요' | '만료'
 type ComplianceRecord = {
   id: string
   category: string
@@ -27,6 +27,10 @@ type ComplianceRecord = {
   issuedAt: string
   expiresAt: string
   owner: string
+  /**
+   * 저장할 때의 상태. **화면은 이 값을 믿지 않는다** — 만료일과 증빙에서 볼 때마다 다시 계산한다(withLiveStatus).
+   * 전에는 저장 순간에만 계산해, 만료일이 지나도 다시 저장하기 전까지 초록 '정상'이 떠 있었다.
+   */
   status: ComplianceStatus
   checklist: string[]
   attachments: { id: string; name: string; size: string }[]
@@ -51,7 +55,9 @@ function complianceStatusLabel(status: ComplianceStatus) {
   return '만료됨'
 }
 
-function complianceNextStep(status: ComplianceStatus) {
+function complianceNextStep(record: Pick<ComplianceRecord, 'status' | 'attachments'>) {
+  const { status } = record
+  if (status === '보완필요' && record.attachments.length) return '다음 검토일을 읽을 수 없습니다. 아래 수정 버튼을 눌러 유효·다음 검토일을 입력해 주세요.'
   if (status === '보완필요') return '인증서·성적서 파일을 첨부하면 정상으로 바뀝니다. 아래 수정 버튼을 눌러 증빙자료를 올려 주세요.'
   if (status === '갱신예정') return '다음 검토일이 90일 이내로 다가왔습니다. 발급 기관에 갱신 신청을 미리 준비하세요.'
   if (status === '만료') return '유효기간이 지났습니다. 재발급 받은 뒤 새 인증서와 검토일을 등록해 주세요.'
@@ -79,12 +85,15 @@ function isRecordArray(value: unknown): value is ComplianceRecord[] {
   return Array.isArray(value) && value.every((item) => Boolean(item && typeof item === 'object' && typeof item.id === 'string' && typeof item.name === 'string' && Array.isArray(item.attachments)))
 }
 
-function deriveStatus(expiresAt: string, attachments: ComplianceRecord['attachments']): ComplianceStatus {
-  if (!attachments.length) return '보완필요'
-  const remaining = Math.ceil((new Date(`${expiresAt}T23:59:59`).getTime() - Date.now()) / 86_400_000)
-  if (remaining < 0) return '만료'
-  if (remaining <= 90) return '갱신예정'
-  return '유효'
+/** 오늘(서울) 기준으로 상태를 다시 계산한 기록. 요약·지금 할 일·목록·배지·AI 검토가 모두 이것을 쓴다. */
+function withLiveStatus(record: ComplianceRecord, today: string): ComplianceRecord {
+  return { ...record, status: deriveComplianceStatus(record.expiresAt, record.attachments.length, today) }
+}
+
+function complianceIssueLabel(record: Pick<ComplianceRecord, 'status' | 'attachments' | 'expiresAt'>) {
+  if (record.status === '만료') return '유효기간 지남'
+  if (record.status === '보완필요') return record.attachments.length ? '다음 검토일 입력 필요' : '증빙자료 첨부 필요'
+  return `다음 검토일 ${record.expiresAt}`
 }
 
 function useComplianceDialog(onClose: () => void) {
@@ -259,7 +268,7 @@ function RecordModal({ record, workspaceScope, currentUserName, onAskLens, onClo
           issuedAt: String(form.get('issuedAt')),
           expiresAt,
           owner: String(form.get('owner')).trim(),
-          status: deriveStatus(expiresAt, attachments),
+          status: deriveComplianceStatus(expiresAt, attachments.length),
           checklist: String(form.get('checklist')).split('\n').map((item) => item.trim()).filter(Boolean),
           attachments,
           note: String(form.get('note')).trim(),
@@ -315,7 +324,10 @@ function RecordModal({ record, workspaceScope, currentUserName, onAskLens, onClo
 }
 
 export function ComplianceCenter({ workspaceScope, canManage, currentUserName, companyName, onAskLens, onToast }: { workspaceScope?: string; canManage: boolean; currentUserName: string; companyName: string; onAskLens?: (target: LensTarget) => void; onToast: (message: string) => void }) {
-  const [records, setRecords] = useWorkspaceState<ComplianceRecord[]>('compliance-records', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isRecordArray })
+  const [storedRecords, setRecords] = useWorkspaceState<ComplianceRecord[]>('compliance-records', [], { scope: workspaceScope, seedWhenEmpty: false, validate: isRecordArray })
+  // 저장된 status는 무시하고 오늘 날짜로 다시 계산한다 — 생존 센티널(승인 큐)과 같은 근거(만료일)로 말한다.
+  const today = seoulDateInputValue()
+  const records = useMemo(() => storedRecords.map((record) => withLiveStatus(record, today)), [storedRecords, today])
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('전체')
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
@@ -388,7 +400,7 @@ export function ComplianceCenter({ workspaceScope, canManage, currentUserName, c
         {needsAction.slice(0, 4).map((record) => <button type="button" key={record.id} onClick={() => { setCategory('전체'); setSelectedRecordId(record.id) }}>
           <StatusBadge className="compliance-status" tone={complianceStatusTone(record.status)}>{complianceStatusLabel(record.status)}</StatusBadge>
           <strong>{record.name}</strong>
-          <small>{record.status === '만료' ? '유효기간 지남' : record.status === '보완필요' ? '증빙자료 첨부 필요' : `다음 검토일 ${record.expiresAt}`}</small>
+          <small>{complianceIssueLabel(record)}</small>
           <ChevronRight size={15} />
         </button>)}
       </div>
@@ -415,7 +427,7 @@ export function ComplianceCenter({ workspaceScope, canManage, currentUserName, c
               <button className="compliance-record-select" type="button" aria-pressed={selected} onClick={() => setSelectedRecordId(record.id)}>
                 <span className={`compliance-record-icon ${meta.tone}`}><Icon size={19} /></span>
                 <span className="compliance-record-main"><small>{record.category}</small><strong>{record.name}</strong><em>{record.owner} · 다음 검토 {record.expiresAt}</em></span>
-                <StatusBadge className="compliance-status" tone={complianceStatusTone(record.status)} icon={record.status === '갱신예정' || record.status === '보완필요' ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}>{complianceStatusLabel(record.status)}</StatusBadge>
+                <StatusBadge className="compliance-status" tone={complianceStatusTone(record.status)} icon={record.status === '유효' ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}>{complianceStatusLabel(record.status)}</StatusBadge>
                 <ChevronRight className="compliance-row-chevron" size={17} />
               </button>
               {canManage && <div className="compliance-row-actions"><button type="button" aria-label={`${record.name} 수정`} onClick={() => setEditing(record)}><Pencil size={15} /></button><button className="danger" type="button" aria-label={`${record.name} 삭제`} onClick={() => void remove(record)}><Trash2 size={15} /></button></div>}
@@ -430,7 +442,7 @@ export function ComplianceCenter({ workspaceScope, canManage, currentUserName, c
           const Icon = meta.icon
           return <>
             <header><span className={`compliance-record-icon ${meta.tone}`}><Icon size={21} /></span><div><small>{selectedRecord.category}</small><h2>{selectedRecord.name}</h2></div><StatusBadge className="compliance-status" tone={complianceStatusTone(selectedRecord.status)}>{complianceStatusLabel(selectedRecord.status)}</StatusBadge></header>
-            <div className={`compliance-next-step tone-${complianceStatusTone(selectedRecord.status)}`}><ClipboardCheck size={17} /><div><strong>지금 할 일</strong><p>{complianceNextStep(selectedRecord.status)}</p></div></div>
+            <div className={`compliance-next-step tone-${complianceStatusTone(selectedRecord.status)}`}><ClipboardCheck size={17} /><div><strong>지금 할 일</strong><p>{complianceNextStep(selectedRecord)}</p></div></div>
             <dl className="compliance-detail-meta"><div><dt>발급·검토 기관</dt><dd>{selectedRecord.authority}</dd></div><div><dt>관리번호</dt><dd>{selectedRecord.certificateNo}</dd></div><div><dt>담당자</dt><dd>{selectedRecord.owner}</dd></div><div><dt>다음 검토일</dt><dd>{selectedRecord.expiresAt}</dd></div></dl>
             <section><div className="compliance-detail-section-title"><ClipboardCheck size={16} /><strong>필수 확인 항목</strong><span>{selectedRecord.checklist.length}</span></div><ul className="compliance-checklist">{selectedRecord.checklist.map((item) => <li key={item}><CheckCircle2 size={15} />{item}</li>)}{selectedRecord.checklist.length === 0 && <li className="empty">등록된 확인 항목이 없습니다.</li>}</ul></section>
             <section><div className="compliance-detail-section-title"><FileText size={16} /><strong>증빙자료</strong><span>{selectedRecord.attachments.length}</span></div><div className="compliance-detail-files">{selectedRecord.attachments.map((attachment) => <button type="button" disabled={!isStoredDocumentAttachment(attachment) || Boolean(downloadingId)} onClick={() => void downloadAttachment(attachment)} key={attachment.id}><FileText size={15} /><span><strong>{attachment.name}</strong><small>{attachment.size}{!isStoredDocumentAttachment(attachment) ? ' · 원본 없음' : ''}</small></span>{isStoredDocumentAttachment(attachment) && <Download size={15} />}</button>)}{selectedRecord.attachments.length === 0 && <p>등록된 증빙자료가 없습니다.</p>}</div></section>

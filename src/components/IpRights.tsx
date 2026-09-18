@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Award, BadgeCheck, Check, Copyright, Download, FileBadge, Paperclip, Pencil, Plus, Sparkles, Trash2, X } from 'lucide-react'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { formatDateLabel, seoulDateInputValue } from '../utils/dateTime'
+import { daysUntil, deriveIpStatus, IP_RENEWAL_WINDOW_DAYS, IP_STAGES, ipStageOf, type IpDisplayStatus } from '../utils/expiryStatus'
 import {
   deleteDocumentAttachments,
   downloadDocumentAttachment,
@@ -18,7 +19,12 @@ import { Button, IconButton } from './ui/Button'
 
 // 지식재산권·인증서: 등록증 원본 파일을 업로드해 두고 만료를 관리한다.
 type IpKind = '특허' | '실용신안' | '상표' | '디자인' | '저작권' | '인증서' | '등록증' | '기타'
-type IpStatus = '준비' | '출원' | '심사 중' | '등록' | '갱신 필요' | '만료'
+/**
+ * 저장값. 사람이 고르는 것은 진행 단계(준비·출원·심사 중·등록)뿐이다. 예전 기록에는 사람이 고른 '갱신 필요'·'만료'가
+ * 남아 있을 수 있어 타입에 둔다. 화면에 보이는 상태는 deriveIpStatus가 만료일에서 계산한다 — 전에는 '등록'(초록)
+ * 배지와 '만료 12일 지남'이 한 줄에 함께 나왔다.
+ */
+type IpStatus = IpDisplayStatus
 type IpRight = {
   id: string
   kind: IpKind
@@ -37,7 +43,6 @@ type IpRight = {
 }
 
 const IP_KINDS: IpKind[] = ['특허', '실용신안', '상표', '디자인', '저작권', '인증서', '등록증', '기타']
-const IP_STATUSES: IpStatus[] = ['준비', '출원', '심사 중', '등록', '갱신 필요', '만료']
 const isIpRights = (value: unknown): value is IpRight[] => Array.isArray(value) && value.every((item) => item && typeof item.id === 'string' && typeof item.title === 'string' && Array.isArray(item.attachments))
 
 function useIpDialog(onClose: () => void, locked: boolean, initialFocus?: () => HTMLElement | null) {
@@ -90,17 +95,19 @@ export function IpRightsPage({ workspaceScope, canManage, currentUserName, onAsk
 
   const sorted = useMemo(() => [...rights].sort((left, right) => (left.expiresAt || '9999').localeCompare(right.expiresAt || '9999')), [rights])
   const visible = sorted.filter((right) => kindFilter === '전체' || right.kind === kindFilter)
-  const expiring = rights.filter((right) => right.expiresAt && right.status !== '만료' && Math.ceil((Date.parse(right.expiresAt) - Date.parse(today)) / 86_400_000) <= 60)
-  const registered = rights.filter((right) => right.status === '등록').length
+  // 상태는 저장값이 아니라 오늘 날짜로 계산한다. 요약 칸도 같은 계산을 센다.
+  const statusOf = (right: IpRight) => deriveIpStatus(right.status, right.expiresAt, today)
+  const expiring = rights.filter((right) => statusOf(right) === '갱신 필요')
+  const registered = rights.filter((right) => ['등록', '갱신 필요'].includes(statusOf(right))).length
   const kinds = ['전체', ...new Set(rights.map((right) => right.kind))] as Array<'전체' | IpKind>
 
   const download = async (attachment: StoredDocumentAttachment) => {
     try { await downloadDocumentAttachment(attachment, workspaceScope) } catch (error) { onToast(error instanceof Error ? error.message : '파일을 내려받지 못했습니다.') }
   }
   const dday = (expiresAt: string) => {
-    if (!expiresAt) return null
-    const days = Math.ceil((Date.parse(expiresAt) - Date.parse(today)) / 86_400_000)
-    return { label: days < 0 ? `만료 ${Math.abs(days)}일 지남` : `만료 D-${days}`, urgent: days <= 60 }
+    const days = daysUntil(expiresAt, today)
+    if (days === null) return null
+    return { label: days < 0 ? `만료 ${Math.abs(days)}일 지남` : `만료 D-${days}`, urgent: days <= IP_RENEWAL_WINDOW_DAYS }
   }
   const remove = async (right: IpRight) => {
     if (!window.confirm(`‘${right.title}’을(를) 삭제할까요? 첨부한 등록증 파일도 함께 삭제됩니다.`)) return
@@ -124,11 +131,11 @@ export function IpRightsPage({ workspaceScope, canManage, currentUserName, onAsk
     <section className="panel it-list-panel">
       {visible.length === 0
         ? <div className="empty-state"><Award size={30} /><h3>등록된 권리·인증이 없습니다</h3><p>특허·상표 출원부터 ISO 인증서, 각종 등록증까지 — 명칭과 파일만으로 시작하세요.</p>{canManage && <Button tone="primary" type="button" onClick={() => setEditor({})}><Plus size={18} /> 첫 항목 등록</Button>}</div>
-        : <div className="it-rows" role="list">{visible.map((right) => { const due = dday(right.expiresAt); const Icon = kindIcon(right.kind); return <article className="it-row" role="listitem" key={right.id}>
+        : <div className="it-rows" role="list">{visible.map((right) => { const due = dday(right.expiresAt); const status = statusOf(right); const Icon = kindIcon(right.kind); return <article className="it-row" role="listitem" key={right.id}>
           <span className="ip-kind-mark"><Icon size={17} /></span>
-          <StatusBadge className="status-pill" dot tone={ipTone(right.status)}>{right.status}</StatusBadge>
+          <StatusBadge className="status-pill" dot tone={ipTone(status)}>{status}</StatusBadge>
           <div className="it-row-main"><strong>{right.title}</strong><small>{right.kind}{right.number ? ` · ${right.number}` : ''}{right.holder ? ` · 권리자 ${right.holder}` : ''}{right.issuer ? ` · ${right.issuer}` : ''}{right.registeredAt ? ` · 등록 ${formatDateLabel(right.registeredAt)}` : right.filedAt ? ` · 출원 ${formatDateLabel(right.filedAt)}` : ''}</small></div>
-          {due && right.status !== '만료' && <span className={`it-row-meta${due.urgent ? ' is-urgent' : ''}`}>{due.label}</span>}
+          {due && <span className={`it-row-meta${due.urgent ? ' is-urgent' : ''}`}>{due.label}</span>}
           <div className="it-row-files">{right.attachments.length === 0 ? <span className="it-row-meta">파일 없음</span> : right.attachments.map((file) => <span key={file.id} className="it-row-file"><button type="button" onClick={() => void download(file)}><Download size={13} /> {file.name}</button>{onAskLens && <button type="button" aria-label={`${file.name} AI에게 물어보기`} onClick={() => onAskLens({ id: file.id, name: file.name, context: `지식재산 · 인증 · ${right.title}` })}><Sparkles size={13} /></button>}</span>)}</div>
           {canManage && <div className="it-row-actions"><button type="button" aria-label={`${right.title} 수정`} onClick={() => setEditor({ item: right })}><Pencil size={15} /></button><button type="button" aria-label={`${right.title} 삭제`} onClick={() => void remove(right)}><Trash2 size={15} /></button></div>}
         </article> })}</div>}
@@ -244,7 +251,8 @@ function IpEditor({ item, workspaceScope, currentUserName, onToast, onClose, onS
       filedAt: field('filedAt'),
       registeredAt: field('registeredAt'),
       expiresAt: field('expiresAt'),
-      status: IP_STATUSES.includes(field('status') as IpStatus) ? field('status') as IpStatus : '준비',
+      // 사람이 고른 진행 단계만 저장한다. 등록 뒤의 '갱신 필요'·'만료'는 만료일에서 계산한다.
+      status: ipStageOf(field('status')),
       owner: field('owner'),
       note: field('note'),
       attachments,
@@ -309,7 +317,7 @@ function IpEditor({ item, workspaceScope, currentUserName, onToast, onClose, onS
         <div className="form-grid"><label className="form-field"><span>출원 · 등록번호</span><input name="number" defaultValue={approved.number ?? item?.number ?? ''} placeholder="예: 10-2026-0012345" /></label><label className="form-field"><span>권리자</span><input name="holder" defaultValue={approved.holder ?? item?.holder ?? ''} placeholder="예: 주식회사 3D뮤즈" /></label></div>
         <label className="form-field full"><span>발급 · 관할 기관</span><input name="issuer" defaultValue={approved.issuer ?? item?.issuer ?? ''} placeholder="예: 특허청" /></label>
         <div className="form-grid"><label className="form-field"><span>출원일</span><input name="filedAt" type="date" defaultValue={approved.filedAt ?? item?.filedAt ?? ''} /></label><label className="form-field"><span>등록일</span><input name="registeredAt" type="date" defaultValue={approved.registeredAt ?? item?.registeredAt ?? ''} /></label></div>
-        <div className="form-grid"><label className="form-field"><span>만료 · 갱신일</span><input name="expiresAt" type="date" defaultValue={approved.expiresAt ?? item?.expiresAt ?? ''} /></label><label className="form-field"><span>상태</span><select name="status" defaultValue={item?.status ?? '등록'}>{IP_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label></div>
+        <div className="form-grid"><label className="form-field"><span>만료 · 갱신일</span><input name="expiresAt" type="date" defaultValue={approved.expiresAt ?? item?.expiresAt ?? ''} /></label><label className="form-field"><span>진행 단계 <small>갱신 필요·만료는 만료일로 자동 표시</small></span><select name="status" defaultValue={item ? ipStageOf(item.status) : '등록'}>{IP_STAGES.map((stage) => <option key={stage}>{stage}</option>)}</select></label></div>
         <label className="form-field full"><span>담당자</span><input name="owner" defaultValue={item?.owner ?? currentUserName} /></label>
         <label className="form-field full"><span>메모</span><textarea name="note" rows={2} defaultValue={item?.note ?? ''} placeholder="연차료 납부·갱신 절차 등" /></label>
         <footer><Button tone="ghost" type="button" disabled={locked} onClick={() => void cancel()}>{closing ? '정리 중…' : '취소'}</Button><Button tone="primary" type="submit" disabled={locked || extracting}><Check size={18} /> {busy ? '저장 중…' : extracting ? 'AI 읽는 중…' : '확인 후 저장'}</Button></footer>

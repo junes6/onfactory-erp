@@ -1,18 +1,14 @@
 import {
   AlertTriangle,
   ArrowRight,
-  BarChart3,
   Boxes,
   CheckCircle2,
   ChevronRight,
   CircleDollarSign,
-  Clock3,
   FileCheck2,
   FileUp,
   ExternalLink,
   ImagePlus,
-  KeyRound,
-  Link2,
   Package,
   Plus,
   RefreshCw,
@@ -24,8 +20,6 @@ import {
   Trash2,
   Truck,
   Printer,
-  TrendingDown,
-  TrendingUp,
   Warehouse,
   X,
 } from 'lucide-react'
@@ -33,6 +27,9 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { ChannelMetric, SeaProduct } from '../domainData'
 import { useWorkspaceState } from '../hooks/useWorkspaceState'
 import { formatDateTime } from '../utils/dateTime'
+import { daysUntil } from '../utils/expiryStatus'
+import { checkLabelFields, collectLabelIssues, openLabelMemo, storedLabelStatus, summarizeLabel } from '../utils/foodLabelCheck'
+import { SALES_PERIODS, summarizeShipments, type SalesPeriod } from '../utils/salesPeriod'
 import { StatusBadge, type StatusBadgeTone } from './StatusBadge'
 import './BusinessPagesEnhancements.css'
 import { Button, IconButton, buttonClassName } from './ui/Button'
@@ -47,31 +44,20 @@ type TenantBusinessPageProps = BusinessPageProps & {
 }
 
 type ProductDetailTab = 'basic' | 'label' | 'channels' | 'inventory'
-type SalesPeriod = 'today' | 'week' | 'month'
 type ChannelSetupStatus = 'setup-required' | 'credentials-entered' | 'test-pending'
-type ChannelHealthResult = {
-  credential: 'missing' | 'ready'
-  response: 'not-tested' | 'ok' | 'unavailable'
-  responseLabel: string
-  mapping: 'none' | 'ready' | 'attention'
-  mappingLabel: string
-  checkedAt: string
-}
 
+/**
+ * 판매채널 목록의 한 줄. 아직 어느 판매자센터와도 직접 연결하지 않는다 —
+ * 주문 수·판매수량은 출고 주문(sales-shipments)에서 세고, orders·revenue 같은 합계 칸은 채우는 곳이 없다.
+ * 아래 선택 칸들은 예전 '연결 설정'이 남긴 흔적이다(키 끝 4자리·판매자 ID·점검 결과). 새로 쓰지 않고, 쓸 때 걷어 낸다.
+ */
 type ManagedChannel = ChannelMetric & {
   connectionStatus?: ChannelSetupStatus
   sellerAccount?: string
   credentialHint?: string
   credentialFields?: Record<string, string>
   checkedAt?: string
-  health?: ChannelHealthResult
-}
-
-type CredentialField = {
-  id: string
-  label: string
-  placeholder: string
-  secret?: boolean
+  health?: unknown
 }
 
 type ChannelDefinition = {
@@ -79,12 +65,7 @@ type ChannelDefinition = {
   name: string
   short: string
   color: string
-  authMode: string
   sellerUrl: string
-  docsUrl: string
-  fields: CredentialField[]
-  checklist: string[]
-  accessNote: string
 }
 
 type ShipmentStatus = '출고대기' | '송장등록' | '출고완료'
@@ -180,82 +161,25 @@ function useModalFocus(active: boolean) {
   return dialogRef
 }
 
+/**
+ * 고를 수 있는 판매채널과 각 판매자센터 주소.
+ *
+ * 전에는 채널마다 API 키 입력칸(Access Key·Secret 등)과 준비 체크리스트를 두고 '연결 설정'을 받았지만,
+ * 받은 키는 버리고 끝 4자리만 남겼으며 서버에는 채널 커넥터가 없어 아무 연결도 일어나지 않았다.
+ * 커넥터가 생기기 전까지는 판매자센터 바로가기와 출고 주문 CSV만 둔다.
+ */
 const channelDefinitions: ChannelDefinition[] = [
-  {
-    id: 'coupang', name: '쿠팡', short: 'C', color: 'var(--color-danger)', authMode: 'HMAC Access Key',
-    sellerUrl: 'https://wing.coupang.com/', docsUrl: 'https://developers.coupangcorp.com/',
-    fields: [
-      { id: 'vendorId', label: 'Vendor ID', placeholder: 'A00012345' },
-      { id: 'accessKey', label: 'Access Key', placeholder: 'WING에서 발급한 Access Key', secret: true },
-      { id: 'secretKey', label: 'Secret Key', placeholder: 'WING에서 발급한 Secret Key', secret: true },
-    ],
-    checklist: ['WING 사업자 판매자 계정 승인', '판매자정보에서 Open API Key 발급', '연동 서버의 고정 IP 등록'],
-    accessNote: '쿠팡은 WING에서 발급한 Vendor ID·Access Key·Secret Key와 HMAC 서명이 필요합니다.',
-  },
-  {
-    id: 'naver', name: '네이버 스마트스토어', short: 'N', color: 'var(--color-success)', authMode: 'Commerce API 애플리케이션',
-    sellerUrl: 'https://sell.smartstore.naver.com/', docsUrl: 'https://apicenter.commerce.naver.com/docs/commerce-api/current',
-    fields: [
-      { id: 'sellerId', label: '커머스 판매자 ID', placeholder: '통합 매니저 계정' },
-      { id: 'clientId', label: '애플리케이션 ID', placeholder: '커머스API센터 애플리케이션 ID' },
-      { id: 'clientSecret', label: '애플리케이션 Secret', placeholder: '커머스API센터 Secret', secret: true },
-    ],
-    checklist: ['스마트스토어 통합 매니저 권한 확인', '커머스API센터 계정 생성', '애플리케이션 등록 및 API 권한 확인'],
-    accessNote: '스마트스토어 통합 매니저가 커머스API센터에서 애플리케이션을 등록해야 합니다.',
-  },
-  {
-    id: 'gmarket', name: 'G마켓 · 옥션', short: 'G', color: 'var(--color-blue)', authMode: 'ESM Trading API',
-    sellerUrl: 'https://www.esmplus.com/', docsUrl: 'https://etapi.gmarket.com/',
-    fields: [
-      { id: 'esmId', label: 'ESM 마스터 ID', placeholder: 'ESM PLUS 마스터 ID' },
-      { id: 'apiKey', label: 'Trading API Key', placeholder: 'ESM API에서 발급한 키', secret: true },
-    ],
-    checklist: ['ESM PLUS 마스터 ID 생성', 'G마켓/옥션 판매자 ID 연결', 'ESM Trading API 사용 신청 및 키 발급'],
-    accessNote: 'ESM PLUS 판매자 계정과 ESM Trading API 사용 권한이 모두 필요합니다.',
-  },
-  {
-    id: '11st', name: '11번가', short: '11', color: 'var(--color-danger)', authMode: 'Open API Key',
-    sellerUrl: 'https://soffice.11st.co.kr/', docsUrl: 'https://openapi.11st.co.kr/',
-    fields: [
-      { id: 'sellerId', label: '셀러 ID', placeholder: '11번가 셀러오피스 ID' },
-      { id: 'apiKey', label: 'Open API Key', placeholder: 'Open API Center 발급 키', secret: true },
-    ],
-    checklist: ['셀러오피스 판매회원 승인', 'Open API Center 서비스 등록', 'API Key 발급 및 사용 권한 확인'],
-    accessNote: '11번가 Open API Center에서 서비스 등록 후 API Key를 발급해야 합니다.',
-  },
-  {
-    id: 'ssg', name: 'SSG.COM', short: 'S', color: 'var(--color-danger)', authMode: 'SSG eAPI 인증키',
-    sellerUrl: 'https://partners.ssgadm.com/', docsUrl: 'https://eapi.ssgadm.com/info/main.ssg',
-    fields: [
-      { id: 'sellerId', label: '파트너사 ID', placeholder: 'SSG 파트너오피스 ID' },
-      { id: 'apiKey', label: 'eAPI 인증키', placeholder: 'SSG eAPI에서 발급한 인증키', secret: true },
-    ],
-    checklist: ['SSG.COM 입점 및 파트너오피스 승인', 'eAPI 사이트에서 신규(New) API 연동 신청', '상품·주문·배송 권한과 인증키 확인'],
-    accessNote: 'SSG.COM 파트너오피스 입점 승인 후 eAPI 신규(New) API 기준으로 인증키와 사용할 권한을 확인해야 합니다.',
-  },
-  {
-    id: 'kakao', name: '카카오 톡스토어 · 선물하기', short: 'K', color: 'var(--color-warning)', authMode: 'REST API KEY + ADMIN KEY',
-    sellerUrl: 'https://shopping-sell.kakao.com/hub', docsUrl: 'https://shopping-developers.kakao.com/hc/ko/articles/4681097907087',
-    fields: [
-      { id: 'sellerId', label: '판매자 ID', placeholder: '카카오쇼핑 판매자 ID' },
-      { id: 'restApiKey', label: 'REST API KEY', placeholder: '판매자 연동 설정에서 발급한 REST API KEY', secret: true },
-      { id: 'adminKey', label: 'ADMIN KEY', placeholder: '판매자 연동 설정에서 발급한 ADMIN KEY', secret: true },
-    ],
-    checklist: ['카카오쇼핑 판매채널 입점 승인', 'Open API 별도 이용 신청 및 판매자 연동 설정', '운영용 REST API KEY·ADMIN KEY와 서비스별 권한 확인'],
-    accessNote: '카카오쇼핑 Open API는 별도 이용 신청과 판매자 연동 설정이 필요하며, 제공되는 운영 환경의 REST API KEY·ADMIN KEY로 인증합니다.',
-  },
-  {
-    id: 'own', name: '카페24 자사몰', short: '24', color: 'var(--color-blue-deep)', authMode: 'OAuth 2.0',
-    sellerUrl: 'https://eclogin.cafe24.com/Shop/', docsUrl: 'https://developers.cafe24.com/',
-    fields: [
-      { id: 'mallId', label: 'Mall ID', placeholder: '카페24 쇼핑몰 ID' },
-      { id: 'clientId', label: 'Client ID', placeholder: '개발자센터 App Client ID' },
-      { id: 'clientSecret', label: 'Client Secret', placeholder: '개발자센터 App Secret', secret: true },
-    ],
-    checklist: ['카페24 개발자센터 앱 생성', '주문·상품·재고 Scope 설정', 'OAuth Redirect URI 등록'],
-    accessNote: '카페24 Admin API는 OAuth 2.0 승인 코드와 Access Token 발급이 필요합니다.',
-  },
+  { id: 'coupang', name: '쿠팡', short: 'C', color: 'var(--color-danger)', sellerUrl: 'https://wing.coupang.com/' },
+  { id: 'naver', name: '네이버 스마트스토어', short: 'N', color: 'var(--color-success)', sellerUrl: 'https://sell.smartstore.naver.com/' },
+  { id: 'gmarket', name: 'G마켓 · 옥션', short: 'G', color: 'var(--color-blue)', sellerUrl: 'https://www.esmplus.com/' },
+  { id: '11st', name: '11번가', short: '11', color: 'var(--color-danger)', sellerUrl: 'https://soffice.11st.co.kr/' },
+  { id: 'ssg', name: 'SSG.COM', short: 'S', color: 'var(--color-danger)', sellerUrl: 'https://partners.ssgadm.com/' },
+  { id: 'kakao', name: '카카오 톡스토어 · 선물하기', short: 'K', color: 'var(--color-warning)', sellerUrl: 'https://shopping-sell.kakao.com/hub' },
+  { id: 'own', name: '카페24 자사몰', short: '24', color: 'var(--color-blue-deep)', sellerUrl: 'https://eclogin.cafe24.com/Shop/' },
 ]
+
+/** 모든 채널에 같은 말이다 — 아직 어느 판매자센터와도 직접 연결하지 않는다. */
+const CHANNEL_NOT_CONNECTED = '판매자센터와 직접 연결 전'
 
 function channelDefinition(channelId: string) {
   return channelDefinitions.find((definition) => definition.id === channelId)
@@ -283,16 +207,24 @@ function emptyManagedChannel(definition: ChannelDefinition): ManagedChannel {
     units: 0,
     revenue: 0,
     delta: 0,
-    sync: '실 API 미연결',
+    sync: CHANNEL_NOT_CONNECTED,
     status: '설정중',
     connectionStatus: 'setup-required',
   }
 }
 
-function connectionLabel(channel: ManagedChannel) {
-  if (channel.connectionStatus === 'test-pending') return '실 API 테스트 대기'
-  if (channel.connectionStatus === 'credentials-entered') return '자격정보 입력됨'
-  return '설정 필요'
+/**
+ * 예전 '연결 설정'이 남긴 흔적(비밀키 끝 4자리·판매자 ID·점검 결과)을 걷어 낸다.
+ * 그 입력으로는 아무 연결도 일어나지 않았으므로 남겨 둘 이유가 없다 — 채널 목록을 저장할 때마다 적용한다.
+ */
+function withoutCredentialTraces(channel: ManagedChannel): ManagedChannel {
+  const next: ManagedChannel = { ...channel, connectionStatus: 'setup-required', sync: CHANNEL_NOT_CONNECTED }
+  delete next.credentialHint
+  delete next.credentialFields
+  delete next.sellerAccount
+  delete next.checkedAt
+  delete next.health
+  return next
 }
 
 function isManagedChannelList(value: unknown): value is ManagedChannel[] {
@@ -309,9 +241,12 @@ type ProductFact = {
   shelfLife: string
   origin: string
   ingredients: string
-  labelScore: number
+  /** 예전 규칙 공식(100 − 문제 수 × 11, 최저 45)의 결과. 더 쓰지도 보여 주지도 않는다 — 옛 기록 호환용. */
+  labelScore?: number
   labelOwner: string
-  labelSummary: string
+  /** 예전 검증 문장. 화면은 칸 점검(summarizeLabel)에서 그때그때 만든다 — 옛 기록 호환용. */
+  labelSummary?: string
+  /** 표시 검토 담당자의 메모. 사람이 쓴 말이다 — 검증이 덮어쓰지 않는다. */
   labelIssue: string
   lotNo: string
   warehouse: string
@@ -347,10 +282,8 @@ const defaultProductFact: ProductFact = {
   shelfLife: '',
   origin: '',
   ingredients: '',
-  labelScore: 0,
   labelOwner: '품질관리 담당자 미지정',
-  labelSummary: '표시 필수항목 검증 전입니다.',
-  labelIssue: '표시정보를 입력한 뒤 검증을 실행해 주세요.',
+  labelIssue: '',
   lotNo: 'LOT 미등록',
   warehouse: '창고 미지정',
   location: '-',
@@ -430,44 +363,29 @@ async function prepareProductImage(file: File) {
   return dataUrl
 }
 
-function collectLabelIssues(product: ManagedProduct) {
-  const issues: string[] = []
-  const { fact } = product
-  if (!product.name.trim()) issues.push('제품명이 비어 있습니다.')
-  if (!fact.foodType.trim()) issues.push('식품유형을 입력해 주세요.')
-  if (!fact.ingredients.trim()) issues.push('원재료명과 함량을 입력해 주세요.')
-  if (!fact.origin.trim()) issues.push('원산지 표시를 입력해 주세요.')
-  if (!fact.shelfLife.trim()) issues.push('소비기한 표시 기준을 입력해 주세요.')
-  if (!product.storage.trim()) issues.push('보관방법을 입력해 주세요.')
-  if (!/^\d{13}$/.test(fact.barcode)) issues.push('바코드는 숫자 13자리로 입력해 주세요.')
-  if (fact.labelIssue.trim() && !/(없습니다|이상 없음|해당 없음)/.test(fact.labelIssue)) issues.push(fact.labelIssue.trim())
-  return Array.from(new Set(issues))
-}
-
+/**
+ * '필수항목 다시 확인'을 누른 기록을 남긴다(언제·무엇이 빠졌는지). 점수는 매기지 않는다.
+ * 사람의 메모 칸(labelIssue)은 건드리지 않는다 — 전에는 첫 번째 문제 문장으로 덮어써서, 칸을 채운 뒤에도
+ * 그 문장이 '열린 메모'로 남아 문제가 영영 사라지지 않았다.
+ */
 function validateLabelRecord(product: ManagedProduct): ManagedProduct {
   const issues = collectLabelIssues(product)
-  const score = Math.max(45, 100 - issues.length * 11)
-  const labelStatus: SeaProduct['labelStatus'] = issues.length === 0 ? '승인' : issues.length <= 2 ? '검토중' : '수정필요'
   return {
     ...product,
-    labelStatus,
-    fact: {
-      ...product.fact,
-      labelScore: score,
-      labelSummary: issues.length === 0
-        ? '법정 의무표시 필수 입력값이 모두 확인되었습니다.'
-        : `표시 필수항목 ${issues.length}건을 담당자가 확인해야 합니다.`,
-      labelIssue: issues[0] ?? '현재 확인된 수정 항목이 없습니다.',
-    },
+    labelStatus: storedLabelStatus(product),
     validation: { checkedAt: new Date().toISOString(), issues },
   }
 }
 
-const salesPeriods: Array<{ id: SalesPeriod; label: string; factor: number }> = [
-  { id: 'today', label: '오늘', factor: 0.16 },
-  { id: 'week', label: '최근 7일', factor: 1 },
-  { id: 'month', label: '최근 30일', factor: 4.18 },
-]
+/** 편집 칸에 다시 채울 메모. 예전 검증이 덮어써 둔 자기 문장은 사람의 메모가 아니므로 비운다. */
+function openLabelMemoFor(fact: ProductFact) {
+  return openLabelMemo({ name: '', storage: '', fact })
+}
+
+/** 가용재고가 안전재고 이하인가. 요약 칸과 재고 탭 경고가 같은 규칙을 쓴다. */
+function isBelowSafetyStock(product: Pick<SeaProduct, 'available' | 'safetyStock'>) {
+  return product.available <= product.safetyStock
+}
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('ko-KR').format(Math.round(value))
@@ -492,6 +410,12 @@ function BusinessStatusBadge({ status }: { status: string }) {
   return <StatusBadge tone={toneForStatus(status)}>{status}</StatusBadge>
 }
 
+/** 표시 필수항목 상태. 저장값('승인' 등)이 아니라 지금 칸이 채워졌는지에서 그때그때 만든다. */
+function LabelStatusBadge({ product, prefix = '' }: { product: ManagedProduct; prefix?: string }) {
+  const summary = summarizeLabel(product)
+  return <StatusBadge tone={summary.complete ? 'success' : 'warning'}>{prefix}{summary.label}</StatusBadge>
+}
+
 function ProductVisual({ product, compact = false }: { product: SeaProduct & { imageDataUrl?: string }; compact?: boolean }) {
   const customImage = isStoredProductImage(product.imageDataUrl) ? product.imageDataUrl : undefined
   return (
@@ -510,7 +434,7 @@ function BusinessSummaryStrip({ items, label }: {
   items: Array<{ icon: typeof Package; label: string; value: string; helper: string; tone?: string }>
 }) {
   return (
-    <section className="business-summary-strip" aria-label={label}>
+    <section className={`business-summary-strip${items.length === 3 ? ' is-three' : ''}`} aria-label={label}>
       {items.map((item) => {
         const Icon = item.icon
         return (
@@ -611,8 +535,8 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, c
     }
     setDetailTab('label')
     onToast(validated.validation?.issues.length
-      ? `${validated.shortName} 표시정보에서 ${validated.validation.issues.length}건을 확인했습니다.`
-      : `${validated.shortName} 표시 필수항목 검증을 통과했습니다.`)
+      ? `${validated.shortName} 표시 필수항목에서 확인할 것 ${validated.validation.issues.length}건을 기록했습니다.`
+      : `${validated.shortName} 표시 필수항목이 모두 채워져 있습니다. 확인 시각을 기록했습니다.`)
   }
 
   const deleteProduct = async (product: ManagedProduct) => {
@@ -629,9 +553,10 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, c
     return true
   }
 
-  const attentionCount = products.filter((product) => product.status !== '정상').length
-  const labelReviewCount = products.filter((product) => product.labelStatus !== '승인').length
-  const linkedChannelCount = products.reduce((sum, product) => sum + product.channels, 0)
+  // 요약 칸은 이름과 같은 것을 센다. 전에는 '재고 확인 — 안전재고 이하'가 실제로는 운영상태가 '정상'이 아닌 제품 수였고,
+  // '상품 채널'은 만들 때 0으로 박힌 뒤 바뀌지 않는 칸(channels)의 합, 직원 화면 '재고 연결'은 제품 수 그대로였다.
+  const belowSafetyCount = products.filter(isBelowSafetyStock).length
+  const labelAttentionCount = products.filter((product) => !summarizeLabel(product).complete).length
 
   return (
     <div className="page-enter business-page product-management-page">
@@ -639,7 +564,7 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, c
         <div>
           <div className="page-kicker">Product control</div>
           <h1>제품 통합관리</h1>
-          <p>{canManage ? `${companyName}의 제품 기준정보부터 표시·법규, 판매채널과 재고 LOT까지 제품 중심으로 연결합니다.` : '제품 기준정보, 표시·법규와 재고 LOT를 업무에 필요한 범위에서 조회합니다.'}</p>
+          <p>{canManage ? `${companyName}의 제품 기준정보와 표시 필수항목, 재고를 제품별로 관리합니다.` : '제품 기준정보, 표시 필수항목과 재고를 업무에 필요한 범위에서 조회합니다.'}</p>
         </div>
         {canManage && <div className="heading-actions">
           <Button tone="primary" type="button" onClick={() => openEditor()}>
@@ -649,12 +574,9 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, c
       </header>
 
       <BusinessSummaryStrip label="제품 주요 현황" items={[
-        { icon: Boxes, label: '운영 제품', value: `${products.length}개`, helper: '완제품 기준' },
-        { icon: AlertTriangle, label: '재고 확인', value: `${attentionCount}개`, helper: products.length ? '안전재고 이하' : '등록 대기', tone: 'warning' },
-        { icon: FileCheck2, label: '표시 검토', value: `${labelReviewCount}개`, helper: '규칙 검증 기준', tone: 'blue' },
-        canManage
-          ? { icon: Link2, label: '상품 채널', value: `${linkedChannelCount}건`, helper: '제품별 등록값', tone: 'green' }
-          : { icon: Warehouse, label: '재고 연결', value: `${products.length}개`, helper: 'LOT 위치 확인', tone: 'green' },
+        { icon: Boxes, label: '운영 제품', value: `${products.length}개`, helper: '등록한 제품' },
+        { icon: AlertTriangle, label: '재고 확인', value: `${belowSafetyCount}개`, helper: products.length ? '가용재고가 안전재고 이하' : '등록 대기', tone: 'warning' },
+        { icon: FileCheck2, label: '표시 확인', value: `${labelAttentionCount}개`, helper: '필수항목 빠짐·담당자 메모', tone: 'blue' },
       ]} />
 
       <section className="business-panel product-catalog-panel" aria-labelledby="product-catalog-title">
@@ -731,8 +653,7 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, c
                       <small>안전재고 {formatNumber(product.safetyStock)}개</small>
                     </div>
                     <div className="product-card-footer">
-                      {canManage && <span><Store size={15} aria-hidden="true" /> {product.channels}개 채널</span>}
-                      <span><Tags size={15} aria-hidden="true" /> 표시 {product.labelStatus}</span>
+                      <span><Tags size={15} aria-hidden="true" /> 표시 {summarizeLabel(product).label}</span>
                     </div>
                   </div>
                 </article>
@@ -743,7 +664,7 @@ export function ProductManagement({ onToast, canManage = true, workspaceScope, c
           <div className="business-empty-state">
             <Package size={32} aria-hidden="true" />
             <h3>{companyName}에 등록된 제품이 없습니다</h3>
-            <p>첫 제품의 품목코드와 표시정보를 등록하면 재고·판매채널을 함께 연결할 수 있습니다.</p>
+            <p>첫 제품의 품목코드와 표시정보를 등록하면 재고와 표시 필수항목을 함께 관리할 수 있습니다.</p>
             {canManage && <Button tone="primary" type="button" onClick={() => openEditor()}><Plus size={17} /> 첫 제품 등록</Button>}
           </div>
         ) : (
@@ -882,7 +803,7 @@ function ProductEditorDialog({
       safetyStock,
       storage: text('storage'),
       status: text('status') as SeaProduct['status'],
-      labelStatus: '검토중',
+      labelStatus: '수정필요',
       fact: {
         ...fact,
         manufacturer: text('manufacturer'),
@@ -893,14 +814,14 @@ function ProductEditorDialog({
         origin: text('origin'),
         ingredients: text('ingredients'),
         labelOwner: text('labelOwner') || '품질관리 담당자 미지정',
-        labelScore: Math.min(fact.labelScore, 80),
-        labelSummary: '제품 정보가 변경되어 표시 필수항목 재검증이 필요합니다.',
-        labelIssue: text('labelIssue') || '현재 확인된 수정 항목이 없습니다.',
+        labelIssue: text('labelIssue'),
       },
       validation: undefined,
       imageDataUrl: imageDataUrl || undefined,
       imageFileName: imageDataUrl ? imageFileName : undefined,
     }
+    // 저장값은 지금 칸이 채워졌는지에서 바로 만든다(홈 화면 점검 목록이 이 값을 읽는다). 사람의 승인이 아니다.
+    next.labelStatus = storedLabelStatus(next)
 
     setSaving(true)
     const saved = await onSave(next, isNew)
@@ -967,7 +888,7 @@ function ProductEditorDialog({
                 <label className="form-field full"><span>원산지 표시</span><textarea name="origin" rows={2} defaultValue={fact.origin} /></label>
                 <label className="form-field full"><span>원재료명·함량</span><textarea name="ingredients" rows={3} defaultValue={fact.ingredients} /></label>
                 <label className="form-field"><span>표시 검토 담당</span><input name="labelOwner" defaultValue={fact.labelOwner} /></label>
-                <label className="form-field"><span>표시 검토 메모</span><input name="labelIssue" defaultValue={fact.labelIssue} placeholder="이상 없으면 ‘수정 항목 없음’ 입력" /></label>
+                <label className="form-field"><span>표시 검토 메모</span><input name="labelIssue" defaultValue={openLabelMemoFor(fact)} placeholder="고칠 것이 있을 때만 적어 주세요" /></label>
               </div>
             </section>
             <section className="product-editor-section compact" aria-labelledby="product-stock-fields">
@@ -979,7 +900,7 @@ function ProductEditorDialog({
               </div>
             </section>
           </div>
-          <footer><span>저장 후 표시 상태는 자동으로 ‘검토중’으로 변경됩니다.</span><div><Button tone="ghost" type="button" disabled={saving || imageBusy} onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={saving || imageBusy}>{saving ? '저장 중…' : product ? '변경사항 저장' : '제품 등록'}</Button></div></footer>
+          <footer><span>저장하면 표시 필수항목 7개가 채워졌는지 바로 다시 셉니다.</span><div><Button tone="ghost" type="button" disabled={saving || imageBusy} onClick={onClose}>취소</Button><Button tone="primary" type="submit" disabled={saving || imageBusy}>{saving ? '저장 중…' : product ? '변경사항 저장' : '제품 등록'}</Button></div></footer>
         </form>
       </section>
     </div>
@@ -1017,7 +938,11 @@ function ProductDetailDialog({
   const [showValidationHistory, setShowValidationHistory] = useState(false)
   const [showLotHistory, setShowLotHistory] = useState(false)
   const productChannels = channels
-  const heldStock = Math.max(0, product.stock - product.available - detail.reserved)
+  const labelSummary = summarizeLabel(product)
+  const labelChecks = checkLabelFields(product)
+  // 이 제품에 LOT를 적어 넣는 곳은 아직 없다. 기본 자리표시('LOT 미등록'·'-'·D-0·검사 '대기')를 기록처럼 보여 주지 않는다.
+  const hasLotRecord = Boolean(detail.lotNo?.trim()) && detail.lotNo !== defaultProductFact.lotNo
+  const lotDaysLeft = hasLotRecord ? daysUntil(detail.expiresAt) : null
 
   onCloseRef.current = onClose
 
@@ -1066,7 +991,7 @@ function ProductDetailDialog({
 
   const tabs: Array<{ id: ProductDetailTab; label: string; icon: typeof Package }> = [
     { id: 'basic', label: '기본정보', icon: Package },
-    { id: 'label', label: '표시 · 법규', icon: FileCheck2 },
+    { id: 'label', label: '표시사항', icon: FileCheck2 },
     ...(canViewCommercial ? [{ id: 'channels' as const, label: '판매채널', icon: Store }] : []),
     { id: 'inventory', label: '재고 LOT', icon: Warehouse },
   ]
@@ -1087,7 +1012,7 @@ function ProductDetailDialog({
             <div className="product-detail-badges">
               <span className="product-category-tag">{product.category}</span>
               <BusinessStatusBadge status={product.status} />
-              <BusinessStatusBadge status={`표시 ${product.labelStatus}`} />
+              <LabelStatusBadge product={product} prefix="표시 " />
             </div>
             <h2 id="product-detail-title">{product.name}</h2>
             <p>{product.code} · {product.specification}</p>
@@ -1148,55 +1073,50 @@ function ProductDetailDialog({
 
           {activeTab === 'label' && (
             <div id="product-panel-label" role="tabpanel" aria-labelledby="product-tab-label" className="label-detail-panel">
-              <div className={`label-score-card ${product.labelStatus === '승인' ? 'approved' : ''}`}>
-                <div className="label-score-ring" style={{ '--score': detail.labelScore } as React.CSSProperties}>
-                  <strong>{detail.labelScore}</strong>
-                  <span>AI 점수</span>
+              <div className={`label-score-card ${labelSummary.complete ? 'approved' : ''}`}>
+                <div className="label-score-ring" role="img" style={{ '--score': Math.round((labelSummary.filled / labelSummary.total) * 100) } as React.CSSProperties} aria-label={`표시 필수항목 ${labelSummary.total}개 중 ${labelSummary.filled}개 입력`}>
+                  <strong>{labelSummary.filled}/{labelSummary.total}</strong>
+                  <span>필수항목</span>
                 </div>
                 <div>
-                  <div className="label-score-title"><BusinessStatusBadge status={product.labelStatus} /><span>담당 {detail.labelOwner}</span></div>
-                  <h3>{detail.labelSummary}</h3>
-                  <p>{detail.labelIssue}</p>
+                  <div className="label-score-title"><LabelStatusBadge product={product} /><span>담당 {detail.labelOwner}</span></div>
+                  <h3>{labelSummary.headline}</h3>
+                  <p>{labelSummary.memo
+                    ? `담당자 메모: ${labelSummary.memo}`
+                    : '이 점검은 칸이 채워졌는지만 봅니다. 문구가 법 기준에 맞는지, 알레르기 유발물질 표시는 담당자가 직접 확인해 주세요.'}</p>
                 </div>
               </div>
               <div className="label-check-grid">
-                {['원재료명·함량', '알레르기 유발물질', '원산지', '영양정보·보관방법'].map((item, index) => {
-                  const warning = product.labelStatus !== '승인' && index === 1
-                  return (
-                    <div className={warning ? 'label-check-item warning' : 'label-check-item'} key={item}>
-                      {warning ? <AlertTriangle size={19} aria-hidden="true" /> : <CheckCircle2 size={19} aria-hidden="true" />}
-                      <div><strong>{item}</strong><span>{warning ? '담당자 확인 필요' : '내부 기준과 일치'}</span></div>
-                    </div>
-                  )
-                })}
+                {labelChecks.map((item) => (
+                  <div className={item.ok ? 'label-check-item' : 'label-check-item warning'} key={item.id}>
+                    {item.ok ? <CheckCircle2 size={19} aria-hidden="true" /> : <AlertTriangle size={19} aria-hidden="true" />}
+                    <div><strong>{item.label}</strong><span>{item.note}</span></div>
+                  </div>
+                ))}
               </div>
               {showValidationHistory && <div className="label-validation-history" role="status">
-                <div><strong>최근 규칙 검증</strong><span>{validation?.checkedAt ? formatDateTime(validation.checkedAt) : '아직 실행하지 않음'}</span></div>
+                <div><strong>마지막 필수항목 확인</strong><span>{validation?.checkedAt ? formatDateTime(validation.checkedAt) : '아직 기록 없음'}</span></div>
                 {validation?.issues.length
                   ? <ul>{validation.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
-                  : <p>{validation ? '현재 필수 입력값 기준 확인 항목이 없습니다.' : '표시사항 다시 검증을 실행하면 결과가 이곳에 기록됩니다.'}</p>}
+                  : <p>{validation ? '그때 빠진 필수항목이 없었습니다.' : '‘필수항목 다시 확인’을 누르면 시각과 결과가 이곳에 남습니다.'}</p>}
               </div>}
               <Button tone="ghost" type="button" aria-expanded={showValidationHistory} onClick={() => setShowValidationHistory((current) => !current)}>
-                <FileCheck2 size={16} aria-hidden="true" /> {showValidationHistory ? '검토 이력 닫기' : '검토 이력 보기'}
+                <FileCheck2 size={16} aria-hidden="true" /> {showValidationHistory ? '확인 기록 닫기' : '확인 기록 보기'}
               </Button>
             </div>
           )}
 
           {canViewCommercial && activeTab === 'channels' && (
             <div id="product-panel-channels" role="tabpanel" aria-labelledby="product-tab-channels" className="product-channel-detail-list">
-              <p className="channel-demo-note">회사에 등록된 판매채널 설정입니다. 상품별 매핑 상태는 판매자센터 API가 연결되면 확인할 수 있습니다.</p>
-              {productChannels.length === 0 && <div className="business-empty-state"><Store size={28} /><h3>등록된 상품 채널이 없습니다</h3><p>판매채널 페이지에서 API 설정을 완료한 뒤 상품 매핑을 진행하세요.</p></div>}
+              <p className="channel-demo-note">회사 판매채널 목록입니다. 판매자센터와 직접 연결하지 않아, 채널별 상품 등록 여부와 주문은 여기서 가져오지 않습니다.</p>
+              {productChannels.length === 0 && <div className="business-empty-state"><Store size={28} /><h3>등록된 판매채널이 없습니다</h3><p>판매채널 화면에서 쓰는 채널을 목록에 추가해 주세요.</p></div>}
               {productChannels.map((channel) => (
                   <article className="product-channel-detail" key={channel.id}>
                     <span className="channel-mark" style={{ backgroundColor: channelTokenColor(channel.id) }}>{channel.short}</span>
                     <div className="product-channel-name">
                       <strong>{channel.name}</strong>
-                      <span>{channel.short}-{product.code} · {product.specification}</span>
+                      <span>{CHANNEL_NOT_CONNECTED}</span>
                     </div>
-                    <div><span>기준 판매가</span><strong>{formatMoney(product.price)}</strong></div>
-                    <div><span>채널 주문</span><strong>{formatNumber(channel.orders)}건</strong></div>
-                    <div><span>동기화</span><strong>{channel.sync}</strong></div>
-                    <BusinessStatusBadge status={connectionLabel(channel)} />
                     {channelDefinition(channel.id) && <a className="product-channel-external" href={channelDefinition(channel.id)!.sellerUrl} target="_blank" rel="noreferrer" aria-label={`${channel.name} 판매자센터 열기`}><ExternalLink size={18} aria-hidden="true" /></a>}
                   </article>
               ))}
@@ -1207,48 +1127,52 @@ function ProductDetailDialog({
             <div id="product-panel-inventory" role="tabpanel" aria-labelledby="product-tab-inventory" className="inventory-detail-panel">
               <div className="inventory-summary-cards">
                 <div><span>실재고</span><strong>{formatNumber(product.stock)}개</strong></div>
-                <div><span>예약재고</span><strong>{formatNumber(detail.reserved)}개</strong></div>
-                <div className={product.available <= product.safetyStock ? 'warning' : ''}><span>가용재고</span><strong>{formatNumber(product.available)}개</strong></div>
+                <div className={isBelowSafetyStock(product) ? 'warning' : ''}><span>가용재고</span><strong>{formatNumber(product.available)}개</strong></div>
+                <div><span>안전재고</span><strong>{formatNumber(product.safetyStock)}개</strong></div>
               </div>
-              {product.available <= product.safetyStock && (
+              {isBelowSafetyStock(product) && (
                 <div className="inventory-warning-banner">
                   <AlertTriangle size={20} aria-hidden="true" />
                   <div>
                     <strong>{product.available === 0 ? '현재 판매 가능한 재고가 없습니다.' : '안전재고 이하로 내려갔습니다.'}</strong>
-                    <span>{heldStock > 0 ? `${formatNumber(heldStock)}개가 품질검사로 보류 중입니다.` : '판매 추세를 반영한 생산 또는 발주 검토가 필요합니다.'}</span>
+                    <span>생산 또는 발주를 검토해 주세요.</span>
                   </div>
                 </div>
               )}
-              <div className="lot-detail-card">
-                <div className="lot-detail-head">
-                  <div><span>대표 LOT</span><h3>{detail.lotNo}</h3></div>
-                  <BusinessStatusBadge status={detail.inspection} />
+              {hasLotRecord ? <>
+                <div className="lot-detail-card">
+                  <div className="lot-detail-head">
+                    <div><span>대표 LOT</span><h3>{detail.lotNo}</h3></div>
+                  </div>
+                  <dl className="product-fact-grid">
+                    <div><dt>창고</dt><dd>{detail.warehouse}</dd></div>
+                    <div><dt>로케이션</dt><dd>{detail.location}</dd></div>
+                    <div><dt>제조일</dt><dd>{detail.manufacturedAt}</dd></div>
+                    <div><dt>소비기한</dt><dd>{detail.expiresAt}</dd></div>
+                    <div><dt>남은 날</dt><dd>{lotDaysLeft === null ? '날짜 없음' : lotDaysLeft < 0 ? `${Math.abs(lotDaysLeft)}일 지남` : `D-${lotDaysLeft}`}</dd></div>
+                  </dl>
                 </div>
-                <dl className="product-fact-grid">
-                  <div><dt>창고</dt><dd>{detail.warehouse}</dd></div>
-                  <div><dt>로케이션</dt><dd>{detail.location}</dd></div>
-                  <div><dt>제조일</dt><dd>{detail.manufacturedAt}</dd></div>
-                  <div><dt>소비기한</dt><dd>{detail.expiresAt}</dd></div>
-                  <div><dt>잔여일</dt><dd>D-{detail.daysToExpire}</dd></div>
-                  <div><dt>검사상태</dt><dd>{detail.inspection}</dd></div>
-                </dl>
-              </div>
-              {showLotHistory && <div className="lot-history-list"><div><strong>{detail.lotNo}</strong><span>{detail.manufacturedAt} 제조 · {detail.warehouse} {detail.location}</span><BusinessStatusBadge status={detail.inspection} /></div><p>현재 제품에 연결된 추가 LOT는 없습니다.</p></div>}
-              <Button tone="ghost" type="button" aria-expanded={showLotHistory} onClick={() => setShowLotHistory((current) => !current)}>
-                <Warehouse size={16} aria-hidden="true" /> {showLotHistory ? 'LOT 이력 닫기' : '전체 LOT 이력'}
-              </Button>
+                {showLotHistory && <div className="lot-history-list"><div><strong>{detail.lotNo}</strong><span>{detail.manufacturedAt} 제조 · {detail.warehouse} {detail.location}</span></div><p>현재 제품에 연결된 추가 LOT는 없습니다.</p></div>}
+                <Button tone="ghost" type="button" aria-expanded={showLotHistory} onClick={() => setShowLotHistory((current) => !current)}>
+                  <Warehouse size={16} aria-hidden="true" /> {showLotHistory ? 'LOT 이력 닫기' : '전체 LOT 이력'}
+                </Button>
+              </> : <div className="business-empty-state compact">
+                <Warehouse size={28} aria-hidden="true" />
+                <h3>연결된 LOT 기록이 아직 없습니다</h3>
+                <p>입출고와 LOT는 재고·LOT 화면에서 기록합니다. 이 제품의 LOT·소비기한은 아직 여기로 이어지지 않습니다.</p>
+              </div>}
             </div>
           )}
         </div>
 
         <footer className="product-detail-actions">
-          <span>표시 검증 · {validation?.checkedAt ? formatDateTime(validation.checkedAt) : '실행 전'}</span>
+          <span>필수항목 확인 · {validation?.checkedAt ? formatDateTime(validation.checkedAt) : '기록 없음'}</span>
           {canViewCommercial ? <div>
             <Button tone="danger" size="sm" type="button" onClick={onDelete}>
               <Trash2 size={16} aria-hidden="true" /> 제품 삭제
             </Button>
             <Button tone="ghost" type="button" onClick={onValidate}>
-              <RefreshCw size={16} aria-hidden="true" /> 표시 다시 검증
+              <RefreshCw size={16} aria-hidden="true" /> 필수항목 다시 확인
             </Button>
             <Button tone="primary" type="button" onClick={onEdit}>
               제품 정보 편집 <ArrowRight size={16} aria-hidden="true" />
@@ -1366,12 +1290,8 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
   const normalizedChannels = useMemo(() => storedChannels.map(normalizeManagedChannel), [storedChannels])
   const channels = normalizedChannels
   const [channelDialog, setChannelDialog] = useState<'catalog' | string | null>(null)
-  const [credentialDraft, setCredentialDraft] = useState<Record<string, string>>({})
-  const [credentialError, setCredentialError] = useState('')
   const [savingChannel, setSavingChannel] = useState(false)
   const [confirmDisconnect, setConfirmDisconnect] = useState(false)
-  const [healthPanelOpen, setHealthPanelOpen] = useState(false)
-  const [checkingChannelId, setCheckingChannelId] = useState<string | null>(null)
   const [shipmentDialog, setShipmentDialog] = useState<'new' | string | null>(null)
   const [shipmentFilter, setShipmentFilter] = useState<'all' | ShipmentStatus>('all')
   const [shipmentBusy, setShipmentBusy] = useState(false)
@@ -1392,97 +1312,25 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
     }
   }, [channelDialog, savingChannel])
 
-  useEffect(() => {
-    if (channels.some((channel) => Boolean(channel.health))) setHealthPanelOpen(true)
-  }, [channels])
-
-  const periodConfig = salesPeriods.find((item) => item.id === period) ?? salesPeriods[1]
-  const factor = periodConfig.factor
-  const totalOrders = channels.reduce((sum, channel) => sum + channel.orders, 0) * factor
-  const totalUnits = channels.reduce((sum, channel) => sum + channel.units, 0) * factor
-  const totalRevenue = channels.reduce((sum, channel) => sum + channel.revenue, 0) * factor
-  const averageOrder = totalOrders > 0 ? totalRevenue / totalOrders : 0
-  const maxChannelRevenue = Math.max(1, ...channels.map((channel) => channel.revenue))
+  // 기간별 숫자는 출고 주문에서 센다(고정 배수 없음). 매출은 결제 금액을 받는 길이 없어 만들지 않는다.
+  const periodConfig = SALES_PERIODS.find((item) => item.id === period) ?? SALES_PERIODS[1]
+  const periodSummary = useMemo(() => summarizeShipments(shipments, period), [period, shipments])
+  const hasShipments = shipments.length > 0
+  const pendingShipmentCount = shipments.filter((shipment) => shipment.status !== '출고완료').length
 
   const openChannelSetup = (channelId: string) => {
-    const definition = channelDefinition(channelId)
-    if (!definition) return
-    const existing = channels.find((channel) => channel.id === channelId)
-    const draft = Object.fromEntries(definition.fields.map((field) => [field.id, field.secret ? '' : existing?.credentialFields?.[field.id] ?? '']))
-    setCredentialDraft(draft)
-    setCredentialError('')
+    if (!channelDefinition(channelId)) return
     setConfirmDisconnect(false)
     setChannelDialog(channelId)
   }
 
   const commitChannelChange = async (action: (current: ManagedChannel[]) => ManagedChannel[]) => {
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      const result = await setChannels(action)
+      const result = await setChannels((current) => action(current).map(withoutCredentialTraces))
       if (result.ok || !result.message?.includes('불러오는 중')) return result
       await new Promise((resolve) => window.setTimeout(resolve, 150))
     }
     return { ok: false, persisted: false, message: '판매채널 공유 데이터 준비가 지연되고 있습니다. 잠시 후 다시 시도해 주세요.' }
-  }
-
-  const inspectChannelHealth = async (channel: ManagedChannel): Promise<ChannelHealthResult> => {
-    const checkedAt = new Date().toISOString()
-    const hasCredentials = channel.connectionStatus !== 'setup-required' && Boolean(channel.credentialHint)
-    const localMapping = channel.orders > 0 || channel.units > 0
-        ? { mapping: 'ready' as const, mappingLabel: '수집 데이터 매핑 있음' }
-        : { mapping: 'none' as const, mappingLabel: '상품 매핑 없음' }
-    if (!hasCredentials) {
-      return { credential: 'missing', response: 'not-tested', responseLabel: '자격정보가 없어 호출하지 않음', ...localMapping, checkedAt }
-    }
-    try {
-      const headers: Record<string, string> = { accept: 'application/json' }
-      if (workspaceScope) headers['x-workspace-identity'] = workspaceScope
-      const response = await fetch(`/api/sales-channels/${encodeURIComponent(channel.id)}/health`, { headers, cache: 'no-store' })
-      let payload: { message?: string; mappedProducts?: number; mappingIssues?: number; checkedAt?: string } = {}
-      try { payload = await response.json() as typeof payload } catch { /* HTTP status remains authoritative */ }
-      const mappedProducts = Number(payload.mappedProducts)
-      const mappingIssues = Number(payload.mappingIssues)
-      const apiMapping = Number.isFinite(mappedProducts)
-        ? mappingIssues > 0
-          ? { mapping: 'attention' as const, mappingLabel: `${mappedProducts}개 매핑 · ${mappingIssues}개 확인` }
-          : mappedProducts > 0
-            ? { mapping: 'ready' as const, mappingLabel: `${mappedProducts}개 상품 매핑` }
-            : { mapping: 'none' as const, mappingLabel: '상품 매핑 없음' }
-        : localMapping
-      if (response.ok) {
-        return { credential: 'ready', response: 'ok', responseLabel: payload.message || `정상 응답 (HTTP ${response.status})`, ...apiMapping, checkedAt: payload.checkedAt || checkedAt }
-      }
-      return {
-        credential: 'ready', response: 'unavailable',
-        responseLabel: response.status === 404 ? '채널 검증 API 미구성 (HTTP 404)' : payload.message || `응답 오류 (HTTP ${response.status})`,
-        ...apiMapping, checkedAt,
-      }
-    } catch {
-      return { credential: 'ready', response: 'unavailable', responseLabel: '검증 서버에 연결할 수 없음', ...localMapping, checkedAt }
-    }
-  }
-
-  const runChannelHealthCheck = async (channel?: ManagedChannel) => {
-    if (checkingChannelId) return
-    setHealthPanelOpen(true)
-    const targets = channel ? [channel] : channels
-    if (!targets.length) {
-      onToast('점검할 채널이 없습니다. 채널 연결에서 사용할 판매채널을 먼저 추가해 주세요.')
-      return
-    }
-    setCheckingChannelId(channel?.id ?? 'all')
-    const results = await Promise.all(targets.map(async (item) => [item.id, await inspectChannelHealth(item)] as const))
-    const byId = new Map(results)
-    const result = await commitChannelChange((current) => current.map((item) => byId.has(item.id) ? { ...item, health: byId.get(item.id) } : item))
-    setCheckingChannelId(null)
-    if (!result.ok) {
-      onToast(result.message ?? '채널 상태 점검 결과를 저장하지 못했습니다.')
-      return
-    }
-    const missing = results.filter(([, health]) => health.credential === 'missing').length
-    const responding = results.filter(([, health]) => health.response === 'ok').length
-    onToast(channel
-      ? `${channel.name} 상태 점검을 완료했습니다. 연결 설정 화면은 열지 않았습니다.`
-      : `${results.length}개 채널 점검 완료 · API 응답 ${responding}개 · 자격정보 없음 ${missing}개`)
   }
 
   const addChannelToList = async (definition: ChannelDefinition) => {
@@ -1496,57 +1344,22 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
       onToast(result.message ?? `${definition.name} 채널을 추가하지 못했습니다.`)
       return false
     }
-    onToast(`${definition.name}을 판매채널 목록에 추가했습니다. 자격정보는 준비되는 대로 입력할 수 있습니다.`)
+    setChannelDialog(null)
+    onToast(`${definition.name}을 판매채널 목록에 추가했습니다. 주문은 판매자센터에서 내려받아 ‘주문 CSV 가져오기’로 올려 주세요.`)
     return true
-  }
-
-  const saveChannelCredentials = async (definition: ChannelDefinition, testRequested: boolean) => {
-    const missing = definition.fields.find((field) => !credentialDraft[field.id]?.trim())
-    if (missing) {
-      setCredentialError(`${missing.label} 값을 입력해 주세요.`)
-      return
-    }
-    const existing = channels.find((channel) => channel.id === definition.id)
-    const credentialFields = Object.fromEntries(definition.fields
-      .filter((field) => !field.secret)
-      .map((field) => [field.id, credentialDraft[field.id].trim()]))
-    const lastSecret = [...definition.fields].reverse().find((field) => field.secret)
-    const secretValue = lastSecret ? credentialDraft[lastSecret.id].trim() : ''
-    const next: ManagedChannel = {
-      ...(existing ?? emptyManagedChannel(definition)),
-      name: definition.name,
-      short: definition.short,
-      color: definition.color,
-      status: '설정중',
-      connectionStatus: testRequested ? 'test-pending' : 'credentials-entered',
-      credentialFields,
-      sellerAccount: Object.values(credentialFields)[0] ?? '',
-      credentialHint: secretValue ? `•••• ${secretValue.slice(-4)}` : existing?.credentialHint,
-      checkedAt: new Date().toISOString(),
-      sync: testRequested ? '서버 API 테스트 대기' : '자격정보 입력됨',
-      health: undefined,
-    }
-    setSavingChannel(true)
-    const result = await commitChannelChange((current) => current.some((channel) => channel.id === definition.id)
-      ? current.map((channel) => channel.id === definition.id ? next : channel)
-      : [...current, next])
-    setSavingChannel(false)
-    if (!result.ok) return
-    setCredentialError('')
-    onToast(testRequested
-      ? `${definition.name} 입력 형식을 확인했습니다. 실제 API 호출은 서버 커넥터와 Secret Vault 구성 후 실행해야 합니다.`
-      : `${definition.name} 자격정보 입력 상태를 저장했습니다. 키 원문은 저장하지 않았습니다.`)
   }
 
   const disconnectChannel = async (channel: ManagedChannel) => {
     setSavingChannel(true)
     const result = await commitChannelChange((current) => current.filter((item) => item.id !== channel.id))
     setSavingChannel(false)
-    if (!result.ok) return
+    if (!result.ok) {
+      onToast(result.message ?? `${channel.name}을 목록에서 빼지 못했습니다.`)
+      return
+    }
     setChannelDialog('catalog')
-    setCredentialDraft({})
     setConfirmDisconnect(false)
-    onToast(`${channel.name} 설정을 해제했습니다. 언제든 다시 설정할 수 있습니다.`)
+    onToast(`${channel.name}을 판매채널 목록에서 뺐습니다. 이미 등록한 출고 주문은 그대로 남습니다.`)
   }
 
   const commitShipmentChange = async (action: (current: SalesShipment[]) => SalesShipment[]) => {
@@ -1698,8 +1511,6 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
 
   const selectedDefinition = channelDialog && channelDialog !== 'catalog' ? channelDefinition(channelDialog) : undefined
   const selectedChannel = selectedDefinition ? channels.find((channel) => channel.id === selectedDefinition.id) : undefined
-  const checkedChannelCount = channels.filter((channel) => Boolean(channel.health)).length
-  const respondingChannelCount = channels.filter((channel) => channel.health?.response === 'ok').length
 
   const visibleShipments = shipments.filter((shipment) => shipmentFilter === 'all' || shipment.status === shipmentFilter)
 
@@ -1709,11 +1520,11 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
         <div>
           <div className="page-kicker">Commerce hub</div>
           <h1>판매채널 통합</h1>
-          <p>{companyName}의 판매자센터·API 자격정보와 연결 준비 상태를 관리합니다. 표시 수치는 연결된 API 또는 업로드 데이터 기준입니다.</p>
+          <p>{companyName}의 판매채널 목록과 출고 주문을 관리합니다. 주문 수와 판매수량은 이 화면에 등록하거나 CSV로 올린 출고 주문에서 셉니다.</p>
         </div>
-        <div className="heading-actions">
-          <div className="sales-period-switch" role="group" aria-label="판매 조회 기간">
-            {salesPeriods.map((item) => (
+        {canManage && <div className="heading-actions">
+          <div className="sales-period-switch" role="group" aria-label="주문 집계 기간">
+            {SALES_PERIODS.map((item) => (
               <button
                 className={period === item.id ? 'active' : ''}
                 type="button"
@@ -1725,81 +1536,44 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
               </button>
             ))}
           </div>
-          {canManage && <Button tone="ghost" type="button" onClick={() => setChannelDialog('catalog')}><Plus size={17} aria-hidden="true" /> 채널 연결</Button>}
-          {canManage && <Button tone="primary" type="button" disabled={Boolean(checkingChannelId)} onClick={() => void runChannelHealthCheck()}>
-            <RefreshCw className={checkingChannelId ? 'spin' : ''} size={17} aria-hidden="true" /> {checkingChannelId ? '점검 중…' : '연결 상태 점검'}
-          </Button>}
-        </div>
+          <Button tone="ghost" type="button" onClick={() => setChannelDialog('catalog')}><Plus size={17} aria-hidden="true" /> 채널 추가</Button>
+        </div>}
       </header>
 
-      <BusinessSummaryStrip label={`${periodConfig.label} 판매 요약`} items={[
-        { icon: ShoppingBag, label: '주문', value: `${formatNumber(totalOrders)}건`, helper: `${formatNumber(totalUnits)}개 판매` },
-        { icon: CircleDollarSign, label: '총매출', value: formatMoney(totalRevenue), helper: channels.length ? '수집 합계' : '수집 대기', tone: 'green' },
-        { icon: BarChart3, label: '객단가', value: formatMoney(averageOrder), helper: totalOrders > 0 ? '수집 주문 기준' : '주문 없음', tone: 'blue' },
-        { icon: Clock3, label: '상태 점검', value: `${checkedChannelCount} / ${channels.length}`, helper: `API 응답 ${respondingChannelCount}개`, tone: checkedChannelCount === channels.length && channels.length > 0 ? 'green' : 'warning' },
-      ]} />
-
-      {healthPanelOpen && <section className="channel-health-panel" aria-labelledby="channel-health-title">
-        <header><div><span className="channel-health-icon"><RefreshCw size={18} /></span><div><h2 id="channel-health-title">판매채널 연결 상태</h2><p>저장된 설정만 점검하며 자격정보가 없는 채널은 외부 API를 호출하지 않습니다.</p></div></div><IconButton tone="ghost" type="button" aria-label="상태 점검 결과 닫기" onClick={() => setHealthPanelOpen(false)}><X size={18} /></IconButton></header>
-        <div className="channel-health-table" role="table" aria-label="판매채널 상태 점검 결과">
-          <div className="channel-health-row header" role="row"><span>채널</span><span>자격정보</span><span>API 응답</span><span>상품 매핑</span><span>마지막 점검</span><span /></div>
-          {channels.map((channel) => {
-            const health = channel.health
-            const credentialLabel = health ? (health.credential === 'ready' ? '입력됨' : '자격정보 없음') : channel.credentialHint ? '입력됨 · 미점검' : '자격정보 없음'
-            const mappingLabel = health?.mappingLabel ?? (channel.orders || channel.units ? '수집 데이터 매핑 있음' : '상품 매핑 없음')
-            return <div className="channel-health-row" role="row" key={channel.id}>
-              <span className="channel-health-name"><i className="channel-mark" style={{ backgroundColor: channelTokenColor(channel.id) }}>{channel.short}</i><strong>{channel.name}</strong></span>
-              <span><i className={`health-dot ${health?.credential === 'ready' ? 'ok' : 'muted'}`} />{credentialLabel}</span>
-              <span><i className={`health-dot ${health?.response === 'ok' ? 'ok' : health?.response === 'unavailable' ? 'danger' : 'muted'}`} />{health?.responseLabel ?? '아직 점검하지 않음'}</span>
-              <span><i className={`health-dot ${health?.mapping === 'ready' ? 'ok' : health?.mapping === 'attention' ? 'warning' : 'muted'}`} />{mappingLabel}</span>
-              <span>{health?.checkedAt ? formatDateTime(health.checkedAt) : '—'}</span>
-              {canManage ? <button className="channel-health-check" type="button" disabled={Boolean(checkingChannelId)} onClick={() => void runChannelHealthCheck(channel)}>{checkingChannelId === channel.id ? '점검 중' : '점검'}</button> : <span />}
-            </div>
-          })}
-          {channels.length === 0 && <div className="channel-health-empty">점검할 채널이 없습니다. ‘채널 연결’에서 판매채널을 먼저 추가하세요.</div>}
-        </div>
-      </section>}
+      {canManage && <BusinessSummaryStrip label={`${periodConfig.label} 출고 주문 요약`} items={[
+        { icon: ShoppingBag, label: '주문', value: hasShipments ? `${formatNumber(periodSummary.orders)}건` : '아직 데이터 없음', helper: hasShipments ? '등록한 출고 주문' : '등록하면 셉니다' },
+        { icon: Package, label: '판매수량', value: hasShipments ? `${formatNumber(periodSummary.units)}개` : '아직 데이터 없음', helper: '주문 수량 합계', tone: 'blue' },
+        { icon: Truck, label: '출고 대기', value: `${formatNumber(pendingShipmentCount)}건`, helper: '출고 완료 전', tone: pendingShipmentCount > 0 ? 'warning' : undefined },
+        { icon: CircleDollarSign, label: '매출', value: '아직 데이터 없음', helper: '채널 연결 전', tone: 'green' },
+      ]} />}
 
       <section className="sales-channel-section" aria-labelledby="channel-status-title">
         <div className="business-section-heading">
-          <div><h2 id="channel-status-title">채널 설정과 판매 현황</h2><p>{periodConfig.label} 기준 · 등록된 채널의 수집 데이터를 표시합니다.</p></div>
-          <span className="section-live-status setup"><span /> 채널별 연결 상태</span>
+          <div><h2 id="channel-status-title">채널별 출고 주문</h2><p>{periodConfig.label} · 등록한 출고 주문 기준. 주문은 판매자센터에서 내려받아 아래 ‘주문 CSV 가져오기’로 올려 주세요.</p></div>
+          <span className="section-live-status setup"><span /> {CHANNEL_NOT_CONNECTED}</span>
         </div>
         <div className="sales-channel-grid">
-          {channels.length === 0 && <div className="business-empty-state"><Store size={32} /><h3>{canManage ? '설정한 판매채널이 없습니다' : '판매채널 운영 권한이 필요합니다'}</h3><p>{canManage ? '공식 판매자센터에서 API 권한을 준비한 뒤 자격정보를 등록하세요.' : '자격정보와 주문·배송 데이터는 회사 관리자만 관리할 수 있습니다.'}</p>{canManage && <Button tone="primary" type="button" onClick={() => setChannelDialog('catalog')}><Plus size={17} /> 첫 채널 설정</Button>}</div>}
+          {channels.length === 0 && <div className="business-empty-state"><Store size={32} /><h3>{canManage ? '목록에 넣은 판매채널이 없습니다' : '판매채널 운영 권한이 필요합니다'}</h3><p>{canManage ? '쓰는 판매채널을 목록에 넣으면 판매자센터 바로가기와 채널별 주문 수가 생깁니다.' : '주문·배송 데이터는 회사 관리자만 관리할 수 있습니다.'}</p>{canManage && <Button tone="primary" type="button" onClick={() => setChannelDialog('catalog')}><Plus size={17} /> 첫 채널 추가</Button>}</div>}
           {channels.map((channel) => {
             const definition = channelDefinition(channel.id)
-            const scaledRevenue = channel.revenue * factor
-            const performanceWidth = Math.max(8, Math.round((channel.revenue / maxChannelRevenue) * 100))
+            const totals = periodSummary.byChannel[channel.id] ?? { orders: 0, units: 0 }
+            const share = periodSummary.orders > 0 ? Math.round((totals.orders / periodSummary.orders) * 100) : 0
             return (
-              <article className={`sales-channel-card ${channel.status === '주의' ? 'warning' : ''}`} key={channel.id}>
+              <article className="sales-channel-card" key={channel.id}>
                 <div className="sales-channel-card-head">
                   <span className="channel-mark large" style={{ backgroundColor: channelTokenColor(channel.id) }}>{channel.short}</span>
-                  <div><h3>{channel.name}</h3><p>{channel.orders || channel.units ? '판매 데이터 수집됨' : '판매 데이터 수집 전'}</p></div>
-                  <span className={`connection-status ${channel.connectionStatus ?? 'setup-required'}`}>{connectionLabel(channel)}</span>
-                </div>
-                <div className="channel-revenue">
-                  <span>결제 매출</span>
-                  <strong>{formatMoney(scaledRevenue)}</strong>
-                  <em className={channel.delta >= 0 ? 'up' : 'down'}>
-                    {channel.delta >= 0 ? <TrendingUp size={15} aria-hidden="true" /> : <TrendingDown size={15} aria-hidden="true" />}
-                    {channel.delta >= 0 ? '+' : ''}{channel.delta}%
-                  </em>
-                </div>
-                <div className="channel-performance-bar" aria-label={`최고 채널 대비 매출 ${performanceWidth}%`}>
-                  <span style={{ width: `${performanceWidth}%`, backgroundColor: channelTokenColor(channel.id) }} />
+                  <div><h3>{channel.name}</h3><p>{CHANNEL_NOT_CONNECTED}</p></div>
                 </div>
                 <div className="channel-card-metrics">
-                  <div><span>주문</span><strong>{formatNumber(channel.orders * factor)}건</strong></div>
-                  <div><span>판매수량</span><strong>{formatNumber(channel.units * factor)}개</strong></div>
+                  <div><span>주문</span><strong>{formatNumber(totals.orders)}건</strong></div>
+                  <div><span>판매수량</span><strong>{formatNumber(totals.units)}개</strong></div>
                 </div>
+                {periodSummary.orders > 0 && <div className="channel-performance-bar" role="img" aria-label={`${periodConfig.label} 전체 주문 중 ${share}%`}>
+                  <span style={{ width: `${share}%`, backgroundColor: channelTokenColor(channel.id) }} />
+                </div>}
                 <div className="channel-card-actions">
                   {definition && <a href={definition.sellerUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> 판매자센터</a>}
-                  {canManage && <Button tone="ghost" full type="button" onClick={() => openChannelSetup(channel.id)}>
-                    <KeyRound size={16} aria-hidden="true" /> {channel.connectionStatus === 'setup-required' ? '연결 설정' : '재연결 설정'}
-                  </Button>}
-                  {canManage && <button className="channel-health-card-button" type="button" disabled={Boolean(checkingChannelId)} onClick={() => void runChannelHealthCheck(channel)}><RefreshCw size={15} /> 상태 점검</button>}
-                  {canManage && definition && <button className="channel-remove-button" type="button" aria-label={`${channel.name} 채널 해제`} onClick={() => { openChannelSetup(channel.id); setConfirmDisconnect(true) }}><Trash2 size={15} /> 해제</button>}
+                  {canManage && definition && <Button tone="ghost" size="sm" type="button" aria-label={`${channel.name} 목록에서 빼기`} onClick={() => { openChannelSetup(channel.id); setConfirmDisconnect(true) }}><Trash2 size={15} /> 목록에서 빼기</Button>}
                 </div>
               </article>
             )
@@ -1822,7 +1596,7 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
         </div>
         <div className="shipment-integration-note">
           <Truck size={19} aria-hidden="true" />
-          <div><strong>현재는 수기·CSV 출고가 즉시 동작합니다.</strong><span>채널 주문 자동수집, 택배사 규격 바코드와 집하 접수는 각 사업자 계약·API 키·서버 커넥터가 준비된 뒤 활성화됩니다.</span></div>
+          <div><strong>지금은 직접 등록과 CSV 가져오기로 출고를 관리합니다.</strong><span>판매채널 주문 자동 수집과 택배사 규격 바코드·집하 접수는 아직 없습니다.</span></div>
         </div>
         <div className="shipment-filter-row" role="group" aria-label="배송 상태 필터">
           {([['all', '전체'], ['출고대기', '출고대기'], ['송장등록', '송장등록'], ['출고완료', '출고완료']] as const).map(([value, label]) => (
@@ -1860,43 +1634,38 @@ export function SalesChannels({ onToast, workspaceScope, companyName = '고객�
       />}
       {canManage && channelDialog && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !savingChannel && setChannelDialog(null)}>
         <section ref={channelDialogRef} className="modal-card channel-connect-modal" role="dialog" aria-modal="true" aria-labelledby="channel-connect-title">
-          <header><div><span className="page-kicker">CHANNEL CONNECT</span><h2 id="channel-connect-title">{selectedDefinition ? `${selectedDefinition.name} 연결 설정` : '판매채널 선택'}</h2><p>{selectedDefinition ? selectedDefinition.accessNote : '공식 판매자센터와 API 문서를 확인한 뒤 자격정보를 준비하세요.'}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" disabled={savingChannel} onClick={() => setChannelDialog(null)}><X size={21} /></IconButton></header>
+          <header><div><span className="page-kicker">SALES CHANNEL</span><h2 id="channel-connect-title">{selectedDefinition ? selectedDefinition.name : '판매채널 추가'}</h2><p>{selectedDefinition ? '판매자센터에서 주문을 내려받아 CSV로 올리면 이 화면에서 셉니다.' : '쓰는 판매채널을 목록에 넣어 두세요.'}</p></div><IconButton tone="ghost" type="button" aria-label="닫기" disabled={savingChannel} onClick={() => setChannelDialog(null)}><X size={21} /></IconButton></header>
           {channelDialog === 'catalog' && <>
-            <div className="integration-truth-banner"><ShieldCheck size={20} /><div><strong>실 API 자격정보가 없으면 연결 완료로 표시하지 않습니다.</strong><p>연결되지 않은 채널은 주문·매출 수치를 0으로 표시하며 운영 데이터로 추정하지 않습니다.</p></div></div>
+            <div className="integration-truth-banner"><ShieldCheck size={20} /><div><strong>아직 판매채널과 직접 연결하지 않습니다.</strong><p>목록에 넣으면 판매자센터 바로가기와 채널별 주문 수가 생깁니다. 주문과 매출을 자동으로 가져오지는 않습니다.</p></div></div>
             <div className="channel-catalog">{channelDefinitions.map((definition) => {
               const existing = channels.find((channel) => channel.id === definition.id)
               return <button className={existing ? 'configured' : ''} type="button" key={definition.id} onClick={() => openChannelSetup(definition.id)}>
                 <span className="channel-mark large" style={{ backgroundColor: definition.color }}>{definition.short}</span>
-                <div><strong>{definition.name}</strong><small>{existing ? `목록에 추가됨 · ${connectionLabel(existing)}` : `${definition.authMode} · 추가 가능`}</small></div>
+                <div><strong>{definition.name}</strong><small>{existing ? '목록에 있음' : '추가할 수 있음'}</small></div>
                 {existing ? <CheckCircle2 size={19} /> : <ChevronRight size={19} />}
               </button>
             })}</div>
-            <footer><span><ExternalLink size={17} /> 외부 링크는 각 플랫폼의 공식 센터로 열립니다.</span><Button tone="ghost" type="button" onClick={() => setChannelDialog(null)}>닫기</Button></footer>
+            <footer><span><ExternalLink size={17} /> 판매자센터 링크는 각 회사의 공식 사이트로 열립니다.</span><Button tone="ghost" type="button" onClick={() => setChannelDialog(null)}>닫기</Button></footer>
           </>}
           {selectedDefinition && <>
-            <div className="channel-connect-steps"><span className="done">1. 채널 선택</span><i /><span className="active">2. 자격정보</span><i /><span>3. 서버 테스트</span></div>
             <div className="channel-setup-scroll">
               <div className="channel-resource-links">
-                <a href={selectedDefinition.sellerUrl} target="_blank" rel="noreferrer"><Store size={18} /><span><strong>판매자센터 열기</strong><small>계정·API 권한 준비</small></span><ExternalLink size={16} /></a>
-                <a href={selectedDefinition.docsUrl} target="_blank" rel="noreferrer"><FileCheck2 size={18} /><span><strong>공식 API 문서</strong><small>{selectedDefinition.authMode}</small></span><ExternalLink size={16} /></a>
+                <a href={selectedDefinition.sellerUrl} target="_blank" rel="noreferrer"><Store size={18} /><span><strong>판매자센터 열기</strong><small>주문 내려받기</small></span><ExternalLink size={16} /></a>
               </div>
-              <section className="channel-checklist" aria-labelledby="channel-checklist-title">
-                <div><h3 id="channel-checklist-title">연결 전 체크리스트</h3><span>{selectedDefinition.checklist.length}단계</span></div>
-                <ol>{selectedDefinition.checklist.map((item) => <li key={item}><CheckCircle2 size={17} /> {item}</li>)}</ol>
-              </section>
-              <section className="channel-credential-panel" aria-labelledby="channel-credentials-title">
-                <div><h3 id="channel-credentials-title">OAuth / API 자격정보</h3><span className={`connection-status ${selectedChannel?.connectionStatus ?? 'setup-required'}`}>{selectedChannel ? connectionLabel(selectedChannel) : '설정 필요'}</span></div>
-                <div className="channel-credential-grid">
-                  {selectedDefinition.fields.map((field) => <label className="form-field" key={field.id}><span>{field.label} *</span><input type={field.secret ? 'password' : 'text'} value={credentialDraft[field.id] ?? ''} placeholder={field.placeholder} autoComplete="off" onChange={(event) => { setCredentialDraft((current) => ({ ...current, [field.id]: event.target.value })); setCredentialError('') }} />{field.secret && selectedChannel?.credentialHint && <small>저장된 키 식별값 {selectedChannel.credentialHint} · 원문은 다시 입력해야 합니다.</small>}</label>)}
-                </div>
-                {credentialError && <div className="channel-credential-error" role="alert"><AlertTriangle size={17} /> {credentialError}</div>}
-                <div className="credential-security-note"><KeyRound size={18} /><p><strong>이 로컬 버전은 Secret 원문을 저장하지 않습니다.</strong><span>실제 연결에는 서버 커넥터, 암호화 Secret Vault와 OAuth Redirect 설정이 필요합니다.</span></p></div>
-                {selectedChannel?.checkedAt && <div className="connection-test-status"><Clock3 size={17} /><span>최근 입력 점검 {formatDateTime(selectedChannel.checkedAt)}</span><strong>{connectionLabel(selectedChannel)}</strong></div>}
+              <section className="channel-checklist" aria-labelledby="channel-steps-title">
+                <div><h3 id="channel-steps-title">주문을 이 화면으로 가져오는 방법</h3><span>3단계</span></div>
+                <ol>
+                  <li><CheckCircle2 size={17} /> 판매자센터에서 주문 목록을 내려받습니다.</li>
+                  <li><CheckCircle2 size={17} /> ‘CSV 양식’에 맞춰 칸을 옮깁니다. 채널ID 칸에는 {selectedDefinition.id}를 적습니다.</li>
+                  <li><CheckCircle2 size={17} /> ‘주문 CSV 가져오기’로 올리면 채널별 주문 수와 출고 목록에 들어갑니다.</li>
+                </ol>
               </section>
             </div>
             <footer className="channel-setup-footer">
-              <div>{selectedChannel && <Button tone="danger" size="sm" type="button" disabled={savingChannel} onClick={() => confirmDisconnect ? void disconnectChannel(selectedChannel) : setConfirmDisconnect(true)}><Trash2 size={16} /> {confirmDisconnect ? '한 번 더 눌러 해제' : '연결 설정 해제'}</Button>}</div>
-              <div><Button tone="ghost" type="button" disabled={savingChannel} onClick={() => setChannelDialog('catalog')}>채널 목록</Button>{!selectedChannel && <Button tone="ghost" type="button" disabled={savingChannel} onClick={() => void addChannelToList(selectedDefinition)}>목록에 추가</Button>}<Button tone="ghost" type="button" disabled={savingChannel} onClick={() => void saveChannelCredentials(selectedDefinition, false)}>자격정보 저장</Button><Button tone="primary" type="button" disabled={savingChannel} onClick={() => void saveChannelCredentials(selectedDefinition, true)}>{savingChannel ? '확인 중…' : '입력 형식 점검'}</Button></div>
+              <div>{selectedChannel && <Button tone="danger" size="sm" type="button" disabled={savingChannel} onClick={() => confirmDisconnect ? void disconnectChannel(selectedChannel) : setConfirmDisconnect(true)}><Trash2 size={16} /> {confirmDisconnect ? '한 번 더 눌러 빼기' : '목록에서 빼기'}</Button>}</div>
+              <div><Button tone="ghost" type="button" disabled={savingChannel} onClick={() => setChannelDialog('catalog')}>채널 목록</Button>{selectedChannel
+                ? <Button tone="primary" type="button" disabled={savingChannel} onClick={() => setChannelDialog(null)}>닫기</Button>
+                : <Button tone="primary" type="button" disabled={savingChannel} onClick={() => void addChannelToList(selectedDefinition)}>{savingChannel ? '추가 중…' : '목록에 추가'}</Button>}</div>
             </footer>
           </>}
         </section>

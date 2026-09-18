@@ -13,7 +13,6 @@ import {
   Filter,
   Headphones,
   Home,
-  KeyRound,
   Layers3,
   LifeBuoy,
   LockKeyhole,
@@ -31,6 +30,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import type { Tenant } from '../domainData'
 import { formatDateTime } from '../utils/dateTime'
+import { ticketOwnerOptions, UNASSIGNED_OWNER } from '../utils/ticketOwners'
 import { Bot, Radar, Sparkles, Users } from 'lucide-react'
 import { StatusBadge } from './StatusBadge'
 import './PlatformConsole.css'
@@ -54,6 +54,10 @@ type PlatformConsoleProps = {
 type TenantScope = 'all' | Tenant['id']
 type Tone = 'success' | 'warning' | 'danger' | 'info' | 'neutral'
 
+/**
+ * 서버가 아직 보내 주는 연동 행의 모양. 화면에는 그리지 않는다 — 고객사 생성 때 만든 자리표시와 데모 시드뿐이고
+ * 갱신하는 곳이 없다(IntegrationsView 참고).
+ */
 type IntegrationState = {
   id: string
   tenantId: Tenant['id']
@@ -188,6 +192,8 @@ type BackupStatus = {
 type BackupSettingsView = { enabled: boolean; retention: number; scheduleHour: number; intervalHours: number; nasConfigured: boolean; cloudConfigured: boolean; scheduleLabel?: string; retentionLabel?: string }
 
 type PlatformContextValue = PlatformState & {
+  /** 지금 로그인한 운영자 이름(세션에서 읽는다). CS 담당자 선택지에 쓴다. */
+  operatorName: string
   loading: boolean
   error: string
   refresh: (silent?: boolean) => Promise<void>
@@ -228,15 +234,13 @@ type PlatformDialogState =
   | { kind: 'timeline'; ticket: SupportTicket }
   | { kind: 'audit-record'; event: AuditEvent }
   | { kind: 'owner-notice'; ticket: SupportTicket }
-  | { kind: 'diagnostic'; item?: IntegrationState }
-  | { kind: 'reconnect'; item: IntegrationState }
 
 
 const sectionMeta: Record<PlatformSection, { label: string; title: string; description: string; icon: LucideIcon }> = {
   platform: { label: '관제센터', title: '플랫폼 관제센터', description: '모든 고객사의 상태·계정·지원·AI 신호를 한 화면에서 총괄하고, AI 브리핑으로 우선순위를 잡습니다.', icon: Home },
   tenants: { label: '고객사', title: '고객사 관리', description: '계약·활성도·사용량을 고객사 단위로 관리합니다.', icon: Building2 },
   support: { label: 'CS 지원', title: 'CS 지원센터', description: 'SLA와 다음 행동을 기준으로 티켓을 처리합니다.', icon: Headphones },
-  integrations: { label: '연동 상태', title: '연동 모니터링', description: '판매채널·물류·AI의 동기화 상태를 진단합니다.', icon: Layers3 },
+  integrations: { label: '연동 상태', title: '연동 상태 · 정기 작업', description: '서버 정기 작업과 백업이 제대로 돌았는지 확인합니다. 고객사별 연동 상태는 아직 모으지 않습니다.', icon: Layers3 },
   audit: { label: '지원 세션', title: '지원 세션 · 감사', description: '승인형 접근과 운영자 활동을 추적합니다.', icon: ShieldCheck },
 }
 
@@ -255,11 +259,6 @@ function toneForService(value: string): Tone {
 function tenantForTicket(ticket: SupportTicket, tenants: PlatformTenant[]) {
   return tenants.find((tenant) => tenant.id === ticket.tenantId)
     ?? tenants.find((tenant) => tenant.name === ticket.tenant)
-}
-
-function integrationSummaryForTenant(tenantId: Tenant['id'], integrationStates: IntegrationState[]) {
-  const items = integrationStates.filter((item) => item.tenantId === tenantId)
-  return `${items.filter((item) => item.status === '정상').length} / ${items.length}`
 }
 
 function ScopeBar({ scope, onScope }: { scope: TenantScope; onScope: (scope: TenantScope) => void }) {
@@ -323,7 +322,7 @@ function PlatformDialog({
   onSectionChange: PlatformConsoleProps['onSectionChange']
   onToast: PlatformConsoleProps['onToast']
 }) {
-  const { tenants, integrations, auditEvents, createTenant, createTicket, createAction, downloadEvidence } = usePlatformData()
+  const { tenants, supportTickets, operatorName, auditEvents, createTenant, createTicket, createAction, downloadEvidence } = usePlatformData()
   const dialogRef = useRef<HTMLElement>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -397,18 +396,15 @@ function PlatformDialog({
 
   const submitAction = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (dialog.kind !== 'owner-notice' && dialog.kind !== 'reconnect') return
+    if (dialog.kind !== 'owner-notice') return
     const form = new FormData(event.currentTarget)
     const message = String(form.get('message') ?? '').trim()
     if (!message) return
-    const isNotice = dialog.kind === 'owner-notice'
-    const target = isNotice ? `${dialog.ticket.owner} · ${dialog.ticket.id}` : `${tenants.find((tenant) => tenant.id === dialog.item.tenantId)?.name ?? dialog.item.tenantId} · ${dialog.item.name}`
-    const tenantId = isNotice ? dialog.ticket.tenantId : dialog.item.tenantId
     setBusy(true); setError('')
     try {
-      await createAction({ tenantId, kind: isNotice ? '담당자 알림' : '재연결 요청', target, message, reference: isNotice ? dialog.ticket.id : dialog.item.id })
+      await createAction({ tenantId: dialog.ticket.tenantId, kind: '담당자 알림', target: `${dialog.ticket.owner} · ${dialog.ticket.id}`, message, reference: dialog.ticket.id })
       onClose()
-      onToast(`${isNotice ? '담당자 알림' : '재연결 요청'}을 공유 운영 기록에 저장했습니다.`)
+      onToast('담당자 알림을 공유 운영 기록에 저장했습니다.')
     } catch (reason) { setError(reason instanceof Error ? reason.message : '운영 액션을 저장하지 못했습니다.') }
     finally { setBusy(false) }
   }
@@ -426,11 +422,7 @@ function PlatformDialog({
         ? ['TICKET HISTORY', `${dialog.ticket.id} 처리 이력`, '상태 변화와 다음 행동을 시간순으로 확인합니다.']
         : dialog.kind === 'audit-record'
           ? ['AUDIT TRAIL', `${dialog.event.id} 전체 기록`, '같은 고객사와 참조 건의 감사 이벤트를 함께 확인합니다.']
-          : dialog.kind === 'owner-notice'
-            ? ['OPERATION ACTION', '담당자 알림 작성', '담당자 조치와 메시지를 감사 가능한 운영 기록으로 저장합니다.']
-            : dialog.kind === 'reconnect'
-              ? ['RECONNECT ACTION', '고객사 재연결 요청', '고객사 관리자에게 전달할 인증 안내와 조치를 기록합니다.']
-              : ['DIAGNOSTIC SNAPSHOT', dialog.item ? `${dialog.item.name} 진단 상세` : '연동 상태 점검', '현재 화면의 메타데이터 스냅샷을 해석합니다.']
+          : ['OPERATION ACTION', '담당자 알림 작성', '담당자 조치와 메시지를 감사 가능한 운영 기록으로 저장합니다.']
 
   return <div className="pc-modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section ref={dialogRef} className={`pc-modal${dialog.kind === 'audit-record' ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby="pc-modal-title" tabIndex={-1}>
@@ -446,15 +438,14 @@ function PlatformDialog({
         <div className="pc-modal-actions"><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>취소</Button><Button tone="primary" type="submit" disabled={busy}><Plus size={15} /> {busy ? '생성 중…' : '고객사 · 관리자 생성'}</Button></div>
       </form>)}
       {dialog.kind === 'new-ticket' && <form className="pc-modal-body" onSubmit={submitTicket}>
-        <div className="pc-form-grid"><label className="pc-field"><span>고객사</span><select name="tenantId" defaultValue={scope === 'all' ? tenants[0]?.id : scope} data-autofocus>{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label><label className="pc-field"><span>우선순위</span><select name="priority"><option>P3</option><option>P2</option><option>P1</option></select></label><label className="pc-field full"><span>제목</span><input name="title" required minLength={4} placeholder="문의 또는 장애 현상을 요약하세요." /></label><label className="pc-field full"><span>상세 내용</span><textarea name="description" required placeholder="재현 절차, 발생 시각, 영향 범위를 입력하세요." /></label><label className="pc-field"><span>담당자</span><select name="owner"><option>이민지</option><option>박하늘</option><option>김도윤</option><option>미배정</option></select></label><label className="pc-field"><span>증빙 파일</span><input name="evidence" type="file" accept="image/*,.pdf,.txt,.csv" /></label></div>
+        <div className="pc-form-grid"><label className="pc-field"><span>고객사</span><select name="tenantId" defaultValue={scope === 'all' ? tenants[0]?.id : scope} data-autofocus>{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label><label className="pc-field"><span>우선순위</span><select name="priority"><option>P3</option><option>P2</option><option>P1</option></select></label><label className="pc-field full"><span>제목</span><input name="title" required minLength={4} placeholder="문의 또는 장애 현상을 요약하세요." /></label><label className="pc-field full"><span>상세 내용</span><textarea name="description" required placeholder="재현 절차, 발생 시각, 영향 범위를 입력하세요." /></label><label className="pc-field"><span>담당자</span><select name="owner" defaultValue={UNASSIGNED_OWNER}>{ticketOwnerOptions(supportTickets, operatorName).map((name) => <option key={name}>{name}</option>)}</select></label><label className="pc-field"><span>증빙 파일</span><input name="evidence" type="file" accept="image/*,.pdf,.txt,.csv" /></label></div>
         <div className="pc-form-note"><ShieldCheck size={17} /><span>증빙은 플랫폼 운영자 전용 저장소에 최대 10MB까지 보관되며 고객사 계정에서는 열람할 수 없습니다.</span></div>
         {error && <div className="pc-form-note"><AlertTriangle size={17} /><span>{error}</span></div>}
         <div className="pc-modal-actions"><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>취소</Button><Button tone="primary" type="submit" disabled={busy}><Plus size={15} /> {busy ? '등록 중…' : 'CS 등록'}</Button></div>
       </form>}
       {dialog.kind === 'timeline' && <div className="pc-modal-body"><div className="pc-detail-grid"><DetailStat label="고객사" value={dialog.ticket.tenant} /><DetailStat label="현재 상태" value={dialog.ticket.status} /><DetailStat label="담당" value={dialog.ticket.owner} /><DetailStat label="SLA" value={dialog.ticket.sla} /></div>{dialog.ticket.evidence && <Button tone="ghost" type="button" onClick={() => void downloadEvidence(dialog.ticket).catch((reason) => onToast(reason instanceof Error ? reason.message : 'CS 증빙을 다운로드하지 못했습니다.'))}><FileClock size={16} /> 증빙 다운로드 · {dialog.ticket.evidence.name}</Button>}<div className="pc-timeline">{timeline.map((item) => <article key={item.id}><i /><div><strong>{item.at} · {item.title}</strong><span>{item.detail} · {item.actor}</span></div></article>)}</div><div className="pc-modal-actions"><Button tone="primary" type="button" onClick={onClose}>확인</Button></div></div>}
       {dialog.kind === 'audit-record' && <div className="pc-modal-body"><div className="pc-safe-note"><ShieldCheck size={16} /> 고객사 원문이나 인증 토큰 없이 운영 메타데이터만 표시합니다.</div><div className="pc-audit-records">{auditRecords.map((event) => <article key={event.id}><span className="pc-code">{event.at}</span><div><strong>{event.event}</strong><span>{event.actor} · {event.scope} · 참조 {event.reference}</span></div><Badge tone={toneForService(event.result)}>{event.result}</Badge></article>)}</div><div className="pc-modal-actions"><Button tone="primary" type="button" onClick={onClose}>닫기</Button></div></div>}
-      {(dialog.kind === 'owner-notice' || dialog.kind === 'reconnect') && <form className="pc-modal-body" onSubmit={submitAction}><label className="pc-field"><span>전달 대상</span><input readOnly value={dialog.kind === 'owner-notice' ? `${dialog.ticket.owner} · ${dialog.ticket.id}` : `${tenants.find((tenant) => tenant.id === dialog.item.tenantId)?.name ?? ''} 관리자 · ${dialog.item.name}`} /></label><label className="pc-field"><span>전달 내용</span><textarea name="message" data-autofocus required defaultValue={dialog.kind === 'owner-notice' ? `${dialog.ticket.title} 건의 현재 상태(${dialog.ticket.status})를 확인하고 다음 조치를 기록해 주세요.` : `${dialog.item.name} 인증 상태(${dialog.item.status})를 확인하고 판매자센터에서 권한을 다시 승인해 주세요.`} /></label><div className="pc-form-note"><ShieldCheck size={17} /><span>운영자 신원·대상·내용·참조 건을 공유 저장소와 감사로그에 함께 기록합니다.</span></div>{error && <div className="pc-form-note"><AlertTriangle size={17} /><span>{error}</span></div>}<div className="pc-modal-actions"><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>취소</Button><Button tone="primary" type="submit" disabled={busy}>{busy ? '저장 중…' : '운영 액션 저장'}</Button></div></form>}
-      {dialog.kind === 'diagnostic' && <div className="pc-modal-body">{dialog.item ? <><div className="pc-detail-grid"><DetailStat label="상태" value={dialog.item.status} /><DetailStat label="최근 동기화" value={dialog.item.lastSync} /><DetailStat label="성공률" value={dialog.item.successRate} /><DetailStat label="화면 진단" value={dialog.item.result} /></div><div className="pc-form-note"><AlertTriangle size={17} /><span>현재 저장된 운영 메타데이터입니다. 외부 API의 최신 토큰 유효성 검사는 채널 커넥터에서 수행해야 합니다.</span></div></> : <><div className="pc-detail-grid"><DetailStat label="표시 연동" value={`${integrations.length}개`} /><DetailStat label="정상" value={`${integrations.filter((item) => item.status === '정상').length}개`} /><DetailStat label="점검 필요" value={`${integrations.filter((item) => item.status !== '정상').length}개`} /><DetailStat label="점검 시각" value={formatDateTime(new Date())} /></div></>}<div className="pc-modal-actions"><Button tone="primary" type="button" onClick={onClose}>확인</Button></div></div>}
+      {dialog.kind === 'owner-notice' && <form className="pc-modal-body" onSubmit={submitAction}><label className="pc-field"><span>전달 대상</span><input readOnly value={`${dialog.ticket.owner} · ${dialog.ticket.id}`} /></label><label className="pc-field"><span>전달 내용</span><textarea name="message" data-autofocus required defaultValue={`${dialog.ticket.title} 건의 현재 상태(${dialog.ticket.status})를 확인하고 다음 조치를 기록해 주세요.`} /></label><div className="pc-form-note"><ShieldCheck size={17} /><span>운영자 신원·대상·내용·참조 건을 공유 저장소와 감사로그에 함께 기록합니다.</span></div>{error && <div className="pc-form-note"><AlertTriangle size={17} /><span>{error}</span></div>}<div className="pc-modal-actions"><Button tone="ghost" type="button" onClick={onClose} disabled={busy}>취소</Button><Button tone="primary" type="submit" disabled={busy}>{busy ? '저장 중…' : '운영 액션 저장'}</Button></div></form>}
     </section>
   </div>
 }
@@ -711,11 +702,9 @@ function TenantDetail({ tenant, onSectionChange, onRequestSupport, onScope, onEn
   )
 }
 
-function Overview({ scope, scopedTenants, scopedTickets, scopedIntegrations, selectedTenantId, onSelectTenant, onScope, props }: SectionProps) {
-  const { tenants } = usePlatformData()
+function Overview({ scope, scopedTenants, scopedTickets, selectedTenantId, onSelectTenant, onScope, props }: SectionProps) {
   const selectedTenant = scopedTenants.find((tenant) => tenant.id === selectedTenantId) ?? scopedTenants[0]
   const exceptionTickets = scopedTickets.filter((ticket) => ticket.priority === 'P1' || ticket.status.includes('대기')).slice(0, 3)
-  const exceptionIntegrations = scopedIntegrations.filter((item) => item.status !== '정상')
   const [briefing, setBriefing] = useState<Briefing | null>(null)
   const [briefingLoading, setBriefingLoading] = useState(false)
   const loadBriefing = useCallback(async () => {
@@ -739,11 +728,7 @@ function Overview({ scope, scopedTenants, scopedTickets, scopedIntegrations, sel
                 <Badge tone={toneForService(ticket.priority)}>{ticket.priority} · {ticket.sla}</Badge>
               </div>
             ))}
-            {exceptionIntegrations.map((item) => {
-              const tenant = tenants.find((value) => value.id === item.tenantId)
-              return <div className="pc-alert" key={item.id}><span className="pc-alert-icon"><KeyRound size={16} /></span><div><strong>{item.name} · {item.result}</strong><span>{tenant?.name} · 연동 메타데이터</span></div><Badge tone={toneForService(item.status)}>{item.status}</Badge></div>
-            })}
-            {exceptionTickets.length === 0 && exceptionIntegrations.length === 0 && <EmptyState label="현재 우선 확인할 항목이 없습니다." />}
+            {exceptionTickets.length === 0 && <EmptyState label="현재 우선 확인할 항목이 없습니다." />}
           </div>
         </Panel>
       </div>
@@ -756,7 +741,6 @@ type SectionProps = {
   scope: TenantScope
   scopedTenants: PlatformTenant[]
   scopedTickets: SupportTicket[]
-  scopedIntegrations: IntegrationState[]
   selectedTenantId: Tenant['id']
   onSelectTenant: (id: Tenant['id']) => void
   onScope: (scope: TenantScope) => void
@@ -780,7 +764,7 @@ function TenantsView({ scope, scopedTenants, selectedTenantId, onSelectTenant, o
 }
 
 function TicketDetail({ ticket, props, onOpenDialog }: { ticket?: SupportTicket; props: PlatformConsoleProps; onOpenDialog: (dialog: PlatformDialogState) => void }) {
-  const { tenants, updateTicket, downloadEvidence, loadSupportConversation, replySupportConversation, uploadSupportAttachments, deleteSupportAttachment, downloadSupportAttachment } = usePlatformData()
+  const { tenants, supportTickets, operatorName, updateTicket, downloadEvidence, loadSupportConversation, replySupportConversation, uploadSupportAttachments, deleteSupportAttachment, downloadSupportAttachment } = usePlatformData()
   const tenant = ticket ? tenantForTicket(ticket, tenants) : undefined
   const [statusDraft, setStatusDraft] = useState(ticket?.status ?? '접수')
   const [ownerDraft, setOwnerDraft] = useState(ticket?.owner ?? '미배정')
@@ -903,7 +887,7 @@ function TicketDetail({ ticket, props, onOpenDialog }: { ticket?: SupportTicket;
       </div>
       <div className="pc-detail-actions">
         <label className="pc-field"><span>상태</span><select value={statusDraft} onChange={(event) => setStatusDraft(event.target.value)}><option>접수</option><option>기술팀 처리중</option><option>고객 회신 대기</option><option>수정본 검증중</option><option>해결</option><option>종료</option></select></label>
-        <label className="pc-field"><span>담당자</span><select value={ownerDraft} onChange={(event) => setOwnerDraft(event.target.value)}><option>개발운영진</option><option>이민지</option><option>박하늘</option><option>김도윤</option><option>미배정</option></select></label>
+        <label className="pc-field"><span>담당자</span><select value={ownerDraft} onChange={(event) => setOwnerDraft(event.target.value)}>{ticketOwnerOptions(supportTickets, operatorName, ticket.owner).map((name) => <option key={name}>{name}</option>)}</select></label>
         <Button tone="primary" type="button" disabled={saving || (statusDraft === ticket.status && ownerDraft === ticket.owner)} onClick={() => void saveAssignment()}><CheckCircle2 size={15} /> {saving ? '저장 중…' : '상태 저장'}</Button>
         <Button tone="ghost" type="button" onClick={() => onOpenDialog({ kind: 'timeline', ticket })}><FileClock size={15} /> 처리 이력</Button>
         <Button tone="ghost" type="button" onClick={() => onOpenDialog({ kind: 'owner-notice', ticket })}><UserCheck size={15} /> 담당자 알림</Button>
@@ -938,26 +922,6 @@ function SupportView({ scopedTickets, onOpenDialog, props }: SectionProps) {
     </Panel>
     <TicketDetail ticket={selectedTicket} props={props} onOpenDialog={onOpenDialog} />
   </div>
-}
-
-function IntegrationDetail({ item, props, onScope, onOpenDialog }: { item?: IntegrationState; props: PlatformConsoleProps; onScope: (scope: TenantScope) => void; onOpenDialog: (dialog: PlatformDialogState) => void }) {
-  const { tenants } = usePlatformData()
-  const tenant = item ? tenants.find((value) => value.id === item.tenantId) : undefined
-  if (!item || !tenant) return <aside className="pc-detail"><EmptyState label="연동을 선택해 주세요." /></aside>
-  return <aside className="pc-detail" aria-label={`${item.name} 연동 상세`}>
-    <div className="pc-detail-head"><div className="pc-detail-eyebrow"><span>{tenant.name}</span><Badge tone={toneForService(item.status)}>{item.status}</Badge></div><h2>{item.name}</h2></div>
-    <div className="pc-detail-body">
-      <div>
-        <div className="pc-detail-grid"><DetailStat label="구분" value={item.kind} /><DetailStat label="최근 동기화" value={item.lastSync} /><DetailStat label="성공률" value={item.successRate} /><DetailStat label="진단" value={item.result} /></div>
-        <div className="pc-detail-section"><strong>데이터 격리</strong><p>{item.kind === 'AI' ? '프롬프트와 답변 원문은 운영자에게 공개되지 않습니다.' : '인증 토큰과 주문 원문은 표시하지 않습니다.'}</p></div>
-      </div>
-      <div className="pc-detail-actions">
-        <Button tone="ghost" type="button" onClick={() => onOpenDialog({ kind: 'diagnostic', item })}><Activity size={15} /> 진단 상세</Button>
-        {item.status !== '정상' && <Button tone="primary" type="button" onClick={() => onOpenDialog({ kind: 'reconnect', item })}><KeyRound size={15} /> 고객사 재연결 요청</Button>}
-        <Button tone="ghost" type="button" onClick={() => { onScope(tenant.id); props.onSectionChange('support') }}><LifeBuoy size={15} /> 관련 CS 보기</Button>
-      </div>
-    </div>
-  </aside>
 }
 
 /** 저장소 건강 경고. 문제가 없으면 아무것도 그리지 않는다. */
@@ -1098,23 +1062,16 @@ function SchedulerPanel({ onToast }: { onToast: (message: string) => void }) {
   </Panel>
 }
 
-function IntegrationsView({ scopedIntegrations, onScope, onOpenDialog, props }: SectionProps) {
-  const { tenants } = usePlatformData()
-  const [status, setStatus] = useState<'all' | IntegrationState['status']>('all')
-  const [selectedId, setSelectedId] = useState(scopedIntegrations[0]?.id ?? '')
-  const items = scopedIntegrations.filter((item) => status === 'all' || item.status === status)
-  const selected = items.find((item) => item.id === selectedId) ?? items[0]
-  return <div className="pc-workspace">
-    <Panel title="연동 목록" subtitle="토큰·주문 원문 없이 상태 메타데이터만 조회" tools={<div className="pc-toolbar">{(['all', '정상', '주의', '설정중'] as const).map((value) => <button type="button" key={value} className={`pc-filter-button${status === value ? ' active' : ''}`} onClick={() => setStatus(value)}>{value === 'all' ? '전체' : value}</button>)}</div>} footer={`${items.length}개 연동 · 최근 상태 진단 기준`}>
-      {items.length ? <div className="pc-table-wrap"><table className="pc-table">
-        <thead><tr><th>서비스</th><th>고객사</th><th>구분</th><th>상태</th><th>최근 동기화</th><th>성공률</th><th>진단</th><th aria-label="상세" /></tr></thead>
-        <tbody>{items.map((item) => { const tenant = tenants.find((value) => value.id === item.tenantId); return <tr key={item.id} className={selected?.id === item.id ? 'selected' : undefined}>
-          <td><div className="pc-cell-main"><span className="pc-logo channel">{item.short}</span><span className="pc-cell-copy"><strong>{item.name}</strong><span>{item.id}</span></span></div></td><td>{tenant?.name}</td><td>{item.kind}</td><td><Badge tone={toneForService(item.status)}>{item.status}</Badge></td><td className="pc-code">{item.lastSync}</td><td>{item.successRate}</td><td>{item.result}</td><td><IconButton tone="ghost" size="sm" type="button" aria-label={`${item.name} 상세 보기`} onClick={() => setSelectedId(item.id)}><ChevronRight size={17} /></IconButton></td>
-        </tr> })}</tbody>
-      </table></div> : <EmptyState label="선택한 조건의 연동이 없습니다." />}
-    </Panel>
-    <IntegrationDetail item={selected} props={props} onScope={onScope} onOpenDialog={onOpenDialog} />
-  </div>
+/**
+ * 고객사별 연동 상태. 지금 서버에 있는 연동 행은 고객사를 만들 때 자동으로 만든 자리표시(쿠팡·G마켓·택배·Claude AI
+ * '설정중')이거나 데모 시드이고, 이 행을 갱신하는 곳이 없다 — IT 고객사에도 쿠팡 행이 생겼다. 그것을 '정상/주의'와
+ * '성공률'로 보여 주면 확인한 적 없는 상태를 확인한 것처럼 보인다. 실제 연결(외부 연동·캘린더·판매채널)에서 상태를
+ * 모으는 서버 집계가 생길 때까지는 아직 모으지 않는다고만 말한다.
+ */
+function IntegrationsView() {
+  return <Panel title="고객사 연동 상태" subtitle="아직 데이터 없음">
+    <div className="pc-empty"><Layers3 size={22} aria-hidden="true" />고객사별 연동 상태는 아직 모으지 않습니다. 판매채널·택배·외부 연동이 실제로 연결되면 이곳에 그 결과가 표시됩니다.</div>
+  </Panel>
 }
 
 function AuditDetail({ event, props, onOpenDialog }: { event?: AuditEvent; props: PlatformConsoleProps; onOpenDialog: (dialog: PlatformDialogState) => void }) {
@@ -1160,6 +1117,16 @@ export function PlatformConsole(props: PlatformConsoleProps) {
   const [platformState, setPlatformState] = useState<PlatformState>(emptyPlatformState)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [operatorName, setOperatorName] = useState('')
+
+  useEffect(() => {
+    let active = true
+    void fetch('/api/auth/session', { cache: 'no-store' })
+      .then(async (response) => response.ok ? await response.json() as { account?: { name?: unknown } } : null)
+      .then((body) => { if (active && typeof body?.account?.name === 'string') setOperatorName(body.account.name) })
+      .catch(() => { /* 이름을 못 읽으면 선택지에서 '나'만 빠진다 */ })
+    return () => { active = false }
+  }, [])
 
   const refresh = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -1300,14 +1267,12 @@ export function PlatformConsole(props: PlatformConsoleProps) {
     window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
   }, [])
 
-  const { tenants, supportTickets, integrations, actions, auditEvents } = platformState
+  const { tenants, supportTickets, actions, auditEvents } = platformState
   const scopedTenants = useMemo(() => scope === 'all' ? tenants : tenants.filter((tenant) => tenant.id === scope), [scope, tenants])
   const scopedTickets = useMemo(() => supportTickets.filter((ticket) => scope === 'all' || ticket.tenantId === scope), [scope, supportTickets])
-  const scopedIntegrations = useMemo(() => integrations.filter((item) => scope === 'all' || item.tenantId === scope), [integrations, scope])
 
   const activeTenantCount = scopedTenants.filter((tenant) => tenant.metrics.lastActivityAt && Date.now() - Date.parse(tenant.metrics.lastActivityAt) < 24 * 60 * 60 * 1_000).length
   const unresolvedTicketTotal = scopedTenants.reduce((sum, tenant) => sum + tenant.metrics.openTickets, 0)
-  const healthyIntegrations = scopedIntegrations.filter((item) => item.status === '정상').length
   const openTickets = scopedTickets.filter((ticket) => !['해결', '종료'].includes(ticket.status))
   const p1Count = openTickets.filter((ticket) => ticket.priority === 'P1').length
   const newRequestCount = scopedTickets.filter((ticket) => ticket.newRequest).length
@@ -1335,7 +1300,6 @@ export function PlatformConsole(props: PlatformConsoleProps) {
     scope,
     scopedTenants,
     scopedTickets,
-    scopedIntegrations,
     selectedTenantId,
     onSelectTenant: setSelectedTenantId,
     onScope: changeScope,
@@ -1345,6 +1309,7 @@ export function PlatformConsole(props: PlatformConsoleProps) {
 
   const contextValue = useMemo<PlatformContextValue>(() => ({
     ...platformState,
+    operatorName,
     loading,
     error: loadError,
     refresh,
@@ -1359,7 +1324,7 @@ export function PlatformConsole(props: PlatformConsoleProps) {
     uploadSupportAttachments,
     deleteSupportAttachment,
     downloadSupportAttachment,
-  }), [createAction, createTenant, createTicket, deleteSupportAttachment, downloadEvidence, downloadSupportAttachment, loadError, loading, loadSupportConversation, platformState, refresh, replySupportConversation, updateTenantIndustry, updateTicket, uploadSupportAttachments])
+  }), [createAction, createTenant, createTicket, deleteSupportAttachment, downloadEvidence, downloadSupportAttachment, loadError, loading, loadSupportConversation, operatorName, platformState, refresh, replySupportConversation, updateTenantIndustry, updateTicket, uploadSupportAttachments])
 
   return (
     <PlatformDataContext.Provider value={contextValue}><div className="pc-root">
@@ -1373,7 +1338,6 @@ export function PlatformConsole(props: PlatformConsoleProps) {
           <div className="pc-actions">
             {props.section === 'tenants' && <Button tone="ghost" type="button" onClick={() => setDialog({ kind: 'onboarding' })}><Plus size={15} /> 고객사 온보딩</Button>}
             {props.section === 'support' && <Button tone="primary" type="button" onClick={() => setDialog({ kind: 'new-ticket' })}><Plus size={15} /> 새 CS 등록</Button>}
-            {props.section === 'integrations' && <Button tone="ghost" type="button" onClick={() => setDialog({ kind: 'diagnostic' })}><RefreshCw size={15} /> 상태 점검</Button>}
             <Button tone="ghost" type="button" onClick={props.onReturnTenant}><LockKeyhole size={15} /> 승인 후 고객사 접근</Button>
           </div>
         </header>
@@ -1390,7 +1354,7 @@ export function PlatformConsole(props: PlatformConsoleProps) {
           <Metric icon={Building2} label="관리 고객사" value={`${scopedTenants.length}곳`} note={scope === 'all' ? '전체' : '선택'} />
           <Metric icon={Activity} label="24시간 활동 고객사" value={`${activeTenantCount}/${scopedTenants.length}곳`} note={unresolvedTicketTotal ? `미처리 티켓 ${unresolvedTicketTotal}건` : '미처리 티켓 없음'} warning={unresolvedTicketTotal > 0 || activeTenantCount < scopedTenants.length} />
           <Metric icon={LifeBuoy} label="열린 CS" value={`${openTickets.length}건`} note={newRequestCount ? `새 요청 ${newRequestCount}` : unansweredCount ? `미답변 ${unansweredCount}` : p1Count ? `P1 ${p1Count}` : '대기 없음'} warning={newRequestCount > 0 || p1Count > 0} />
-          <Metric icon={CheckCircle2} label="정상 연동" value={`${healthyIntegrations}/${scopedIntegrations.length}`} note={healthyIntegrations === scopedIntegrations.length ? '전체 정상' : '점검 필요'} warning={healthyIntegrations < scopedIntegrations.length} />
+          <Metric icon={CheckCircle2} label="연동 상태" value="수집 전" note="아직 데이터 없음" />
         </section>
 
         <ScopeBar scope={scope} onScope={changeScope} />
@@ -1400,7 +1364,7 @@ export function PlatformConsole(props: PlatformConsoleProps) {
         {props.section === 'platform' && <Overview {...sectionProps} />}
         {props.section === 'tenants' && <TenantsView {...sectionProps} />}
         {props.section === 'support' && <SupportView {...sectionProps} />}
-        {props.section === 'integrations' && <><IntegrationsView {...sectionProps} /><SchedulerPanel onToast={props.onToast} /><BackupPanel /></>}
+        {props.section === 'integrations' && <><IntegrationsView /><SchedulerPanel onToast={props.onToast} /><BackupPanel /></>}
         {props.section === 'audit' && <AuditView {...sectionProps} />}
       </div>
       {dialog && <PlatformDialog dialog={dialog} scope={scope} onClose={() => setDialog(null)} onScope={changeScope} onSectionChange={props.onSectionChange} onToast={props.onToast} />}
