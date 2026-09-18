@@ -1,0 +1,12 @@
+/* [더 보기] 메뉴 — 모양은 토큰만. 항목은 손가락으로 누르기 쉬운 높이(48px). */
+.more-menu { position: relative; display: inline-flex; }
+.more-menu-list { position: absolute; top: calc(100% + var(--space-4)); right: var(--space-0); z-index: 40; min-width: 240px; display: flex; flex-direction: column; padding: var(--space-4); border: var(--hairline) solid var(--line); border-radius: var(--radius-8); background: var(--surface); }
+.more-menu-item { min-height: 48px; display: flex; align-items: center; gap: var(--space-12); padding: var(--space-8) var(--space-12); border: none; border-radius: var(--radius-8); color: var(--ink); background: transparent; font-size: var(--font-15); text-align: left; cursor: pointer; }
+.more-menu-item:hover, .more-menu-item:focus-visible { background: var(--canvas); }
+.more-menu-item:focus-visible { outline: var(--hairline) solid var(--color-primary); outline-offset: calc(var(--hairline) * -1); }
+.more-menu-item.is-danger { color: var(--color-danger-ink); }
+.more-menu-item svg { flex: 0 0 auto; color: var(--muted); }
+@media (max-width: 640px) {
+  /* 휴대폰: 아래 탭 막대(56px) 위에 뜬다 — 막대에 가려 마지막 항목을 누르지 못하는 일이 없게. */
+  .more-menu-list { position: fixed; top: auto; right: var(--space-16); bottom: calc(56px + var(--space-12) + env(safe-area-inset-bottom, 0px)); left: var(--space-16); z-index: 80; }
+}

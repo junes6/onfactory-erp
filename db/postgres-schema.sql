@@ -543,6 +543,24 @@ CREATE TABLE IF NOT EXISTS meeting_notes (
   created_by TEXT, PRIMARY KEY (org_id, id)
 );
 
+-- 검토 자료(AI가 만든 HTML 회의 자료). 행에는 제목·판 목록·항목 계보만 있다 — 원본은 자료실 문서(items),
+-- 그리기 사본·항목·그림은 파일 저장소에 있다. 의견·찬반·결정은 추가만 하는 기록으로 review_feedback에 따로 둔다.
+-- 서비스 컨텍스트만 통과한다. 게스트 정책은 만들지 않는다(1차에서 게스트는 검토 자료에 들어오지 않는다).
+-- 마이그레이션 사슬(supabase/migrations/20260918000000_review_materials.sql)과 **같은 본문**이다.
+CREATE TABLE IF NOT EXISTS review_materials (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS review_feedback (
+  id TEXT NOT NULL, org_id TEXT NOT NULL REFERENCES core_tenants(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL, position INTEGER NOT NULL DEFAULT 0, source_updated_at TIMESTAMPTZ, updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), deleted_at TIMESTAMPTZ,
+  created_by TEXT, PRIMARY KEY (org_id, id)
+);
+
 -- R16-L: 외부 연동. tokenHash(sha256)와 signingSecretEnc(AES-256-GCM 봉인문)만 들어간다 — 평문은 저장하지 않는다.
 -- 게스트 범위가 아니므로 아래 게스트 DO 루프에 넣지 않고 service 전용 정책만 붙인다.
 CREATE TABLE IF NOT EXISTS webhook_endpoints (
@@ -799,6 +817,16 @@ ALTER TABLE meeting_notes FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS meeting_notes_service ON meeting_notes;
 CREATE POLICY meeting_notes_service ON meeting_notes USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
 
+-- 검토 자료도 서비스 컨텍스트만 통과한다(게스트 정책 없음).
+ALTER TABLE review_materials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE review_materials FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS review_materials_service ON review_materials;
+CREATE POLICY review_materials_service ON review_materials USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+ALTER TABLE review_feedback ENABLE ROW LEVEL SECURITY;
+ALTER TABLE review_feedback FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS review_feedback_service ON review_feedback;
+CREATE POLICY review_feedback_service ON review_feedback USING (current_setting('app.role', TRUE) = 'service') WITH CHECK (current_setting('app.role', TRUE) = 'service');
+
 DROP POLICY IF EXISTS project_spaces_guest_read ON project_spaces;
 CREATE POLICY project_spaces_guest_read ON project_spaces FOR SELECT USING (
   current_setting('app.role', TRUE) = 'tenant-guest'
@@ -971,6 +999,7 @@ CREATE INDEX IF NOT EXISTS approval_documents_drafter_idx ON approval_documents 
 CREATE INDEX IF NOT EXISTS approval_documents_month_idx ON approval_documents (org_id, (payload -> 'posting' ->> 'month')) WHERE deleted_at IS NULL;
 -- 회의록 목록은 언제나 '아직 도는 것(transcribing·summarizing)'과 '끝난 것'을 갈라 읽는다.
 CREATE INDEX IF NOT EXISTS meeting_notes_status_idx ON meeting_notes (org_id, (payload ->> 'status')) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS review_feedback_material_idx ON review_feedback (org_id, (payload ->> 'materialId')) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ai_conversations_owner_idx ON ai_conversations (org_id, (payload ->> 'ownerId'), (payload ->> 'updatedAt') DESC);
 CREATE INDEX IF NOT EXISTS ai_conversations_trash_idx ON ai_conversations (org_id, (payload ->> 'deletedAt'));
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON auth_sessions (expires_at) WHERE revoked_at IS NULL;

@@ -46,6 +46,9 @@ export const NOTIFICATION_TYPES = Object.freeze({
   // R16-E: 구글 캘린더 연결이 끊겼다. 사람이 직접 다시 연결해야 하므로 기본 푸시를 켜 둔다.
   // DEFAULT_URGENT_TYPES에는 넣지 않는다 — 새벽에 울릴 일이 아니다.
   'calendar-reauth': { label: '캘린더 재연결', pushByDefault: true, page: 'schedule' },
+  // 검토 자료: 올린 사람이 [검토 요청 보내기]를 눌렀을 때 한 번, 마감 하루 전에 아직 반응하지 않은 사람에게 한 번.
+  'material-review': { label: '검토 요청', pushByDefault: true, page: 'wiki' },
+  'material-due': { label: '의견 마감 알림', pushByDefault: true, page: 'wiki' },
 })
 
 export const NOTIFICATION_TYPE_IDS = Object.freeze(Object.keys(NOTIFICATION_TYPES))
@@ -144,6 +147,26 @@ export function normalizeNotifications(value) {
     rows.push(row)
   }
   return rows
+}
+
+/**
+ * 저장된 알림을 **읽을 수 있는 것**과 **읽지 못하는 것(foreign)**으로 나눈다. 읽지 못하는 줄은 버리지 않고
+ * 쓸 때 그대로 뒤에 붙여 돌려놓는다.
+ *
+ * 전에는 한 줄만 이상해도(예: 새 알림 유형을 배포했다가 되돌린 뒤 옛 코드가 그 유형을 모름) 목록 전체를 null로 보고,
+ * 알림을 보내는 자리가 `?? []`로 받아 **그 회사의 모든 알림을 새 한 건으로 덮어썼다**. 다시 앞으로 배포해도 되돌아오지 않는다.
+ */
+export function partitionNotifications(value) {
+  const rows = []
+  const foreign = []
+  const seen = new Set()
+  for (const item of Array.isArray(value) ? value : []) {
+    const row = normalizeNotification(item)
+    if (row && !seen.has(row.id)) { seen.add(row.id); rows.push(row); continue }
+    // 같은 id가 두 번이면 뒤의 것은 버린다(그것만은 되살릴 이유가 없다). 모양을 모르는 줄은 보관한다.
+    if (!row && item && typeof item === 'object' && foreign.length < 500) foreign.push(item)
+  }
+  return { rows: rows.slice(0, MAX_NOTIFICATIONS_PER_TENANT), foreign }
 }
 
 /** 기본 설정: 모든 유형을 화면에 보여 주고, 푸시는 즉시성이 필요한 4가지만 켠다. */

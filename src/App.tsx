@@ -22,6 +22,8 @@ import { CompanyLibrary } from './components/CompanyLibrary'
 import { WikiPage } from './components/wiki/WikiPage'
 // R16-M4: 회의록. 녹음·전사·요약은 문서 편집과 성격이 다른 흐름이라 화면을 따로 둔다.
 import { MeetingNotesPage } from './components/MeetingNotes'
+import { DocumentsHub, type DocumentsTab } from './components/DocumentsHub'
+import { MaterialsPage } from './components/materials/MaterialsPage'
 import { DailyJournalPage, MessengerDrawer, parseMessengerFocus, SchedulePage, type MessengerFocus } from './components/CollaborationSuite'
 import { CALENDAR_CALLBACK_MESSAGES } from './components/CalendarConnection'
 import { ComplianceCenter } from './components/ComplianceCenter'
@@ -2086,8 +2088,14 @@ export default function App() {
   const [lensTarget, setLensTarget] = useState<LensTarget | null>(null)
   /** 전역 검색·출처 배지가 지목한 문서. WikiPage가 한 번 열고 나면 비운다. */
   const [wikiFocusId, setWikiFocusId] = useState<string>()
+  /** 문서 메뉴의 탭(문서 · 회의록 · 검토 자료). 옛 회의록 메뉴로 들어오면 회의록 탭이 열린다. */
+  const [documentsTab, setDocumentsTab] = useState<DocumentsTab>('docs')
+  const [materialFocusId, setMaterialFocusId] = useState<string | null>(null)
   /** 프로젝트 상세의 ‘문서 N건’이 지목한 프로젝트. 문서 화면이 그 프로젝트로 목록을 좁혀 연다. */
   const [wikiProjectId, setWikiProjectId] = useState<string>()
+  // 문서·검토 자료를 지목해 들어오면(알림·검색·출처 배지) 그 탭을 연다 — 다른 탭에 머물러 있으면 지목한 것이 보이지 않는다.
+  useEffect(() => { if (wikiFocusId || wikiProjectId) setDocumentsTab('docs') }, [wikiFocusId, wikiProjectId])
+  useEffect(() => { if (materialFocusId) setDocumentsTab('materials') }, [materialFocusId])
   /**
    * 문서 화면의 스트림 수신구. WikiPage가 마운트될 때 자기 핸들러를 여기에 꽂는다.
    * 이 한 칸이 있어야 세 번째 EventSource를 열지 않고도 문서가 실시간으로 갱신된다 —
@@ -2127,6 +2135,8 @@ export default function App() {
     // 문서 프레임은 열려 있는 문서 화면만 쓴다. 화면이 없으면 아무 일도 하지 않는다 —
     // 본문·제목이 실려 오지 않는 재조회 신호라, 흘려보내도 잃는 것이 없다.
     if (event.kind === 'wiki' || event.kind === 'resync') wikiStreamRef.current?.(event)
+    // 검토 자료: 열려 있는 자료 화면이 스스로 다시 읽는다(본문은 실려 오지 않는 신호다).
+    if (event.kind === 'material') window.dispatchEvent(new CustomEvent('itf:material', { detail: event.data }))
   })
   useEffect(() => {
     // 푸시 알림을 눌렀을 때 이미 열려 있는 앱이 새로고침 없이 해당 화면으로 이동한다.
@@ -2622,7 +2632,10 @@ export default function App() {
     return [...moduleResults, ...tasks]
   }, [account, dashboardItContracts, dashboardItProjects, dashboardProducts, hasItModule, mode, platformTenants, platformTickets, query, scopedWorkItems, tenantWorkItems])
 
-  const navigate = (nextPage: PageId) => {
+  const navigate = (requestedPage: PageId) => {
+    // 회의록은 문서 메뉴의 탭이 됐다. 알림·출처 배지·옛 링크가 'meetings'로 불러도 같은 자리로 간다.
+    if (requestedPage === 'meetings') setDocumentsTab('meetings')
+    const nextPage: PageId = requestedPage === 'meetings' ? 'wiki' : requestedPage
     if (mode === 'tenant' && account?.role === 'tenant-member' && !tenantMemberPages.has(nextPage)) {
       setToast('현재 직무 권한에서는 이 메뉴에 접근할 수 없습니다.')
       setMobileNav(false)
@@ -2640,6 +2653,9 @@ export default function App() {
     // 지난번 알림의 문서가 계속 펼쳐진다.
     if (nextPage !== 'approvals') setApprovalFocusId('')
     setPage(nextPage)
+    // 휴대폰 화면은 탭(오늘·업무·채팅·더보기) 아래에 화면을 그린다. 메뉴·알림·검색으로 다른 화면에 가면
+    // 그 화면을 '더보기' 탭 아래에 연다 — 전에는 탭이 그대로라 고른 화면이 보이지 않았다(오늘 화면이 계속 떴다).
+    if (phoneShell) { setMobileTab(nextPage === 'tasks' ? 'tasks' : nextPage === 'ai' ? 'today' : 'more'); setMessengerOpen(false) }
     setMobileNav(false)
     setQuery('')
     window.scrollTo({ top: 0, behavior: 'auto' })
@@ -2662,6 +2678,7 @@ export default function App() {
     // 이 갈래의 문장은 R16-L이 쓰던 것을 그대로 둔다 — 여기서 고치면 이 절이 재지 않은 화면을 말하게 된다.
     else if (originPage === 'people') { setPeopleInitialTab('integrations'); setToast('승인 큐에서 원인을 확인하세요.') }
     // R16-H: 문서에서 승격한 업무의 출처는 그 문서다. page만 바꾸면 목록 첫 화면이 열려 근거에 닿지 못한다.
+    else if (originPage === 'wiki' && focusId.startsWith('material:')) { setMaterialFocusId(focusId.slice('material:'.length)); setToast('결정한 검토 자료를 엽니다.') }
     else if (originPage === 'wiki') { setWikiFocusId(focusId); setToast('원본 문서를 엽니다.') }
     else setToast('승인 큐에서 원인을 확인하세요.')
     // 휴대폰은 아래 네 칸이 화면을 정한다 — page만 바꾸고 탭을 두면 업무 상세가 그대로 남아
@@ -3033,17 +3050,24 @@ export default function App() {
           // id는 그 id를 뜻하는 자리에만 넣는다. 자료 id를 workFocusId에 넣으면 업무 화면이
           // 없는 업무를 찾다가 아무것도 못 여는 자리로 사람을 데려간다.
           if (page === 'approvals') { setApprovalFocusId(focusId); return }
-          if (page === 'wiki' && focusId) setWikiFocusId(focusId)
+          if (page === 'wiki' && focusId?.startsWith('material:')) setMaterialFocusId(focusId.slice('material:'.length))
+          else if (page === 'wiki' && focusId) setWikiFocusId(focusId)
           else if (page === 'tasks' && focusId) setWorkFocusId(focusId)
           navigate(page as PageId)
         }}
         onPendingChange={setPendingProposals}
         onWaitingChange={handleApprovalSummary}
       />
-      case 'wiki': return <WikiPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} focusDocumentId={wikiFocusId} focusProjectId={wikiProjectId} onFocusHandled={() => { setWikiFocusId(undefined); setWikiProjectId(undefined) }} streamRef={wikiStreamRef} onAskLens={setLensTarget} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} />
-      case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} industryType={account?.industryType ?? 'food_manufacturing'} onAskLens={setLensTarget} onToast={setToast} />
+      case 'meetings':
+      case 'wiki': return <DocumentsHub
+        tab={page === 'meetings' ? 'meetings' : documentsTab}
+        onTabChange={(next) => { setDocumentsTab(next); if (page === 'meetings') setPage('wiki') }}
+        meetings={<MeetingNotesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} isAdmin={account?.role === 'tenant-admin'} onOpenDocument={(documentId) => { setWikiFocusId(documentId); setDocumentsTab('docs'); navigate('wiki') }} onNavigate={(target) => navigate(target as PageId)} onToast={setToast} />}
+        materials={<MaterialsPage workspaceScope={workspaceScope} focusMaterialId={materialFocusId} onFocusHandled={() => setMaterialFocusId(null)} preferReading={fontSize !== 'standard' || easyMode === 'easy'} currentUserId={account?.id ?? ''} isAdmin={account?.role === 'tenant-admin'} onOpenDocument={(documentId) => { setWikiFocusId(documentId); setDocumentsTab('docs') }} onToast={setToast} />}
+        docs={<WikiPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} focusDocumentId={wikiFocusId} focusProjectId={wikiProjectId} onFocusHandled={() => { setWikiFocusId(undefined); setWikiProjectId(undefined) }} streamRef={wikiStreamRef} onAskLens={setLensTarget} onOpenTask={(taskId) => { setWorkFocusId(taskId); navigate('tasks') }} onToast={setToast} />}
+      />
+      case 'documents': return <CompanyLibrary workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserId={account?.id ?? ''} companyName={tenantName} industryType={account?.industryType ?? 'food_manufacturing'} onAskLens={setLensTarget} onReviewMaterial={(materialId) => { setMaterialFocusId(materialId); navigate('wiki') }} onToast={setToast} />
       // R16-M4: 회의록 문서는 위키에 만들어진다 — page만 바꾸면 문서 목록 첫 화면이 열려 그 회의록에 닿지 못한다.
-      case 'meetings': return <MeetingNotesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} isAdmin={account?.role === 'tenant-admin'} onOpenDocument={(documentId) => { setWikiFocusId(documentId); navigate('wiki') }} onNavigate={(target) => navigate(target as PageId)} onToast={setToast} />
       case 'compliance': return <ComplianceCenter workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} currentUserName={account?.name ?? ''} companyName={tenantName} onAskLens={setLensTarget} onToast={setToast} />
       case 'it-projects': return <ProjectSpacesPage workspaceScope={workspaceScope} currentUserId={account?.id ?? ''} currentUserName={account?.name ?? ''} canManage={account?.role === 'tenant-admin'} onToast={setToast} onNavigate={(target) => { if (target === 'people') setPeopleInitialTab('accounts'); navigate(target as PageId) }} />
       case 'it-deliverables':
@@ -3169,6 +3193,8 @@ export default function App() {
                   // 한쪽은 '주소를 고쳐 주세요'라고 말해 놓고 고칠 수 없는 화면을 연다.
                   // 엔드포인트 id를 workFocusId에 넣지 않는다: 그 자리는 업무 id만 뜻한다.
                   if (page === 'people') { setPeopleInitialTab('integrations'); setNotificationsOpen(false); navigate('people'); return }
+                  // 문서·검토 자료 알림은 그 문서·자료를 연다(업무 자리에 문서 id를 넣지 않는다).
+                  if (page === 'wiki' && focusId) { if (focusId.startsWith('material:')) setMaterialFocusId(focusId.slice('material:'.length)); else setWikiFocusId(focusId); setNotificationsOpen(false); navigate('wiki'); return }
                   // 어디를 열 것인가는 page가 아니라 **id의 모양**이 정한다(notificationFocusTarget).
                   // 결재 문서 id는 결재 자리에서만 뜻이 있고, page:'approvals'로 오는 알림이 전부
                   // 결재 문서인 것도 아니다(AI 제안 PRP-·센티널·기회 OPP-).
@@ -3221,7 +3247,8 @@ export default function App() {
         />
       )}
 
-      <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => { setMessengerOpen(false); if (phoneShell && mobileTab === 'chat') setMobileTab('today') }} onToast={setToast} onUnreadChange={setMessengerUnread} focus={messengerFocus} onFocusHandled={() => setMessengerFocus(null)} />
+      {/* 메신저는 고객사 워크스페이스의 것이다. 플랫폼 콘솔에서 그리면 대화 목록을 읽다 403이 나고 「고객사 워크스페이스에서만…」 알림이 뜬다. */}
+      {tenantDataEnabled && <MessengerDrawer {...collaborationIdentity} workspaceScope={workspaceScope} open={messengerOpen} onClose={() => { setMessengerOpen(false); if (phoneShell && mobileTab === 'chat') setMobileTab('today') }} onToast={setToast} onUnreadChange={setMessengerUnread} focus={messengerFocus} onFocusHandled={() => setMessengerFocus(null)} />}
       {lensTarget && <LensPanel target={lensTarget} workspaceScope={workspaceScope} canManage={account?.role === 'tenant-admin'} onClose={() => setLensTarget(null)} onToast={setToast} onPendingChange={setPendingProposals} />}
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} profileName={account?.name ?? '사용자'} profileRole={account?.jobRole ?? '사용자'} companyName={account?.tenantName ?? BRAND.name} theme={theme} fontSize={fontSize} accent={accent} easyMode={easyMode} onThemeChange={setTheme} onFontSizeChange={setFontSize} onAccentChange={setAccent} onEasyModeChange={setEasyMode} onLogout={logout} onEditProfile={() => { setSettingsOpen(false); setProfileOpen(true) }} />
       {profileOpen && account && <ProfileEditor account={account} onClose={() => setProfileOpen(false)} onToast={setToast} onSaved={(next) => { setAccount((current) => current ? { ...current, ...next } as AuthAccount : current) }} />}

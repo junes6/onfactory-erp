@@ -96,6 +96,11 @@ export const WORKSPACE_TABLES = Object.freeze({
   // R16-M: 회의록. 전사 원문과 요약이 payload 안에 산다 — 회의 음성은 개인정보라
   // 게스트 정책도, generic PUT 도 열지 않고 전용 라우트만 문이 된다(M3).
   'meeting-notes': 'meeting_notes',
+  // 검토 자료(AI가 만든 HTML 회의 자료). 행에는 제목·판 목록·항목 계보만 있고 본문·그림은 파일 저장소에 있다.
+  // 의견·찬반·결정은 추가만 하는 기록이라 따로 둔다. 둘 다 전용 라우트(/api/materials)만 문이 된다 —
+  // WORKSPACE_STORE_KEYS에 넣지 않으므로 generic GET/PUT은 404다.
+  'review-materials': 'review_materials',
+  'review-feedback': 'review_feedback',
 })
 
 export const WORKSPACE_KEYS = Object.freeze(Object.keys(WORKSPACE_TABLES))

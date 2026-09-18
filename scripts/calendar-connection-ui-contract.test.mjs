@@ -128,7 +128,8 @@ test('12. SSE 종류 목록이 서버와 같다', () => {
   const clientList = [...(eventStreamHook.match(/const kinds: StreamEventKind\[\] = \[([^\]]*)\]/)?.[1] ?? '').matchAll(/'([a-z]+)'/g)].map((match) => match[1])
   // R16-H에서 'wiki'가 늘어 여덟이 됐다. 화면 유니온과 addEventListener 배열이 함께 늘지 않으면
   // 서버는 보내는데 화면은 구독하지 않아 프레임이 조용히 버려진다 — 아래 두 deepEqual이 그것을 잡는다.
-  assert.equal(serverKinds.length, 8, serverKinds.join(','))
+  // 검토 자료에서 'material'이 늘어 아홉이 됐다(본문 없이 "다시 읽으라"는 신호만 싣는다).
+  assert.equal(serverKinds.length, 9, serverKinds.join(','))
   assert.deepEqual(clientType.sort(), [...serverKinds].sort())
   assert.deepEqual(clientList.sort(), [...serverKinds].sort())
 })

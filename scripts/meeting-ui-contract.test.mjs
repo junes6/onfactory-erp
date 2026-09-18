@@ -301,9 +301,11 @@ test('회의록 화면에 hex 색이 없고, 라우트는 레지스트리 한 �
     assert.equal(count(source, /#[0-9a-fA-F]{3,8}\b/g), 0, `${name}에 hex 색이 남아 있다`)
   }
   assert.match(registry, /meetings: \{ id: 'meetings', label: '회의록', icon: Mic \}/, '메뉴 라벨은 레지스트리 한 곳에서 나온다')
-  assert.match(app, /case 'meetings': return <MeetingNotesPage/)
+  // 회의록은 문서 메뉴의 탭이다(DocumentsHub). 옛 'meetings' 경로도 같은 허브의 회의록 탭을 연다.
+  assert.match(app, /case 'meetings':\s*\n\s*case 'wiki': return <DocumentsHub/)
+  assert.match(app, /meetings=\{<MeetingNotesPage /)
   // 회의록 문서는 문서 화면의 **그 문서**를 연다 — page만 바꾸면 목록 첫 화면이 열려 근거에 닿지 못한다.
-  assert.match(app, /onOpenDocument=\{\(documentId\) => \{ setWikiFocusId\(documentId\); navigate\('wiki'\) \}\}/)
+  assert.match(app, /onOpenDocument=\{\(documentId\) => \{ setWikiFocusId\(documentId\); setDocumentsTab\('docs'\); navigate\('wiki'\) \}\}/)
 })
 
 test('한글 입력이 끊기지 않는다 — onChange는 받은 값을 그대로 넘긴다', () => {

@@ -8,6 +8,7 @@ import {
   markRead,
   normalizeNotificationSettings,
   normalizeNotifications,
+  partitionNotifications,
   normalizeSubscription,
   removeSubscriptions,
   settingsFor,
@@ -40,13 +41,10 @@ export function registerNotificationRoutes({
       return null
     }
     const tenantStore = workspaceStore.tenants[request.auth.tenantId] ??= {}
-    const rows = normalizeNotifications(tenantStore[NOTIFICATIONS_KEY]?.data ?? [])
-    if (rows === null) {
-      // 형식이 깨진 저장소를 덮어써서 되돌릴 수 없게 만들지 않는다.
-      response.status(500).json({ error: { code: 'NOTIFICATION_DATA_INVALID', message: '알림 형식이 올바르지 않아 안전하게 처리하지 않았습니다.' } })
-      return null
-    }
-    return { tenantStore, rows }
+    // 형식이 깨진(또는 이 버전이 모르는 유형의) 줄은 버리지도, 목록 전체를 막지도 않는다 —
+    // 읽을 수 있는 줄로 일하고, 쓸 때 읽지 못한 줄을 뒤에 그대로 붙여 둔다.
+    const { rows, foreign } = partitionNotifications(tenantStore[NOTIFICATIONS_KEY]?.data ?? [])
+    return { tenantStore, rows, foreign }
   }
 
   const payloadFor = (request, rows) => ({
@@ -87,7 +85,7 @@ export function registerNotificationRoutes({
     const ids = Array.isArray(request.body?.ids) ? request.body.ids.map((id) => String(id)) : []
     const next = markRead(scope.rows, request.auth.id, ids, clock())
     const previous = scope.tenantStore[NOTIFICATIONS_KEY]
-    try { await persist(scope.tenantStore, NOTIFICATIONS_KEY, next, request.auth.id, previous) }
+    try { await persist(scope.tenantStore, NOTIFICATIONS_KEY, [...next, ...scope.foreign], request.auth.id, previous) }
     catch {
       response.status(500).json({ error: { code: 'NOTIFICATION_WRITE_FAILED', message: '알림을 읽음으로 표시하지 못했습니다.' } })
       return

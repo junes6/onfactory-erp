@@ -123,7 +123,8 @@ export const serviceModules: readonly ServiceModule[] = [
     name: `${BRAND.name} 코어 플랫폼`,
     version: '1.1.0',
     industry: 'all',
-    routes: ['ai', 'schedule', 'tasks', 'approvals', 'journal', 'projects', 'people', 'finance', 'ip', 'wiki', 'documents', 'meetings'],
+    // 회의록은 문서 메뉴의 탭이다(DocumentsHub). 'meetings' 경로는 옛 링크를 위해 App이 문서로 돌려보낸다.
+    routes: ['ai', 'schedule', 'tasks', 'approvals', 'journal', 'projects', 'people', 'finance', 'ip', 'wiki', 'documents'],
     capabilities: ['ai-hub', 'calendar', 'workflow', 'approval-queue', 'journal', 'project-spaces', 'people', 'performance', 'wiki', 'documents', 'messenger'],
   },
   {

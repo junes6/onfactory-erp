@@ -258,8 +258,9 @@ test('라우트 배선 여섯 자리가 모두 있다 — 하나라도 빠지면
   // 4·5: App의 페이지 유니온과 직원 허용 목록
   assert.match(app, /type TenantPage = [^\n]*\| 'wiki' \|/u)
   assert.match(app, /const tenantMemberPages = new Set<PageId>\(\[[^\]]*'wiki'[^\]]*\]\)/u)
-  // 6: 실제 화면
-  assert.match(app, /case 'wiki': return <WikiPage/u)
+  // 6: 실제 화면 — 문서 메뉴는 문서·회의록·검토 자료 탭을 가진 허브이고, 문서 탭이 WikiPage다.
+  assert.match(app, /case 'wiki': return <DocumentsHub/u)
+  assert.match(app, /docs=\{<WikiPage /u)
   // App 최상위에 훅을 더하지 않았다(게스트 계약이 이 수를 고정한다).
   assert.equal(count(app, /enabled: tenantDataEnabled,/gu), 3)
 })

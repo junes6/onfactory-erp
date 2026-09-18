@@ -41,6 +41,7 @@ import { createTranscription } from './transcription.mjs'
 import { conversationIdOfDocument, privateConversationOfDocument, redactDirectMessageProposals } from './messenger-privacy.mjs'
 import { createArchive } from './archive.mjs'
 import { createOverflowSweeper, pageHotAndArchive } from './archive-sweeps.mjs'
+import { MATERIALS_KEY, registerMaterialRoutes } from './review-materials.mjs'
 import { WORK_ARCHIVE_AFTER_DAYS, WORK_ARCHIVE_PRESSURE, registerWorkArchiveRoutes } from './work-archive.mjs'
 import { registerMeetingNoteRoutes } from './meeting-notes.mjs'
 import { CUSTOM_FIELD_KEY, customFieldViolation, hasWorkFieldValuesShape, registerCustomFieldRoutes } from './custom-fields.mjs'
@@ -66,7 +67,8 @@ import { backupScheduleSpec, backupSettings, BACKUP_STATUS_KEY, describeRetentio
 import { createScheduler, describeSpec, SCHEDULER_RUNS_KEY, SCHEDULER_STATE_KEY } from './scheduler.mjs'
 import {
   addNotifications, buildNotification, bundleAssignmentDrafts, NOTIFICATIONS_KEY, NOTIFICATION_SETTINGS_KEY,
-  normalizeNotifications, pushPayload, PUSH_SUBSCRIPTIONS_KEY, removeSubscriptions,
+  normalizeNotifications,
+  partitionNotifications, pushPayload, PUSH_SUBSCRIPTIONS_KEY, removeSubscriptions,
   subscriptionsFor,
   // R15-I: 방해 금지 시간 · 아침 요약
   buildQuietDigest, collectQuietDigest, lastQuietWindow, pushDecision, settingsFor,
@@ -344,17 +346,20 @@ function workOriginFromProposal(proposal) {
         : proposal?.kind === 'lens-task' ? '문서 렌즈에서 추출'
           : proposal?.kind === 'wiki-task' ? '문서에서 승격'
             : proposal?.kind === 'meeting-task' ? '회의록에서 추출'
-              : 'AI 제안에서 생성'
+              : proposal?.kind === 'material-task' ? '검토 자료 결정'
+                : 'AI 제안에서 생성'
   // R16-H: 문서에서 올라온 제안은 승인된 뒤에도 **문서로** 되짚어야 한다.
   // page를 'approvals'로 고정해 두면 그 업무의 출처 배지가 이미 결정된 제안 카드로 되돌아가는 막다른 길이 된다.
   // R16-M: 회의에서 뽑은 할 일도 같은 문으로 되짚는다 — 그 회의록 문서가 결정과 인용이 적힌 자리다.
   const fromWiki = ['wiki-task', 'meeting-task'].includes(proposal?.kind) && Boolean(proposal.payload?.documentId)
+  // 검토 자료의 결정에서 온 업무는 그 자료(그 항목)로 되짚는다.
+  const fromMaterial = proposal?.kind === 'material-task' && Boolean(proposal.payload?.materialId)
   return {
     kind: String(proposal?.kind ?? 'proposal'),
     label,
     detail,
-    page: fromWiki ? 'wiki' : 'approvals',
-    focusId: fromWiki ? String(proposal.payload.documentId) : String(proposal?.id ?? ''),
+    page: fromWiki || fromMaterial ? 'wiki' : 'approvals',
+    focusId: fromMaterial ? `material:${proposal.payload.materialId}` : fromWiki ? String(proposal.payload.documentId) : String(proposal?.id ?? ''),
   }
 }
 
@@ -2546,6 +2551,10 @@ export function createApp(options = {}) {
     // 들어가므로 'wiki-documents' 갈래가 그 id 를 세지 않는다.
     const meetings = Array.isArray(tenantStore['meeting-notes']?.data) ? tenantStore['meeting-notes'].data : []
     if (linkedDocumentIds(meetings).includes(id)) return 'meeting-source'
+    // 검토 자료의 원본(판마다 하나). 원본이 사라지면 그리기 사본을 다시 만들 수 없고, 의견이 가리키던 판이 증거를 잃는다.
+    // 자료를 보관해도 풀리지 않는다 — 보관은 지우는 것이 아니다.
+    const materials = Array.isArray(tenantStore[MATERIALS_KEY]?.data) ? tenantStore[MATERIALS_KEY].data : []
+    if (materials.some((material) => (material?.versions ?? []).some((version) => version?.sourceDocumentId === id))) return 'material-source'
     // 보관한 공지는 채널에서 내려간 글이다. 그 첨부까지 영구 잠그면 자료실을 정리할 길이 사라진다
     // (공지에는 삭제 라우트가 없다).
     const activeNotices = (Array.isArray(tenantStore[NOTICES_KEY]?.data) ? tenantStore[NOTICES_KEY].data : [])
@@ -2567,6 +2576,7 @@ export function createApp(options = {}) {
     // **누가 지울 수 있는지**까지 말한다 — 아무도 할 수 없는 지시를 주지 않는다(규칙 3·11).
     'meeting-source': '회의록이 원본(녹음·전사 원문)으로 쓰고 있는 자료입니다. 회의를 만든 사람이나 회사 관리자가 회의록 화면에서 그 회의를 삭제하면 이 자료도 삭제할 수 있습니다.',
     linked: '다른 화면에서 사용 중인 자료입니다. 해당 화면에서 먼저 연결을 해제한 뒤 삭제해 주세요.',
+    'material-source': '검토 자료의 원본 파일입니다. 의견과 결정이 이 판을 가리키므로 삭제할 수 없습니다. 자료를 목록에서 내리려면 문서 › 검토 자료에서 [보관]을 눌러 주세요.',
   }
   const safeDownloadName = (value) => String(value || 'document').replace(/[\r\n"]/g, '_').slice(0, 180)
   /**
@@ -4110,10 +4120,11 @@ export function createApp(options = {}) {
     }
     if (!built.length) return []
     const tenantStore = workspaceStore.tenants[tenantId] ??= {}
-    const existing = normalizeNotifications(tenantStore[NOTIFICATIONS_KEY]?.data ?? []) ?? []
+    // 읽지 못하는 줄은 버리지 않고 뒤에 그대로 붙여 둔다(partitionNotifications 참고).
+    const { rows: existing, foreign } = partitionNotifications(tenantStore[NOTIFICATIONS_KEY]?.data ?? [])
     const { rows, accepted } = addNotifications(existing, built, { settingsRecord: notificationSettingsRecord(tenantId), now })
     if (!accepted.length) return []
-    tenantStore[NOTIFICATIONS_KEY] = { data: rows, updatedAt: now.toISOString(), updatedBy: 'system:notify' }
+    tenantStore[NOTIFICATIONS_KEY] = { data: [...rows, ...foreign], updatedAt: now.toISOString(), updatedBy: 'system:notify' }
     scheduleAuditCommit()
     queuePush(tenantId, accepted)
     // 카카오 알림톡·메일. 채널이 없으면 아무 일도 하지 않는다.
@@ -9039,6 +9050,30 @@ export function createApp(options = {}) {
     enqueueProposal, announceProposal, newProposalId, proposalsOf, writeProposals,
     transcription,
     ...(typeof options.meetingClock === 'function' ? { clock: options.meetingClock } : {}),
+  })
+
+  // 검토 자료(AI가 만든 HTML 회의 자료). 원본은 자료실 문서로, 파생물은 파일 저장소에 둔다.
+  const reviewMaterials = registerMaterialRoutes({
+    app, express, requireAuth, requireMatchingWorkspaceIdentity,
+    workspaceStore, commitWorkspaceStore, documentStorage,
+    documentRecord, projectSpacesOf, projectMemberIds, canReadDocument,
+    accounts, notify, createWikiDocument: wiki.createWikiDocument,
+    client, model, billingService, usageMetadataFor, extractText, mapAnthropicError,
+    enqueueProposal, announceProposal, newProposalId, proposalsOf,
+    appendAudit: (entry) => { appendPlatformAudit(workspaceStore.platform, entry); scheduleAuditCommit() },
+    events,
+    ...(typeof options.prepareMaterial === 'function' ? { prepare: options.prepareMaterial } : {}),
+  })
+  app.locals.reviewMaterials = reviewMaterials
+  scheduler.register({
+    id: 'material-due',
+    label: '검토 자료 마감 알림',
+    description: '의견 마감이 하루 남은 검토 자료를, 아직 의견을 남기지 않은 사람에게 한 번 알립니다.',
+    spec: { every: 'hour', minute: 5 },
+    run: async ({ now }) => {
+      const { reminded } = await reviewMaterials.remindDue(now)
+      return { detail: reminded ? `${reminded}명에게 알렸습니다.` : '알릴 사람이 없었습니다.' }
+    },
   })
 
   scheduler.register({

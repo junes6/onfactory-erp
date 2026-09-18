@@ -2,7 +2,9 @@
 // 제안은 절대 직접 실행되지 않는다. 사람이 ✓/✏/✗로 결정하고, 결정 이력이 자동화 승급의 원료가 된다.
 import { randomBytes } from 'node:crypto'
 
-export const PROPOSAL_KINDS = Object.freeze(['document-classification', 'task-from-message', 'sentinel-task', 'lens-task', 'meeting-task', 'opportunity', 'principle'])
+// wiki-task(문서 문단 → 업무)와 material-task(검토 자료 결정 → 업무)도 센다 — 빠지면 그 승인·거절이
+// 자동화 승급 판단 자료(승인률 통계)에 한 건도 들어가지 않는다(2026-09-18 설계 점검).
+export const PROPOSAL_KINDS = Object.freeze(['document-classification', 'task-from-message', 'sentinel-task', 'lens-task', 'meeting-task', 'wiki-task', 'material-task', 'opportunity', 'principle'])
 export const PROPOSAL_STATUSES = Object.freeze(['pending', 'approved', 'edited', 'rejected', 'expired'])
 export const PROPOSALS_KEY = 'ai-proposals'
 export const AUTOMATION_POLICIES_KEY = 'automation-policies'
